@@ -316,7 +316,7 @@ export function SubmitRun() {
   );
 
   // Model capabilities and reasoning-effort management
-  const { capabilitiesMap: modelCapabilitiesMap } = useModelCapabilities(worker || undefined);
+  const { capabilitiesMap: modelCapabilitiesMap, activeModelIds } = useModelCapabilities(worker || undefined);
   const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
   const { supportedEfforts, workerEffortWarning } = useReasoningEffort({
     model,
@@ -638,7 +638,7 @@ export function SubmitRun() {
   const canSubmit =
     !!task.trim() &&
     !submitMutation.isPending &&
-    !(selectedAgent && selectedAgent.supportedModels.length > 0 && !model) &&
+    !(selectedAgent && activeModelIds.length > 0 && !model) &&
     !(maxIterations !== 1 && pickedCriteria.length === 0) &&
     gateErrors.length === 0;
 
@@ -1463,7 +1463,7 @@ export function SubmitRun() {
                 </SelectContent>
               </Select>
             </div>
-            {selectedAgent && selectedAgent.supportedModels.length > 0 && (
+            {selectedAgent && activeModelIds.length > 0 && (
               <div className="space-y-2">
                 <Label htmlFor="model">Model *</Label>
                 {/* Model is required; ignore spurious empty-value callbacks Radix
@@ -1480,7 +1480,7 @@ export function SubmitRun() {
                   </SelectTrigger>
                   <SelectContent>
                     <ModelSelectItems
-                      models={selectedAgent.supportedModels}
+                      models={activeModelIds}
                       capabilitiesMap={modelCapabilitiesMap}
                       defaultModel={selectedAgent.defaultModel}
                     />

@@ -5199,6 +5199,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "disappeared",
+              ],
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {

@@ -964,10 +964,10 @@ export function RunsList() {
     () => availableAgents.find((a) => a._id === effectiveWorker),
     [availableAgents, effectiveWorker],
   );
-  const availableModels = effectiveAgent?.supportedModels ?? [];
-
-  // Effort-aware model capabilities for the dialog.
-  const { capabilitiesMap: resubmitCapabilitiesMap } = useModelCapabilities(effectiveWorker || undefined);
+  const { capabilitiesMap: resubmitCapabilitiesMap, activeModelIds: resubmitActiveModelIds } = useModelCapabilities(effectiveWorker || undefined);
+  const availableModels = resubmitActiveModelIds.length > 0
+    ? resubmitActiveModelIds
+    : (effectiveAgent?.supportedModels ?? []);
   const effectiveModel = activeProfile
     ? activeProfile.version.model
     : (resubmitOverrides.model ?? selectedRunsSummary.model);

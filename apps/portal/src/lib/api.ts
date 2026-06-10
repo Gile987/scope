@@ -862,10 +862,11 @@ export const api = {
   // ─── Models ────────────────────────────────────────────────────────────────
 
   /** List all scanned models, optionally filtered by agentId or provider */
-  listModels: (params?: { agentId?: string; provider?: string }): Promise<Model[]> => {
+  listModels: (params?: { agentId?: string; provider?: string; status?: "active" | "disappeared" }): Promise<Model[]> => {
     const searchParams = new URLSearchParams();
     if (params?.agentId) searchParams.set("agentId", params.agentId);
     if (params?.provider) searchParams.set("provider", params.provider);
+    if (params?.status) searchParams.set("status", params.status);
     const qs = searchParams.toString();
     return request(`/models${qs ? `?${qs}` : ""}`);
   },

@@ -42,6 +42,11 @@ apiRoute(ctx.app, ctx.registry, {
     const filter: Record<string, unknown> = {};
     if (req.query.agentId) filter.agentId = req.query.agentId;
     if (req.query.provider) filter.provider = req.query.provider;
+    if (req.query.status === "active") {
+      filter.disappearedAt = { $exists: false };
+    } else if (req.query.status === "disappeared") {
+      filter.disappearedAt = { $exists: true };
+    }
 
     const models = await ctx.modelCollection
       .find(filter)
