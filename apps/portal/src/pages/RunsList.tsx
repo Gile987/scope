@@ -1524,7 +1524,17 @@ export function RunsList() {
       sortable: true,
       width: "120px",
       hidden: columnVisibility.isHidden("status"),
-      cell: (r) => (r.run?.status ? <StatusBadge status={r.run.status} /> : <span className="text-xs text-muted-foreground">—</span>),
+      cell: (r) =>
+        r.run?.status ? (
+          <StatusBadge
+            status={r.run.status}
+            worker={r.run.worker}
+            lastHeartbeatAt={r.run.lastHeartbeatAt}
+            startedAt={r.run.startedAt}
+          />
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
     },
     {
       id: "outcome",
