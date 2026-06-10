@@ -4,9 +4,10 @@
 /**
  * Integration tests for the StuckRunReaper (situations A2, B3, B4).
  *
- * Runs against REAL infrastructure (MongoDB + Redis), not mocks:
- *   pnpm docker:up:infra    # brings up redis + azurite + mongodb
- *   pnpm test:integration   # dotenv -e .env -- vitest --config vitest.integration.config.ts
+ * Runs against REAL infrastructure (MongoDB + Redis + Azurite), not mocks. The
+ * containers are provisioned automatically via testcontainers in beforeAll —
+ * no `pnpm docker:up:infra` required, only a reachable Docker daemon:
+ *   pnpm test:integration:queue
  *
  * What the 11 unit tests already prove (with a mocked collection): the branch
  * logic — two-strikes, ping skip, circuit-breaker, claim filter shape.
@@ -33,27 +34,33 @@ import { QueueClient } from "@azure/storage-queue";
 import { CodingAgentQueueProcessor, RedisHeartbeatStore, startVisibilityHeartbeat } from "shared";
 import type { RequestDocument, QueueProcessorConfig, WorkerProcessor, WorkerResult } from "shared";
 import { StuckRunReaper } from "./stuck-run-reaper.js";
+import {
+  isDockerAvailable,
+  startMongo,
+  startRedis,
+  startAzurite,
+  AZURITE_ACCOUNT,
+  type StartedMongo,
+  type StartedRedis,
+  type StartedAzurite,
+} from "./testing/integration-infra.js";
 
-// ─── Infra coordinates (worktree-offset ports; overridable via env) ──────────
-const MONGODB_PORT = Number(process.env.MONGODB_PORT) || 27028;
-const REDIS_HOST = process.env.REDIS_HOST || "127.0.0.1";
-const REDIS_PORT = Number(process.env.REDIS_PORT) || 6328;
-const MONGO_URI = process.env.MONGO_ITEST_URI || `mongodb://127.0.0.1:${MONGODB_PORT}`;
+// ─── Infra is provisioned by testcontainers in beforeAll (dynamic ports) ─────
 const DB_NAME = `reaper-itest-${Date.now()}`;
 
 const STALE_MS = 1000; // tiny threshold so the test isn't slow
 const TEN_MIN_AGO = () => new Date(Date.now() - 10 * 60 * 1000);
 
-// ─── Azurite queue coordinates (used only by the B3 worker-path test) ────────
-const AZURITE_QUEUE_PORT = Number(process.env.AZURITE_QUEUE_PORT) || 10228;
-const AZURITE_ACCOUNT = "devstoreaccount1";
-const AZURITE_KEY =
-  "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
-const STORAGE_CONNECTION_STRING =
-  `DefaultEndpointsProtocol=http;AccountName=${AZURITE_ACCOUNT};AccountKey=${AZURITE_KEY};` +
-  `QueueEndpoint=http://127.0.0.1:${AZURITE_QUEUE_PORT}/${AZURITE_ACCOUNT};`;
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Skip locally when Docker is absent; FAIL in CI so the suite can never pass
+// vacuously by silently skipping — CI must actually exercise the infra.
+const dockerAvailable = await isDockerAvailable();
+if (!dockerAvailable && process.env.CI) {
+  throw new Error(
+    "Docker is required for integration tests in CI but no Docker daemon was reachable",
+  );
+}
 
 // A real worker whose AGENT step must never run for an already-reaped run. If
 // the terminal-status guard regressed, handleRequest would fall through to
@@ -74,16 +81,16 @@ function makeStubAgent(): { processor: WorkerProcessor; called: () => boolean } 
 
 function makeQueueConfig(queueName: string): QueueProcessorConfig {
   return {
-    mongoUri: MONGO_URI,
+    mongoUri: mongoInfra.uri,
     mongoDatabase: DB_NAME,
     mongoCollection: "requests",
     storageAccountName: AZURITE_ACCOUNT,
-    storageConnectionString: STORAGE_CONNECTION_STRING,
+    storageConnectionString: azurite.connectionString,
     queueName,
     batchSize: 1,
     pollIntervalMs: 1000,
-    redisHost: REDIS_HOST,
-    redisPort: REDIS_PORT,
+    redisHost: redis.host,
+    redisPort: redis.port,
     redisPassword: "",
   };
 }
@@ -91,6 +98,10 @@ function makeQueueConfig(queueName: string): QueueProcessorConfig {
 let mongo: MongoClient;
 let collection: Collection<RequestDocument>;
 let heartbeatStore: RedisHeartbeatStore;
+let mongoInfra: StartedMongo;
+let redis: StartedRedis;
+let azurite: StartedAzurite;
+const stoppers: Array<() => Promise<void>> = [];
 
 function makeReaper(): StuckRunReaper {
   return new StuckRunReaper(collection, heartbeatStore, {
@@ -125,27 +136,43 @@ const getRun = (id: string) =>
 
 describe("StuckRunReaper integration (A2 / B3 / B4)", () => {
   beforeAll(async () => {
-    mongo = new MongoClient(MONGO_URI);
+    if (!dockerAvailable) return; // suite is skipped; nothing to provision
+
+    // Start infra failure-safe: record each stopper the moment its container is
+    // up, so a later failure still tears down whatever already started.
+    mongoInfra = await startMongo();
+    stoppers.push(() => mongoInfra.stop());
+    redis = await startRedis();
+    stoppers.push(() => redis.stop());
+    azurite = await startAzurite();
+    stoppers.push(() => azurite.stop());
+
+    mongo = new MongoClient(mongoInfra.uri);
     await mongo.connect();
     collection = mongo.db(DB_NAME).collection<RequestDocument>("requests");
     heartbeatStore = new RedisHeartbeatStore({
-      redisHost: REDIS_HOST,
-      redisPort: REDIS_PORT,
+      redisHost: redis.host,
+      redisPort: redis.port,
       redisPassword: "",
     });
   });
 
   afterAll(async () => {
-    try { await mongo.db(DB_NAME).dropDatabase(); } catch { /* ignore */ }
-    try { await mongo.close(); } catch { /* ignore */ }
-    try { await heartbeatStore.close(); } catch { /* ignore */ }
+    try { await mongo?.db(DB_NAME).dropDatabase(); } catch { /* ignore */ }
+    try { await mongo?.close(); } catch { /* ignore */ }
+    try { await heartbeatStore?.close(); } catch { /* ignore */ }
+    // Stop containers in reverse start order.
+    for (const stop of stoppers.reverse()) {
+      try { await stop(); } catch { /* ignore */ }
+    }
   });
 
   beforeEach(async () => {
+    if (!dockerAvailable) return;
     await collection.deleteMany({} as any);
   });
 
-  it("A2: reaps a stuck processing run with no heartbeat (after two strikes), sparing fresh-beat runs", async () => {
+  it.skipIf(!dockerAvailable)("A2: reaps a stuck processing run with no heartbeat (after two strikes), sparing fresh-beat runs", async () => {
     // Stuck: old + no heartbeat → dead worker, no queue message will save it.
     await insertRun("req-stuck", "run-stuck", { worker: { instanceId: "worker-A" } });
     // Old enough to be a candidate, but its worker is ALIVE (fresh beat) →
@@ -178,7 +205,7 @@ describe("StuckRunReaper integration (A2 / B3 / B4)", () => {
     expect(await heartbeatStore.get("run-stuck")).toBeNull();
   }, 30_000);
 
-  it("B3: a worker that dequeues an already-reaped run's message discards it via the REAL terminal-status guard (no revival, no agent run)", async () => {
+  it.skipIf(!dockerAvailable)("B3: a worker that dequeues an already-reaped run's message discards it via the REAL terminal-status guard (no revival, no agent run)", async () => {
     await insertRun("req-fp", "run-fp", { worker: { instanceId: "worker-A" } });
     await heartbeatStore.delete("run-fp");
 
@@ -194,7 +221,7 @@ describe("StuckRunReaper integration (A2 / B3 / B4)", () => {
     // terminal-status guard must delete the message and return — never running
     // the agent, never writing to Mongo, never reviving the run.
     const queueName = `itest-reaped-${Date.now()}`;
-    const queueClient = new QueueClient(STORAGE_CONNECTION_STRING, queueName);
+    const queueClient = new QueueClient(azurite.connectionString, queueName);
     await queueClient.createIfNotExists();
     const agent = makeStubAgent();
     const qp = new CodingAgentQueueProcessor(makeQueueConfig(queueName), agent.processor);
@@ -265,7 +292,7 @@ describe("StuckRunReaper integration (A2 / B3 / B4)", () => {
     }
   }, 30_000);
 
-  it("B4: a run the worker completes between strikes is never reaped", async () => {
+  it.skipIf(!dockerAvailable)("B4: a run the worker completes between strikes is never reaped", async () => {
     await insertRun("req-race", "run-race", { worker: { instanceId: "worker-A" } });
     await heartbeatStore.delete("run-race");
 

@@ -4,9 +4,10 @@
 /**
  * Integration test for the queue-processor redelivery handler (situation A1).
  *
- * Runs against REAL infrastructure (Azurite queue + Redis), not mocks:
- *   pnpm docker:up:infra    # brings up redis + azurite + mongodb
- *   pnpm test:integration   # dotenv -e .env -- vitest --config vitest.integration.config.ts
+ * Runs against REAL infrastructure (Azurite queue + Redis), not mocks. The
+ * containers are provisioned automatically via testcontainers in beforeAll —
+ * no `pnpm docker:up:infra` required, only a reachable Docker daemon:
+ *   pnpm test:integration:queue
  *
  * What the 30 unit tests already prove (with a mocked queue): that the
  * fresh-heartbeat branch CALLS safeDeferMessage and NOT safeDeleteMessage.
@@ -24,17 +25,27 @@ import { CodingAgentQueueProcessor } from "./queue-processor.js";
 import { RedisHeartbeatStore } from "./heartbeat-store.js";
 import { startVisibilityHeartbeat } from "./visibility-heartbeat.js";
 import type { QueueProcessorConfig, WorkerProcessor, WorkerResult } from "../types/types.js";
+import {
+  isDockerAvailable,
+  startRedis,
+  startAzurite,
+  AZURITE_ACCOUNT,
+  type StartedRedis,
+  type StartedAzurite,
+} from "../testing/integration-infra.js";
 
-// ─── Infra coordinates (worktree-offset ports; overridable via env) ──────────
-const REDIS_HOST = process.env.REDIS_HOST || "127.0.0.1";
-const REDIS_PORT = Number(process.env.REDIS_PORT) || 6328;
-const AZURITE_QUEUE_PORT = Number(process.env.AZURITE_QUEUE_PORT) || 10228;
-const AZURITE_ACCOUNT = "devstoreaccount1";
-const AZURITE_KEY =
-  "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
-const STORAGE_CONNECTION_STRING =
-  `DefaultEndpointsProtocol=http;AccountName=${AZURITE_ACCOUNT};AccountKey=${AZURITE_KEY};` +
-  `QueueEndpoint=http://127.0.0.1:${AZURITE_QUEUE_PORT}/${AZURITE_ACCOUNT};`;
+// ─── Infra is provisioned by testcontainers in beforeAll (dynamic ports) ─────
+let redis: StartedRedis;
+let azurite: StartedAzurite;
+
+// Skip locally when Docker is absent; FAIL in CI so the suite can never pass
+// vacuously by silently skipping — CI must actually exercise the infra.
+const dockerAvailable = await isDockerAvailable();
+if (!dockerAvailable && process.env.CI) {
+  throw new Error(
+    "Docker is required for integration tests in CI but no Docker daemon was reachable",
+  );
+}
 
 const stubProcessor: WorkerProcessor = {
   workerName: "itest-worker",
@@ -51,12 +62,12 @@ function makeConfig(queueName: string): QueueProcessorConfig {
     mongoDatabase: "unused",
     mongoCollection: "unused",
     storageAccountName: AZURITE_ACCOUNT,
-    storageConnectionString: STORAGE_CONNECTION_STRING,
+    storageConnectionString: azurite.connectionString,
     queueName,
     batchSize: 1,
     pollIntervalMs: 1000,
-    redisHost: REDIS_HOST,
-    redisPort: REDIS_PORT,
+    redisHost: redis.host,
+    redisPort: redis.port,
     redisPassword: "",
   };
 }
@@ -71,14 +82,24 @@ describe("queue-processor redelivery (A1) — fresh heartbeat re-defers, does no
   let queueClient: QueueClient;
   let heartbeatStore: RedisHeartbeatStore;
   let qp: CodingAgentQueueProcessor;
+  const stoppers: Array<() => Promise<void>> = [];
 
   beforeAll(async () => {
-    queueClient = new QueueClient(STORAGE_CONNECTION_STRING, queueName);
+    if (!dockerAvailable) return; // suite is skipped; nothing to provision
+
+    // Start infra failure-safe: record each stopper the moment its container is
+    // up, so a later failure still tears down whatever already started.
+    azurite = await startAzurite();
+    stoppers.push(() => azurite.stop());
+    redis = await startRedis();
+    stoppers.push(() => redis.stop());
+
+    queueClient = new QueueClient(azurite.connectionString, queueName);
     await queueClient.createIfNotExists();
 
     heartbeatStore = new RedisHeartbeatStore({
-      redisHost: REDIS_HOST,
-      redisPort: REDIS_PORT,
+      redisHost: redis.host,
+      redisPort: redis.port,
       redisPassword: "",
     });
 
@@ -89,13 +110,17 @@ describe("queue-processor redelivery (A1) — fresh heartbeat re-defers, does no
   });
 
   afterAll(async () => {
-    try { await queueClient.deleteIfExists(); } catch { /* ignore */ }
-    try { await heartbeatStore.delete(runId); } catch { /* ignore */ }
-    try { await heartbeatStore.close(); } catch { /* ignore */ }
-    try { await (qp as any).mongoClient?.close?.(); } catch { /* ignore */ }
+    try { await queueClient?.deleteIfExists(); } catch { /* ignore */ }
+    try { await heartbeatStore?.delete(runId); } catch { /* ignore */ }
+    try { await heartbeatStore?.close(); } catch { /* ignore */ }
+    try { await (qp as any)?.mongoClient?.close?.(); } catch { /* ignore */ }
+    // Stop containers in reverse start order.
+    for (const stop of stoppers.reverse()) {
+      try { await stop(); } catch { /* ignore */ }
+    }
   });
 
-  it("keeps the message in the queue and re-surfaces it after the defer window", async () => {
+  it.skipIf(!dockerAvailable)("keeps the message in the queue and re-surfaces it after the defer window", async () => {
     // Configure a short, deterministic defer window (2s) and a long staleness
     // threshold so the heartbeat we write below is unambiguously "fresh".
     const prevDefer = process.env.SCOPE_RUN_REDELIVER_DEFER_MS;
