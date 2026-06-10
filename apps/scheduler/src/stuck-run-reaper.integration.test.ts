@@ -16,16 +16,22 @@
  *         startedAt cutoff) actually finds a stuck run that has no queue message
  *         in existence, and the atomic findOneAndUpdate claims it on a real
  *         Mongo-compatible engine (no range index needed — CosmosDB-safe).
- *   B3  — the false-positive safety guarantee is enforced by MongoDB itself:
- *         once the reaper sets `done`, a late worker's status-gated terminal
- *         write returns matchedCount 0 and the run is NOT revived. A mock can't
- *         prove the database evaluates the filter that way.
+ *   B3  — the false-positive safety guarantee is enforced by REAL worker code:
+ *         once the reaper sets `done`, a worker that later dequeues the run's
+ *         still-queued message runs the real CodingAgentQueueProcessor
+ *         handleRequest terminal-status guard, which discards the message
+ *         (deletes it from Azurite) without re-running the agent or reviving
+ *         the run. (The deeper DB-level status-gated *write* — the worker error
+ *         path's updateOne gated on `run.status:"processing"` — is covered by
+ *         the worker unit test and, on real Mongo, by A2's atomic claim; it is
+ *         unreachable here because the terminal guard short-circuits first.)
  *   B4  — a run the worker completes between reaper strikes is never reaped.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { MongoClient, Collection } from "mongodb";
-import { RedisHeartbeatStore } from "shared";
-import type { RequestDocument } from "shared";
+import { QueueClient } from "@azure/storage-queue";
+import { CodingAgentQueueProcessor, RedisHeartbeatStore, startVisibilityHeartbeat } from "shared";
+import type { RequestDocument, QueueProcessorConfig, WorkerProcessor, WorkerResult } from "shared";
 import { StuckRunReaper } from "./stuck-run-reaper.js";
 
 // ─── Infra coordinates (worktree-offset ports; overridable via env) ──────────
@@ -37,6 +43,50 @@ const DB_NAME = `reaper-itest-${Date.now()}`;
 
 const STALE_MS = 1000; // tiny threshold so the test isn't slow
 const TEN_MIN_AGO = () => new Date(Date.now() - 10 * 60 * 1000);
+
+// ─── Azurite queue coordinates (used only by the B3 worker-path test) ────────
+const AZURITE_QUEUE_PORT = Number(process.env.AZURITE_QUEUE_PORT) || 10228;
+const AZURITE_ACCOUNT = "devstoreaccount1";
+const AZURITE_KEY =
+  "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
+const STORAGE_CONNECTION_STRING =
+  `DefaultEndpointsProtocol=http;AccountName=${AZURITE_ACCOUNT};AccountKey=${AZURITE_KEY};` +
+  `QueueEndpoint=http://127.0.0.1:${AZURITE_QUEUE_PORT}/${AZURITE_ACCOUNT};`;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// A real worker whose AGENT step must never run for an already-reaped run. If
+// the terminal-status guard regressed, handleRequest would fall through to
+// processMultiTurn → this throws → the test fails (keeps the test honest).
+function makeStubAgent(): { processor: WorkerProcessor; called: () => boolean } {
+  let invoked = false;
+  return {
+    processor: {
+      workerName: "itest-worker",
+      async processMessage(): Promise<WorkerResult> {
+        invoked = true;
+        throw new Error("agent must NOT run for a reaped run");
+      },
+    },
+    called: () => invoked,
+  };
+}
+
+function makeQueueConfig(queueName: string): QueueProcessorConfig {
+  return {
+    mongoUri: MONGO_URI,
+    mongoDatabase: DB_NAME,
+    mongoCollection: "requests",
+    storageAccountName: AZURITE_ACCOUNT,
+    storageConnectionString: STORAGE_CONNECTION_STRING,
+    queueName,
+    batchSize: 1,
+    pollIntervalMs: 1000,
+    redisHost: REDIS_HOST,
+    redisPort: REDIS_PORT,
+    redisPassword: "",
+  };
+}
 
 let mongo: MongoClient;
 let collection: Collection<RequestDocument>;
@@ -128,28 +178,91 @@ describe("StuckRunReaper integration (A2 / B3 / B4)", () => {
     expect(await heartbeatStore.get("run-stuck")).toBeNull();
   }, 30_000);
 
-  it("B3: a late worker terminal write is a no-op after the reaper failed the run (status gate enforced by Mongo)", async () => {
+  it("B3: a worker that dequeues an already-reaped run's message discards it via the REAL terminal-status guard (no revival, no agent run)", async () => {
     await insertRun("req-fp", "run-fp", { worker: { instanceId: "worker-A" } });
     await heartbeatStore.delete("run-fp");
 
+    // The reaper genuinely fails the run (two strikes).
     const reaper = makeReaper();
     await reaper.sweep(); // strike 1
     await reaper.sweep(); // strike 2 → reaped
-
+    expect((await getRun("req-fp")).status).toBe("done");
     expect((await getRun("req-fp")).outcome).toBe("failed");
 
-    // Simulate the slow-but-alive worker finally writing its terminal SUCCESS,
-    // using the SAME status-gated filter the worker uses in production.
-    const res = await collection.updateOne(
-      { _id: "req-fp", "run._id": "run-fp", "run.status": "processing" } as any,
-      { $set: { "run.status": "done", "run.outcome": "passed" } } as any,
-    );
+    // A real worker now dequeues the run's still-queued message and runs the
+    // REAL handleRequest. Because run.status is already "done", the production
+    // terminal-status guard must delete the message and return — never running
+    // the agent, never writing to Mongo, never reviving the run.
+    const queueName = `itest-reaped-${Date.now()}`;
+    const queueClient = new QueueClient(STORAGE_CONNECTION_STRING, queueName);
+    await queueClient.createIfNotExists();
+    const agent = makeStubAgent();
+    const qp = new CodingAgentQueueProcessor(makeQueueConfig(queueName), agent.processor);
+    // Inject the real Redis heartbeat store; the real Azurite queueClient is
+    // built by the base constructor from the connection string.
+    (qp as any).heartbeatStore = heartbeatStore;
 
-    // Mongo itself enforces the no-op: the run is no longer `processing`.
-    expect(res.matchedCount).toBe(0);
-    const run = await getRun("req-fp");
-    expect(run.outcome).toBe("failed"); // NOT revived to "passed"
-    expect(run.error).toMatch(/Reaped by scheduler/);
+    try {
+      await queueClient.sendMessage(
+        Buffer.from(JSON.stringify({ runId: "run-fp", requestId: "req-fp" })).toString("base64"),
+      );
+      // Short visibility window so that "no redelivery after it expires" is a
+      // SOUND proof of DELETION, not merely of the message still being hidden.
+      const received = await queueClient.receiveMessages({
+        numberOfMessages: 1,
+        visibilityTimeout: 3,
+      });
+      const message = received.receivedMessageItems[0];
+      expect(message).toBeDefined();
+
+      // Real per-run visibility heartbeat; huge interval so it never auto-ticks.
+      // The terminal-guard path does not stop it (production's processMessage
+      // stops it in a finally), so we stop it ourselves to avoid a leaked timer.
+      const heartbeat = startVisibilityHeartbeat(
+        queueClient,
+        message.messageId,
+        message.popReceipt,
+        "itest-worker",
+        3_600_000,
+        30,
+        { runId: "run-fp", documentId: "req-fp" },
+      );
+
+      const reapedDoc = await collection.findOne({ _id: "req-fp" } as any);
+      const log = async () => {};
+
+      try {
+        // Drive the REAL worker decision path against the reaped doc.
+        await (qp as any).handleRequest(reapedDoc, message, heartbeat, log, {
+          runId: "run-fp",
+          requestId: "req-fp",
+        });
+      } finally {
+        heartbeat.stop();
+      }
+
+      // (1) The agent never ran — the terminal guard short-circuited.
+      expect(agent.called()).toBe(false);
+
+      // (2) The message was DELETED by the guard: after the 3s visibility window
+      //     expires it does NOT re-surface. (A re-defer or a no-op would.)
+      await sleep(3500);
+      const after = await queueClient.receiveMessages({
+        numberOfMessages: 1,
+        visibilityTimeout: 5,
+      });
+      expect(after.receivedMessageItems.length).toBe(0);
+
+      // (3) The reaped run was NOT revived — handleRequest never wrote to Mongo
+      //     on the terminal-discard path.
+      const run = await getRun("req-fp");
+      expect(run.status).toBe("done");
+      expect(run.outcome).toBe("failed");
+      expect(run.error).toMatch(/Reaped by scheduler/);
+    } finally {
+      try { await queueClient.deleteIfExists(); } catch { /* ignore */ }
+      try { await (qp as any).mongoClient?.close?.(); } catch { /* ignore */ }
+    }
   }, 30_000);
 
   it("B4: a run the worker completes between strikes is never reaped", async () => {
