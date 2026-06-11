@@ -18,6 +18,13 @@ interface CriteriaProvider {
 
 All methods are `async` so both synchronous (filesystem) and asynchronous (HTTP) backends can satisfy the same contract.
 
+> Each `CriteriaConfig` carries an optional `gates: GateId[]` compatibility list
+> (empty/undefined = compatible with all [gates](app-design.md#gates--multi-phase-evaluation-pipeline)).
+> `resolveWithAncestors` is also how the gate pipeline pulls a criterion's
+> dependencies into a gate's evaluation set; the compatibility list is
+> downward-closed so a resolved ancestor is always compatible with its
+> descendant's gates. See the [gates design doc](../design/gates.md).
+
 ## Implementations
 
 ```mermaid
