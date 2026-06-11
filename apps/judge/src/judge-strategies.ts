@@ -11,6 +11,8 @@ import {
   DetailedEvaluationResult,
   ConversationTurn,
   DependencyGraph,
+  GateId,
+  ToolCall,
   TokenManagerClient,
   withRetry,
 } from "shared";
@@ -24,6 +26,10 @@ export interface JudgeStrategyContext {
   model?: string;
   /** Called when an individual criterion result is available (for real-time progress) */
   onProgress?: (result: CriterionResult) => void;
+  /** Which gate is being evaluated. Defaults to select. */
+  gate?: GateId;
+  /** This iteration's captured tool calls/outputs (build/test/run output). */
+  toolCalls?: ToolCall[];
 }
 
 /**
@@ -233,14 +239,94 @@ export abstract class JudgeStrategy {
   }
 
   /**
+   * Create tools that expose the tool calls/outputs captured during the gate
+   * iteration being judged (e.g. a build/test command's stdout/stderr/exit
+   * code). `read_tool_outputs` lists calls with truncated previews;
+   * `get_tool_output` returns the full output for a given index on demand.
+   */
+  protected createToolOutputTools(toolCalls: ToolCall[]) {
+    const PREVIEW_LIMIT = 2_000;
+    const FULL_LIMIT = 100_000;
+
+    const readToolOutputs = defineTool("read_tool_outputs", {
+      description:
+        "List the tool calls the coding agent made during this iteration (e.g. shell/bash commands and their output). Returns each call's index, name, arguments and a truncated response preview. Use get_tool_output(index) to fetch the full output of a specific call. Consult these to decide whether a command (build, test, run) actually succeeded.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+      handler: async () => {
+        if (toolCalls.length === 0) {
+          return { count: 0, calls: [], message: "No tool calls were captured for this iteration." };
+        }
+        const calls = toolCalls.map((tc, index) => {
+          const response = tc.response ?? "";
+          return {
+            index,
+            name: tc.name,
+            arguments: tc.arguments,
+            responsePreview:
+              response.length > PREVIEW_LIMIT
+                ? response.substring(0, PREVIEW_LIMIT) + "\n…(truncated, use get_tool_output)"
+                : response,
+            responseTruncated: response.length > PREVIEW_LIMIT,
+            responseLength: response.length,
+          };
+        });
+        return { count: calls.length, calls };
+      },
+    });
+
+    const getToolOutput = defineTool("get_tool_output", {
+      description:
+        "Return the full captured output (response) of a single tool call by its index, as listed by read_tool_outputs.",
+      parameters: {
+        type: "object",
+        properties: {
+          index: {
+            type: "number",
+            description: "Zero-based index of the tool call from read_tool_outputs",
+          },
+        },
+        required: ["index"],
+      },
+      handler: async (args: { index: number }) => {
+        const tc = toolCalls[args.index];
+        if (!tc) {
+          return { error: `No tool call at index ${args.index} (have ${toolCalls.length})` };
+        }
+        const response = tc.response ?? "";
+        if (response.length > FULL_LIMIT) {
+          return {
+            index: args.index,
+            name: tc.name,
+            arguments: tc.arguments,
+            response: response.substring(0, FULL_LIMIT),
+            truncated: true,
+            totalLength: response.length,
+          };
+        }
+        return { index: args.index, name: tc.name, arguments: tc.arguments, response };
+      },
+    });
+
+    return [readToolOutputs, getToolOutput];
+  }
+
+  /**
    * Run a Copilot session with given prompt and tools, retrying on timeout.
    */
   protected async runCopilotSession(
     workspacePath: string,
     systemPrompt: string,
-    userPrompt: string
+    userPrompt: string,
+    toolCalls?: ToolCall[]
   ): Promise<string> {
-    const tools = this.createFileTools(workspacePath);
+    const tools = [
+      ...this.createFileTools(workspacePath),
+      ...(toolCalls && toolCalls.length > 0 ? this.createToolOutputTools(toolCalls) : []),
+    ];
 
     return withRetry(
       () => this.doRunCopilotSession(tools, systemPrompt, userPrompt),
@@ -269,7 +355,7 @@ export abstract class JudgeStrategy {
   }
 
   private async doRunCopilotSession(
-    tools: ReturnType<typeof this.createFileTools>,
+    tools: any[],
     systemPrompt: string,
     userPrompt: string
   ): Promise<string> {
@@ -281,7 +367,7 @@ export abstract class JudgeStrategy {
       const session = await client.createSession({
         model: this.model,
         streaming: true,
-        tools,
+        tools: tools as any,
         systemMessage: { mode: "replace", content: systemPrompt },
       });
 
@@ -321,18 +407,23 @@ export class BundledStrategy extends JudgeStrategy {
       criteria,
       conversationHistory,
       personaInstructions,
+      gate,
+      toolCalls,
     } = context;
 
     const systemPrompt = this.buildSystemPrompt(
       criteria,
       conversationHistory,
-      personaInstructions
+      personaInstructions,
+      gate,
+      toolCalls && toolCalls.length > 0
     );
 
     const response = await this.runCopilotSession(
       workspacePath,
       systemPrompt,
-      "Evaluate the workspace against ALL criteria. Use the file tools to inspect the code, then provide your verdict in JSON format."
+      "Evaluate the workspace against ALL criteria. Use the file tools to inspect the code, then provide your verdict in JSON format.",
+      toolCalls
     );
 
     return this.parseJsonResponse(response, criteria, context.onProgress);
@@ -341,7 +432,9 @@ export class BundledStrategy extends JudgeStrategy {
   private buildSystemPrompt(
     criteria: CriteriaConfig[],
     conversationHistory: ConversationTurn[],
-    personaInstructions?: string
+    personaInstructions?: string,
+    gate?: GateId,
+    hasToolOutputs?: boolean
   ): string {
     const criteriaList = criteria
       .map((c) => `  - ${c.id}: ${c.prompt}`)
@@ -362,11 +455,18 @@ export class BundledStrategy extends JudgeStrategy {
       ? `\n## Persona\n${personaInstructions}\n`
       : "";
 
+    const gateLine =
+      gate && gate !== "select" ? `\nYou are evaluating the **${gate}** gate.\n` : "";
+
+    const toolOutputsSection = hasToolOutputs
+      ? `\n## Tool outputs\nThe coding agent ran commands during this iteration. Use read_tool_outputs to list those calls and get_tool_output(index) to read full output. To decide whether a command (e.g. build, test, run) succeeded, inspect its output and exit status rather than guessing from the files alone.\n`
+      : "";
+
     return `You are an expert code reviewer evaluating whether generated code meets requirements.
-${personaSection}
+${personaSection}${gateLine}
 ## Your Task
 Inspect the workspace using the provided tools (read_file, list_directory, search_files, file_exists) and evaluate whether the code meets each criterion.
-
+${toolOutputsSection}
 ## Criteria
 ${criteriaList}
 ${historySection}
@@ -499,6 +599,8 @@ export class IndependentStrategy extends JudgeStrategy {
       conversationHistory,
       personaInstructions,
       onProgress,
+      gate,
+      toolCalls,
     } = context;
 
     // Get topological order
@@ -562,7 +664,9 @@ export class IndependentStrategy extends JudgeStrategy {
             criteriaById.get(cid)!,
             conversationHistory,
             personaInstructions,
-            evalIndex++
+            evalIndex++,
+            gate,
+            toolCalls
           )
         );
 
@@ -601,7 +705,9 @@ export class IndependentStrategy extends JudgeStrategy {
     criterion: CriteriaConfig,
     conversationHistory: ConversationTurn[],
     personaInstructions: string | undefined,
-    index: number
+    index: number,
+    gate?: GateId,
+    toolCalls?: ToolCall[]
   ): Promise<CriterionResult> {
     const historySection =
       conversationHistory.length > 0
@@ -617,13 +723,21 @@ export class IndependentStrategy extends JudgeStrategy {
       ? `\n## Persona\n${personaInstructions}\n`
       : "";
 
+    const gateLine =
+      gate && gate !== "select" ? `\nYou are evaluating the **${gate}** gate.\n` : "";
+
+    const toolOutputsSection =
+      toolCalls && toolCalls.length > 0
+        ? `\n## Tool outputs\nThe coding agent ran commands during this iteration. Use read_tool_outputs to list those calls and get_tool_output(index) to read full output. To decide whether a command (e.g. build, test, run) succeeded, inspect its output and exit status rather than guessing from the files alone.\n`
+        : "";
+
     const systemPrompt = `You are an expert code reviewer evaluating ONE specific criterion.
-${personaSection}
+${personaSection}${gateLine}
 ## Your Task
 Inspect the workspace using the provided tools and evaluate ONLY this criterion:
 
 **Criterion**: ${criterion.prompt}
-
+${toolOutputsSection}
 ${historySection}
 
 ## Instructions
@@ -647,7 +761,8 @@ No package.json file was found in the workspace root.`;
       const response = await this.runCopilotSession(
         workspacePath,
         systemPrompt,
-        `Evaluate criterion "${criterion.id}": ${criterion.prompt}`
+        `Evaluate criterion "${criterion.id}": ${criterion.prompt}`,
+        toolCalls
       );
 
       const passed = this.detectPassFail(response);
