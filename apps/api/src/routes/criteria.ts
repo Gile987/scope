@@ -7,6 +7,8 @@ import {
   CriteriaGraphSchema,
   CriteriaResponseSchema,
   UpdateCriteriaInputSchema,
+  gatesSatisfyInvariant,
+  type GateId,
 } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { CriteriaDocument, RouteContext } from "../route-context.js";
@@ -105,6 +107,7 @@ apiRoute(ctx.app, ctx.registry, {
               dependsOn: Array.isArray(config.dependsOn)
                 ? config.dependsOn.map((d: any) => String(d).trim())
                 : [],
+              ...(Array.isArray(config.gates) ? { gates: config.gates } : {}),
               createdAt: new Date(),
             },
           },
@@ -239,6 +242,7 @@ apiRoute(ctx.app, ctx.registry, {
       id: c.id,
       prompt: c.prompt,
       dependsOn: c.dependsOn || [],
+      ...(c.gates !== undefined ? { gates: c.gates } : {}),
     }));
     const edges: { source: string; target: string }[] = [];
     for (const c of all) {
@@ -294,7 +298,7 @@ apiRoute(ctx.app, ctx.registry, {
     409: { description: "Criterion already exists" },
   },
   handler: async (req, res) => {
-    const { id, prompt, dependsOn = [] } = req.body;
+    const { id, prompt, dependsOn = [], gates } = req.body;
 
     // Check for duplicates
     const existing = await ctx.criteriaCollection.findOne({
@@ -306,7 +310,7 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    // Validate dependency references
+    // Validate dependency references and the gate-compatibility invariant
     for (const depId of dependsOn) {
       const dep = await ctx.criteriaCollection.findOne({
         id: depId,
@@ -316,12 +320,19 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(400).json({ error: `Dependency '${depId}' does not exist` });
         return;
       }
+      if (!gatesSatisfyInvariant(dep.gates as GateId[] | undefined, gates)) {
+        res.status(400).json({
+          error: `'${id}' is compatible with more gates than its dependency '${depId}'. A dependency must be compatible with at least every gate its dependent is.`,
+        });
+        return;
+      }
     }
 
     const doc: CriteriaDocument = {
       id,
       prompt: prompt.trim(),
       dependsOn,
+      ...(gates !== undefined ? { gates } : {}),
       createdAt: new Date(),
     };
 
@@ -345,7 +356,7 @@ apiRoute(ctx.app, ctx.registry, {
   },
   handler: async (req, res) => {
     const { id } = req.params;
-    const { prompt, dependsOn } = req.body;
+    const { prompt, dependsOn, gates } = req.body;
 
     const existing = await ctx.criteriaCollection.findOne({
       id,
@@ -360,6 +371,12 @@ apiRoute(ctx.app, ctx.registry, {
     if (prompt !== undefined) {
       update.prompt = prompt.trim();
     }
+
+    const effectiveDependsOn =
+      dependsOn !== undefined ? dependsOn : (existing.dependsOn ?? []);
+    const effectiveGates =
+      gates !== undefined ? gates : (existing.gates as GateId[] | undefined);
+
     if (dependsOn !== undefined) {
       // Validate dependency references
       for (const depId of dependsOn) {
@@ -378,6 +395,40 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
       update.dependsOn = dependsOn;
+    }
+
+    if (gates !== undefined) {
+      update.gates = gates;
+    }
+
+    // Enforce the downward-closed gate-compatibility invariant when either the
+    // dependencies or the gate compatibility of this criterion changes.
+    if (dependsOn !== undefined || gates !== undefined) {
+      // As a child: every parent must be compatible with at least this node's gates.
+      for (const depId of effectiveDependsOn) {
+        const dep = await ctx.criteriaCollection.findOne({
+          id: depId,
+          deletedAt: { $exists: false },
+        });
+        if (dep && !gatesSatisfyInvariant(dep.gates as GateId[] | undefined, effectiveGates)) {
+          res.status(400).json({
+            error: `'${id}' is compatible with more gates than its dependency '${depId}'. A dependency must be compatible with at least every gate its dependent is.`,
+          });
+          return;
+        }
+      }
+      // As a parent: every dependent must remain a subset of this node's gates.
+      const dependents = await ctx.criteriaCollection
+        .find({ dependsOn: id, deletedAt: { $exists: false } })
+        .toArray();
+      for (const child of dependents) {
+        if (!gatesSatisfyInvariant(effectiveGates, child.gates as GateId[] | undefined)) {
+          res.status(400).json({
+            error: `Dependent '${child.id}' is compatible with more gates than '${id}' would be after this change. A dependency must be compatible with at least every gate its dependent is.`,
+          });
+          return;
+        }
+      }
     }
 
     await ctx.criteriaCollection.updateOne(

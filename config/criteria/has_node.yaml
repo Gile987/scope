@@ -2,3 +2,5 @@ id: has_node
 prompt: |
   The project uses Node.js as its runtime environment. Look for package.json file
   or Node.js-specific configuration files.
+gates:
+  - select

@@ -4,3 +4,5 @@ prompt: |
   Look for .tf files, terraform.tfstate, or terraform configuration.
 depends_on:
   - has_iac
+gates:
+  - select

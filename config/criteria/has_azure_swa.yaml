@@ -5,3 +5,5 @@ prompt: |
 depends_on:
   - has_azure
   - has_node
+gates:
+  - select

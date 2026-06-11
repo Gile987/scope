@@ -2,8 +2,9 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import { CriteriaConfig, CriteriaDocument } from '../types/types.js';
+import { CriteriaConfig, CriteriaDocument, GateId } from '../types/types.js';
 import { DependencyGraph } from '../graph/dependency-graph.js';
+import { gatesSatisfyInvariant } from '../gates/gates.js';
 
 /**
  * MongoDB-backed criteria store for CRUD operations on criteria definitions.
@@ -32,8 +33,9 @@ export class CriteriaStore {
     id: string;
     prompt: string;
     dependsOn?: string[];
+    gates?: GateId[];
   }): Promise<CriteriaDocument> {
-    const { id, prompt, dependsOn = [] } = input;
+    const { id, prompt, dependsOn = [], gates } = input;
 
     // Validate ID format
     if (!/^[a-z0-9_-]+$/.test(id)) {
@@ -58,10 +60,14 @@ export class CriteriaStore {
       await this.validateNoCycles(id, dependsOn);
     }
 
+    // Validate the downward-closed gate-compatibility invariant.
+    await this.validateGateCompatibility(id, dependsOn, gates);
+
     const doc: CriteriaDocument = {
       id,
       prompt: prompt.trim(),
       dependsOn,
+      ...(gates !== undefined && { gates }),
       createdAt: new Date(),
     };
 
@@ -69,10 +75,10 @@ export class CriteriaStore {
     return doc;
   }
 
-  /** Update a criterion's prompt and/or dependencies */
+  /** Update a criterion's prompt, dependencies and/or gate compatibility */
   async update(
     id: string,
-    patch: { prompt?: string; dependsOn?: string[] }
+    patch: { prompt?: string; dependsOn?: string[]; gates?: GateId[] }
   ): Promise<CriteriaDocument> {
     const existing = await this.get(id);
     if (!existing) {
@@ -87,9 +93,17 @@ export class CriteriaStore {
       await this.validateNoCycles(id, patch.dependsOn);
     }
 
+    // Validate the gate-compatibility invariant against the resulting state.
+    if (patch.dependsOn !== undefined || patch.gates !== undefined) {
+      const effectiveDependsOn = patch.dependsOn ?? existing.dependsOn ?? [];
+      const effectiveGates = patch.gates !== undefined ? patch.gates : existing.gates;
+      await this.validateGateCompatibility(id, effectiveDependsOn, effectiveGates);
+    }
+
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (patch.prompt !== undefined) update.prompt = patch.prompt.trim();
     if (patch.dependsOn !== undefined) update.dependsOn = patch.dependsOn;
+    if (patch.gates !== undefined) update.gates = patch.gates;
 
     await this.collection.updateOne(
       { id, deletedAt: { $exists: false } },
@@ -151,7 +165,7 @@ export class CriteriaStore {
         );
       }
 
-      collected.set(id, { id: doc.id, prompt: doc.prompt, dependsOn: doc.dependsOn });
+      collected.set(id, { id: doc.id, prompt: doc.prompt, dependsOn: doc.dependsOn, ...(doc.gates !== undefined && { gates: doc.gates }) });
 
       if (doc.dependsOn) {
         for (const parentId of doc.dependsOn) {
@@ -177,6 +191,7 @@ export class CriteriaStore {
       id: c.id,
       prompt: c.prompt,
       dependsOn: c.dependsOn,
+      ...(c.gates !== undefined && { gates: c.gates }),
     }));
 
     const edges: { from: string; to: string }[] = [];
@@ -204,6 +219,7 @@ export class CriteriaStore {
           id: config.id,
           prompt: config.prompt,
           dependsOn: config.dependsOn || [],
+          ...(config.gates !== undefined && { gates: config.gates }),
           createdAt: new Date(),
         } as any);
         inserted++;
@@ -251,6 +267,40 @@ export class CriteriaStore {
         );
       }
       throw error;
+    }
+  }
+
+  /**
+   * Enforce the downward-closed gate-compatibility invariant: every direct
+   * parent of `criterionId` must be compatible with at least every gate the
+   * child is compatible with (`compat(parent) ⊇ compat(child)`).
+   *
+   * Ancestors are resolved transitively by the parents themselves satisfying
+   * the same rule, so checking direct parents is sufficient. An unrestricted
+   * child (empty/undefined gates = all gates) requires its parents to also be
+   * unrestricted.
+   */
+  private async validateGateCompatibility(
+    criterionId: string,
+    dependsOn: string[],
+    gates: GateId[] | undefined,
+  ): Promise<void> {
+    if (dependsOn.length === 0) return;
+
+    for (const parentId of dependsOn) {
+      const parent = await this.get(parentId);
+      // Missing parents are caught by validateDependencies; skip here.
+      if (!parent) continue;
+      if (!gatesSatisfyInvariant(parent.gates, gates)) {
+        const childGates = !gates || gates.length === 0 ? "all gates" : gates.join(", ");
+        const parentGates =
+          !parent.gates || parent.gates.length === 0 ? "all gates" : parent.gates.join(", ");
+        throw new Error(
+          `'${criterionId}' is compatible with [${childGates}] but its dependency ` +
+            `'${parentId}' is not (compatible with: ${parentGates}). A dependency must be ` +
+            `compatible with at least every gate its dependent is.`,
+        );
+      }
     }
   }
 }

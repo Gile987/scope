@@ -60,6 +60,14 @@ export class FileSystemCriteriaProvider implements CriteriaProvider {
           dependsOn: dependsOn.map((d: any) => String(d).trim()),
         };
 
+        const gates = data.gates;
+        if (gates !== undefined) {
+          if (!Array.isArray(gates)) {
+            throw new Error(`'gates' must be an array in ${file}`);
+          }
+          criteria.gates = gates.map((g: any) => String(g).trim()) as CriteriaConfig["gates"];
+        }
+
         if (this.registry.has(criteria.id)) {
           throw new Error(`Duplicate criteria id '${criteria.id}' found in ${file}`);
         }
