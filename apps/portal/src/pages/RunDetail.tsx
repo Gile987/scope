@@ -35,12 +35,14 @@ import {
   GATE_METADATA,
   GATE_ORDER,
   buildGateIterationScoper,
+  orderGates,
   type GateId,
+  type GateConfig,
   type GateRunSummary,
 } from "@/lib/gates";
 import { useState, useMemo, type ReactNode } from "react";
 import { toast } from "sonner";
-import type { RunState } from "@/types";
+import type { RunState, LogEvent } from "@/types";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { getRetryButtonState } from "@/components/RetryButton";
 
@@ -90,6 +92,66 @@ function skippedSummaryText(summaries: GateRunSummary[]): string | null {
     .map((summary) => GATE_METADATA[summary.gate].label);
   if (skipped.length === 0) return null;
   return `${GATE_METADATA[failed.gate].label} failed; ${skipped.join("/")} skipped`;
+}
+
+/** Compact status dot for a gate tab trigger. */
+function GateTabStatusDot({ summary }: { summary?: GateRunSummary }) {
+  if (summary?.status === "passed") return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
+  if (summary?.status === "failed") return <XCircle className="h-3.5 w-3.5 text-red-500" />;
+  if (summary?.status === "skipped") return <MinusCircle className="h-3.5 w-3.5 text-slate-400" />;
+  return null;
+}
+
+/**
+ * Renders one criteria diagram per configured gate behind a gate tab strip.
+ * Falls back to a single bare diagram when only one gate is present (legacy runs).
+ */
+function CriteriaGateTabs({
+  gates,
+  gateSummaryById,
+  logs,
+}: {
+  gates: Array<Pick<GateConfig, "gate" | "criteria">>;
+  gateSummaryById: Map<GateId, GateRunSummary>;
+  logs: LogEvent[];
+}) {
+  // Default active gate follows the latest gate that has a summary (most recent in
+  // the pipeline) until the user picks one explicitly.
+  const defaultGate = useMemo<GateId | undefined>(() => {
+    for (let i = gates.length - 1; i >= 0; i--) {
+      if (gateSummaryById.get(gates[i].gate)) return gates[i].gate;
+    }
+    return gates[0]?.gate;
+  }, [gates, gateSummaryById]);
+
+  const [selected, setSelected] = useState<GateId | undefined>(undefined);
+  const activeGate = selected ?? defaultGate;
+
+  if (gates.length === 0) return null;
+
+  // Single gate (or legacy run): no tab strip, just the diagram.
+  if (gates.length === 1) {
+    const only = gates[0];
+    return <CriteriaGraphView scenarioCriteria={only.criteria} gate={only.gate} logs={logs} />;
+  }
+
+  return (
+    <Tabs value={activeGate} onValueChange={(value) => setSelected(value as GateId)}>
+      <TabsList>
+        {gates.map((g) => (
+          <TabsTrigger key={g.gate} value={g.gate} className="gap-1.5">
+            {GATE_METADATA[g.gate].label}
+            <GateTabStatusDot summary={gateSummaryById.get(g.gate)} />
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      {gates.map((g) => (
+        <TabsContent key={g.gate} value={g.gate} className="mt-3">
+          <CriteriaGraphView scenarioCriteria={g.criteria} gate={g.gate} logs={logs} />
+        </TabsContent>
+      ))}
+    </Tabs>
+  );
 }
 
 export function RunDetail() {
@@ -401,6 +463,20 @@ export function RunDetail() {
    }))
    .filter((group) => group.turns.length > 0 || group.summary);
   const downstreamSkippedText = skippedSummaryText(gateSummaries);
+
+  // Criteria diagrams per gate. For gated runs, use each gate's own criteria; for
+  // legacy runs (no gates configured), fall back to a single Select diagram driven by
+  // the scenario criteria. Computed inline (not memoized) to avoid adding a hook after
+  // the component's early returns.
+  const configuredGates = (run.gates ?? []) as GateConfig[];
+  const criteriaGates: Array<Pick<GateConfig, "gate" | "criteria">> =
+    configuredGates.length > 0
+      ? orderGates(configuredGates)
+          .filter((g) => (g.criteria?.length ?? 0) > 0)
+          .map((g) => ({ gate: g.gate, criteria: g.criteria }))
+      : (run.scenario?.criteria?.length ?? 0) > 0
+        ? [{ gate: "select" as GateId, criteria: run.scenario!.criteria }]
+        : [];
  
   return (
     <TooltipProvider delayDuration={200}>
@@ -790,9 +866,10 @@ export function RunDetail() {
 
         {/* Logs tab */}
         <TabsContent value="logs" className="mt-4 space-y-4">
-          {run.scenario?.criteria && run.scenario.criteria.length > 0 && (
-            <CriteriaGraphView
-              scenarioCriteria={run.scenario!.criteria}
+          {criteriaGates.length > 0 && (
+            <CriteriaGateTabs
+              gates={criteriaGates}
+              gateSummaryById={gateSummaryById}
               logs={effectiveLogs}
             />
           )}

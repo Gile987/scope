@@ -424,7 +424,12 @@ Per the CLI ↔ Portal parity rule, both must expose gate selection.
   (skipped).
     - Follows the Portal UX v2 patterns (explicit composition, action counts).
 - **Run detail** (Portal + CLI): group turns by gate; show per-gate status and
-  the "downstream skipped" state.
+  the "downstream skipped" state. On the Portal **Logs** tab, the criteria DAG is
+  shown per gate behind a gate tab strip (one tab per configured gate, labelled with
+  the gate name and a status icon from `gateSummaries`); the selected tab renders that
+  gate's criteria with node status scoped to that gate's log events (events without a
+  `gate` tag are treated as Select). Legacy/single-gate runs render a single diagram
+  with no tab strip.
 - **Profiles**: gate config (prompts + criteria + budgets) should be persistable
   on a profile so it can be reused/varied across submissions (follow-up, aligned
   with existing profile flow).
