@@ -264,11 +264,13 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
         undefined,
         undefined,
         { documentId, runId: logRunId },
-        // Bump the per-run liveness heartbeat in Redis on every successful
-        // tick so the redelivery handler can distinguish a real worker crash
-        // from a spurious queue redelivery. Stored in Redis (not Mongo) to
-        // avoid the recurring CosmosDB RU cost of writing every 15 s for
-        // every active run.
+        // Bump the per-run liveness heartbeat in Redis on a dedicated interval
+        // (decoupled from the queue-visibility extension) so the redelivery
+        // handler and StuckRunReaper can distinguish a real worker crash from a
+        // spurious queue redelivery — or from a transient Azure Queue
+        // visibility-extension failure under load (issue #1064). Stored in
+        // Redis (not Mongo) to avoid the recurring CosmosDB RU cost of writing
+        // every 15 s for every active run.
         async () => {
           await this.heartbeatStore.set(logRunId, new Date());
           // Fallback cancel check: if the Pub/Sub message was missed (e.g.

@@ -33,6 +33,9 @@ import type { HeartbeatStore, RequestDocument } from "shared";
  *     is reaped. A transient Redis read blip (which makes the whole fleet look
  *     stale for one sweep) is absorbed because nothing was stale in the prior
  *     sweep; only genuinely-dead runs persist across both.
+ *   - Confirmation re-read: immediately before failing a run, its heartbeat is
+ *     re-read with a single-key GET. A fresh beat here aborts the reap
+ *     regardless of why the batch read missed it (issue #1064).
  *   - Per-sweep circuit-breaker: if more runs would be reaped than
  *     `maxPerSweep`, the sweep is skipped and logged loudly — a correlated
  *     spike is almost certainly systemic (CosmosDB throttling, network) rather
@@ -170,12 +173,41 @@ export class StuckRunReaper {
         return;
       }
 
+      // Zero readable beats for a non-empty candidate set points at a systemic
+      // heartbeat-read/Redis-misconfig problem, not N simultaneous worker deaths
+      // (genuine deaths still expose present-but-stale beats inside the TTL).
+      // Surface it loudly; the per-candidate confirmation read in reapOne() is
+      // the actual false-positive guard (issue #1064).
+      if (heartbeats.size === 0 && candidates.length > 0) {
+        console.warn(
+          `[StuckRunReaper] Read 0 live heartbeats for ${candidates.length} processing candidate(s) ` +
+            `while Redis is reachable — likely a heartbeat read failure or Redis misconfiguration, ` +
+            `not worker deaths. Each candidate is re-verified with a direct read before any reap. ` +
+            `Verify the scheduler's REDIS_HOST/PORT/PASSWORD/TLS match the workers and API.`,
+        );
+      }
+
       const now = Date.now();
+      let missingCount = 0;
+      let staleCount = 0;
       const currentStale = candidates.filter((c) => {
         const hb = heartbeats.get(c.runId);
-        if (!hb) return true; // missing & startedAt already old (filtered in findCandidates)
-        return now - hb.getTime() > this.staleThresholdMs;
+        if (!hb) {
+          missingCount++;
+          return true; // missing & startedAt already old (filtered in findCandidates)
+        }
+        if (now - hb.getTime() > this.staleThresholdMs) {
+          staleCount++;
+          return true;
+        }
+        return false;
       });
+      if (currentStale.length > 0) {
+        console.log(
+          `[StuckRunReaper] Sweep: ${candidates.length} candidate(s), ${heartbeats.size} live beat(s), ` +
+            `${staleCount} stale, ${missingCount} missing; ${this.previouslyStale.size} stale in prior sweep.`,
+        );
+      }
       const currentStaleIds = new Set(currentStale.map((c) => c.runId));
 
       // Two-strikes: only reap runs that were ALSO stale in the previous sweep.
@@ -262,6 +294,20 @@ export class StuckRunReaper {
   }
 
   private async reapOne(c: Candidate, now: number): Promise<void> {
+    // Confirmation re-read (issue #1064): a single-key GET is always
+    // shard-routable, so a fresh beat here means the worker is alive — abort the
+    // reap regardless of why the batch read under-reported it.
+    const confirmBeat = await this.heartbeatStore.get(c.runId);
+    if (confirmBeat && now - confirmBeat.getTime() <= this.staleThresholdMs) {
+      console.warn(
+        `[StuckRunReaper] Aborting reap of request=${c._id} (runId=${c.runId}) — confirmation read found a ` +
+          `fresh heartbeat (${Math.round((now - confirmBeat.getTime()) / 1000)}s ago). The batch heartbeat ` +
+          `read under-reported liveness (likely a cross-slot MGET failure on clustered Redis); not reaping.`,
+      );
+      this.previouslyStale.delete(c.runId);
+      return;
+    }
+
     const ageDesc = c.startedAt
       ? `${Math.round((now - c.startedAt.getTime()) / 1000)}s`
       : "unknown";

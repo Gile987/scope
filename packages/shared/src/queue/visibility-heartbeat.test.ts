@@ -130,6 +130,65 @@ describe("visibility heartbeat", () => {
     hb.stop();
   });
 
+  it("fires the liveness onTick on a dedicated interval even when updateMessage keeps failing", async () => {
+    const qc = createMockQueueClient();
+    // Visibility extension fails on every tick — liveness must still fire.
+    (qc.updateMessage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("transient 500"));
+    const onTick = vi.fn().mockResolvedValue(undefined);
+
+    const hb = startVisibilityHeartbeat(
+      qc, "msg-1", "receipt-0", "test-worker", 100, 120, {}, onTick,
+    );
+
+    await vi.advanceTimersByTimeAsync(350);
+
+    // updateMessage failed every time, but liveness kept beating.
+    expect(qc.updateMessage).toHaveBeenCalled();
+    expect(onTick).toHaveBeenCalledTimes(3);
+    expect(onTick).toHaveBeenLastCalledWith({ tickCount: 3 });
+
+    hb.stop();
+  });
+
+  it("keeps beating liveness when a single onTick rejects (and does not abort)", async () => {
+    const qc = createMockQueueClient();
+    (qc.updateMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ popReceipt: "receipt-1" });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const onTick = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("redis blip"))
+      .mockResolvedValue(undefined);
+
+    const hb = startVisibilityHeartbeat(
+      qc, "msg-1", "receipt-0", "test-worker", 100, 120, {}, onTick,
+    );
+
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(onTick).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Liveness heartbeat tick failed"),
+      expect.any(Error),
+    );
+
+    hb.stop();
+    warnSpy.mockRestore();
+  });
+
+  it("does not fire onTick after stop", async () => {
+    const qc = createMockQueueClient();
+    (qc.updateMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ popReceipt: "receipt-1" });
+    const onTick = vi.fn().mockResolvedValue(undefined);
+
+    const hb = startVisibilityHeartbeat(
+      qc, "msg-1", "receipt-0", "test-worker", 100, 120, {}, onTick,
+    );
+    hb.stop();
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(onTick).not.toHaveBeenCalled();
+  });
+
   it("exports correct default constants", () => {
     expect(HEARTBEAT_INTERVAL_MS).toBe(15_000);
     expect(HEARTBEAT_VISIBILITY_SECONDS).toBe(60);

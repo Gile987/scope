@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const Redis = require("ioredis");
 
 import type { RedisConfig } from "../logging/log-publisher.js";
+import { clusterSafeMget } from "./cluster-safe-mget.js";
 
 /**
  * Per-run liveness heartbeat storage.
@@ -162,9 +163,10 @@ export class RedisHeartbeatStore implements HeartbeatStore {
     const out = new Map<string, Date>();
     if (runIds.length === 0) return out;
     try {
-      const vals: (string | null)[] = await this.redis.mget(runIds.map(keyFor));
-      vals.forEach((v, i) => {
-        if (!v) return;
+      // Cluster-safe batch read (see {@link clusterSafeMget}, issue #1064).
+      const values = await clusterSafeMget(this.redis, runIds.map(keyFor));
+      values.forEach((v, i) => {
+        if (typeof v !== "string") return;
         const ms = Date.parse(v);
         if (Number.isFinite(ms)) out.set(runIds[i], new Date(ms));
       });
