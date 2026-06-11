@@ -3,3 +3,4 @@
 
 export * from "./judge-client.js";
 export * from "./multi-turn-loop.js";
+export * from "./gated-loop.js";
