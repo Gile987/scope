@@ -850,6 +850,7 @@ export function SubmitRun() {
               selected={pickedCriteria}
               onChange={setPickedCriteria}
               inputId="criteria"
+              gate="select"
               trailingAction={(
                 <Button
                   type="button"
