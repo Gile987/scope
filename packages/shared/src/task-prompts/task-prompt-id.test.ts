@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect } from "vitest";
-import { computeTaskPromptId, TASK_PROMPT_NAMESPACE } from "./task-prompt-id.js";
+import { computeTaskPromptId, computePromptId, TASK_PROMPT_NAMESPACE } from "./task-prompt-id.js";
 
 describe("computeTaskPromptId", () => {
   it("returns a valid UUID string", () => {
@@ -37,5 +37,35 @@ describe("computeTaskPromptId", () => {
 
   it("exposes TASK_PROMPT_NAMESPACE as a valid UUID", () => {
     expect(TASK_PROMPT_NAMESPACE).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+});
+
+describe("computePromptId", () => {
+  it("select is identical to computeTaskPromptId — preserves existing ids", () => {
+    const text = "Create a Hello World Express API";
+    expect(computePromptId("select", text)).toBe(computeTaskPromptId(text));
+  });
+
+  it("namespaces non-select gates by type", () => {
+    const text = "Build the project";
+    const build = computePromptId("build", text);
+    const test = computePromptId("test", text);
+    const select = computePromptId("select", text);
+    expect(build).not.toBe(select);
+    expect(build).not.toBe(test);
+    expect(test).not.toBe(select);
+  });
+
+  it("is deterministic per (type, text)", () => {
+    expect(computePromptId("build", "x")).toBe(computePromptId("build", "x"));
+  });
+
+  it("trims whitespace before hashing for typed gates", () => {
+    expect(computePromptId("test", "  run tests  ")).toBe(computePromptId("test", "run tests"));
+  });
+
+  it("a build prompt never collides with a legacy select prompt of the same text", () => {
+    const text = "ship it";
+    expect(computePromptId("build", text)).not.toBe(computeTaskPromptId(text));
   });
 });
