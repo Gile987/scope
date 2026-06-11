@@ -9,6 +9,94 @@ import type { ToolCall } from '../har/types.js';
 // Re-export ToolCall so consumers can import from types
 export type { ToolCall } from '../har/types.js';
 
+// --- Gates (multi-phase evaluation pipeline) ---
+// See docs/design/gates.md. Gates are hard-coded and run strictly in order.
+
+/** The ordered, hard-coded set of evaluation gates. */
+export const GATES = ["select", "build", "test", "run", "deploy"] as const;
+
+/** A single gate identifier. */
+export type GateId = (typeof GATES)[number];
+
+/** Ordered execution sequence — array index defines run order. */
+export const GATE_ORDER: readonly GateId[] = GATES;
+
+/** Static, human-facing metadata for a gate. */
+export interface GateMetadata {
+  id: GateId;
+  label: string;
+  description: string;
+}
+
+/** Hard-coded metadata for every gate, keyed by id. */
+export const GATE_METADATA: Record<GateId, GateMetadata> = {
+  select: {
+    id: "select",
+    label: "Select",
+    description: "Agent implements the task (current behaviour).",
+  },
+  build: {
+    id: "build",
+    label: "Build",
+    description: "Project builds / compiles successfully.",
+  },
+  test: {
+    id: "test",
+    label: "Test",
+    description: "Tests pass.",
+  },
+  run: {
+    id: "run",
+    label: "Run",
+    description: "App runs / serves correctly.",
+  },
+  deploy: {
+    id: "deploy",
+    label: "Deploy",
+    description: "Deploys to the target environment.",
+  },
+};
+
+/** True when `value` is a valid gate id. */
+export function isGateId(value: unknown): value is GateId {
+  return typeof value === "string" && (GATES as readonly string[]).includes(value);
+}
+
+/**
+ * A prompt's type discriminator — one literal per gate. The prompt that drives
+ * a gate must have a `type` equal to that gate's id.
+ */
+export type PromptType = GateId;
+
+/**
+ * Per-gate configuration on a request. Describes which prompt drives the gate,
+ * which criteria are evaluated for it, and the gate's iteration budget.
+ */
+export interface GateConfig {
+  /** Which gate this configures. */
+  gate: GateId;
+  /**
+   * Prompt entity id (`prompt.type` must === `gate`). For the Select gate this
+   * is the request's task prompt (`taskPromptId`).
+   */
+  promptId: string;
+  /**
+   * Criterion ids evaluated for THIS gate. Must contain ≥1 id unless
+   * `maxIterations === 1` (a pass-through gate that auto-passes with no judge).
+   */
+  criteria: string[];
+  /** Per-gate iteration budget. Falls back to the request-level default. */
+  maxIterations?: number;
+}
+
+/** Per-gate execution outcome recorded on a run for cheap querying. */
+export interface GateRunSummary {
+  gate: GateId;
+  status: "passed" | "failed" | "skipped";
+  /** Number of iterations actually executed for this gate. */
+  iterations: number;
+}
+
 /** LLM token usage counters for a single interaction */
 export interface TokenUsage {
   promptTokens: number;
@@ -19,6 +107,9 @@ export interface TokenUsage {
 // Multi-turn conversation turn (one coding + judge iteration)
 export interface ConversationTurn {
   iteration: number;
+  /** Which gate this turn belongs to. Absent on legacy turns (treated as
+   *  "select"). Lets the UI/history group turns per gate. */
+  gate?: GateId;
   /** The coding agent's final assistant message for this iteration.
    *  Optional: workers may omit it when no response text could be extracted
    *  from the agent (e.g. the chat result envelope contained no recognizable
@@ -174,6 +265,18 @@ export interface RequestDocument {
   submissionId?: string;           // FK → SubmissionDocument._id
   /** Scheduling priority. Higher = processed first. Default: 0. */
   priority: number;
+  /**
+   * Per-gate configuration for the multi-phase evaluation pipeline. When
+   * absent, the request is normalised to a single Select gate from
+   * `scenario.criteria` + `maxIterations` + `taskPromptId` (see
+   * docs/design/gates.md §4.3). Gates run in `GATE_ORDER`.
+   */
+  gates?: GateConfig[];
+  /**
+   * Per-gate execution summary, populated as the run progresses. Derived
+   * from `run.turns` but stored explicitly for cheap querying.
+   */
+  gateSummaries?: GateRunSummary[];
   /**
    * Per-attempt mutable state. Migration 014 nests per-attempt fields
    * under this object; new submissions populate it on insert.
@@ -452,6 +555,10 @@ export interface CriteriaConfig {
   id: string;
   prompt: string;
   dependsOn?: string[];  // Optional parent criteria IDs
+  /** Gates this criterion is compatible with. Empty/undefined = all gates
+   *  (applies only to NEW criteria; legacy rows are backfilled to ["select"]
+   *  by migration 018). See docs/design/gates.md §4.2. */
+  gates?: GateId[];
 }
 
 // Per-criterion result from judge evaluation
@@ -612,7 +719,8 @@ export interface InsightDocument {
 
 /** Task prompt document stored in MongoDB. Immutable — text cannot be changed after creation. */
 export interface TaskPromptDocument {
-  _id: string;                          // UUIDv5 of text.trim() (content-addressed)
+  _id: string;                          // UUIDv5 (content-addressed; see computePromptId)
+  type?: PromptType;                    // Which gate this prompt drives. Absent = legacy "select".
   text: string;                         // Full task prompt text
   features?: PromptFeatureResult[];     // Detected prompt features
   featuresExtractedAt?: Date;           // When features were last extracted
