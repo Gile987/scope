@@ -298,10 +298,10 @@ How often the post-processor dispatcher polls for completed runs needing post-pr
 Azure Storage Queue name used by both the scheduler (to enqueue post-processing work) and the post-processor worker (to dequeue). Must match between the two services.
 
 ### SCOPE_REAPER_ENABLED
-**Default:** `true`
-**Type:** boolean (`false` to disable)
+**Default:** `false`
+**Type:** boolean (`true` to enable)
 
-Kill-switch for the scheduler's stuck-run reaper. When enabled (and `REDIS_HOST` is set), the scheduler runs a periodic backstop sweep that fails `processing` runs whose worker died without writing a terminal state and whose queue message no longer triggers recovery. Set to `false` to disable the sweep entirely (the queue redelivery path still operates). Redis is **non-fatal**: if `REDIS_HOST` is absent or the heartbeat store can't be constructed, the reaper self-disables and the dispatch loop keeps running.
+Kill-switch for the scheduler's stuck-run reaper. **Disabled by default** — set to `true` (and ensure `REDIS_HOST` is set) to run a periodic backstop sweep that fails `processing` runs whose worker died without writing a terminal state and whose queue message no longer triggers recovery. When disabled, the queue redelivery path still operates. Redis is **non-fatal**: even when enabled, if `REDIS_HOST` is absent or the heartbeat store can't be constructed, the reaper self-disables and the dispatch loop keeps running.
 
 ### SCOPE_REAPER_POLL_INTERVAL_MS
 **Default:** `60000`
