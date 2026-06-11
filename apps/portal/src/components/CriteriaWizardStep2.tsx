@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
+import { GateCompatibilityPicker } from "@/components/GateCompatibilityPicker";
 import { Loader2, Check, RefreshCw } from "lucide-react";
 import type { CriteriaWizardState } from "@/hooks/useCriteriaWizard";
 
@@ -20,6 +21,8 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
     id,
     dependsOn,
     setDependsOn,
+    gates,
+    setGates,
     prompt,
     setPrompt,
     aiGenerated,
@@ -53,6 +56,19 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
             {id}
           </Badge>
         </div>
+      </div>
+
+      <Separator />
+
+      {/* Gate compatibility */}
+      <div className="space-y-2">
+        <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
+          Gate compatibility
+        </Label>
+        <GateCompatibilityPicker value={gates} onChange={setGates} />
+        <p className="text-xs text-muted-foreground">
+          Empty means all gates. Parents must be compatible with every gate selected here.
+        </p>
       </div>
 
       <Separator />

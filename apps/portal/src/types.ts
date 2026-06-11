@@ -29,6 +29,7 @@ export interface ToolCall {
 
 export interface ConversationTurn {
   iteration: number;
+  gate?: GateId;
   codingAgentResponse?: string;
   judgeFeedback: string;
   snapshotUrl: string;
@@ -141,6 +142,8 @@ export interface Run {
   submissionId?: string;
   profileId?: string;
   profileVersionId?: string;
+  gates?: GateConfig[];
+  gateSummaries?: GateRunSummary[];
 }
 
 export interface CursorPaginatedResponse<T> {
@@ -151,6 +154,22 @@ export interface CursorPaginatedResponse<T> {
     next: string | null;
     prev: string | null;
   };
+}
+
+export type GateId = "select" | "build" | "test" | "run" | "deploy";
+export type PromptType = GateId;
+
+export interface GateConfig {
+  gate: GateId;
+  promptId: string;
+  criteria: string[];
+  maxIterations?: number;
+}
+
+export interface GateRunSummary {
+  gate: GateId;
+  status: "passed" | "failed" | "skipped";
+  iterations: number;
 }
 
 export const WORKER_TYPES = [
@@ -183,6 +202,7 @@ export interface CriteriaConfig {
   id: string;
   prompt: string;
   dependsOn?: string[];
+  gates?: GateId[];
 }
 
 export interface CriteriaDocument extends CriteriaConfig {
@@ -192,7 +212,7 @@ export interface CriteriaDocument extends CriteriaConfig {
 }
 
 export interface CriteriaGraphData {
-  nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
+  nodes: Array<{ id: string; prompt: string; dependsOn: string[]; gates?: GateId[] }>;
   edges: Array<{ source: string; target: string }>;
 }
 
@@ -241,7 +261,8 @@ export interface PromptFeatureExtraction {
 // Task Prompt types (first-class entity for benchmark task texts)
 export interface TaskPrompt {
   _id: string;                          // UUIDv5 content-addressed ID
-  text: string;                         // Full task prompt text
+  text: string;
+  type?: PromptType;                         // Full task prompt text
   features?: PromptFeatureResult[];     // Detected prompt features
   featuresExtractedAt?: string;         // When features were last extracted
   createdAt: string;

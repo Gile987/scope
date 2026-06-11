@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, X, Sparkles } from "lucide-react";
+import { GATE_METADATA, isCriterionCompatibleWithGate, type GateId } from "@/lib/gates";
 
 interface CriteriaPickerProps {
   selected: string[];
@@ -19,9 +20,11 @@ interface CriteriaPickerProps {
   inputId?: string;
   /** Optional trailing control rendered on the same row as the search input */
   trailingAction?: ReactNode;
+  /** Restrict suggestions to criteria compatible with this gate */
+  gate?: GateId;
 }
 
-export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, trailingAction }: CriteriaPickerProps) {
+export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, trailingAction, gate }: CriteriaPickerProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -34,15 +37,18 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
     queryFn: () => api.listCriteria(),
   });
 
-  // Filter: show unselected criteria matching query
+  // Filter: show unselected criteria matching query and gate compatibility.
   const suggestions = useMemo(() => {
-    const available = criteria.filter((c) => !selected.includes(c.id));
+    const available = criteria.filter((c) =>
+      !selected.includes(c.id) &&
+      (!gate || isCriterionCompatibleWithGate(c.gates, gate))
+    );
     if (!query.trim()) return available.slice(0, 8);
     const q = query.toLowerCase();
     return available.filter(
       (c) => c.id.toLowerCase().includes(q) || c.prompt.toLowerCase().includes(q),
     );
-  }, [criteria, selected, query]);
+  }, [criteria, selected, query, gate]);
 
   // Reset highlight when suggestions change
   useEffect(() => {
@@ -192,7 +198,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={handleKeyDown}
-          placeholder="Type to search criteria…"
+          placeholder={gate ? `Search ${GATE_METADATA[gate].label} criteria…` : "Type to search criteria…"}
           className="h-9 font-mono text-sm"
         />
         {trailingAction}

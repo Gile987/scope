@@ -15,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2, Eye, GitBranch } from "lucide-react";
 import { truncate } from "@/lib/utils";
+import { formatGateList } from "@/lib/gates";
 import {
   ListLayout,
   FilterRail,
@@ -35,6 +36,7 @@ const FILTER_KEYS = [] as const;
 const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "id", label: "ID", required: true },
   { id: "prompt", label: "Prompt" },
+  { id: "gates", label: "Gates" },
   { id: "dependencies", label: "Dependencies" },
   { id: "actions", label: "Actions" },
 ];
@@ -132,6 +134,17 @@ export function CriteriaList() {
       hidden: visibility.isHidden("prompt"),
       cell: (c) => (
         <span className="text-sm text-muted-foreground">{truncate(c.prompt, 100)}</span>
+      ),
+    },
+    {
+      id: "gates",
+      header: "Gates",
+      width: "160px",
+      hidden: visibility.isHidden("gates"),
+      cell: (c) => (
+        <Badge variant="secondary" className="text-xs">
+          {formatGateList(c.gates)}
+        </Badge>
       ),
     },
     {

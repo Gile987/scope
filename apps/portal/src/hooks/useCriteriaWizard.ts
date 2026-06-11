@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { slugify } from "@/lib/utils";
 import { toast } from "sonner";
+import type { GateId } from "@/lib/gates";
 
 export interface UseCriteriaWizardOptions {
   /** Pre-populated parent dependency IDs */
@@ -25,6 +26,7 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
   const [id, setId] = useState("");
   const [idManuallyEdited, setIdManuallyEdited] = useState(false);
   const [dependsOn, setDependsOn] = useState<string[]>(initialDependsOn);
+  const [gates, setGates] = useState<GateId[] | undefined>(["select"]);
 
   // Step 2 fields
   const [prompt, setPrompt] = useState("");
@@ -141,8 +143,9 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
       id: id.trim(),
       prompt: prompt.trim(),
       dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
+      gates,
     });
-  }, [id, prompt, dependsOn, createMutation]);
+  }, [id, prompt, dependsOn, gates, createMutation]);
 
   // Regenerate prompt
   const handleRegenerate = useCallback(() => {
@@ -159,6 +162,7 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
     setId("");
     setIdManuallyEdited(false);
     setDependsOn(initialDependsOn);
+    setGates(["select"]);
     setPrompt("");
     setAiGenerated(false);
     setSuggestedParents([]);
@@ -177,6 +181,8 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
     setIdManuallyEdited,
     dependsOn,
     setDependsOn,
+    gates,
+    setGates,
     prompt,
     setPrompt,
     aiGenerated,

@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import {
   WORKER_TYPES, type CodingAgent, type McpServerDocument,
-  type ProfileWithVersion, type ProfileVersionDocument, type Run,
+  type ProfileWithVersion, type ProfileVersionDocument, type Run, type TaskPrompt,
 } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
@@ -36,6 +36,14 @@ import {
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
+import {
+  GATE_METADATA,
+  GATE_ORDER,
+  orderGates,
+  validateGateConfigs,
+  type GateConfig,
+  type GateId,
+} from "@/lib/gates";
 import { toast } from "sonner";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
@@ -57,6 +65,25 @@ type VariationDraft = {
 };
 
 type GraphSelection = { kind: "base" } | { kind: "variation"; index: number };
+
+type GateDraft = {
+  enabled: boolean;
+  promptId: string;
+  promptText?: string;
+  criteria: string[];
+  maxIterations: number;
+};
+
+const NON_SELECT_GATES = GATE_ORDER.filter((gate): gate is Exclude<GateId, "select"> => gate !== "select");
+
+function createGateDraft(maxIterations: number): GateDraft {
+  return {
+    enabled: false,
+    promptId: "",
+    criteria: [],
+    maxIterations,
+  };
+}
 
 const VARIATION_COLORS = [
   "#3b82f6",
@@ -157,6 +184,12 @@ export function SubmitRun() {
   const [model, setModel] = useState<string>("");
   const [reasoningEffort, setReasoningEffort] = useState<string>("");
   const [maxIterations, setMaxIterations] = useState<number>(10);
+  const [gateDrafts, setGateDrafts] = useState<Record<Exclude<GateId, "select">, GateDraft>>(() => ({
+    build: createGateDraft(10),
+    test: createGateDraft(10),
+    run: createGateDraft(10),
+    deploy: createGateDraft(10),
+  }));
   const [occurrences, setOccurrences] = useState<number>(5);
   const [priority, setPriority] = useState<number>(0);
 
@@ -321,6 +354,21 @@ export function SubmitRun() {
     setVariationDrafts([]);
   };
 
+  const updateGateDraft = (gate: Exclude<GateId, "select">, patch: Partial<GateDraft>) => {
+    setGateDrafts((prev) => ({
+      ...prev,
+      [gate]: { ...prev[gate], ...patch },
+    }));
+  };
+
+  const selectGatePrompt = (gate: Exclude<GateId, "select">, prompt: TaskPrompt) => {
+    updateGateDraft(gate, {
+      enabled: true,
+      promptId: prompt._id,
+      promptText: prompt.text,
+    });
+  };
+
   const handleProfileCreated = (profile: ProfileWithVersion) => {
     queryClient.setQueryData<ProfileWithVersion[]>(["profiles"], (previous) => {
       const existing = previous ?? [];
@@ -402,6 +450,24 @@ export function SubmitRun() {
     if (run.model) setModel(run.model);
     if (run.agentVersion) setSelectedAgentVersion(run.agentVersion);
     if (run.maxIterations) setMaxIterations(run.maxIterations);
+    setGateDrafts(() => {
+      const next = {
+        build: createGateDraft(run.maxIterations ?? maxIterations),
+        test: createGateDraft(run.maxIterations ?? maxIterations),
+        run: createGateDraft(run.maxIterations ?? maxIterations),
+        deploy: createGateDraft(run.maxIterations ?? maxIterations),
+      };
+      for (const gateConfig of run.gates ?? []) {
+        if (gateConfig.gate === "select") continue;
+        next[gateConfig.gate] = {
+          enabled: true,
+          promptId: gateConfig.promptId,
+          criteria: gateConfig.criteria,
+          maxIterations: gateConfig.maxIterations ?? run.maxIterations ?? maxIterations,
+        };
+      }
+      return next;
+    });
     if (run.mcpServers && run.mcpServers.length > 0) {
       setSelectedMcpServers(run.mcpServers);
       setMcpOpen(true);
@@ -446,7 +512,7 @@ export function SubmitRun() {
     mutationFn: (opts: { description?: string; existingPrompt?: string }) =>
       api.generateTaskPrompt(opts),
     onSuccess: (data) => {
-      setTask(data.taskPrompt);
+      setTask(data.taskPrompt ?? data.tasks?.[0] ?? "");
       setShowGenerate(false);
       setGenerateDescription("");
     },
@@ -464,6 +530,37 @@ export function SubmitRun() {
       });
     }
   };
+
+  const configuredGateCount = NON_SELECT_GATES.filter((gate) => gateDrafts[gate].enabled).length;
+  const gatesEnabled = configuredGateCount > 0;
+  const gateConfigs: GateConfig[] = gatesEnabled
+    ? orderGates([
+        {
+          gate: "select",
+          promptId: "",
+          criteria: pickedCriteria,
+          maxIterations,
+        },
+        ...NON_SELECT_GATES
+          .filter((gate) => gateDrafts[gate].enabled)
+          .map((gate): GateConfig => ({
+            gate,
+            promptId: gateDrafts[gate].promptId,
+            criteria: gateDrafts[gate].criteria,
+            maxIterations: gateDrafts[gate].maxIterations,
+          })),
+      ])
+    : [];
+  const gateValidationErrors = gatesEnabled ? validateGateConfigs(gateConfigs, maxIterations) : [];
+  const promptValidationErrors = gatesEnabled
+    ? NON_SELECT_GATES.flatMap((gate) => {
+        const draft = gateDrafts[gate];
+        return draft.enabled && !draft.promptId
+          ? [`${GATE_METADATA[gate].label} gate needs a ${GATE_METADATA[gate].label} prompt.`]
+          : [];
+      })
+    : [];
+  const gateErrors = [...gateValidationErrors, ...promptValidationErrors];
 
   const submitMutation = useMutation({
     mutationFn: api.submitRun,
@@ -495,6 +592,7 @@ export function SubmitRun() {
       ...(inVariationMode ? {} : { ...(model ? { model } : {}) }),
       ...(inVariationMode ? {} : { ...(reasoningEffort ? { reasoningEffort } : {}) }),
       maxIterations,
+      ...(gatesEnabled ? { gates: gateConfigs } : {}),
       ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
       ...(inVariationMode ? {} : { ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}) }),
@@ -521,7 +619,8 @@ export function SubmitRun() {
     !!task.trim() &&
     !submitMutation.isPending &&
     !(selectedAgent && selectedAgent.supportedModels.length > 0 && !model) &&
-    !(maxIterations !== 1 && pickedCriteria.length === 0);
+    !(maxIterations !== 1 && pickedCriteria.length === 0) &&
+    gateErrors.length === 0;
 
   const selectedVariationCount = variationDrafts.filter((v) => v.profileId.trim().length > 0).length;
   const compositionProfileCount = selectedProfileId ? 1 + selectedVariationCount : 0;
@@ -585,7 +684,8 @@ export function SubmitRun() {
   // ─── Render helpers ─────────────────────────────────────────────────────
   const summaryChips: string[] = [
     `${maxIterations} iteration${maxIterations === 1 ? "" : "s"}`,
-    `${pickedCriteria.length} criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
+    `${pickedCriteria.length} select criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
+    gatesEnabled ? `${gateConfigs.length} configured gates` : "single-pass Select",
     occurrences > 1 ? `×${occurrences} runs` : "",
     worker,
     model || "",
@@ -808,6 +908,113 @@ export function SubmitRun() {
               />
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ─── Gates ─────────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Gate pipeline</CardTitle>
+          <CardDescription>
+            Optional phase gates after Select. Leave all disabled for the existing single-pass flow.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-md border bg-muted/30 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">Base</Badge>
+                  <p className="font-medium">{GATE_METADATA.select.label}</p>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Uses the task prompt above with {pickedCriteria.length} {pickedCriteria.length === 1 ? "criterion" : "criteria"} and {maxIterations} iteration{maxIterations === 1 ? "" : "s"}.
+                </p>
+              </div>
+              <Badge variant="outline">Always configured</Badge>
+            </div>
+          </div>
+
+          {NON_SELECT_GATES.map((gate, index) => {
+            const meta = GATE_METADATA[gate];
+            const draft = gateDrafts[gate];
+            return (
+              <div key={gate} className={`rounded-md border p-4 ${draft.enabled ? "border-primary/40 bg-primary/5" : "bg-card"}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <label className="flex items-start gap-3">
+                    <Checkbox
+                      checked={draft.enabled}
+                      onCheckedChange={(checked) => updateGateDraft(gate, { enabled: Boolean(checked) })}
+                    />
+                    <span>
+                      <span className="flex items-center gap-2 font-medium">
+                        <Badge variant="outline">Gate {index + 2}</Badge>
+                        {meta.label}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">{meta.description}</span>
+                    </span>
+                  </label>
+                  <Badge variant={draft.enabled ? "default" : "secondary"}>
+                    {draft.enabled ? "Configured" : "Skipped"}
+                  </Badge>
+                </div>
+
+                {draft.enabled && (
+                  <div className="mt-4 space-y-4">
+                    <div className="space-y-2">
+                      <Label>{meta.label} prompt *</Label>
+                      {draft.promptId && (
+                        <div className="rounded-md border bg-background px-3 py-2 text-xs">
+                          <p className="font-mono">{draft.promptId}</p>
+                          {draft.promptText && <p className="mt-1 text-muted-foreground line-clamp-2">{draft.promptText}</p>}
+                        </div>
+                      )}
+                      <TaskPromptPicker
+                        type={gate}
+                        onSelect={() => undefined}
+                        onSelectPrompt={(prompt) => selectGatePrompt(gate, prompt)}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{meta.label} criteria</Label>
+                      <CriteriaPicker
+                        gate={gate}
+                        selected={draft.criteria}
+                        onChange={(criteria) => updateGateDraft(gate, { criteria })}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Only criteria compatible with {meta.label} are shown. Required unless max iterations is 1.
+                      </p>
+                    </div>
+
+                    <div className="max-w-xs space-y-2">
+                      <Label htmlFor={`${gate}-maxIterations`}>Max iterations</Label>
+                      <Input
+                        id={`${gate}-maxIterations`}
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={draft.maxIterations}
+                        onChange={(e) => updateGateDraft(gate, {
+                          maxIterations: Math.max(1, Math.min(50, parseInt(e.target.value) || 1)),
+                        })}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {gateErrors.length > 0 && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <p className="font-medium">Gate configuration needs attention</p>
+              <ul className="mt-1 list-disc pl-5">
+                {gateErrors.map((message) => <li key={message}>{message}</li>)}
+              </ul>
+            </div>
+          )}
         </CardContent>
       </Card>
 

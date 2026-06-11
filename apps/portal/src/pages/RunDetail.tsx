@@ -31,6 +31,11 @@ import { ReportThumbnail } from "@/components/ReportThumbnail";
 import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
+import {
+  GATE_METADATA,
+  GATE_ORDER,
+  type GateRunSummary,
+} from "@/lib/gates";
 import { useState, useMemo, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { RunState } from "@/types";
@@ -65,6 +70,24 @@ function ResourceLinks({ label, items, hrefBase }: { label: string; items: strin
       </div>
     </div>
   );
+}
+
+function GateStatusBadge({ summary }: { summary?: GateRunSummary }) {
+  if (!summary) return <Badge variant="outline">Not configured</Badge>;
+  if (summary.status === "passed") return <Badge variant="success">Passed · {summary.iterations}</Badge>;
+  if (summary.status === "failed") return <Badge variant="destructive">Failed · {summary.iterations}</Badge>;
+  return <Badge variant="secondary">Skipped</Badge>;
+}
+
+function skippedSummaryText(summaries: GateRunSummary[]): string | null {
+  const failed = summaries.find((summary) => summary.status === "failed");
+  if (!failed) return null;
+  const failedIndex = GATE_ORDER.indexOf(failed.gate);
+  const skipped = summaries
+    .filter((summary) => summary.status === "skipped" && GATE_ORDER.indexOf(summary.gate) > failedIndex)
+    .map((summary) => GATE_METADATA[summary.gate].label);
+  if (skipped.length === 0) return null;
+  return `${GATE_METADATA[failed.gate].label} failed; ${skipped.join("/")} skipped`;
 }
 
 export function RunDetail() {
@@ -278,15 +301,22 @@ export function RunDetail() {
   const latestCriteriaResultsMap = useMemo(() => {
     if (activeRun?.status !== "done") return undefined;
     const turns = activeRun?.turns ?? [];
-    const lastTurn = turns.length > 0 ? turns[turns.length - 1] : undefined;
-    if (!lastTurn?.criteriaResults?.length) return new Map<string, boolean | undefined>();
+    if (turns.length === 0) return new Map<string, boolean | undefined>();
 
-    return new Map<string, boolean | undefined>(
-      lastTurn.criteriaResults.map((r) => [
-        r.criterionId,
-        r.evaluated ? r.passed : undefined,
-      ])
-    );
+    const resultTurns = turns.some((turn) => turn.gate)
+      ? GATE_ORDER.map((gate) => {
+          const gateTurns = turns.filter((turn) => (turn.gate ?? "select") === gate);
+          return gateTurns[gateTurns.length - 1];
+        }).filter(Boolean)
+      : [turns[turns.length - 1]];
+
+    const results = new Map<string, boolean | undefined>();
+    for (const turn of resultTurns) {
+      for (const result of turn?.criteriaResults ?? []) {
+        results.set(result.criterionId, result.evaluated ? result.passed : undefined);
+      }
+    }
+    return results;
   }, [activeRun?.status, activeRun?.turns]);
 
   // Prefer scenario criteria as the canonical list.
@@ -358,6 +388,18 @@ export function RunDetail() {
      ? skillIdsFromRevisions
      : (run.skills ?? []);
 
+  const gateSummaries = (run.gateSummaries ?? []) as GateRunSummary[];
+  const gateSummaryById = new Map(gateSummaries.map((summary) => [summary.gate, summary]));
+  const hasGateData = gateSummaries.length > 0 || (activeRun?.turns ?? []).some((turn) => turn.gate);
+  const turnGroups = GATE_ORDER
+   .map((gate) => ({
+     gate,
+     turns: (activeRun?.turns ?? []).filter((turn) => (turn.gate ?? "select") === gate),
+     summary: gateSummaryById.get(gate),
+   }))
+   .filter((group) => group.turns.length > 0 || group.summary);
+  const downstreamSkippedText = skippedSummaryText(gateSummaries);
+ 
   return (
     <TooltipProvider delayDuration={200}>
     <div className="space-y-6">
@@ -397,6 +439,27 @@ export function RunDetail() {
                 <EnrichmentBadge status={activeRun.postProcessorStatus} version={activeRun.postProcessorVersion} />
               )}
             </div>
+
+            {hasGateData && (
+              <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {GATE_ORDER.map((gate) => {
+                    const summary = gateSummaryById.get(gate);
+                    const configured = summary || run.gates?.some((config) => config.gate === gate);
+                    if (!configured) return null;
+                    return (
+                      <div key={gate} className="flex items-center gap-1.5">
+                        <span className="text-xs font-medium">{GATE_METADATA[gate].label}</span>
+                        <GateStatusBadge summary={summary} />
+                      </div>
+                    );
+                  })}
+                </div>
+                {downstreamSkippedText && (
+                  <p className="text-xs text-muted-foreground">{downstreamSkippedText}</p>
+                )}
+              </div>
+            )}
 
             {/* Tier 2 — labeled configuration + metrics */}
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
@@ -662,7 +725,24 @@ export function RunDetail() {
 
         {/* Turns tab */}
         <TabsContent value="turns" className="mt-4">
-          <TurnTimeline turns={activeRun?.turns ?? []} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
+          {hasGateData && turnGroups.length > 0 ? (
+            <div className="space-y-5">
+              {turnGroups.map(({ gate, turns, summary }) => (
+                <section key={gate} className="space-y-3">
+                  <div className="flex items-center justify-between rounded-md border bg-muted/30 px-4 py-2">
+                    <div>
+                      <h3 className="font-medium">{GATE_METADATA[gate].label}</h3>
+                      <p className="text-xs text-muted-foreground">{GATE_METADATA[gate].description}</p>
+                    </div>
+                    <GateStatusBadge summary={summary} />
+                  </div>
+                  <TurnTimeline turns={turns} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
+                </section>
+              ))}
+            </div>
+          ) : (
+            <TurnTimeline turns={activeRun?.turns ?? []} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
+          )}
         </TabsContent>
 
         {/* Conversation tab — chat-style view of agent/judge exchanges */}
@@ -877,7 +957,35 @@ export function RunDetail() {
                     <Badge variant="outline">{run.scenario!.version}</Badge>
                   </div>
                 )}
-                {displayedCriteria.length > 0 && (
+                {run.gates && run.gates.length > 0 ? (
+                  <div>
+                    <h4 className="text-sm font-medium mb-1">Gate criteria</h4>
+                    <div className="space-y-2">
+                      {run.gates.map((gateConfig) => (
+                        <div key={gateConfig.gate} className="rounded-md border p-2">
+                          <div className="mb-1 flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium">{GATE_METADATA[gateConfig.gate].label}</span>
+                            <GateStatusBadge summary={gateSummaryById.get(gateConfig.gate)} />
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {gateConfig.criteria.length > 0 ? gateConfig.criteria.map((c) => (
+                              <CriteriaBadge
+                                key={`${gateConfig.gate}-${c}`}
+                                criterionId={c}
+                                result={latestCriteriaResultsMap?.get(c)}
+                                evaluated={activeRun?.status === "done"}
+                                showStateLabel={activeRun?.status === "done"}
+                                link={false}
+                              />
+                            )) : (
+                              <span className="text-xs text-muted-foreground">Pass-through (no criteria)</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : displayedCriteria.length > 0 && (
                   <div>
                     <h4 className="text-sm font-medium mb-1">Criteria ({displayedCriteria.length})</h4>
                     <div className="flex flex-wrap gap-1.5">
