@@ -5,10 +5,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { List, Plus } from "lucide-react";
+import { List, Plus, X } from "lucide-react";
 import type { CriteriaGraphData } from "@/types";
+import { GATE_ORDER, GATE_METADATA, isCriterionCompatibleWithGate, type GateId } from "@/lib/gates";
 import { useRef, useState, useMemo } from "react";
 
 // Simple DAG layout using topological sort + layering
@@ -94,9 +96,33 @@ export function CriteriaGraphView() {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [selectedGates, setSelectedGates] = useState<GateId[]>([]);
+
+  const toggleGate = (gate: GateId) =>
+    setSelectedGates((prev) => (prev.includes(gate) ? prev.filter((g) => g !== gate) : [...prev, gate]));
+
+  // Gate option counts come from the unfiltered graph so they stay stable.
+  const gateCounts = useMemo(() => {
+    const counts = new Map<GateId, number>();
+    for (const gate of GATE_ORDER) {
+      counts.set(gate, (graph?.nodes ?? []).filter((n) => isCriterionCompatibleWithGate(n.gates, gate)).length);
+    }
+    return counts;
+  }, [graph]);
+
+  // Filter to nodes compatible with any selected gate (OR); drop edges whose
+  // endpoints were filtered out so the DAG layout stays consistent.
+  const filteredGraph = useMemo<CriteriaGraphData | null>(() => {
+    if (!graph) return null;
+    if (selectedGates.length === 0) return graph;
+    const nodes = graph.nodes.filter((n) => selectedGates.some((g) => isCriterionCompatibleWithGate(n.gates, g)));
+    const kept = new Set(nodes.map((n) => n.id));
+    const edges = graph.edges.filter((e) => kept.has(e.source) && kept.has(e.target));
+    return { nodes, edges };
+  }, [graph, selectedGates]);
 
   // Compute layout
-  const layout = useMemo(() => (graph ? layoutGraph(graph) : null), [graph]);
+  const layout = useMemo(() => (filteredGraph ? layoutGraph(filteredGraph) : null), [filteredGraph]);
 
   if (isLoading) {
     return (
@@ -107,9 +133,72 @@ export function CriteriaGraphView() {
     );
   }
 
-  if (!graph || !layout) {
+  if (!graph) {
     return (
       <div className="text-center py-12 text-muted-foreground">No criteria data</div>
+    );
+  }
+
+  const gateFilterBar = (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-sm text-muted-foreground">Gate:</span>
+      {GATE_ORDER.map((gate) => {
+        const active = selectedGates.includes(gate);
+        const count = gateCounts.get(gate) ?? 0;
+        return (
+          <button key={gate} type="button" onClick={() => toggleGate(gate)} className="focus:outline-none">
+            <Badge variant={active ? "default" : "outline"} className="cursor-pointer gap-1">
+              {GATE_METADATA[gate].label}
+              <span className="opacity-60">{count}</span>
+            </Badge>
+          </button>
+        );
+      })}
+      {selectedGates.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setSelectedGates([])}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <X className="h-3 w-3" /> Clear
+        </button>
+      )}
+    </div>
+  );
+
+  const header = (
+    <div className="flex items-center justify-between">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Criteria Graph</h1>
+        <p className="text-muted-foreground">
+          Dependency DAG — {filteredGraph!.nodes.length}
+          {selectedGates.length > 0 ? ` of ${graph.nodes.length}` : ""} criteria, {filteredGraph!.edges.length} edges
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Link to="/criteria">
+          <Button variant="outline" className="gap-1.5">
+            <List className="h-4 w-4" /> List View
+          </Button>
+        </Link>
+        <Link to="/criteria/new">
+          <Button className="gap-1.5">
+            <Plus className="h-4 w-4" /> New Criterion
+          </Button>
+        </Link>
+      </div>
+    </div>
+  );
+
+  if (!layout || filteredGraph!.nodes.length === 0) {
+    return (
+      <div className="space-y-6">
+        {header}
+        {gateFilterBar}
+        <div className="text-center py-12 text-muted-foreground">
+          No criteria are compatible with the selected gate{selectedGates.length > 1 ? "s" : ""}.
+        </div>
+      </div>
     );
   }
 
@@ -133,26 +222,8 @@ export function CriteriaGraphView() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Criteria Graph</h1>
-          <p className="text-muted-foreground">
-            Dependency DAG — {graph.nodes.length} criteria, {graph.edges.length} edges
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link to="/criteria">
-            <Button variant="outline" className="gap-1.5">
-              <List className="h-4 w-4" /> List View
-            </Button>
-          </Link>
-          <Link to="/criteria/new">
-            <Button className="gap-1.5">
-              <Plus className="h-4 w-4" /> New Criterion
-            </Button>
-          </Link>
-        </div>
-      </div>
+      {header}
+      {gateFilterBar}
 
       <Card>
         <CardContent className="p-2">

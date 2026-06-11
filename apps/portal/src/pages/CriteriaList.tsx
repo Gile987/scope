@@ -15,10 +15,12 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2, Eye, GitBranch } from "lucide-react";
 import { truncate } from "@/lib/utils";
-import { formatGateList } from "@/lib/gates";
+import { formatGateList, GATE_ORDER, GATE_METADATA, isCriterionCompatibleWithGate, type GateId } from "@/lib/gates";
 import {
   ListLayout,
   FilterRail,
+  FilterSection,
+  CheckboxFilterGroup,
   ClearFiltersLink,
   CustomizeColumnsLink,
   CustomizeColumnsPanel,
@@ -31,7 +33,7 @@ import {
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
 
-const FILTER_KEYS = [] as const;
+const FILTER_KEYS = ["gate"] as const;
 
 const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "id", label: "ID", required: true },
@@ -80,8 +82,15 @@ export function CriteriaList() {
   });
 
   const sortedCriteria = useMemo(() => {
-    if (!state.sort) return criteria;
-    const sorted = [...criteria];
+    const selectedGates = state.getFilterList("gate") as GateId[];
+    // A criterion matches if it is compatible with any selected gate (OR).
+    // Criteria with no explicit gates are compatible with every gate.
+    const filtered =
+      selectedGates.length === 0
+        ? criteria
+        : criteria.filter((c) => selectedGates.some((g) => isCriterionCompatibleWithGate(c.gates, g)));
+    if (!state.sort) return filtered;
+    const sorted = [...filtered];
     sorted.sort((a, b) => {
       const av = sortKey(a, state.sort!);
       const bv = sortKey(b, state.sort!);
@@ -91,7 +100,17 @@ export function CriteriaList() {
     });
     if (state.sortDir === "desc") sorted.reverse();
     return sorted;
-  }, [criteria, state.sort, state.sortDir]);
+  }, [criteria, state.sort, state.sortDir, state]);
+
+  const gateFilterOptions = useMemo(
+    () =>
+      GATE_ORDER.map((gate) => ({
+        value: gate,
+        label: GATE_METADATA[gate].label,
+        count: criteria.filter((c) => isCriterionCompatibleWithGate(c.gates, gate)).length,
+      })),
+    [criteria],
+  );
 
   const total = sortedCriteria.length;
   const pageStart = (state.page - 1) * state.pageSize;
@@ -243,7 +262,13 @@ export function CriteriaList() {
             </>
           }
         >
-          {null}
+          <FilterSection title="Gate" storageKey="criteria-gate">
+            <CheckboxFilterGroup
+              options={gateFilterOptions}
+              selected={state.getFilterList("gate")}
+              onToggle={(value) => state.toggleFilterValue("gate", value)}
+            />
+          </FilterSection>
         </FilterRail>
       }
       secondaryPanel={
@@ -300,7 +325,7 @@ export function CriteriaList() {
           loading={isLoading}
           loadingRows={state.pageSize}
           emptyState={
-            state.search ? "No criteria match your search" : "No criteria defined yet"
+            state.hasActiveFilters ? "No criteria match your filters" : "No criteria defined yet"
           }
         />
         <Pagination
