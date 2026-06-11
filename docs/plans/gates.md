@@ -269,3 +269,33 @@ Phases 2, 3, and 4 (Select-only parts) can proceed in parallel once Phase 1 land
 Build/Test/Deploy behaviour in Phases 4–5 is gated on Phase 0. This maps to the
 [parallelization waves](#parallelization-map-waves): A (Phase 0+1, serial) →
 B (2/3/4, parallel) → C (5, serial) → D (6, parallel) → E (7, serial).
+
+## Validation results — golden path verified end-to-end
+
+Validated locally against the full Copilot stack (\`GITHUB\_TOKEN=$(gh auth token)
+pnpm docker:dev:copilot`) with model` claude-sonnet-4.6\`. All three Definition of
+Done bars are green:
+
+- **Bar 1 — No regression.** A request submitted with \*\*no `gates`\*\* ran as a
+  single normalised Select gate (`gateSummaries: [{ select, passed, 1 }]`),
+  identical to legacy behaviour.
+- **Bar 2 — Golden path.** A `Select → Build → Test` run had every gate pass:
+  `gateSummaries: [{select,passed,1},{build,passed,1},{test,passed,1}]`, turns
+  grouped per gate with globally-unique iteration offsets, and the judge loaded
+  the per-gate captured tool outputs (`Loaded N tool call(s) for gate '<gate>'`)
+  so Build/Test were evaluated against command output, not just files. Run detail
+  shows per-gate status in both CLI (`run get`) and Portal.
+- **Bar 3 — Edge rules.**
+    - *Stop-on-failure:* a Build gate that could not pass exhausted its budget
+    (`build: failed, 2 iters`) and downstream \*\*Test was recorded `skipped` (0
+    iters)\*\*.
+    - *Compatibility invariant:* rejected at criteria create (a `build` child may
+    not depend on a `select`-only parent) **and** at request submit (a `build`
+    gate may not select a `select`-only criterion).
+    - *Prompt typing:* a gate referencing a prompt of the wrong `type` is rejected
+    with a clear error.
+    - *Pass-through rule:* a non-Select gate with `maxIterations > 1` and no
+    criteria is a validation error; with `maxIterations === 1` it is accepted.
+
+See the [design doc](../design/gates.md) for the behaviour specifications these
+results verify.
