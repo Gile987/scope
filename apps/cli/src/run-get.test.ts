@@ -169,9 +169,9 @@ describe('run get', () => {
       expect(output).toContain('has_validation');
       expect(output).toContain('has_tests');
 
-      // Turns summary
-      expect(output).toContain('Turn 1');
-      expect(output).toContain('Turn 2');
+      // Turns summary (grouped per gate, iterations scoped within each gate)
+      expect(output).toContain('Iteration 1');
+      expect(output).toContain('Iteration 2');
       expect(output).toContain('3/3 criteria passed');
 
       // Prompt feature extraction
