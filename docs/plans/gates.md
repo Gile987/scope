@@ -61,6 +61,61 @@ A single end-to-end **Select → Build → Test** run demonstrates the feature:
 | Golden-path Select→Build→Test run | Integration / scripted demo (Phases 5–6) |
 | Per-gate status in run detail; CLI⇄Portal parity | Component/Storybook + manual demo (Phase 6) |
 
+## Local validation loop (Ralph loop)
+
+Implementation does not stop at "code compiles" or "unit tests pass" — it **iterates against a real local stack until the end-to-end design works as expected**, i.e. until the [Definition of done](#definition-of-done--how-we-know-it-works) bars are green. This is a tight, repeatable loop (a "Ralph loop"): bring up the stack, run the golden path, observe, fix, repeat.
+
+### Local stack
+
+Per the [root README](../../README.md#run-locally), validate against the full
+Copilot stack with hot reload:
+
+```bash
+pnpm install
+GITHUB_TOKEN=$(gh auth token) pnpm docker:dev:copilot
+```
+
+This runs core services (MongoDB, Redis, Azurite, API, Judge, Token Manager) plus
+the Copilot worker, report generator, and **portal**, all with hot reload — most
+code fixes are picked up without a restart. The portal is at
+`http://localhost:5100` (in a worktree the port is offset — check `PORTAL_PORT`
+in `.env` or run `pnpm open:portal`). `GITHUB_TOKEN=$(gh auth token)` exports the
+GitHub token the worker needs.
+
+### The loop
+
+```mermaid
+flowchart TD
+    Up["Bring up stack<br/>GITHUB_TOKEN=$(gh auth token) pnpm docker:dev:copilot"] --> Mig[pnpm migrate:up + seed golden-path criteria/prompts]
+    Mig --> Submit[Submit golden-path Select→Build→Test run<br/>CLI and Portal]
+    Submit --> Obs[Observe: stream logs + run detail per-gate status]
+    Obs --> Check{All DoD bars green?}
+    Check -->|no| Diag[Diagnose: judge output, tool-calls blob, worker logs]
+    Diag --> Fix[Fix code → hot reload]
+    Fix --> Submit
+    Check -->|yes| Codify[Codify the passing run as an integration test / scripted demo]
+    Codify --> Done([End-to-end validated])
+```
+
+1. **Bring up** the stack with the command above.
+2. **Migrate + seed** (`pnpm migrate:up`); seed the Build/Test criteria (`builds_clean`, `tests_pass`) and gate prompts the golden path needs.
+3. **Submit** the golden-path Select→Build→Test run from **both** CLI and Portal (Bar 2).
+4. **Observe** via streamed logs and the run-detail per-gate status.
+5. **Check** against the [Definition of done](#definition-of-done--how-we-know-it-works) bars (no regression, golden path, edge rules).
+6. **Diagnose & fix** on failure — inspect the judge's evaluation, the per-iteration tool-calls blob (`toolCallsUrl`), and worker logs; fix; hot reload re-runs it. Repeat from step 3.
+7. **Codify** once green: capture the passing run as an automated **integration test** (or scripted demo) so the end-to-end behaviour can't silently regress.
+
+### Loop exit criteria
+
+- The golden-path run passes end-to-end on the local stack from both surfaces.
+- The edge-rule scenarios (stop-on-failure, invariant rejection, pass-through) reproduce locally.
+- Bar 1 (no regression) holds: a legacy `gates`-less request still runs identically.
+- The passing golden path is committed as a repeatable automated test.
+
+> The loop is run continuously **from Phase 4 onward** (once the judge and pipeline
+> can execute gates), tightening each phase. It is the primary acceptance gate for
+> Phases 5–6 — not a one-time check at the end.
+
 ## Phase 0 — Resolve gating decisions (blocks Build/Test/Deploy)
 
 Two design open questions (design §6) must be answered before the dependent
@@ -132,7 +187,7 @@ Implements design §4.4. Depends on Phases 1, 3, 4.
 - Pass `gate` + `toolCallsUrl` to the judge per iteration.
 - Persist per-gate run summary (`run.gates` and/or derived from `run.turns`) (design §4.7).
 
-**Tests:** multi-gate run (Select → Build → Test), pass-through gate (maxIterations 1, no criteria), stop-on-failure skips downstream, unconfigured gate skipped. **Exit:** a Select+Build+Test run executes, evaluates, and reports per-gate status.
+**Tests:** multi-gate run (Select → Build → Test), pass-through gate (maxIterations 1, no criteria), stop-on-failure skips downstream, unconfigured gate skipped. **Validation:** run the [local validation loop](#local-validation-loop-ralph-loop) — submit the golden path and iterate until it passes on the live stack. **Exit:** a Select+Build+Test run executes, evaluates, and reports per-gate status end-to-end locally.
 
 ## Phase 6 — Surfaces (Portal + CLI parity)
 
@@ -145,7 +200,7 @@ Implements design §4.8. Depends on Phases 2, 3, 5.
 - **Profiles**: persist gate config (prompts + criteria + budgets) for reuse/variation.
 - Update Storybook stories for new/changed portal components.
 
-**Tests:** Submit Run composition reflects the real expanded run count; criteria multiselect respects compatibility; Storybook play tests for new components. **Exit:** a Select+Build+Test run is fully submittable and reviewable from both Portal and CLI.
+**Tests:** Submit Run composition reflects the real expanded run count; criteria multiselect respects compatibility; Storybook play tests for new components. **Validation:** run the [local validation loop](#local-validation-loop-ralph-loop) end-to-end from the Portal (and CLI) until the golden path and edge rules pass. **Exit:** a Select+Build+Test run is fully submittable and reviewable from both Portal and CLI.
 
 ## Phase 7 — Docs
 
