@@ -43,9 +43,9 @@ configurable entity.
 
 - Making gates user-configurable entities (CRUD, custom gates, reordering). Gates stay hard-coded.
 - Parallel gate execution. Gates run strictly sequentially.
-- Defining the full Test / Run / Deploy semantics beyond what Build needs. The
-  data model accommodates all five gates, but only Select + Build are exercised
-  end-to-end in the first milestone.
+- Defining the full Run / Deploy semantics beyond what Build/Test need. The
+  data model accommodates all five gates, but only Select + Build + Test are
+  exercised end-to-end in the first milestone.
 - Changing the criteria DAG semantics *within* a gate (ancestor resolution,
   bundled/independent strategies stay as-is, scoped to the gate's criteria).
 

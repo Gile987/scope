@@ -14,8 +14,8 @@ design doc first, then this plan.
 ## Scope for the first milestone
 
 The data model accommodates all five gates (`select → build → test → run → deploy`),
-but only **Select + Build** are exercised end-to-end in the first milestone
-(design §2 Non-Goals). Test / Run / Deploy ride along in the schema and surfaces
+but only **Select + Build + Test** are exercised end-to-end in the first milestone
+(design §2 Non-Goals). Run / Deploy ride along in the schema and surfaces
 but are not validated end-to-end yet.
 
 ## Definition of done — how we know it works
@@ -34,12 +34,12 @@ scenario should exist as an integration test or a scripted, repeatable demo run.
 
 ### Bar 2 — The new capability works (golden path)
 
-A single end-to-end **Select → Build** run demonstrates the feature:
+A single end-to-end **Select → Build → Test** run demonstrates the feature:
 
-1. Author a Build-compatible criterion (e.g. `builds_clean`, `gates: ["build"]`).
-2. Submit a run (from CLI **and** Portal) configuring two gates: Select (task prompt + its criteria) and Build (a `type: "build"` prompt + `builds_clean`, `maxIterations > 1`).
-3. **Observe:** the agent implements the task; the Select gate's criteria pass; the pipeline advances to Build; the agent runs the build command; the judge calls `read_tool_outputs` and evaluates `builds_clean` against the captured build output (not just files); the Build gate passes (design §4.4, §4.6).
-4. **Run detail** (Portal + CLI) shows per-gate status — `Select: passed`, `Build: passed` — with turns grouped by gate (design §4.8, §4.7).
+1. Author a Build-compatible criterion (e.g. `builds_clean`, `gates: ["build"]`) and a Test-compatible criterion (e.g. `tests_pass`, `gates: ["test"]`).
+2. Submit a run (from CLI **and** Portal) configuring three gates: Select (task prompt + its criteria), Build (a `type: "build"` prompt + `builds_clean`, `maxIterations > 1`), and Test (a `type: "test"` prompt + `tests_pass`, `maxIterations > 1`).
+3. **Observe:** the agent implements the task; the Select gate's criteria pass; the pipeline advances to Build; the agent runs the build command; the judge calls `read_tool_outputs` and evaluates `builds_clean` against the captured build output (not just files); Build passes; the pipeline advances to Test; the agent runs the tests; the judge evaluates `tests_pass` against the captured test output; Test passes (design §4.4, §4.6).
+4. **Run detail** (Portal + CLI) shows per-gate status — `Select: passed`, `Build: passed`, `Test: passed` — with turns grouped by gate (design §4.8, §4.7).
 
 ### Bar 3 — Edge rules hold
 
@@ -58,7 +58,7 @@ A single end-to-end **Select → Build** run demonstrates the feature:
 | Compatibility invariant enforcement | Unit (Phase 2) |
 | `read_tool_outputs` judge tool | Unit w/ fixture blob (Phase 4) |
 | Sequential gates, per-gate budget, stop-on-failure, pass-through | Integration (Phase 5) |
-| Golden-path Select→Build run | Integration / scripted demo (Phases 5–6) |
+| Golden-path Select→Build→Test run | Integration / scripted demo (Phases 5–6) |
 | Per-gate status in run detail; CLI⇄Portal parity | Component/Storybook + manual demo (Phase 6) |
 
 ## Phase 0 — Resolve gating decisions (blocks Build/Test/Deploy)
@@ -132,7 +132,7 @@ Implements design §4.4. Depends on Phases 1, 3, 4.
 - Pass `gate` + `toolCallsUrl` to the judge per iteration.
 - Persist per-gate run summary (`run.gates` and/or derived from `run.turns`) (design §4.7).
 
-**Tests:** multi-gate run (Select → Build), pass-through gate (maxIterations 1, no criteria), stop-on-failure skips downstream, unconfigured gate skipped. **Exit:** a Select+Build run executes, evaluates, and reports per-gate status.
+**Tests:** multi-gate run (Select → Build → Test), pass-through gate (maxIterations 1, no criteria), stop-on-failure skips downstream, unconfigured gate skipped. **Exit:** a Select+Build+Test run executes, evaluates, and reports per-gate status.
 
 ## Phase 6 — Surfaces (Portal + CLI parity)
 
@@ -145,7 +145,7 @@ Implements design §4.8. Depends on Phases 2, 3, 5.
 - **Profiles**: persist gate config (prompts + criteria + budgets) for reuse/variation.
 - Update Storybook stories for new/changed portal components.
 
-**Tests:** Submit Run composition reflects the real expanded run count; criteria multiselect respects compatibility; Storybook play tests for new components. **Exit:** a Select+Build run is fully submittable and reviewable from both Portal and CLI.
+**Tests:** Submit Run composition reflects the real expanded run count; criteria multiselect respects compatibility; Storybook play tests for new components. **Exit:** a Select+Build+Test run is fully submittable and reviewable from both Portal and CLI.
 
 ## Phase 7 — Docs
 
