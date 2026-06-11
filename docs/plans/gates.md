@@ -18,6 +18,49 @@ but only **Select + Build** are exercised end-to-end in the first milestone
 (design §2 Non-Goals). Test / Run / Deploy ride along in the schema and surfaces
 but are not validated end-to-end yet.
 
+## Definition of done — how we know it works
+
+The milestone is **done** when all three bars below are green. Each phase has its
+own exit criteria; these are the *holistic, observable* acceptance bars for the
+whole effort. Prefer automated coverage (unit + integration); the golden-path
+scenario should exist as an integration test or a scripted, repeatable demo run.
+
+### Bar 1 — No regression (safety)
+
+- An existing request with **no `gates`** produces an identical run to today: normalised to a single Select gate from `scenario.criteria` + `maxIterations` + `taskPromptId`, same criteria evaluated, same pass/fail outcome (design §4.3, §5).
+- After migration `018`, every pre-existing criterion is Select-only and is **not** selectable for Build/Test/Run/Deploy (design §4.2.1).
+- After the prompt backfill, every existing task prompt has `type: "select"` and its `_id` is **byte-for-byte unchanged**; every request/profile/report that referenced a `taskPromptId` still resolves (design §4.5, §4.7).
+- Judge requests without `gate`/`toolCallsUrl` behave as Select; `read_tool_outputs` returns empty (design §5).
+
+### Bar 2 — The new capability works (golden path)
+
+A single end-to-end **Select → Build** run demonstrates the feature:
+
+1. Author a Build-compatible criterion (e.g. `builds_clean`, `gates: ["build"]`).
+2. Submit a run (from CLI **and** Portal) configuring two gates: Select (task prompt + its criteria) and Build (a `type: "build"` prompt + `builds_clean`, `maxIterations > 1`).
+3. **Observe:** the agent implements the task; the Select gate's criteria pass; the pipeline advances to Build; the agent runs the build command; the judge calls `read_tool_outputs` and evaluates `builds_clean` against the captured build output (not just files); the Build gate passes (design §4.4, §4.6).
+4. **Run detail** (Portal + CLI) shows per-gate status — `Select: passed`, `Build: passed` — with turns grouped by gate (design §4.8, §4.7).
+
+### Bar 3 — Edge rules hold
+
+- **Stop-on-failure:** in a run where Build cannot pass, Build exhausts its budget and the pipeline halts; downstream gates are recorded/shown as **skipped** ("Build failed; Test/Run/Deploy skipped") (design §4.4).
+- **Compatibility invariant:** making a `select`-only criterion a dependency of a `build` criterion is rejected at criteria create/update **and** at request submit, with a clear error (design §4.2).
+- **Pass-through gate:** a configured gate with `maxIterations === 1` and no criteria runs once and auto-passes with **no judge call**; a gate with `maxIterations > 1` and no criteria is a validation error (design §4.3, §4.4).
+- **Skipping:** a gate omitted from the submitted `gates` array is not run, distinct from a configured pass-through gate (design §4.4).
+- **Parity:** every flow above is exercisable from both Portal and CLI (design §4.8).
+
+### Verification matrix
+
+| Design behaviour | Verified by |
+| --- | --- |
+| Request normalisation (no `gates` ⇒ Select) | Unit (Phase 1) |
+| Migration 018 + prompt backfill (ids stable) | Unit + migration up/down (Phases 2–3) |
+| Compatibility invariant enforcement | Unit (Phase 2) |
+| `read_tool_outputs` judge tool | Unit w/ fixture blob (Phase 4) |
+| Sequential gates, per-gate budget, stop-on-failure, pass-through | Integration (Phase 5) |
+| Golden-path Select→Build run | Integration / scripted demo (Phases 5–6) |
+| Per-gate status in run detail; CLI⇄Portal parity | Component/Storybook + manual demo (Phase 6) |
+
 ## Phase 0 — Resolve gating decisions (blocks Build/Test/Deploy)
 
 Two design open questions (design §6) must be answered before the dependent
