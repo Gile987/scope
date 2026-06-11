@@ -1134,7 +1134,9 @@ apiRoute(ctx.app, ctx.registry, {
     const data = resources.map((r) => ({ ...r, id: r._id }));
 
     // Enrich `processing` runs with the latest liveness heartbeat from
-    // Redis (single MGET; heartbeats live there, not Mongo).
+    // Redis. The store's mget is cluster-safe (a pipeline of single-key GETs,
+    // not a cross-slot MGET) so this works on clustered Redis too — see
+    // clusterSafeMget / issue #1064. Heartbeats live in Redis, not Mongo.
     const processingRunIds = data
       .filter((r) => r.run?.status === "processing" && r.run._id)
       .map((r) => r.run!._id!);

@@ -78,6 +78,49 @@ describe("StuckRunReaper", () => {
     expect(collection.findOneAndUpdate).toHaveBeenCalledTimes(1);
   });
 
+  it("aborts the reap when a single-key confirmation read finds a fresh beat (cross-slot mget under-reported)", async () => {
+    // Reproduces issue #1064: on a clustered Redis the multi-key mget fails
+    // cross-slot and is swallowed into an empty map, so a healthy run looks
+    // heartbeat-less across both sweeps — but a single-key get (what the run
+    // detail view uses) still returns the fresh beat. The reaper must not fail
+    // the run.
+    const docs = [
+      { _id: "req-1", run: { _id: "run-1", startedAt: OLD(), worker: { instanceId: "w-1" } } },
+    ];
+    const collection = mockCollection(docs);
+    const store = {
+      ping: vi.fn().mockResolvedValue(true),
+      mget: vi.fn().mockResolvedValue(new Map()), // cross-slot failure → empty
+      get: vi.fn().mockResolvedValue(new Date()), // single-key read works → fresh
+      delete: vi.fn(),
+    } as any;
+    const reaper = makeReaper(collection, store);
+
+    await reaper.sweep(); // strike 1 (looks missing via mget)
+    await reaper.sweep(); // strike 2 → reapOne, but confirmation get() aborts
+    expect(store.get).toHaveBeenCalledWith("run-1");
+    expect(collection.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(store.delete).not.toHaveBeenCalled();
+  });
+
+  it("still reaps when the confirmation read also reports a stale/missing beat", async () => {
+    const docs = [
+      { _id: "req-1", run: { _id: "run-1", startedAt: OLD(), worker: { instanceId: "w-1" } } },
+    ];
+    const collection = mockCollection(docs);
+    const store = {
+      ping: vi.fn().mockResolvedValue(true),
+      mget: vi.fn().mockResolvedValue(new Map()),
+      get: vi.fn().mockResolvedValue(null), // genuinely dead — no beat
+      delete: vi.fn(),
+    } as any;
+    const reaper = makeReaper(collection, store);
+
+    await reaper.sweep();
+    await reaper.sweep();
+    expect(collection.findOneAndUpdate).toHaveBeenCalledTimes(1);
+  });
+
   it("does NOT reap a run with a fresh heartbeat", async () => {
     const docs = [
       { _id: "req-1", run: { _id: "run-1", startedAt: OLD(), worker: { instanceId: "w-1" } } },

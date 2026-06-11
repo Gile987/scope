@@ -31,23 +31,34 @@ export interface HeartbeatLogContext {
 }
 
 /**
- * Optional callback invoked on every successful heartbeat tick. Used by the
- * queue processor to also bump a per-run liveness timestamp in MongoDB so
- * the redelivery handler can tell a real worker crash apart from a spurious
- * Azure Storage Queue redelivery while the original worker is still alive.
- *
- * The callback is awaited but its errors are caught and logged — a Mongo
- * write failure must never abort the visibility extension itself.
+ * Optional callback invoked on every liveness tick. Used by the queue
+ * processor to bump a per-run liveness timestamp in Redis so the redelivery
+ * handler and the StuckRunReaper can tell a real worker crash apart from a
+ * spurious redelivery while the original worker is still alive. Runs on a
+ * dedicated interval (see {@link startVisibilityHeartbeat}); its errors are
+ * caught and logged so a Redis write failure never aborts the loops.
  */
 export type HeartbeatTickCallback = (tickInfo: { tickCount: number }) => Promise<void> | void;
 
 /**
- * Start a background loop that periodically extends a queue message's
- * visibility timeout via `QueueClient.updateMessage`. This keeps the message
- * hidden from other workers as long as this process is alive. If the worker
- * crashes, the heartbeat dies and the message reappears after at most
- * {@link HEARTBEAT_VISIBILITY_SECONDS} (default 30 s) instead of the
- * previous 35-minute single-shot extension.
+ * Start the heartbeat for an in-flight queue message. This drives two
+ * INDEPENDENT loops so that a failure in one can never starve the other:
+ *
+ *   1. Visibility loop — periodically extends the queue message's visibility
+ *      timeout via `QueueClient.updateMessage`, keeping the message hidden from
+ *      other workers as long as this process is alive. If the worker crashes,
+ *      the heartbeat dies and the message reappears after at most
+ *      {@link HEARTBEAT_VISIBILITY_SECONDS} instead of the previous 35-minute
+ *      single-shot extension.
+ *
+ *   2. Liveness loop — when `onTick` is provided, fires it on a DEDICATED
+ *      `setInterval` to record per-run liveness (a Redis timestamp the reaper /
+ *      redelivery handler read). This is deliberately decoupled from the
+ *      visibility extension: a transient `updateMessage` failure under
+ *      concurrent load (or a slow extension await) must NOT prevent the
+ *      liveness write, otherwise a healthy, busy worker would be reaped as
+ *      "stale heartbeat" (see issue #1064). Each loop tolerates the other
+ *      failing.
  *
  * @returns A handle to stop the heartbeat and retrieve the latest pop receipt.
  */
@@ -64,8 +75,11 @@ export function startVisibilityHeartbeat(
   let popReceipt = initialPopReceipt;
   let tickCount = 0;
   let failureCount = 0;
+  let livenessTickCount = 0;
+  let livenessInFlight = false;
   const abort = new AbortController();
   const startedAt = Date.now();
+  let livenessTimer: ReturnType<typeof setInterval> | undefined;
 
   // Build a stable `key=value` suffix so log lines are easy to grep / parse.
   // Always includes messageId; documentId and runId are added when known.
@@ -75,9 +89,12 @@ export function startVisibilityHeartbeat(
   const ctx = ctxParts.join(" ");
 
   console.log(
-    `[${workerName}] Visibility heartbeat started (every ${intervalMs / 1000}s, extending by ${visibilityTimeoutSeconds}s) ${ctx}`,
+    `[${workerName}] Visibility heartbeat started (every ${intervalMs / 1000}s, extending by ${visibilityTimeoutSeconds}s${onTick ? ", liveness on dedicated interval" : ""}) ${ctx}`,
   );
 
+  // Loop 1 — queue visibility extension. Owns only the pop receipt; it no
+  // longer drives the liveness write so a failed/slow updateMessage cannot
+  // starve liveness.
   const loop = async () => {
     while (!abort.signal.aborted) {
       await new Promise<void>((resolve) => {
@@ -95,18 +112,6 @@ export function startVisibilityHeartbeat(
         console.log(
           `[${workerName}] Visibility heartbeat tick #${tickCount} extended by ${visibilityTimeoutSeconds}s ${ctx}`,
         );
-        if (onTick) {
-          try {
-            await onTick({ tickCount });
-          } catch (cbError) {
-            // Never let a callback failure abort the heartbeat loop — the
-            // queue visibility extension already succeeded.
-            console.warn(
-              `[${workerName}] Visibility heartbeat onTick callback failed ${ctx}:`,
-              cbError,
-            );
-          }
-        }
       } catch (error) {
         if (abort.signal.aborted) break;
         failureCount++;
@@ -120,6 +125,34 @@ export function startVisibilityHeartbeat(
 
   loop().catch(() => {}); // fire-and-forget
 
+  // Loop 2 — per-run liveness. Independent timer so it keeps writing even when
+  // the visibility extension is failing or its await is slow. A re-entrancy
+  // guard prevents overlapping ticks if a single onTick runs long.
+  if (onTick) {
+    const runLiveness = async () => {
+      if (abort.signal.aborted || livenessInFlight) return;
+      livenessInFlight = true;
+      const seq = livenessTickCount + 1;
+      try {
+        await onTick({ tickCount: seq });
+        livenessTickCount = seq;
+        console.log(
+          `[${workerName}] Liveness heartbeat tick #${livenessTickCount} ${ctx}`,
+        );
+      } catch (cbError) {
+        // Never let a callback failure abort the heartbeat — surface it so a
+        // persistently-failing liveness write is visible in pod stdout.
+        console.warn(
+          `[${workerName}] Liveness heartbeat tick failed ${ctx}:`,
+          cbError,
+        );
+      } finally {
+        livenessInFlight = false;
+      }
+    };
+    livenessTimer = setInterval(() => { void runLiveness(); }, intervalMs);
+  }
+
   return {
     stop: () => {
       if (abort.signal.aborted) {
@@ -130,9 +163,13 @@ export function startVisibilityHeartbeat(
         return popReceipt;
       }
       abort.abort();
+      if (livenessTimer) {
+        clearInterval(livenessTimer);
+        livenessTimer = undefined;
+      }
       const elapsedMs = Date.now() - startedAt;
       console.log(
-        `[${workerName}] Visibility heartbeat stopped after ${tickCount} tick(s), ${failureCount} consecutive failure(s), elapsed=${(elapsedMs / 1000).toFixed(1)}s ${ctx}`,
+        `[${workerName}] Visibility heartbeat stopped after ${tickCount} tick(s), ${failureCount} consecutive failure(s), ${livenessTickCount} liveness tick(s), elapsed=${(elapsedMs / 1000).toFixed(1)}s ${ctx}`,
       );
       return popReceipt;
     },
