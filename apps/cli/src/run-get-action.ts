@@ -161,13 +161,15 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
     for (const gate of gatesToDisplay) {
       const summary = gateSummaries.find((item) => item.gate === gate);
       console.log(`  ${label(`${gateLabel(gate)} gate:`)} ${formatGateStatus(summary)}`);
-      for (const turn of turnsByGate.get(gate) ?? []) {
+      // Iterations are numbered globally across gates; display them per-gate so
+      // each gate's turns restart at 1 (turns are appended in iteration order).
+      (turnsByGate.get(gate) ?? []).forEach((turn, idx) => {
         const passIcon = criterionIcon(true, turn.passed);
         const criteriaStr = turn.criteriaResults?.length
           ? ` — ${turn.criteriaResults.filter((cr: { passed: boolean }) => cr.passed).length}/${turn.criteriaResults.length} criteria passed`
           : '';
-        console.log(`    ${label(`Turn ${turn.iteration}:`)} ${passIcon}${criteriaStr}`);
-      }
+        console.log(`    ${label(`Iteration ${idx + 1}:`)} ${passIcon}${criteriaStr}`);
+      });
     }
   }
 

@@ -34,6 +34,8 @@ import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import {
   GATE_METADATA,
   GATE_ORDER,
+  buildGateIterationScoper,
+  type GateId,
   type GateRunSummary,
 } from "@/lib/gates";
 import { useState, useMemo, type ReactNode } from "react";
@@ -1324,9 +1326,10 @@ export function RunDetail() {
 // Helper: per-iteration HAR viewer tabs for multi-turn runs
 // ---------------------------------------------------------------------------
 
-function HarIterationTabs({ runId, turns, attemptRunId }: { runId: string; turns: { iteration: number; harUrl?: string }[]; attemptRunId?: string }) {
+function HarIterationTabs({ runId, turns, attemptRunId }: { runId: string; turns: { iteration: number; gate?: GateId; harUrl?: string }[]; attemptRunId?: string }) {
   const turnsWithHar = turns.filter(t => t.harUrl);
   const [activeIteration, setActiveIteration] = useState(turnsWithHar[0]?.iteration);
+  const scopeIteration = useMemo(() => buildGateIterationScoper(turns), [turns]);
 
   if (turnsWithHar.length === 0) return null;
 
@@ -1346,7 +1349,7 @@ function HarIterationTabs({ runId, turns, attemptRunId }: { runId: string; turns
             className="font-mono text-xs"
             onClick={() => setActiveIteration(t.iteration)}
           >
-            Iteration {t.iteration}
+            {t.gate ? `${GATE_METADATA[t.gate].label} · ` : ""}Iteration {scopeIteration(t.gate, t.iteration)}
           </Button>
         ))}
       </div>
@@ -1361,10 +1364,11 @@ function HarIterationTabs({ runId, turns, attemptRunId }: { runId: string; turns
 // Helper: per-iteration video player tabs for multi-turn runs
 // ---------------------------------------------------------------------------
 
-function VideoIterationTabs({ runId, turns, setupVideoUrls, attemptRunId }: { runId: string; turns: { iteration: number; videoUrls?: string[] }[]; setupVideoUrls?: string[]; attemptRunId?: string }) {
+function VideoIterationTabs({ runId, turns, setupVideoUrls, attemptRunId }: { runId: string; turns: { iteration: number; gate?: GateId; videoUrls?: string[] }[]; setupVideoUrls?: string[]; attemptRunId?: string }) {
   const turnsWithVideo = turns.filter(t => t.videoUrls && t.videoUrls.length > 0);
   const hasSetupVideo = setupVideoUrls && setupVideoUrls.length > 0;
   const [activeTab, setActiveTab] = useState<string>(hasSetupVideo ? "setup" : String(turnsWithVideo[0]?.iteration));
+  const scopeIteration = useMemo(() => buildGateIterationScoper(turns), [turns]);
 
   if (turnsWithVideo.length === 0 && !hasSetupVideo) return null;
 
@@ -1395,7 +1399,7 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls, attemptRunId }: { ru
               className="font-mono text-xs"
               onClick={() => setActiveTab(String(t.iteration))}
             >
-              Iteration {t.iteration}
+              {t.gate ? `${GATE_METADATA[t.gate].label} · ` : ""}Iteration {scopeIteration(t.gate, t.iteration)}
             </Button>
           ))}
         </div>
@@ -1448,6 +1452,7 @@ function ExpandableCell({ children, className = "" }: { children: React.ReactNod
 
 function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; turns?: ConversationTurn[]; harUrl?: string; attemptRunId?: string }) {
   const { allToolCalls, isLoading } = useAllTurnsToolCalls(runId, turns, harUrl, attemptRunId);
+  const scopeIteration = useMemo(() => buildGateIterationScoper(turns ?? []), [turns]);
 
   // Group by tool name for summary
   const byName = new Map<string, number>();
@@ -1579,7 +1584,7 @@ function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; t
                     onClick={() => window.open(harIterationUrl(t.iteration), "_blank")}
                   >
                     <Download className="h-3 w-3" />
-                    Iteration {t.iteration}
+                    {t.gate ? `${GATE_METADATA[t.gate].label} · ` : ""}Iteration {scopeIteration(t.gate, t.iteration)}
                   </Button>
                 ))}
               </div>

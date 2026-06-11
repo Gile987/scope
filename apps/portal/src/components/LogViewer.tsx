@@ -1,15 +1,22 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useLogStream } from "@/hooks/use-log-stream";
 import { formatLogsAsText } from "@/lib/format-logs";
+import { GATE_METADATA, buildGateIterationScoper, isGateId, type GateId } from "@/lib/gates";
 import type { LogEvent } from "@/types";
 import { Check, Circle, Copy, Wifi, WifiOff } from "lucide-react";
 import { toast } from "sonner";
+
+/** Reads a GateId from a log entry's structured data, if present. */
+function gateOf(log: LogEvent): GateId | undefined {
+  const g = log.data?.gate;
+  return isGateId(g) ? g : undefined;
+}
 
 const levelColors: Record<string, string> = {
   info: "text-blue-600 dark:text-blue-400",
@@ -47,6 +54,17 @@ export function LogViewer({
   const isConnected = externalIsConnected ?? ownStream.isConnected;
   const isDone = externalIsDone ?? ownStream.isDone;
   const error = externalError !== undefined ? externalError : ownStream.error;
+
+  // Iteration numbers are globally unique across gates; for display we restart
+  // them at 1 per gate so each gate's logs read "Iteration 1, 2, …".
+  const scopeIteration = useMemo(
+    () =>
+      buildGateIterationScoper(
+        logs.map((l) => ({ gate: gateOf(l), iteration: l.data?.iteration as number | undefined })),
+      ),
+    [logs],
+  );
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
 
@@ -134,7 +152,14 @@ export function LogViewer({
           {logs.map((log, i) => {
             const iteration = log.data?.iteration as number | undefined;
             const prevIteration = i > 0 ? (logs[i - 1].data?.iteration as number | undefined) : undefined;
-            const showIterationDivider = iteration !== undefined && iteration !== prevIteration;
+            const gate = gateOf(log);
+            const prevGate = i > 0 ? gateOf(logs[i - 1]) : undefined;
+            // New divider whenever the gate or the iteration changes, so a fresh
+            // gate always opens a new block even if its scoped number repeats.
+            const showIterationDivider =
+              iteration !== undefined && (iteration !== prevIteration || gate !== prevGate);
+            const scopedIteration = iteration !== undefined ? scopeIteration(gate, iteration) : undefined;
+            const gateLabel = gate ? GATE_METADATA[gate].label : undefined;
             const showSetupDivider = log.data?.phase === "setup";
             const isIterationHeader = !!log.data?.iterationHeader;
 
@@ -153,7 +178,7 @@ export function LogViewer({
                   <div className="flex items-center gap-2 py-1.5 my-1 select-none">
                     <div className="flex-1 border-t border-slate-700" />
                     <span className="text-cyan-500 text-[10px] font-semibold tracking-wider uppercase">
-                      Iteration {iteration}
+                      {gateLabel ? `${gateLabel} · ` : ""}Iteration {scopedIteration}
                     </span>
                     <div className="flex-1 border-t border-slate-700" />
                   </div>
@@ -171,17 +196,20 @@ export function LogViewer({
                   >
                     {log.level}
                   </span>
-                  {iteration !== undefined && (
-                    <span className="text-cyan-400 shrink-0 select-none">iter {iteration}</span>
+                  {gateLabel && (
+                    <span className="text-amber-400 shrink-0 select-none uppercase">{gateLabel}</span>
+                  )}
+                  {scopedIteration !== undefined && (
+                    <span className="text-cyan-400 shrink-0 select-none">iter {scopedIteration}</span>
                   )}
                   {log.source && (
                     <span className="text-purple-400 shrink-0">[{log.source}]</span>
                   )}
                   <span className="text-slate-200 break-all">{log.message}</span>
-                  {log.data && Object.keys(log.data).filter(k => k !== "iteration" && k !== "final" && k !== "phase" && k !== "iterationHeader").length > 0 && (
+                  {log.data && Object.keys(log.data).filter(k => k !== "iteration" && k !== "gate" && k !== "final" && k !== "phase" && k !== "iterationHeader").length > 0 && (
                     <span className="text-slate-500 shrink-0 truncate max-w-[40%]" title={JSON.stringify(log.data, null, 2)}>
                       {Object.entries(log.data)
-                        .filter(([k]) => k !== "iteration" && k !== "final" && k !== "phase" && k !== "iterationHeader")
+                        .filter(([k]) => k !== "iteration" && k !== "gate" && k !== "final" && k !== "phase" && k !== "iterationHeader")
                         .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`)
                         .join(" ")}
                     </span>
