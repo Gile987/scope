@@ -16,6 +16,7 @@ import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { runGetAction } from "../run-get-action.js";
 import { normalizeUrl, printFollowUpCommands, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { parseGatesOption } from "../utils/gates.js";
 
 export function registerRunCommands(program: Command): void {
 const run = program
@@ -46,10 +47,11 @@ run
   .option("--profile <id>", "Saved profile to apply (supplies worker, model, extensions, etc.)")
   .addOption(new Option("--base-profile <id>", "Deprecated alias for --profile.").hideHelp())
   .option("--profile-variations-file <path>", "Path to JSON file containing profile variation entries")
+  .option("--gates <jsonOrFile>", "GateConfig[] JSON or path/@path to a JSON file for gated runs")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options, command) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption } = options;
     // `--profile` is the documented flag; `--base-profile` is kept as a hidden
     // back-compat alias. Both resolve to the same request `profileId`.
     const profileId = profile ?? baseProfile;
@@ -118,6 +120,9 @@ run
       if (profileId) {
         body.profileId = profileId;
       }
+      if (gatesOption) {
+        body.gates = parseGatesOption(gatesOption, maxIterations);
+      }
 
       if (profileVariationsFile) {
         if (!profileId) {
@@ -166,6 +171,7 @@ run
       if (result.model) console.log(`${label('Model:')} ${value(result.model)}`);
       if (result.reasoningEffort) console.log(`${label('Reasoning Effort:')} ${value(result.reasoningEffort)}`);
       console.log(`${label('Mode:')} ${value(result.mode || 'one-shot')}`);
+      if (Array.isArray(body.gates)) console.log(`${label('Gates:')} ${value(String(body.gates.length))}`);
       console.log(`${label('Status:')} ${value(result.status)}`);
 
       // Display warnings (e.g. model effort compatibility)
