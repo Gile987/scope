@@ -61,9 +61,9 @@ A single end-to-end **Select → Build → Test** run demonstrates the feature:
 | Golden-path Select→Build→Test run | Integration / scripted demo (Phases 5–6) |
 | Per-gate status in run detail; CLI⇄Portal parity | Component/Storybook + manual demo (Phase 6) |
 
-## Local validation loop (Ralph loop)
+## Local validation loop (orchestrated Ralph loop)
 
-Implementation does not stop at "code compiles" or "unit tests pass" — it **iterates against a real local stack until the end-to-end design works as expected**, i.e. until the [Definition of done](#definition-of-done--how-we-know-it-works) bars are green. This is a tight, repeatable loop (a "Ralph loop"): bring up the stack, run the golden path, observe, fix, repeat.
+Implementation does not stop at "code compiles" or "unit tests pass" — it **iterates against a real local stack until the end-to-end design works as expected**, i.e. until the [Definition of done](#definition-of-done--how-we-know-it-works) bars are green. This is a tight, repeatable loop (a "Ralph loop"), run as an **outer orchestrator loop that delegates the inner work to sub-agents**: the orchestrator owns convergence and the shared stack; sub-agents do the parallelizable implementation, diagnosis, and fixes.
 
 ### Local stack
 
@@ -82,28 +82,69 @@ code fixes are picked up without a restart. The portal is at
 in `.env` or run `pnpm open:portal`). `GITHUB_TOKEN=$(gh auth token)` exports the
 GitHub token the worker needs.
 
+There is **one shared stack, owned by the orchestrator.** The golden-path
+integration run is stateful (single MongoDB / queue / worker set), so concurrent
+runs would interfere. Only the orchestrator submits and observes golden-path runs;
+sub-agents never run concurrent golden-path runs against it (see guardrails).
+
+### Orchestration model — outer loop delegates to sub-agents
+
+- **Outer loop = orchestrator agent** (single, long-lived coordinator). Owns: the shared local stack; decomposing remaining work into disjoint tasks; dispatching sub-agents; integrating their branches and resolving conflicts; submitting the golden path and observing it; checking the [Definition of done](#definition-of-done--how-we-know-it-works) bars; deciding done-or-iterate. **Integration runs are serialized through the orchestrator.**
+- **Inner loop = sub-agents** (stateless, scoped, dispatched per task). Three kinds:
+    - **Implementation sub-agents** — each owns a disjoint slice (a phase/track), implements it, and self-verifies (typecheck + its unit tests green) before handing back.
+    - **Diagnosis sub-agents** — on a failed golden-path run, fan out **read-only** across layers to find root cause; return a hypothesis + a minimal proposed patch.
+    - **Fix sub-agents** — apply one specific fix to a disjoint area and self-verify.
+
 ### The loop
 
 ```mermaid
 flowchart TD
-    Up["Bring up stack<br/>GITHUB_TOKEN=$(gh auth token) pnpm docker:dev:copilot"] --> Mig[pnpm migrate:up + seed golden-path criteria/prompts]
-    Mig --> Submit[Submit golden-path Select→Build→Test run<br/>CLI and Portal]
-    Submit --> Obs[Observe: stream logs + run detail per-gate status]
+    Up["Orchestrator: bring up shared stack<br/>GITHUB_TOKEN=$(gh auth token) pnpm docker:dev:copilot"] --> Mig[Orchestrator: pnpm migrate:up + seed golden-path criteria/prompts]
+    Mig --> Submit[Orchestrator: submit golden-path Select→Build→Test run<br/>CLI and Portal]
+    Submit --> Obs[Orchestrator: observe logs + run-detail per-gate status]
     Obs --> Check{All DoD bars green?}
-    Check -->|no| Diag[Diagnose: judge output, tool-calls blob, worker logs]
-    Diag --> Fix[Fix code → hot reload]
-    Fix --> Submit
     Check -->|yes| Codify[Codify the passing run as an integration test / scripted demo]
     Codify --> Done([End-to-end validated])
+    Check -->|no| Fan[Orchestrator fans out parallel diagnosis sub-agents]
+    subgraph Diagnose [Parallel read-only diagnosis]
+        D1[Judge layer]
+        D2[Worker capture layer]
+        D3[Pipeline layer]
+        D4[Surfaces layer]
+    end
+    Fan --> D1 & D2 & D3 & D4
+    D1 & D2 & D3 & D4 --> Merge[Orchestrator: dedup findings, assign fixes]
+    Merge --> Fix[Parallel fix sub-agents on disjoint areas → hot reload]
+    Fix --> Submit
 ```
 
-1. **Bring up** the stack with the command above.
+1. **Bring up** the shared stack (orchestrator).
 2. **Migrate + seed** (`pnpm migrate:up`); seed the Build/Test criteria (`builds_clean`, `tests_pass`) and gate prompts the golden path needs.
-3. **Submit** the golden-path Select→Build→Test run from **both** CLI and Portal (Bar 2).
+3. **Submit** the golden-path Select→Build→Test run from **both** CLI and Portal (orchestrator only — Bar 2).
 4. **Observe** via streamed logs and the run-detail per-gate status.
 5. **Check** against the [Definition of done](#definition-of-done--how-we-know-it-works) bars (no regression, golden path, edge rules).
-6. **Diagnose & fix** on failure — inspect the judge's evaluation, the per-iteration tool-calls blob (`toolCallsUrl`), and worker logs; fix; hot reload re-runs it. Repeat from step 3.
+6. **Diagnose (parallel) & fix** on failure — the orchestrator dispatches read-only diagnosis sub-agents across the judge, worker-capture, pipeline, and surfaces layers; dedups their findings; assigns fixes to fix sub-agents on disjoint files; hot reload picks them up. Repeat from step 3.
 7. **Codify** once green: capture the passing run as an automated **integration test** (or scripted demo) so the end-to-end behaviour can't silently regress.
+
+### Parallelization map (waves)
+
+Sub-agents fan out where the [dependency graph](#dependency-graph) allows; serial waves are integration points the orchestrator owns.
+
+| Wave | Phases | Concurrency | Notes |
+| --- | --- | --- | --- |
+| A | Phase 0 + Phase 1 | **Serial** (single agent) | Resolve decisions; land types & model. **Freeze shared types/contracts before fan-out.** |
+| B | Phases 2, 3, 4 | **Parallel** (3 sub-agents) | Disjoint areas: criteria store+migration / prompt entity+migration / judge tool+contract. Each green on unit tests before handback. |
+| C | Phase 5 | **Serial** | Execution pipeline integrates B; touches the shared loop. Orchestrator runs the first integration golden-path here. |
+| D | Phase 6 | **Parallel** (per-surface sub-agents) | Criteria editor / prompt editor / submit-run config / run detail / profiles + Storybook — mostly disjoint Portal+CLI files. |
+| E | Phase 7 | **Serial** | Docs. |
+
+### Concurrency guardrails
+
+- **One integration run at a time.** Only the orchestrator submits/observes the golden path on the single shared stack; parallel agents never run concurrent golden-path runs against it.
+- **Disjoint ownership.** Each parallel sub-agent owns a non-overlapping file set; the orchestrator integrates and resolves any conflicts.
+- **Freeze foundations before fan-out.** Shared types (Phase 1) and cross-cutting contracts (`JudgeEvaluateRequest`, `GateConfig`) are frozen before Wave B; changes to them route back through the orchestrator.
+- **Self-verify before handback.** Each sub-agent runs typecheck + its unit tests green before returning.
+- **Hot reload.** Most fixes land on the running stack without a restart; schema/env/migration changes may need a restart or `pnpm migrate:up`.
 
 ### Loop exit criteria
 
@@ -225,4 +266,6 @@ flowchart TD
 ```
 
 Phases 2, 3, and 4 (Select-only parts) can proceed in parallel once Phase 1 lands.
-Build/Test/Deploy behaviour in Phases 4–5 is gated on Phase 0.
+Build/Test/Deploy behaviour in Phases 4–5 is gated on Phase 0. This maps to the
+[parallelization waves](#parallelization-map-waves): A (Phase 0+1, serial) →
+B (2/3/4, parallel) → C (5, serial) → D (6, parallel) → E (7, serial).
