@@ -14,6 +14,7 @@ initialize({ onUnhandledRequest: "bypass" });
 const preview: Preview = {
   decorators: [
     (Story) => {
+      localStorage.setItem("scope:theme", "light");
       const queryClient = new QueryClient({
         defaultOptions: {
           queries: { retry: false, staleTime: Infinity },
