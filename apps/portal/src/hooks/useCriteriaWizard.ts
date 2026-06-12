@@ -11,11 +11,15 @@ import type { GateId } from "@/lib/gates";
 export interface UseCriteriaWizardOptions {
   /** Pre-populated parent dependency IDs */
   initialDependsOn?: string[];
+  /** Pre-populated gate compatibility (defaults to ["select"]) */
+  initialGates?: GateId[];
+  /** Gates that cannot be unselected in the gate picker (e.g. inline creation) */
+  lockedGates?: GateId[];
   /** Called with the new criterion ID after successful creation */
   onSuccess: (id: string) => void;
 }
 
-export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCriteriaWizardOptions) {
+export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedGates, onSuccess }: UseCriteriaWizardOptions) {
   const queryClient = useQueryClient();
 
   // Wizard step (1 or 2)
@@ -26,7 +30,7 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
   const [id, setId] = useState("");
   const [idManuallyEdited, setIdManuallyEdited] = useState(false);
   const [dependsOn, setDependsOn] = useState<string[]>(initialDependsOn);
-  const [gates, setGates] = useState<GateId[] | undefined>(["select"]);
+  const [gates, setGates] = useState<GateId[] | undefined>(initialGates ?? ["select"]);
 
   // Step 2 fields
   const [prompt, setPrompt] = useState("");
@@ -162,13 +166,13 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
     setId("");
     setIdManuallyEdited(false);
     setDependsOn(initialDependsOn);
-    setGates(["select"]);
+    setGates(initialGates ?? ["select"]);
     setPrompt("");
     setAiGenerated(false);
     setSuggestedParents([]);
     setSuggestedChildren([]);
     setAcceptedChildren([]);
-  }, [initialDependsOn]);
+  }, [initialDependsOn, initialGates]);
 
   return {
     // State
@@ -183,6 +187,7 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
     setDependsOn,
     gates,
     setGates,
+    lockedGates,
     prompt,
     setPrompt,
     aiGenerated,

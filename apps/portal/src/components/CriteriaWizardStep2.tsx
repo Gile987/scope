@@ -23,6 +23,7 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
     setDependsOn,
     gates,
     setGates,
+    lockedGates,
     prompt,
     setPrompt,
     aiGenerated,
@@ -65,9 +66,9 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
         <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
           Gate compatibility
         </Label>
-        <GateCompatibilityPicker value={gates} onChange={setGates} />
+        <GateCompatibilityPicker value={gates} onChange={setGates} lockedGates={lockedGates} />
         <p className="text-xs text-muted-foreground">
-          Empty means all gates. Parents must be compatible with every gate selected here.
+          Select the gates this criterion applies to. Parents must be compatible with every selected gate.
         </p>
       </div>
 

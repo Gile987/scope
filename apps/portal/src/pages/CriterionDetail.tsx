@@ -122,7 +122,7 @@ export function CriterionDetail() {
     if (!criterion) return;
     setPrompt(criterion.prompt);
     setEditDependsOn(criterion.dependsOn ?? []);
-    setEditGates(criterion.gates && criterion.gates.length > 0 ? criterion.gates : undefined);
+    setEditGates(criterion.gates && criterion.gates.length > 0 ? criterion.gates : ["select"]);
     setAiSuggestOpen(false);
     setBehaviorInput("");
     setSuggestedPrompt(null);
@@ -133,6 +133,7 @@ export function CriterionDetail() {
   };
 
   const handleSave = () => {
+    if (!editGates || editGates.length === 0) return;
     updateMutation.mutate({
       prompt: prompt.trim(),
       dependsOn: editDependsOn.length > 0 ? editDependsOn : undefined,
@@ -435,7 +436,7 @@ export function CriterionDetail() {
         <CardHeader>
           <CardTitle>Gate compatibility</CardTitle>
           <CardDescription>
-            Where this criterion can be selected. Empty means all gates.
+            Where this criterion can be selected.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
