@@ -241,6 +241,11 @@ function AggregateProgress({
 // (used as a dependency by useColumnOrder via the column-id signature).
 const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "id", label: "ID", required: true },
+  // Status and Outcome lead the row so the run's headline result is visible
+  // before the metadata that produced it (per
+  // growth-ecosystems/scope-project#127).
+  { id: "status", label: "Status" },
+  { id: "outcome", label: "Outcome" },
   { id: "submission", label: "Submission" },
   { id: "task", label: "Task" },
   { id: "criteria", label: "Criteria" },
@@ -254,8 +259,6 @@ const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "extensions", label: "Extensions" },
   { id: "profile", label: "Profile" },
   { id: "priority", label: "Priority" },
-  { id: "status", label: "Status" },
-  { id: "outcome", label: "Outcome" },
   { id: "report", label: "Report" },
   { id: "attempt", label: "Attempt" },
   { id: "turns", label: "Turns" },
@@ -395,16 +398,16 @@ export function RunsList() {
   // Persist sort preference to localStorage
   usePersistentSort(state, { pageKey: "runs" });
 
-  // Column visibility — persisted under scope:hidden-columns:runs:v2.
-  // The `:v2` suffix forces the new default set to apply for users who had
-  // an older preference stored under the unversioned key.
-  // Default visible: ID, Submission, Task, Criteria, Worker, Version, OS, MCP,
-  // Skills, Extensions, Profile, Priority, Status, Outcome.
+  // Column visibility — persisted under scope:hidden-columns:runs:v3.
+  // The `:v3` suffix forces the new default set + order to apply for users
+  // who had an older preference stored under a previous versioned key.
+  // Default visible: ID, Status, Outcome, Submission, Task, Criteria, Worker,
+  // Version, OS, MCP, Skills, Extensions, Profile, Priority.
   // Hidden by default (opt-in via Customize columns): Report, Attempt,
   // Turns, LLM Calls, Duration, Tokens, Created. Model is shown next to
   // Worker so users can see what model each run used at a glance.
   const columnVisibility = useHiddenColumns({
-    storageKey: "runs:v2",
+    storageKey: "runs:v3",
     defaultHidden: [
       "report",
       "attempt",
@@ -419,7 +422,7 @@ export function RunsList() {
   // marked `required` in COLUMN_OPTIONS and is locked from reordering by the
   // panel; `actions` lives outside COLUMN_OPTIONS and is always pinned right.
   const columnOrder = useColumnOrder({
-    storageKey: "runs:v2",
+    storageKey: "runs:v3",
     columnIds: COLUMN_IDS,
   });
   const [customizeOpen, setCustomizeOpen] = useState(false);
