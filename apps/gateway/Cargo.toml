@@ -49,3 +49,8 @@ reqwest = { version = "0.12", features = ["rustls-tls-native-roots", "json", "st
 tempfile = "3"
 wiremock = "0.6"
 tokio-test = "0.4"
+
+[patch.crates-io]
+# See vendor/http-types/Cargo.toml: bumps http-types 2.12.0 onto rand 0.8 to
+# remediate GHSA-cq8v-f236-94qc (rand 0.7.x has no patched release).
+http-types = { path = "vendor/http-types" }
