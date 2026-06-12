@@ -249,15 +249,15 @@ export function TaskPromptList() {
     <ListLayout
       title={
         <span className="inline-flex items-center gap-1.5">
-          Task Prompts
+          Task Prompt Library
           <HelpTooltip
-            text="Content-addressed library of task instructions. Prompts are deduplicated by hash and reused across runs."
+            text="Reusable, content-addressed task instructions you pick when submitting a run. Prompts are deduplicated by hash so identical text shares one entry across all runs."
             docs="taskPrompts"
             size="md"
           />
         </span>
       }
-      description="Browse and manage content-addressed task prompt entities"
+      description="Reusable task instructions you can pick when submitting a run — prompts are deduplicated by hash and shared across runs"
       railStorageKey="task-prompts"
       actions={
         <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) resetDialog(); else setDialogOpen(true); }}>
