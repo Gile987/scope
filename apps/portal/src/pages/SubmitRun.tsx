@@ -661,7 +661,6 @@ export function SubmitRun() {
         </CollapsibleCard>
       )}
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
       <div className="space-y-6">
 
       {/* ─── Scenario ──────────────────────────────────────────────────── */}
@@ -835,6 +834,15 @@ export function SubmitRun() {
           <CardDescription>Coding agent, model and version</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {profileLocked && (
+            <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <span>
+                These settings are managed by the selected profile in <span className="font-medium">Profile Variations</span> below.
+                Clear the profile to edit them manually.
+              </span>
+            </div>
+          )}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-2">
               <div className="flex items-center gap-1.5">
@@ -921,104 +929,7 @@ export function SubmitRun() {
         </CardContent>
       </Card>
 
-      {/* ─── MCP Servers (collapsible) ─────────────────────────────────── */}
-      {activeMcpServers.length > 0 && (
-        <CollapsibleCard
-          icon={Server}
-          title="MCP Servers"
-          help={
-            <HelpTooltip
-              text="Model Context Protocol servers expose tools and resources to the agent (filesystem, GitHub, browser, etc.)."
-              docs="mcpServers"
-            />
-          }
-          summary={
-            selectedMcpServers.length === 0
-              ? "None selected"
-              : `${selectedMcpServers.length} server${selectedMcpServers.length === 1 ? "" : "s"} selected`
-          }
-          open={mcpOpen}
-          onOpenChange={setMcpOpen}
-          disabled={profileLocked}
-        >
-          <div className="space-y-2">
-            {activeMcpServers.map((s: McpServerDocument) => (
-              <label
-                key={s._id}
-                className={`flex items-center gap-3 rounded-md border p-3 transition-colors ${profileLocked ? "opacity-60" : "cursor-pointer hover:bg-accent/50"}`}
-              >
-                <Checkbox
-                  checked={selectedMcpServers.includes(s._id)}
-                  disabled={profileLocked}
-                  onCheckedChange={(checked) => {
-                    setSelectedMcpServers((prev) =>
-                      checked ? [...prev, s._id] : prev.filter((id) => id !== s._id)
-                    );
-                  }}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm">{s._id}</span>
-                    <Badge variant="outline" className="text-xs uppercase">{s.type}</Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {s.name}{s.description ? ` — ${s.description}` : ""}
-                  </p>
-                </div>
-              </label>
-            ))}
-          </div>
-        </CollapsibleCard>
-      )}
-
-      {/* ─── Skills (collapsible) ──────────────────────────────────────── */}
-      <CollapsibleCard
-        icon={BookOpen}
-        title="Skills"
-        help={
-          <HelpTooltip
-            text="Reusable instruction packs (Markdown + assets) attached to the prompt so the agent has consistent guidance."
-            docs="skills"
-          />
-        }
-        summary={
-          selectedSkills.length === 0
-            ? "None selected"
-            : `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"} selected`
-        }
-        open={skillsOpen}
-        onOpenChange={setSkillsOpen}
-        disabled={profileLocked}
-      >
-        <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} disabled={profileLocked} />
-      </CollapsibleCard>
-
-      {/* ─── Extensions (collapsible, VS Code only) ────────────────────── */}
-      {isVscodeWorker && (
-        <CollapsibleCard
-          icon={Puzzle}
-          title="Extensions"
-          help={
-            <HelpTooltip
-              text="VS Code extensions to install in the workspace before the agent starts (e.g. language servers, linters)."
-              docs="extensions"
-            />
-          }
-          summary={
-            selectedExtensions.length === 0
-              ? "None selected"
-              : `${selectedExtensions.length} extension${selectedExtensions.length === 1 ? "" : "s"} selected`
-          }
-          open={extensionsOpen}
-          onOpenChange={setExtensionsOpen}
-          disabled={profileLocked}
-        >
-          <ExtensionPicker selected={selectedExtensions} onChange={setSelectedExtensions} disabled={profileLocked} />
-        </CollapsibleCard>
-      )}
-      </div>
-
-      <Card className="xl:sticky xl:top-6">
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-1.5">
             Profile Variations{" "}
@@ -1030,6 +941,7 @@ export function SubmitRun() {
           </CardTitle>
           <CardDescription>
             Choose a base profile and compose profile variations for comparative runs.
+            Profile selections override the Agent, MCP Servers, Skills and Extensions chosen above.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1317,6 +1229,102 @@ export function SubmitRun() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ─── MCP Servers (collapsible) ─────────────────────────────────── */}
+      {activeMcpServers.length > 0 && (
+        <CollapsibleCard
+          icon={Server}
+          title="MCP Servers"
+          help={
+            <HelpTooltip
+              text="Model Context Protocol servers expose tools and resources to the agent (filesystem, GitHub, browser, etc.)."
+              docs="mcpServers"
+            />
+          }
+          summary={
+            selectedMcpServers.length === 0
+              ? "None selected"
+              : `${selectedMcpServers.length} server${selectedMcpServers.length === 1 ? "" : "s"} selected`
+          }
+          open={mcpOpen}
+          onOpenChange={setMcpOpen}
+          disabled={profileLocked}
+        >
+          <div className="space-y-2">
+            {activeMcpServers.map((s: McpServerDocument) => (
+              <label
+                key={s._id}
+                className={`flex items-center gap-3 rounded-md border p-3 transition-colors ${profileLocked ? "opacity-60" : "cursor-pointer hover:bg-accent/50"}`}
+              >
+                <Checkbox
+                  checked={selectedMcpServers.includes(s._id)}
+                  disabled={profileLocked}
+                  onCheckedChange={(checked) => {
+                    setSelectedMcpServers((prev) =>
+                      checked ? [...prev, s._id] : prev.filter((id) => id !== s._id)
+                    );
+                  }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-sm">{s._id}</span>
+                    <Badge variant="outline" className="text-xs uppercase">{s.type}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {s.name}{s.description ? ` — ${s.description}` : ""}
+                  </p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </CollapsibleCard>
+      )}
+
+      {/* ─── Skills (collapsible) ──────────────────────────────────────── */}
+      <CollapsibleCard
+        icon={BookOpen}
+        title="Skills"
+        help={
+          <HelpTooltip
+            text="Reusable instruction packs (Markdown + assets) attached to the prompt so the agent has consistent guidance."
+            docs="skills"
+          />
+        }
+        summary={
+          selectedSkills.length === 0
+            ? "None selected"
+            : `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"} selected`
+        }
+        open={skillsOpen}
+        onOpenChange={setSkillsOpen}
+        disabled={profileLocked}
+      >
+        <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} disabled={profileLocked} />
+      </CollapsibleCard>
+
+      {/* ─── Extensions (collapsible, VS Code only) ────────────────────── */}
+      {isVscodeWorker && (
+        <CollapsibleCard
+          icon={Puzzle}
+          title="Extensions"
+          help={
+            <HelpTooltip
+              text="VS Code extensions to install in the workspace before the agent starts (e.g. language servers, linters)."
+              docs="extensions"
+            />
+          }
+          summary={
+            selectedExtensions.length === 0
+              ? "None selected"
+              : `${selectedExtensions.length} extension${selectedExtensions.length === 1 ? "" : "s"} selected`
+          }
+          open={extensionsOpen}
+          onOpenChange={setExtensionsOpen}
+          disabled={profileLocked}
+        >
+          <ExtensionPicker selected={selectedExtensions} onChange={setSelectedExtensions} disabled={profileLocked} />
+        </CollapsibleCard>
+      )}
       </div>
 
       <Dialog open={createProfileOpen} onOpenChange={setCreateProfileOpen}>
