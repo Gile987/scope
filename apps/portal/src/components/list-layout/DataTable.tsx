@@ -157,7 +157,11 @@ export function DataTable<T>({
     setTableScrollWidth(hasOverflow ? el.scrollWidth : 0);
     if (hasOverflow) {
       const rect = el.getBoundingClientRect();
-      setProxyRect({ left: rect.left, width: rect.width });
+      setProxyRect((prev) =>
+        prev && prev.left === rect.left && prev.width === rect.width
+          ? prev
+          : { left: rect.left, width: rect.width },
+      );
     } else {
       setProxyRect(null);
     }
@@ -193,17 +197,21 @@ export function DataTable<T>({
 
     const onTableScroll = () => {
       updateTableScrollIndicators();
-      if (isSyncingRef.current) return;
+      if (isSyncingRef.current) {
+        isSyncingRef.current = false;
+        return;
+      }
       const proxy = stickyScrollRef.current;
-      if (proxy) {
+      if (proxy && proxy.scrollLeft !== el.scrollLeft) {
         isSyncingRef.current = true;
         proxy.scrollLeft = el.scrollLeft;
-        isSyncingRef.current = false;
       }
     };
     el.addEventListener("scroll", onTableScroll, { passive: true });
 
-    // Listen to the nearest vertical scroll ancestor for rect updates
+    // Listen to the nearest vertical scroll ancestor for rect updates.
+    // Always also listen on `window` so document/body scrolls are covered
+    // and so we don't rely solely on a single cached ancestor.
     let scrollParent: HTMLElement | null = el.parentElement;
     while (scrollParent && scrollParent !== document.documentElement) {
       const style = getComputedStyle(scrollParent);
@@ -214,6 +222,7 @@ export function DataTable<T>({
     if (scrollParent) {
       scrollParent.addEventListener("scroll", onParentScroll, { passive: true });
     }
+    window.addEventListener("scroll", onParentScroll, { passive: true });
 
     const resizeObserver = new ResizeObserver(() => updateTableScrollIndicators());
     resizeObserver.observe(el);
@@ -224,6 +233,7 @@ export function DataTable<T>({
     return () => {
       el.removeEventListener("scroll", onTableScroll);
       if (scrollParent) scrollParent.removeEventListener("scroll", onParentScroll);
+      window.removeEventListener("scroll", onParentScroll);
       window.removeEventListener("resize", onTableScroll);
       resizeObserver.disconnect();
     };
@@ -242,13 +252,15 @@ export function DataTable<T>({
   }, []);
 
   const onStickyScroll = useCallback(() => {
-    if (isSyncingRef.current) return;
+    if (isSyncingRef.current) {
+      isSyncingRef.current = false;
+      return;
+    }
     const proxy = stickyScrollRef.current;
     const el = tableScrollRef.current;
-    if (proxy && el) {
+    if (proxy && el && el.scrollLeft !== proxy.scrollLeft) {
       isSyncingRef.current = true;
       el.scrollLeft = proxy.scrollLeft;
-      isSyncingRef.current = false;
     }
   }, []);
 
