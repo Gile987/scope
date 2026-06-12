@@ -98,8 +98,12 @@ export function parseGatesOption(raw: string, defaultMaxIterations?: number): Ga
     if (record.promptId !== undefined && typeof record.promptId !== "string") {
       throw new Error(`gates[${index}].promptId must be a string.`);
     }
-    if (record.gate !== "select" && !record.promptId) {
-      throw new Error(`gates[${index}].promptId is required for the ${record.gate} gate.`);
+    if (record.promptText !== undefined && typeof record.promptText !== "string") {
+      throw new Error(`gates[${index}].promptText must be a string.`);
+    }
+    const hasPromptText = typeof record.promptText === "string" && record.promptText.trim().length > 0;
+    if (record.gate !== "select" && !record.promptId && !hasPromptText) {
+      throw new Error(`gates[${index}].promptId or promptText is required for the ${record.gate} gate.`);
     }
     let maxIterations: number | undefined;
     if (record.maxIterations !== undefined) {
@@ -111,7 +115,8 @@ export function parseGatesOption(raw: string, defaultMaxIterations?: number): Ga
 
     return {
       gate: record.gate,
-      promptId: record.promptId ?? "",
+      ...(record.promptId ? { promptId: record.promptId as string } : {}),
+      ...(hasPromptText ? { promptText: (record.promptText as string).trim() } : {}),
       criteria,
       ...(maxIterations !== undefined ? { maxIterations } : {}),
     };

@@ -120,6 +120,37 @@ async function validateGatesForSubmit(
   return null;
 }
 
+/**
+ * Materialize free-text gate prompts into typed prompt entities (docs/design/
+ * gates.md §4.3/§4.4). For every non-Select gate that supplies `promptText`, the
+ * text is content-addressed via `taskPromptStore.findOrCreate(text, gate)` —
+ * idempotent and parallel to how the request task prompt is materialized — and
+ * the resulting id is written to `promptId`. `promptText` supersedes any provided
+ * `promptId` (an edited prompt wins over a stale picked id) and is stripped from
+ * the returned config so it never reaches the persisted/running gate.
+ *
+ * The Select gate is left untouched here: its prompt is the request task, which
+ * is resolved separately and stamped onto the Select gate's `promptId` later.
+ */
+async function resolveGatePromptText(
+  ctx: RouteContext,
+  gates: GateConfig[],
+): Promise<GateConfig[]> {
+  return Promise.all(
+    gates.map(async (gc) => {
+      const text = gc.promptText?.trim();
+      if (gc.gate === "select" || !text) {
+        // Drop any stray promptText so it never persists.
+        const { promptText: _ignored, ...rest } = gc;
+        return rest;
+      }
+      const prompt = await ctx.taskPromptStore.findOrCreate(text, gc.gate);
+      const { promptText: _ignored, ...rest } = gc;
+      return { ...rest, promptId: prompt._id };
+    }),
+  );
+}
+
 // Submit a request
 apiRoute(ctx.app, ctx.registry, {
   method: "post",
@@ -604,9 +635,13 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     // Validate the per-gate configuration if provided (docs/design/gates.md §4.3).
+    // Free-text gate prompts are materialized into typed prompt entities first so
+    // validation and persistence both see resolved `promptId`s.
     const gatesProvided = Array.isArray(requestedGates) && requestedGates.length > 0;
+    let resolvedGates: GateConfig[] = gatesProvided ? (requestedGates as GateConfig[]) : [];
     if (gatesProvided) {
-      const gateError = await validateGatesForSubmit(ctx, requestedGates as GateConfig[], maxIterations);
+      resolvedGates = await resolveGatePromptText(ctx, resolvedGates);
+      const gateError = await validateGatesForSubmit(ctx, resolvedGates, maxIterations);
       if (gateError) {
         res.status(400).json({ error: gateError });
         return;
@@ -793,7 +828,7 @@ apiRoute(ctx.app, ctx.registry, {
     // Build the persisted gate configs: order canonically and point the Select
     // gate's prompt at the resolved task prompt (docs/design/gates.md §4.3).
     const persistedGates: GateConfig[] | undefined = gatesProvided
-      ? orderGates(requestedGates as GateConfig[]).map((g) =>
+      ? orderGates(resolvedGates).map((g) =>
           g.gate === "select" ? { ...g, promptId: taskPromptId } : g,
         )
       : undefined;

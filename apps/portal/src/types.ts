@@ -161,7 +161,9 @@ export type PromptType = GateId;
 
 export interface GateConfig {
   gate: GateId;
-  promptId: string;
+  promptId?: string;
+  /** Input-only free-text gate prompt; materialized server-side into a typed prompt. */
+  promptText?: string;
   criteria: string[];
   maxIterations?: number;
 }

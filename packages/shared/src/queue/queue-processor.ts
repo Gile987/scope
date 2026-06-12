@@ -584,6 +584,9 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       if (gc.gate === "select") {
         promptText = requestDoc.scenario.task;
       } else {
+        if (!gc.promptId) {
+          throw new Error(`Gate '${gc.gate}' is missing a resolved promptId.`);
+        }
         promptText = await this.resolveGatePromptText(gc.promptId, apiBaseUrl, log);
       }
       resolvedGates.push({

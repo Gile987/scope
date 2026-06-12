@@ -13,10 +13,26 @@ describe("gate CLI parsing", () => {
     ]), 3);
 
     expect(gates).toEqual([
-      { gate: "select", promptId: "", criteria: ["implements_task"] },
+      { gate: "select", criteria: ["implements_task"] },
       { gate: "build", promptId: "prompt-build", criteria: [], maxIterations: 1 },
       { gate: "test", promptId: "prompt-test", criteria: ["tests_pass"], maxIterations: 2 },
     ]);
+  });
+
+  it("accepts free-text promptText for non-select gates", () => {
+    const gates = parseGatesOption(JSON.stringify([
+      { gate: "build", promptText: "  Build the project.  ", criteria: [], maxIterations: 1 },
+    ]), 3);
+
+    expect(gates).toEqual([
+      { gate: "build", promptText: "Build the project.", criteria: [], maxIterations: 1 },
+    ]);
+  });
+
+  it("requires promptId or promptText for non-select gates", () => {
+    expect(() => parseGatesOption(JSON.stringify([
+      { gate: "build", criteria: [], maxIterations: 1 },
+    ]), 3)).toThrow("promptId or promptText is required");
   });
 
   it("rejects invalid gate configs using shared validation", () => {

@@ -78,8 +78,19 @@ export interface GateConfig {
   /**
    * Prompt entity id (`prompt.type` must === `gate`). For the Select gate this
    * is the request's task prompt (`taskPromptId`).
+   *
+   * Optional on **input**: callers may instead supply `promptText` (free text),
+   * which the submit handler content-addresses into a typed prompt and resolves
+   * to this id. Persisted gate configs always carry the resolved `promptId`.
    */
-  promptId: string;
+  promptId?: string;
+  /**
+   * Input-only convenience: a free-text gate prompt. When present at submit it
+   * is materialized via `taskPromptStore.findOrCreate(text, gate)` and
+   * supersedes any `promptId`. It is stripped from the persisted config once
+   * resolved, so it never appears on a stored/running gate.
+   */
+  promptText?: string;
   /**
    * Criterion ids evaluated for THIS gate. Must contain ≥1 id unless
    * `maxIterations === 1` (a pass-through gate that auto-passes with no judge).

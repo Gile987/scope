@@ -11,7 +11,15 @@ extendZodWithOpenApi(z);
 export const GateConfigSchema = z
   .object({
     gate: GateIdSchema,
-    promptId: z.string(),
+    // Resolved prompt entity id. Optional on input: callers may instead supply
+    // `promptText` (free text), which the submit handler materializes into a
+    // typed prompt and resolves to this id. Persisted gate configs always carry
+    // the resolved `promptId`.
+    promptId: z.string().optional(),
+    // Input-only convenience: free-text gate prompt. When present at submit it is
+    // content-addressed via `findOrCreate(text, gate)` and supersedes any
+    // `promptId`. Never persisted (stripped once resolved).
+    promptText: z.string().optional(),
     criteria: z.array(z.string()),
     maxIterations: z.number().int().min(1).max(50).optional(),
   })
