@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import {
   WORKER_TYPES, type CodingAgent, type McpServerDocument,
-  type ProfileWithVersion, type ProfileVersionDocument, type Run, type TaskPrompt,
+  type ProfileWithVersion, type ProfileVersionDocument, type Run,
 } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
@@ -68,8 +68,7 @@ type GraphSelection = { kind: "base" } | { kind: "variation"; index: number };
 
 type GateDraft = {
   enabled: boolean;
-  promptId: string;
-  promptText?: string;
+  promptText: string;
   criteria: string[];
   maxIterations: number;
 };
@@ -79,7 +78,7 @@ const NON_SELECT_GATES = GATE_ORDER.filter((gate): gate is Exclude<GateId, "sele
 function createGateDraft(maxIterations: number): GateDraft {
   return {
     enabled: false,
-    promptId: "",
+    promptText: "",
     criteria: [],
     maxIterations,
   };
@@ -210,6 +209,7 @@ export function SubmitRun() {
 
   // Inline criteria creation dialog
   const [createCriterionOpen, setCreateCriterionOpen] = useState(false);
+  const [gateCriterionDialog, setGateCriterionDialog] = useState<Exclude<GateId, "select"> | null>(null);
   const [createProfileOpen, setCreateProfileOpen] = useState(false);
 
   // Save as Profile
@@ -361,14 +361,6 @@ export function SubmitRun() {
     }));
   };
 
-  const selectGatePrompt = (gate: Exclude<GateId, "select">, prompt: TaskPrompt) => {
-    updateGateDraft(gate, {
-      enabled: true,
-      promptId: prompt._id,
-      promptText: prompt.text,
-    });
-  };
-
   const handleProfileCreated = (profile: ProfileWithVersion) => {
     queryClient.setQueryData<ProfileWithVersion[]>(["profiles"], (previous) => {
       const existing = previous ?? [];
@@ -461,13 +453,23 @@ export function SubmitRun() {
         if (gateConfig.gate === "select") continue;
         next[gateConfig.gate] = {
           enabled: true,
-          promptId: gateConfig.promptId,
+          promptText: "",
           criteria: gateConfig.criteria,
           maxIterations: gateConfig.maxIterations ?? run.maxIterations ?? maxIterations,
         };
       }
       return next;
     });
+    // Gate configs only store a resolved promptId; resolve each back to its text
+    // so the editable textarea is prefilled when loading a recent run.
+    for (const gateConfig of run.gates ?? []) {
+      if (gateConfig.gate === "select" || !gateConfig.promptId) continue;
+      const gate = gateConfig.gate;
+      const promptId = gateConfig.promptId;
+      api.getTaskPrompt(promptId)
+        .then((prompt) => updateGateDraft(gate, { promptText: prompt.text }))
+        .catch(() => undefined);
+    }
     if (run.mcpServers && run.mcpServers.length > 0) {
       setSelectedMcpServers(run.mcpServers);
       setMcpOpen(true);
@@ -545,7 +547,7 @@ export function SubmitRun() {
           .filter((gate) => gateDrafts[gate].enabled)
           .map((gate): GateConfig => ({
             gate,
-            promptId: gateDrafts[gate].promptId,
+            promptText: gateDrafts[gate].promptText.trim(),
             criteria: gateDrafts[gate].criteria,
             maxIterations: gateDrafts[gate].maxIterations,
           })),
@@ -555,7 +557,7 @@ export function SubmitRun() {
   const promptValidationErrors = gatesEnabled
     ? NON_SELECT_GATES.flatMap((gate) => {
         const draft = gateDrafts[gate];
-        return draft.enabled && !draft.promptId
+        return draft.enabled && !draft.promptText.trim()
           ? [`${GATE_METADATA[gate].label} gate needs a ${GATE_METADATA[gate].label} prompt.`]
           : [];
       })
@@ -866,6 +868,8 @@ export function SubmitRun() {
             <CreateCriterionDialog
               open={createCriterionOpen}
               onOpenChange={setCreateCriterionOpen}
+              defaultGates={["select"]}
+              lockedGates={["select"]}
               onCreated={(id) => setPickedCriteria((prev) => [...prev, id])}
             />
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -963,18 +967,23 @@ export function SubmitRun() {
                 {draft.enabled && (
                   <div className="mt-4 space-y-4">
                     <div className="space-y-2">
-                      <Label>{meta.label} prompt *</Label>
-                      {draft.promptId && (
-                        <div className="rounded-md border bg-background px-3 py-2 text-xs">
-                          <p className="font-mono">{draft.promptId}</p>
-                          {draft.promptText && <p className="mt-1 text-muted-foreground line-clamp-2">{draft.promptText}</p>}
-                        </div>
-                      )}
+                      <Label htmlFor={`${gate}-prompt`}>{meta.label} prompt *</Label>
                       <TaskPromptPicker
                         type={gate}
-                        onSelect={() => undefined}
-                        onSelectPrompt={(prompt) => selectGatePrompt(gate, prompt)}
+                        placeholder={`Search ${meta.label} prompts or type a new one below…`}
+                        onSelect={(text) => updateGateDraft(gate, { promptText: text })}
                       />
+                      <Textarea
+                        id={`${gate}-prompt`}
+                        placeholder={`e.g., ${meta.description}`}
+                        value={draft.promptText}
+                        onChange={(e) => updateGateDraft(gate, { promptText: e.target.value })}
+                        rows={3}
+                      />
+                      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Info className="h-3.5 w-3.5 shrink-0" />
+                        New {meta.label} prompts are automatically added to the prompt library.
+                      </p>
                     </div>
 
                     <div className="space-y-2">
@@ -983,6 +992,17 @@ export function SubmitRun() {
                         gate={gate}
                         selected={draft.criteria}
                         onChange={(criteria) => updateGateDraft(gate, { criteria })}
+                        trailingAction={(
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-9 gap-1.5 px-3"
+                            onClick={() => setGateCriterionDialog(gate)}
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            New…
+                          </Button>
+                        )}
                       />
                       <p className="text-xs text-muted-foreground">
                         Only criteria compatible with {meta.label} are shown. Required unless max iterations is 1.
@@ -1007,6 +1027,24 @@ export function SubmitRun() {
               </div>
             );
           })}
+
+          <CreateCriterionDialog
+            key={gateCriterionDialog ?? "none"}
+            open={gateCriterionDialog !== null}
+            onOpenChange={(open) => { if (!open) setGateCriterionDialog(null); }}
+            defaultGates={gateCriterionDialog ? [gateCriterionDialog] : undefined}
+            lockedGates={gateCriterionDialog ? [gateCriterionDialog] : undefined}
+            onCreated={(id) => {
+              const gate = gateCriterionDialog;
+              if (gate) {
+                updateGateDraft(gate, {
+                  enabled: true,
+                  criteria: [...gateDrafts[gate].criteria, id],
+                });
+              }
+              setGateCriterionDialog(null);
+            }}
+          />
 
           {gateErrors.length > 0 && (
             <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
