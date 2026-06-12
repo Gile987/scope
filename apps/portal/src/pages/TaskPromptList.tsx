@@ -38,6 +38,7 @@ import {
   type DataTableColumn,
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 const DIALOG_STEPS = ["Task Text", "Features"];
 const FILTER_KEYS = [] as const;
@@ -246,7 +247,16 @@ export function TaskPromptList() {
 
   return (
     <ListLayout
-      title="Task Prompts"
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          Task Prompts
+          <HelpTooltip
+            text="Content-addressed library of task instructions. Prompts are deduplicated by hash and reused across runs."
+            docs="taskPrompts"
+            size="md"
+          />
+        </span>
+      }
       description="Browse and manage content-addressed task prompt entities"
       railStorageKey="task-prompts"
       actions={

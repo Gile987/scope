@@ -35,6 +35,7 @@ import {
   type DataTableColumn,
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 const FILTER_KEYS = ["origin"] as const;
 
@@ -234,7 +235,16 @@ export function ExtensionList() {
   return (
     <>
       <ListLayout
-        title="Extensions"
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            Extensions
+            <HelpTooltip
+              text="VS Code extensions installed in worker environments before the agent starts (e.g. language servers, linters)."
+              docs="extensions"
+              size="md"
+            />
+          </span>
+        }
         description="Manage VS Code extensions installed in worker environments"
         railStorageKey="extensions"
         actions={

@@ -36,6 +36,7 @@ import {
   type DataTableColumn,
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 const FILTER_KEYS = ["origin"] as const;
 
@@ -249,7 +250,16 @@ export function SkillList() {
   return (
     <>
       <ListLayout
-        title="Skills"
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            Skills
+            <HelpTooltip
+              text="Reusable instruction packs (Markdown + assets) attached to the prompt so the agent has consistent guidance."
+              docs="skills"
+              size="md"
+            />
+          </span>
+        }
         description="Manage agent skills injected into coding agent prompts"
         railStorageKey="skills"
         actions={

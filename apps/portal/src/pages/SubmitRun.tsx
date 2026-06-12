@@ -27,6 +27,7 @@ import { SkillPicker } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { ProfileCreateForm } from "@/components/ProfileCreateForm";
 import { ProfilePicker } from "@/components/ProfilePicker";
+import { HelpTooltip } from "@/components/HelpTooltip";
 import {
   ModelSelectItems,
   ReasoningEffortSelect,
@@ -105,12 +106,13 @@ interface CollapsibleCardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   disabled?: boolean;
+  help?: React.ReactNode;
   children: React.ReactNode;
 }
 
-function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disabled, children }: CollapsibleCardProps) {
+function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disabled, help, children }: CollapsibleCardProps) {
   return (
-    <Card>
+    <Card className="relative">
       <button
         type="button"
         onClick={() => onOpenChange(!open)}
@@ -133,6 +135,11 @@ function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disab
           className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
         />
       </button>
+      {help && (
+        <div className="absolute right-12 top-6 z-10" onClick={(e) => e.stopPropagation()}>
+          {help}
+        </div>
+      )}
       {open && (
         <CardContent className="pt-0">
           {children}
@@ -666,7 +673,13 @@ export function SubmitRun() {
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="task">Task *</Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="task">Task *</Label>
+              <HelpTooltip
+                text="The natural-language instruction sent to the coding agent. Saved to the task prompt library so you can reuse it across runs."
+                docs="taskPrompts"
+              />
+            </div>
             <TaskPromptPicker onSelect={(text) => setTask(text)} />
             <Textarea
               id="task"
@@ -740,10 +753,16 @@ export function SubmitRun() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="criteria">
-              Criteria {maxIterations !== 1 && "* "}
-              <span className="text-muted-foreground font-normal">(select from registry)</span>
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="criteria">
+                Criteria {maxIterations !== 1 && "* "}
+                <span className="text-muted-foreground font-normal">(select from registry)</span>
+              </Label>
+              <HelpTooltip
+                text="Reusable evaluation rules the judge applies to agent output. Criteria can depend on each other; descendants are skipped when a parent fails."
+                docs="criteria"
+              />
+            </div>
             <CriteriaPicker
               selected={pickedCriteria}
               onChange={setPickedCriteria}
@@ -773,7 +792,13 @@ export function SubmitRun() {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="maxIterations">Max iterations</Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="maxIterations">Max iterations</Label>
+                <HelpTooltip
+                  text="How many judge feedback loops the agent gets. With 1, the agent runs once and the judge does not evaluate. Higher values let the agent iterate on feedback."
+                  docs="submitRunPortal"
+                />
+              </div>
               <Input
                 id="maxIterations"
                 type="number"
@@ -784,7 +809,13 @@ export function SubmitRun() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="occurrences">Occurrences</Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="occurrences">Occurrences</Label>
+                <HelpTooltip
+                  text="How many times to repeat this exact run. Useful for measuring variance across identical inputs."
+                  docs="submitRunPortal"
+                />
+              </div>
               <Input
                 id="occurrences"
                 type="number"
@@ -807,7 +838,13 @@ export function SubmitRun() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-2">
-              <Label htmlFor="worker">Worker *</Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="worker">Worker *</Label>
+                <HelpTooltip
+                  text="The runtime that drives the coding agent: GitHub Copilot, Claude Code, or VS Code Web with Copilot Chat."
+                  docs="choosingAgent"
+                />
+              </div>
               <Select value={worker} onValueChange={setWorker} disabled={profileLocked}>
                 <SelectTrigger id="worker">
                   <SelectValue />
@@ -882,6 +919,12 @@ export function SubmitRun() {
         <CollapsibleCard
           icon={Server}
           title="MCP Servers"
+          help={
+            <HelpTooltip
+              text="Model Context Protocol servers expose tools and resources to the agent (filesystem, GitHub, browser, etc.)."
+              docs="mcpServers"
+            />
+          }
           summary={
             selectedMcpServers.length === 0
               ? "None selected"
@@ -925,6 +968,12 @@ export function SubmitRun() {
       <CollapsibleCard
         icon={BookOpen}
         title="Skills"
+        help={
+          <HelpTooltip
+            text="Reusable instruction packs (Markdown + assets) attached to the prompt so the agent has consistent guidance."
+            docs="skills"
+          />
+        }
         summary={
           selectedSkills.length === 0
             ? "None selected"
@@ -942,6 +991,12 @@ export function SubmitRun() {
         <CollapsibleCard
           icon={Puzzle}
           title="Extensions"
+          help={
+            <HelpTooltip
+              text="VS Code extensions to install in the workspace before the agent starts (e.g. language servers, linters)."
+              docs="extensions"
+            />
+          }
           summary={
             selectedExtensions.length === 0
               ? "None selected"
@@ -958,7 +1013,13 @@ export function SubmitRun() {
 
       <Card className="xl:sticky xl:top-6">
         <CardHeader>
-          <CardTitle>Profile Variations</CardTitle>
+          <CardTitle className="flex items-center gap-1.5">
+            Profile Variations
+            <HelpTooltip
+              text="Profiles bundle worker, model, skills, MCP servers and extensions. Variations let you submit the same task against multiple profile configurations in one run for comparative analysis."
+              docs="profiles"
+            />
+          </CardTitle>
           <CardDescription>
             Choose a base profile and compose profile variations for comparative runs.
           </CardDescription>
