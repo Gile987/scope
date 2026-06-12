@@ -1021,7 +1021,8 @@ export function SubmitRun() {
       <Card className="xl:sticky xl:top-6">
         <CardHeader>
           <CardTitle className="flex items-center gap-1.5">
-            Profile Variations
+            Profile Variations{" "}
+            <span className="text-xs font-normal text-muted-foreground">(optional)</span>
             <HelpTooltip
               text="Profiles bundle worker, model, skills, MCP servers and extensions. Variations let you submit the same task against multiple profile configurations in one run for comparative analysis."
               docs="profiles"
