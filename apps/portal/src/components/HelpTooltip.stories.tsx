@@ -15,6 +15,9 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const PlainText: Story = {
+  args: {
+    text: "Number of judge feedback loops the agent gets to refine its output.",
+  },
   render: () => (
     <div className="flex items-center gap-1.5">
       <Label>Max iterations</Label>
@@ -30,6 +33,10 @@ export const PlainText: Story = {
 };
 
 export const WithDocsLink: Story = {
+  args: {
+    text: "Reusable evaluation rules the judge applies to agent output.",
+    docs: "criteria",
+  },
   render: () => (
     <div className="flex items-center gap-1.5">
       <Label>Criteria</Label>
