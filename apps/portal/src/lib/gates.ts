@@ -43,7 +43,9 @@ export const GATE_METADATA: Record<GateId, GateMetadata> = {
 
 export interface GateConfig {
   gate: GateId;
-  promptId: string;
+  promptId?: string;
+  /** Input-only free-text gate prompt; materialized server-side into a typed prompt. */
+  promptText?: string;
   criteria: string[];
   maxIterations?: number;
 }
@@ -118,32 +120,4 @@ export function formatGateList(gates: readonly GateId[] | undefined): string {
 
 export function orderGateIds(gates: readonly GateId[]): GateId[] {
   return [...gates].sort((a, b) => GATE_ORDER.indexOf(a) - GATE_ORDER.indexOf(b));
-}
-
-/**
- * Builds a function that maps a globally-unique iteration number to a per-gate
- * iteration number that restarts at 1 at the beginning of each gate.
- *
- * The judge labels iterations globally (`iterationOffset + 1 ..`) so blob paths
- * stay unique across the sequential gates, but for display we want each gate to
- * count from 1. Items that carry no `gate` fall back to the Select gate (the
- * design's implicit default), so legacy single-gate runs are unaffected.
- *
- * See docs/design/gates.md §4.4.
- */
-export function buildGateIterationScoper(
-  items: ReadonlyArray<{ gate?: GateId; iteration?: number | null }>,
-): (gate: GateId | undefined, globalIteration: number) => number {
-  const minByGate = new Map<GateId, number>();
-  for (const { gate, iteration } of items) {
-    if (iteration == null) continue;
-    const g = gate ?? "select";
-    const prev = minByGate.get(g);
-    if (prev === undefined || iteration < prev) minByGate.set(g, iteration);
-  }
-  return (gate, globalIteration) => {
-    const g = gate ?? "select";
-    const min = minByGate.get(g);
-    return min === undefined ? globalIteration : globalIteration - min + 1;
-  };
 }

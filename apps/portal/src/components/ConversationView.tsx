@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Bot, Scale, CheckCircle2, AlertCircle, Brain, Wrench, ChevronRight, ChevronDown, Loader2 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
-import { GATE_METADATA, buildGateIterationScoper } from "@/lib/gates";
+import { GATE_METADATA } from "@/lib/gates";
 import type { ConversationTurn, ToolCall } from "@/types";
 import { useHarExtraction, type ConversationSegment } from "@/hooks/useHarExtraction";
 
@@ -33,9 +33,6 @@ interface ConversationViewProps {
  *   - Judge feedback (left-aligned, amber tint)
  */
 export function ConversationView({ turns, task, runId, attemptRunId }: ConversationViewProps) {
-  // Iterations are globally unique across gates; restart the count per gate for display.
-  const scopeIteration = useMemo(() => buildGateIterationScoper(turns), [turns]);
-
   if (turns.length === 0 && !task) {
     return (
       <div className="text-sm text-muted-foreground italic py-4 text-center">
@@ -69,7 +66,7 @@ export function ConversationView({ turns, task, runId, attemptRunId }: Conversat
         <TurnMessages
           key={turn.iteration}
           turn={turn}
-          scopedIteration={scopeIteration(turn.gate, turn.iteration)}
+          scopedIteration={turn.iteration}
           runId={runId}
           attemptRunId={attemptRunId}
         />

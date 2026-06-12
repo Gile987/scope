@@ -10,9 +10,8 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { formatDuration } from "@/lib/utils";
-import { buildGateIterationScoper } from "@/lib/gates";
 import type { ConversationTurn } from "@/types";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 interface TurnTimelineProps {
   turns: ConversationTurn[];
@@ -35,11 +34,6 @@ export function TurnTimeline({ turns, runId, attemptRunId }: TurnTimelineProps) 
       return next;
     });
   };
-
-  // Iterations are numbered globally across gates; display them per-gate so the
-  // count restarts at 1 for each gate. When TurnTimeline renders a single gate's
-  // turns (gated runs) or a flat list (legacy runs) the result is the same.
-  const scopeIteration = useMemo(() => buildGateIterationScoper(turns), [turns]);
 
   if (turns.length === 0) {
     return <div className="text-sm text-muted-foreground italic py-4">No turns recorded yet.</div>;
@@ -64,7 +58,7 @@ export function TurnTimeline({ turns, runId, attemptRunId }: TurnTimelineProps) 
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   )}
                   <CardTitle className="text-base">
-                    Iteration {scopeIteration(turn.gate, turn.iteration)}
+                    Iteration {turn.iteration}
                   </CardTitle>
                   {turn.passed ? (
                     <Badge variant="success" className="gap-1">

@@ -169,7 +169,7 @@ describe('run get', () => {
       expect(output).toContain('has_validation');
       expect(output).toContain('has_tests');
 
-      // Turns summary (grouped per gate, iterations scoped within each gate)
+      // Turns summary (grouped per gate, iterations numbered globally across gates)
       expect(output).toContain('Iteration 1');
       expect(output).toContain('Iteration 2');
       expect(output).toContain('3/3 criteria passed');
