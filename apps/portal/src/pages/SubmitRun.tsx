@@ -28,6 +28,7 @@ import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { ProfileCreateForm } from "@/components/ProfileCreateForm";
 import { ProfilePicker } from "@/components/ProfilePicker";
 import { HelpTooltip } from "@/components/HelpTooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   ModelSelectItems,
   ReasoningEffortSelect,
@@ -900,32 +901,51 @@ export function SubmitRun() {
                 />
               </div>
             )}
-            {sortedVersions.length > 0 && (
-              <div className="space-y-2">
-                <Label htmlFor="agentVersion">Agent version *</Label>
-                <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion} disabled={profileLocked}>
-                  <SelectTrigger id="agentVersion">
-                    <SelectValue placeholder="Latest" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {/*
-                     * Only the latest agent version is exposed to the user
-                     * (per growth-ecosystems/scope-project#124). The value
-                     * uses the current selection when present so that
-                     * profile-pinned versions still resolve in the trigger;
-                     * the label is intentionally version-number-free.
-                     */}
-                    <SelectItem
-                      key={selectedAgentVersion || sortedVersions[0].agentVersion}
-                      value={selectedAgentVersion || sortedVersions[0].agentVersion}
-                    >
-                      Latest
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
           </div>
+          {sortedVersions.length > 0 && (() => {
+            // Read-only display of the actual coding-agent build that will run
+            // (per growth-ecosystems/scope-project#124). The dropdown was
+            // removed; users always get the latest active version. The worker
+            // harness build is shown even more discreetly inside a tooltip.
+            const latest = sortedVersions[0];
+            const activeAgentVersion = selectedAgentVersion || latest.agentVersion;
+            const activeEntry =
+              sortedVersions.find((v) => v.agentVersion === activeAgentVersion) ?? latest;
+            const versionLabel = (
+              <span>
+                Coding agent:{" "}
+                <span className="font-mono text-foreground">v{activeAgentVersion}</span>
+              </span>
+            );
+            return (
+              <p className="-mt-1 text-xs text-muted-foreground">
+                {activeEntry.workerVersion ? (
+                  <TooltipProvider delayDuration={150}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-default underline decoration-dotted decoration-muted-foreground/40 underline-offset-2 hover:decoration-muted-foreground">
+                          {versionLabel}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs space-y-1">
+                        <p className="text-xs font-medium">Worker harness build</p>
+                        <p className="break-all font-mono text-[11px] text-muted-foreground">
+                          {activeEntry.workerVersion}
+                        </p>
+                        {activeEntry.gitCommit && (
+                          <p className="font-mono text-[11px] text-muted-foreground">
+                            commit {activeEntry.gitCommit.slice(0, 7)}
+                          </p>
+                        )}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : (
+                  versionLabel
+                )}
+              </p>
+            );
+          })()}
         </CardContent>
       </Card>
 
