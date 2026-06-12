@@ -114,15 +114,19 @@ gate type (see §4.5).
 
 Add an optional `gates` field to the criterion model. Semantics:
 
-- `gates` **absent or empty** → criterion is compatible with **all** gates (default).
+- `gates` **absent or empty** → criterion is compatible with **all** gates. This is
+  the data-model fallback only; the portal always writes an explicit, non-empty list
+  (see §4.6), and migration 018 backfills any absent/empty/null rows to `["select"]`,
+  so stored criteria never actually rely on the empty=all fallback.
 - `gates: ["build", "test"]` → only selectable for the Build and Test gates.
 
 > **Existing criteria are not left as "all gates".** Every criterion authored
 > before this feature was written for the current (Select) behaviour, so a
-> data migration backfills `gates: ["select"]` on all existing criteria
-> (see §4.2.1). The "absent/empty = all gates" default therefore applies only to
-> *newly created* criteria going forward — it is not silently applied to legacy
-> rows, which would otherwise wrongly become selectable for Build/Test/Run/Deploy.
+> data migration backfills `gates: ["select"]` on all existing criteria whose
+> `gates` field is absent, empty (`[]`), or null (see §4.2.1). Combined with the
+> portal requiring an explicit selection, the "absent/empty = all gates" fallback
+> is never produced by normal flows — it remains only as a defensive default in
+> the shared compatibility helpers.
 
 ```ts
 export interface CriteriaConfig {
@@ -168,12 +172,13 @@ import { batchUpdate } from "../batch-update.js";
 
 export class BackfillCriteriaGates implements MigrationInterface {
   async up(db: Db): Promise<void> {
-    // Any criterion without a `gates` field predates the gates feature and was
-    // written for the Select gate — pin it to ["select"]. New criteria created
-    // after this migration may legitimately omit `gates` (= all gates).
+    // Any criterion without an explicit, non-empty `gates` field predates the
+    // gates feature (or was stored empty/null) and was written for the Select
+    // gate — pin it to ["select"]. The portal always writes an explicit list,
+    // so this eliminates the empty-gate case for all stored data.
     await batchUpdate(
       db.collection("criteria"),
-      { gates: { $exists: false } },
+      { $or: [{ gates: { $exists: false } }, { gates: { $size: 0 } }, { gates: null }] },
       { $set: { gates: ["select"] } },
       "[018] backfill criteria gates → [select]",
     );
@@ -197,8 +202,8 @@ Notes:
 - Uses the existing CosmosDB-safe `batchUpdate` helper (429-retry batching),
   consistent with prior backfill migrations (e.g. `015`, `005`).
 - **Soft-deleted criteria** (`deletedAt` set) are included in the backfill so
-  they remain consistent if later restored — the filter is purely
-  `gates: { $exists: false }`.
+  they remain consistent if later restored — the filter matches any row whose
+  `gates` is absent, empty, or null.
 - The YAML seed files under `config/criteria/` that should be Select-only must
   also declare `gates: [select]` (or be updated in bulk) so a fresh
   seed/import matches the migrated state; criteria intended for other gates
@@ -215,12 +220,28 @@ selected criteria and the iteration budget:
 ```ts
 export interface GateConfig {
   gate: GateId;
-  promptId: string;        // typed prompt entity (prompt.type must === gate); for
-                           // the Select gate this is the request's task prompt
+  promptId?: string;       // resolved typed prompt entity (prompt.type must === gate);
+                           // for the Select gate this is the request's task prompt
+  promptText?: string;     // INPUT-ONLY free text; materialized server-side at submit
+                           // into a typed prompt via findOrCreate(text, gate). Stripped
+                           // after resolution; persisted gates always carry promptId.
   criteria: string[];      // criterion ids for THIS gate; ≥1 unless maxIterations === 1
   maxIterations?: number;  // per-gate budget; falls back to request default
 }
 ```
+
+**Free-text gate prompts (submit boundary).** A gate prompt may be supplied either
+as a saved `promptId` **or** as free `promptText`, mirroring how the request's task
+prompt is submitted as prose and content-addressed server-side. At submit, the API
+resolves each non-Select gate's `promptText` (when non-empty) into a typed prompt via
+`taskPromptStore.findOrCreate(text.trim(), gate)` and sets `promptId` to the result;
+`promptText` wins when both are present (edited text supersedes a stale picked id) and
+is stripped from the resolved config. This keeps the **persisted/runtime contract
+unchanged** — gates always carry a resolved `promptId`, and the worker resolves
+`promptId → text` at run time. The portal therefore renders an **editable textarea**
+per gate (seeded by an optional library picker) instead of a read-only prompt hash;
+newly typed prompts are added to the prompt library automatically. The CLI `--gates`
+JSON accepts `promptId` **or** `promptText` for non-Select gates for parity.
 
 `CreateRequestInput` / `RequestDocument` gain `gates?: GateConfig[]`.
 
@@ -245,8 +266,9 @@ gates = [{ gate: "select",
 - `scenario.criteria` + request-level `maxIterations` + `taskPromptId` are
   retained and continue to mean "the Select gate". No migration of existing
   requests required.
-- **Every configured gate must reference a prompt** (`promptId`) whose
-  `type` equals the gate (§4.5). For Select this is the request's task prompt.
+- **Every configured gate must reference a prompt** — either a resolved `promptId`
+  whose `type` equals the gate, or free `promptText` that the API materializes into
+  one (§4.5). For Select this is the request's task prompt.
 - **Criteria count rule (per gate, mirrors today).** A gate must have **at least one** criterion unless its `maxIterations` is 1. A gate with `maxIterations === 1`
   and no criteria runs as a **pass-through**: the agent acts once for that phase
   and the gate auto-passes with no judge evaluation — exactly the current
@@ -292,6 +314,12 @@ Key decisions:
   gates are **skipped** (you can't meaningfully Test a project that won't Build).
   This is recorded so the UI can show "Build gate failed; Test/Run/Deploy skipped".
 - **Per-gate iteration budget.** Each gate consumes its own `maxIterations`.
+- **Global iteration numbering.** Iterations are numbered globally and
+  continuously across all gates: the judge labels them `iterationOffset + 1 ..`
+  where `iterationOffset` accumulates the actual turns run in earlier gates, so a
+  run with Select (2 iters), Build (1), Test (3) reads Iteration 1–6 end to end.
+  Both Portal (Turns/Logs/Conversation) and CLI display the global number
+  directly — no per-gate restart.
 - **Unconfigured gate = skipped** (not in the `gates` array). A *configured*
   gate with no criteria is only valid at `maxIterations === 1` and runs once as
   a pass-through (auto-pass, no judge) — see §4.3.
@@ -419,10 +447,20 @@ Per the CLI ↔ Portal parity rule, both must expose gate selection.
 - **Prompt editor** (Portal + CLI): prompts are now typed; allow creating/editing
   prompts per gate `type` and seeding default Build/Test/Run/Deploy prompts.
 - **Submit Run** (Portal `/runs/new` + CLI submit): a per-gate section. For each
-  gate: a **prompt** picker (filtered to prompts of that gate's `type`; Select
-  shows the task prompt), a criteria multiselect **filtered to compatible criteria**, and a `maxIterations` input. Gates left unconfigured are omitted
-  (skipped).
+  gate: an **editable prompt textarea** (free text content-addressed on submit;
+  optionally seeded from a library picker filtered to prompts of that gate's `type`;
+  Select uses the task prompt), a criteria multiselect **filtered to compatible
+  criteria** with an inline **New…** action that defaults the new criterion's gate
+  compatibility to that gate, and a `maxIterations` input. Gates left unconfigured are
+  omitted (skipped). The portal shows no prompt hash; a hint notes that new prompts are
+  added to the library automatically (mirroring the task prompt).
     - Follows the Portal UX v2 patterns (explicit composition, action counts).
+    - **Gate compatibility selection is always explicit.** The picker has no "All
+      gates" shortcut — the user must select at least one gate, and an empty
+      selection is not emitted. When creating a criterion inline from a gate's
+      **New…** action, that originating gate is **locked** (rendered checked and
+      disabled so it cannot be unchecked), and an **Unselect all** convenience
+      reduces the selection to just the locked gate.
 - **Run detail** (Portal + CLI): group turns by gate; show per-gate status and
   the "downstream skipped" state. On the Portal **Logs** tab, the criteria DAG is
   shown per gate behind a gate tab strip (one tab per configured gate, labelled with
@@ -439,7 +477,7 @@ Per the CLI ↔ Portal parity rule, both must expose gate selection.
 | Concern | Behaviour |
 | --- | --- |
 | Existing requests (no `gates`) | Normalised to a single Select gate from `scenario.criteria` + `maxIterations` + `taskPromptId`. Identical behaviour. |
-| Existing criteria (no `gates`) | Backfilled to `["select"]` by migration 018 (§4.2.1), so they stay selectable only for the Select gate. Only *new* criteria default to all gates when `gates` is omitted. |
+| Existing criteria (no `gates`) | Backfilled to `["select"]` by migration 018 (§4.2.1) — which matches absent, empty (`[]`), and null — so they stay selectable only for the Select gate. The portal always writes an explicit, non-empty list, so the empty=all fallback is never produced by normal flows. |
 | Existing prompts (no `type`) | Backfilled to `type: "select"` (field-only, no id rewrite — §4.7). `select` prompts keep text-only hashing; only build/test/run/deploy namespace `type` into the id. |
 | Judge requests without `gate`/`toolCallsUrl` | Treated as Select gate; `read_tool_outputs` returns empty. |
 | YAML scenarios/criteria | New fields are optional; old files load unchanged. |
