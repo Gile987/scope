@@ -594,7 +594,6 @@ export function SubmitRun() {
     occurrences > 1 ? `×${occurrences} runs` : "",
     worker,
     model || "",
-    selectedAgentVersion ? `v${selectedAgentVersion}` : "",
     selectedMcpServers.length > 0 ? `${selectedMcpServers.length} MCP` : "",
     selectedSkills.length > 0 ? `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"}` : "",
     selectedExtensions.length > 0 ? `${selectedExtensions.length} ext` : "",
@@ -898,14 +897,22 @@ export function SubmitRun() {
                 <Label htmlFor="agentVersion">Agent version *</Label>
                 <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion} disabled={profileLocked}>
                   <SelectTrigger id="agentVersion">
-                    <SelectValue placeholder="Select version" />
+                    <SelectValue placeholder="Latest" />
                   </SelectTrigger>
                   <SelectContent>
-                    {sortedVersions.map((v, i) => (
-                      <SelectItem key={v.agentVersion} value={v.agentVersion}>
-                        {v.agentVersion}{i === 0 ? " (latest)" : ""}
-                      </SelectItem>
-                    ))}
+                    {/*
+                     * Only the latest agent version is exposed to the user
+                     * (per growth-ecosystems/scope-project#124). The value
+                     * uses the current selection when present so that
+                     * profile-pinned versions still resolve in the trigger;
+                     * the label is intentionally version-number-free.
+                     */}
+                    <SelectItem
+                      key={selectedAgentVersion || sortedVersions[0].agentVersion}
+                      value={selectedAgentVersion || sortedVersions[0].agentVersion}
+                    >
+                      Latest
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
