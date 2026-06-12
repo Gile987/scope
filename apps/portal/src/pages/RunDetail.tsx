@@ -30,17 +30,16 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
 import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X } from "lucide-react";
-import { formatDate, formatId, formatDuration } from "@/lib/utils";
+import { formatDate, formatId, formatDuration, cn } from "@/lib/utils";
 import {
   GATE_METADATA,
   GATE_ORDER,
-  buildGateIterationScoper,
   orderGates,
   type GateId,
   type GateConfig,
   type GateRunSummary,
 } from "@/lib/gates";
-import { useState, useMemo, type ReactNode } from "react";
+import { useState, useMemo, useEffect, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { RunState, LogEvent } from "@/types";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
@@ -76,12 +75,37 @@ function ResourceLinks({ label, items, hrefBase }: { label: string; items: strin
   );
 }
 
-function GateStatusBadge({ summary }: { summary?: GateRunSummary }) {
-  if (!summary) return <Badge variant="outline">Not configured</Badge>;
-  if (summary.status === "passed") return <Badge variant="success">Passed · {summary.iterations}</Badge>;
-  if (summary.status === "failed") return <Badge variant="destructive">Failed · {summary.iterations}</Badge>;
-  return <Badge variant="secondary">Skipped</Badge>;
+type GatePhase = "running" | "pending" | "skipped";
+
+function GateStatusBadge({ summary, phase }: { summary?: GateRunSummary; phase?: GatePhase }) {
+  if (summary) {
+    if (summary.status === "passed") return <Badge variant="success">Passed · {summary.iterations}</Badge>;
+    if (summary.status === "failed") return <Badge variant="destructive">Failed · {summary.iterations}</Badge>;
+    return <Badge variant="secondary">Skipped</Badge>;
+  }
+  if (phase === "running")
+    return (
+      <Badge variant="outline" className="gap-1">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Running…
+      </Badge>
+    );
+  if (phase === "pending") return <Badge variant="outline" className="text-muted-foreground">Pending</Badge>;
+  if (phase === "skipped") return <Badge variant="secondary">Skipped</Badge>;
+  return <Badge variant="outline">Not configured</Badge>;
 }
+
+/**
+ * Per-gate accent classes for the Turns-tab phase containers. Literal Tailwind
+ * class names (no dynamic concatenation) so they survive the purge step.
+ */
+const GATE_ACCENT: Record<GateId, { spine: string; chip: string; tint: string }> = {
+  select: { spine: "bg-indigo-500", chip: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40", tint: "from-indigo-500/10" },
+  build: { spine: "bg-sky-500", chip: "bg-sky-500/20 text-sky-300 border-sky-500/40", tint: "from-sky-500/10" },
+  test: { spine: "bg-purple-500", chip: "bg-purple-500/20 text-purple-300 border-purple-500/40", tint: "from-purple-500/10" },
+  run: { spine: "bg-teal-500", chip: "bg-teal-500/20 text-teal-300 border-teal-500/40", tint: "from-teal-500/10" },
+  deploy: { spine: "bg-rose-500", chip: "bg-rose-500/20 text-rose-300 border-rose-500/40", tint: "from-rose-500/10" },
+};
 
 function skippedSummaryText(summaries: GateRunSummary[]): string | null {
   const failed = summaries.find((summary) => summary.status === "failed");
@@ -110,21 +134,45 @@ function CriteriaGateTabs({
   gates,
   gateSummaryById,
   logs,
+  isStreaming,
 }: {
   gates: Array<Pick<GateConfig, "gate" | "criteria">>;
   gateSummaryById: Map<GateId, GateRunSummary>;
   logs: LogEvent[];
+  /** True while the run is actively streaming logs — drives auto-follow of the live gate. */
+  isStreaming?: boolean;
 }) {
-  // Default active gate follows the latest gate that has a summary (most recent in
-  // the pipeline) until the user picks one explicitly.
+  const gateSet = useMemo(() => new Set(gates.map((g) => g.gate)), [gates]);
+
+  // The gate currently being evaluated in the live log stream: the most recent
+  // log event carrying a `gate` that belongs to a configured gate.
+  const latestLogGate = useMemo<GateId | undefined>(() => {
+    for (let i = logs.length - 1; i >= 0; i--) {
+      const g = logs[i]?.data?.gate as GateId | undefined;
+      if (g && gateSet.has(g)) return g;
+    }
+    return undefined;
+  }, [logs, gateSet]);
+
+  // Default active gate follows the live log gate first (most current), then the
+  // latest gate that has a summary, until the user picks one explicitly.
   const defaultGate = useMemo<GateId | undefined>(() => {
+    if (latestLogGate) return latestLogGate;
     for (let i = gates.length - 1; i >= 0; i--) {
       if (gateSummaryById.get(gates[i].gate)) return gates[i].gate;
     }
     return gates[0]?.gate;
-  }, [gates, gateSummaryById]);
+  }, [gates, gateSummaryById, latestLogGate]);
 
   const [selected, setSelected] = useState<GateId | undefined>(undefined);
+
+  // While streaming, keep the selected tab in sync with the live log gate. Keyed
+  // on the gate value so it only moves on a gate transition — manual selection
+  // sticks within a stable gate and is overridden only when the pipeline advances.
+  useEffect(() => {
+    if (isStreaming && latestLogGate) setSelected(latestLogGate);
+  }, [isStreaming, latestLogGate]);
+
   const activeGate = selected ?? defaultGate;
 
   if (gates.length === 0) return null;
@@ -454,7 +502,18 @@ export function RunDetail() {
 
   const gateSummaries = (run.gateSummaries ?? []) as GateRunSummary[];
   const gateSummaryById = new Map(gateSummaries.map((summary) => [summary.gate, summary]));
-  const hasGateData = gateSummaries.length > 0 || (activeRun?.turns ?? []).some((turn) => turn.gate);
+  // Run is still in flight (not yet terminal). Used to label configured gates that
+  // haven't produced a summary as "Pending"/"Running" rather than "Skipped".
+  const isRunActive = activeRun?.status !== "done";
+  // Gates execute sequentially in GATE_ORDER and only get a summary once they finish,
+  // so the earliest configured gate without a summary is the one currently executing.
+  const currentGate = GATE_ORDER.find(
+    (gate) => !gateSummaryById.get(gate) && (run.gates ?? []).some((config) => config.gate === gate),
+  );
+  const hasGateData =
+    gateSummaries.length > 0 ||
+    (run.gates?.length ?? 0) > 0 ||
+    (activeRun?.turns ?? []).some((turn) => turn.gate);
   const turnGroups = GATE_ORDER
    .map((gate) => ({
      gate,
@@ -525,10 +584,17 @@ export function RunDetail() {
                     const summary = gateSummaryById.get(gate);
                     const configured = summary || run.gates?.some((config) => config.gate === gate);
                     if (!configured) return null;
+                    const phase: GatePhase | undefined = summary
+                      ? undefined
+                      : !isRunActive
+                        ? "skipped"
+                        : gate === currentGate && activeRun?.status === "processing"
+                          ? "running"
+                          : "pending";
                     return (
                       <div key={gate} className="flex items-center gap-1.5">
                         <span className="text-xs font-medium">{GATE_METADATA[gate].label}</span>
-                        <GateStatusBadge summary={summary} />
+                        <GateStatusBadge summary={summary} phase={phase} />
                       </div>
                     );
                   })}
@@ -781,7 +847,7 @@ export function RunDetail() {
 
       {/* Tabs */}
       <Tabs
-        value={tab || (activeRun?.turns && activeRun?.turns.length > 0 ? "turns" : "logs")}
+        value={tab || (activeRun?.status === "done" && activeRun?.turns && activeRun.turns.length > 0 ? "turns" : "logs")}
         onValueChange={(value) => navigate(`/runs/${id}/${value}${selectedRunId ? `?runId=${selectedRunId}` : ""}`)}
       >
         <TabsList>
@@ -804,19 +870,44 @@ export function RunDetail() {
         {/* Turns tab */}
         <TabsContent value="turns" className="mt-4">
           {hasGateData && turnGroups.length > 0 ? (
-            <div className="space-y-5">
-              {turnGroups.map(({ gate, turns, summary }) => (
-                <section key={gate} className="space-y-3">
-                  <div className="flex items-center justify-between rounded-md border bg-muted/30 px-4 py-2">
-                    <div>
-                      <h3 className="font-medium">{GATE_METADATA[gate].label}</h3>
-                      <p className="text-xs text-muted-foreground">{GATE_METADATA[gate].description}</p>
+            <div className="space-y-4">
+              {turnGroups.map(({ gate, turns, summary }) => {
+                const accent = GATE_ACCENT[gate];
+                const phaseNumber = GATE_ORDER.indexOf(gate) + 1;
+                const phase: GatePhase | undefined = summary
+                  ? undefined
+                  : !isRunActive
+                    ? "skipped"
+                    : gate === currentGate && activeRun?.status === "processing"
+                      ? "running"
+                      : "pending";
+                return (
+                  <section key={gate} className="relative overflow-hidden rounded-xl border bg-card">
+                    <span className={cn("absolute inset-y-0 left-0 w-1", accent.spine)} aria-hidden />
+                    <div className={cn("flex items-center gap-3 bg-gradient-to-r to-transparent py-3 pl-5 pr-4", accent.tint)}>
+                      <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-md border text-sm font-bold", accent.chip)}>
+                        {phaseNumber}
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="font-semibold leading-tight">{GATE_METADATA[gate].label}</h3>
+                        <p className="text-xs text-muted-foreground">{GATE_METADATA[gate].description}</p>
+                      </div>
+                      <div className="ml-auto">
+                        <GateStatusBadge summary={summary} phase={phase} />
+                      </div>
                     </div>
-                    <GateStatusBadge summary={summary} />
-                  </div>
-                  <TurnTimeline turns={turns} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
-                </section>
-              ))}
+                    <div className="py-3 pl-5 pr-4">
+                      {turns.length > 0 ? (
+                        <TurnTimeline turns={turns} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
+                      ) : (
+                        <p className="py-1 text-sm italic text-muted-foreground">
+                          {phase === "running" ? "Running — first iteration in progress…" : phase === "pending" ? "Waiting for earlier gates to finish…" : "No iterations recorded."}
+                        </p>
+                      )}
+                    </div>
+                  </section>
+                );
+              })}
             </div>
           ) : (
             <TurnTimeline turns={activeRun?.turns ?? []} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
@@ -871,6 +962,7 @@ export function RunDetail() {
               gates={criteriaGates}
               gateSummaryById={gateSummaryById}
               logs={effectiveLogs}
+              isStreaming={effectiveIsConnected}
             />
           )}
           <LogViewer
@@ -1406,7 +1498,6 @@ export function RunDetail() {
 function HarIterationTabs({ runId, turns, attemptRunId }: { runId: string; turns: { iteration: number; gate?: GateId; harUrl?: string }[]; attemptRunId?: string }) {
   const turnsWithHar = turns.filter(t => t.harUrl);
   const [activeIteration, setActiveIteration] = useState(turnsWithHar[0]?.iteration);
-  const scopeIteration = useMemo(() => buildGateIterationScoper(turns), [turns]);
 
   if (turnsWithHar.length === 0) return null;
 
@@ -1426,7 +1517,7 @@ function HarIterationTabs({ runId, turns, attemptRunId }: { runId: string; turns
             className="font-mono text-xs"
             onClick={() => setActiveIteration(t.iteration)}
           >
-            {t.gate ? `${GATE_METADATA[t.gate].label} · ` : ""}Iteration {scopeIteration(t.gate, t.iteration)}
+            {t.gate ? `${GATE_METADATA[t.gate].label} · ` : ""}Iteration {t.iteration}
           </Button>
         ))}
       </div>
@@ -1445,7 +1536,6 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls, attemptRunId }: { ru
   const turnsWithVideo = turns.filter(t => t.videoUrls && t.videoUrls.length > 0);
   const hasSetupVideo = setupVideoUrls && setupVideoUrls.length > 0;
   const [activeTab, setActiveTab] = useState<string>(hasSetupVideo ? "setup" : String(turnsWithVideo[0]?.iteration));
-  const scopeIteration = useMemo(() => buildGateIterationScoper(turns), [turns]);
 
   if (turnsWithVideo.length === 0 && !hasSetupVideo) return null;
 
@@ -1476,7 +1566,7 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls, attemptRunId }: { ru
               className="font-mono text-xs"
               onClick={() => setActiveTab(String(t.iteration))}
             >
-              {t.gate ? `${GATE_METADATA[t.gate].label} · ` : ""}Iteration {scopeIteration(t.gate, t.iteration)}
+              {t.gate ? `${GATE_METADATA[t.gate].label} · ` : ""}Iteration {t.iteration}
             </Button>
           ))}
         </div>
@@ -1529,13 +1619,20 @@ function ExpandableCell({ children, className = "" }: { children: React.ReactNod
 
 function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; turns?: ConversationTurn[]; harUrl?: string; attemptRunId?: string }) {
   const { allToolCalls, isLoading } = useAllTurnsToolCalls(runId, turns, harUrl, attemptRunId);
-  const scopeIteration = useMemo(() => buildGateIterationScoper(turns ?? []), [turns]);
 
   // Group by tool name for summary
   const byName = new Map<string, number>();
   for (const tc of allToolCalls) {
     byName.set(tc.name, (byName.get(tc.name) ?? 0) + 1);
   }
+
+  // Map each iteration to its gate so the table can show which phase a tool call
+  // ran in. Only shown when the run actually has gated turns.
+  const iterationGate = new Map<number, GateId>();
+  for (const t of turns ?? []) {
+    if (t.gate) iterationGate.set(t.iteration, t.gate);
+  }
+  const showGate = iterationGate.size > 0;
 
   const harDownloadUrl = attemptRunId ? api.runHarUrl(runId, attemptRunId) : api.harUrl(runId);
   const harIterationUrl = (iteration: number) => attemptRunId ? api.runHarUrl(runId, attemptRunId, iteration) : api.harUrl(runId, iteration);
@@ -1590,6 +1687,7 @@ function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; t
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/50">
+                      {showGate && <th className="text-left p-3 font-medium">Gate</th>}
                       <th className="text-left p-3 font-medium">Iteration</th>
                       <th className="text-left p-3 font-medium">Tool</th>
                       <th className="text-left p-3 font-medium">Arguments</th>
@@ -1598,8 +1696,22 @@ function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; t
                     </tr>
                   </thead>
                   <tbody>
-                    {allToolCalls.map((tc, idx) => (
+                    {allToolCalls.map((tc, idx) => {
+                      const gate = tc._iteration != null ? iterationGate.get(tc._iteration) : undefined;
+                      return (
                       <tr key={tc.id || idx} className="border-b last:border-0">
+                        {showGate && (
+                          <td className="p-3">
+                            {gate ? (
+                              <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs">
+                                <span className={cn("h-2 w-2 rounded-full", GATE_ACCENT[gate].spine)} aria-hidden />
+                                {GATE_METADATA[gate].label}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">–</span>
+                            )}
+                          </td>
+                        )}
                         <td className="p-3 text-xs text-muted-foreground">
                           {tc._iteration ?? "–"}
                         </td>
@@ -1640,7 +1752,8 @@ function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; t
                           {tc.timestamp ? new Date(tc.timestamp).toLocaleTimeString() : "–"}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1661,7 +1774,7 @@ function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; t
                     onClick={() => window.open(harIterationUrl(t.iteration), "_blank")}
                   >
                     <Download className="h-3 w-3" />
-                    {t.gate ? `${GATE_METADATA[t.gate].label} · ` : ""}Iteration {scopeIteration(t.gate, t.iteration)}
+                    {t.gate ? `${GATE_METADATA[t.gate].label} · ` : ""}Iteration {t.iteration}
                   </Button>
                 ))}
               </div>
