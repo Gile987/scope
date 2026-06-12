@@ -12,6 +12,10 @@
 #
 # This crate is wired in via [patch.crates-io] in ../../Cargo.toml. The only
 # delta from the upstream 2.12.0 source is the rand version requirement below.
+#
+# TODO(tech-debt): remove this vendored crate (and the [patch.crates-io] entry
+# in ../../Cargo.toml) once the gateway migrates off the azure_core /
+# azure_storage{,_blobs} 0.21 generation, which drops http-types entirely.
 
 [package]
 edition = "2018"
