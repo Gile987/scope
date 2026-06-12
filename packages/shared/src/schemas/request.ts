@@ -37,7 +37,7 @@ export const CriterionResultSchema = z
 export const ConversationTurnSchema = z
   .object({
     iteration: z.number(),
-    codingAgentResponse: z.string(),
+    codingAgentResponse: z.string().optional(),
     judgeFeedback: z.string(),
     snapshotUrl: z.string(),
     passed: z.boolean(),
@@ -55,9 +55,13 @@ export const ConversationTurnSchema = z
       response: z.string().optional(),
       timestamp: z.string().optional(),
     })).optional(),
+    toolCallsUrl: z.string().optional(),
+    toolCallCount: z.number().optional(),
     aiCallCount: z.number().optional(),
     rawChatUrl: z.string().optional(),
     rawChatFormat: z.string().optional(),
+    chatResultUrl: z.string().optional(),
+    chatResultFormat: z.string().optional(),
   })
   .openapi("ConversationTurn");
 
@@ -77,7 +81,8 @@ export const RequestOutcomeSchema = z.enum([
 
 export const VALID_WORKERS = [
   "coder-acp-claude-code",
-  "coder-acp-copilot"
+  "coder-acp-copilot",
+  "coder-acp-copilot-windows"
 ] as const;
 
 export const WorkerTypeSchema = z.enum(VALID_WORKERS);
@@ -86,13 +91,15 @@ export const CreateRequestInputSchema = z
   .object({
     scenario: ScenarioSchema,
     model: z.string().optional(),
-    maxIterations: z.number().optional(),
+    reasoningEffort: z.string().optional(),
+    maxIterations: z.number().int().min(1).max(50).optional(),
     personaInstructions: z.string().optional(),
     persona: PersonaSchema.optional(),
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
     extensions: z.array(z.string()).optional(),
     profileId: z.string().optional(),
+    profileVariations: z.array(z.string()).optional(),
     priority: z.number().int().optional(),
   })
   .openapi("CreateRequestInput");
@@ -103,6 +110,7 @@ export const RequestResponseSchema = z
     scenario: ScenarioSchema,
     workerType: z.string(),
     model: z.string().optional(),
+    reasoningEffort: z.string().optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     maxIterations: z.number().optional(),
@@ -159,6 +167,11 @@ export const RunStateSchema = z
       release: z.string(),
       arch: z.string(),
     }).optional(),
+    lastHeartbeatAt: z.coerce.date().optional(),
+    worker: z.object({
+      instanceId: z.string(),
+      podName: z.string().optional(),
+    }).optional(),
     harUrl: z.string().optional(),
     videoUrls: z.array(z.string()).optional(),
     setupVideoUrls: z.array(z.string()).optional(),
@@ -193,7 +206,15 @@ export const ListRequestsQuerySchema = z
     limit: z.coerce.number().int().min(1).max(100).optional(),
     after: z.string().optional(),
     before: z.string().optional(),
+    last: z.enum(["true", "false"]).optional(),
     sortBy: z.enum(["createdAt", "priority"]).optional(),
+    // Iteration-count filters. `turns` matches the actual number of turns
+    // executed (size of run.turns); `maxIterations` matches the configured
+    // upper bound. Each pairs with an operator (default "eq").
+    turns: z.coerce.number().int().min(0).optional(),
+    turnsOp: z.enum(["eq", "gte", "lte"]).optional(),
+    maxIterations: z.coerce.number().int().min(0).optional(),
+    maxIterationsOp: z.enum(["eq", "gte", "lte"]).optional(),
   })
   .openapi("ListRequestsQuery");
 
@@ -277,6 +298,7 @@ export const BulkResubmitInputSchema = z
         profileId: z.string().nullable().optional(),
         workerType: z.string().optional(),
         model: z.string().nullable().optional(),
+        reasoningEffort: z.string().nullable().optional(),
         maxIterations: z.number().nullable().optional(),
         mcpServers: z.array(z.string()).nullable().optional(),
         skillRevisions: z.array(z.string()).nullable().optional(),

@@ -15,7 +15,7 @@ async fn connect_without_session_passthrough() {
 
     // Verify no HAR data (no session was ever started)
     let resp = api_client
-        .get(gw.api_url("/api/v1/sessions/nonexistent/har"))
+        .get(gw.api_url("/api/v1/sessions/nonexistent/har?iteration=1"))
         .send()
         .await
         .unwrap();
@@ -32,14 +32,14 @@ async fn nonmatching_url_passthrough() {
     let api_client = reqwest::Client::new();
 
     // Create a session
+    let session_id = uuid::Uuid::new_v4().to_string();
     let resp = api_client
         .post(gw.api_url("/api/v1/sessions"))
-        .json(&serde_json::json!({}))
+        .json(&serde_json::json!({"id": session_id}))
         .send()
         .await
         .unwrap();
-    let body: serde_json::Value = resp.json().await.unwrap();
-    let session_id = body["id"].as_str().unwrap().to_string();
+    assert_eq!(resp.status(), 201);
 
     // Stop session
     api_client
@@ -50,7 +50,7 @@ async fn nonmatching_url_passthrough() {
 
     // HAR should be empty — no matching URLs were intercepted
     let resp = api_client
-        .get(gw.api_url(&format!("/api/v1/sessions/{}/har", session_id)))
+        .get(gw.api_url(&format!("/api/v1/sessions/{}/har?iteration=1", session_id)))
         .send()
         .await
         .unwrap();

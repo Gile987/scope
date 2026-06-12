@@ -17,6 +17,14 @@ const ModelSyncRequestSchema = z.object({
       providerAvailableFrom: z.string().optional(),
       providerEndOfLife: z.string().optional(),
       metadata: z.record(z.string(), z.unknown()).optional(),
+      capabilities: z.object({
+        reasoningEffort: z.array(z.string()).optional(),
+        toolCalls: z.boolean().optional(),
+        vision: z.boolean().optional(),
+        streaming: z.boolean().optional(),
+        adaptiveThinking: z.boolean().optional(),
+        maxThinkingBudget: z.number().optional(),
+      }).optional(),
     }),
   ),
   scannedAt: z.string(),
@@ -91,9 +99,6 @@ apiRoute(ctx.app, ctx.registry, {
 
       if (existing) {
         const updateFields: Record<string, unknown> = { lastSeenAt: now };
-        if (existing.disappearedAt) {
-          updateFields.disappearedAt = undefined;
-        }
         if (model.providerAvailableFrom) {
           updateFields.providerAvailableFrom = new Date(model.providerAvailableFrom);
         }
@@ -102,6 +107,9 @@ apiRoute(ctx.app, ctx.registry, {
         }
         if (model.metadata) {
           updateFields.metadata = model.metadata;
+        }
+        if (model.capabilities) {
+          updateFields.capabilities = model.capabilities;
         }
 
         const unsetFields: Record<string, "" | true | 1> = {};
@@ -132,6 +140,7 @@ apiRoute(ctx.app, ctx.registry, {
             ? { providerEndOfLife: new Date(model.providerEndOfLife) }
             : {}),
           ...(model.metadata ? { metadata: model.metadata } : {}),
+          ...(model.capabilities ? { capabilities: model.capabilities } : {}),
         };
         await ctx.modelCollection.insertOne(doc);
         added.push(model.id);

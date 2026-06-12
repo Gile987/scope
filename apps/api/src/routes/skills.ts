@@ -10,6 +10,7 @@ import {
   SkillResponseSchema,
   SkillRevisionResponseSchema,
   SkillSearchResultSchema,
+  SkillDiscoveryResultSchema,
 } from "shared";
 import type { SkillDocument, SkillSearchResult } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
@@ -20,6 +21,33 @@ export function registerSkillsRoutes(ctx: RouteContext): void {
 // =====================================================================
 // Skills API
 // =====================================================================
+
+// Upload a skill archive to blob storage. Shared by manual /resolve and
+// the auto-resolve triggered after a skill is created or imported.
+const uploadSkillArchive = async (archiveName: string, data: Buffer): Promise<string> => {
+  if (!ctx.storageConnectionString && !ctx.storageAccountName) {
+    throw new Error("Blob storage not configured — cannot store skill archives");
+  }
+
+  let blobServiceClient: BlobServiceClient;
+  if (ctx.storageConnectionString) {
+    blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
+  } else {
+    const credential = new DefaultAzureCredential();
+    blobServiceClient = new BlobServiceClient(
+      `https://${ctx.storageAccountName}.blob.core.windows.net`,
+      credential
+    );
+  }
+
+  const containerClient = blobServiceClient.getContainerClient("skill-archives");
+  await containerClient.createIfNotExists();
+  const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
+  await blockBlobClient.upload(data, data.length, {
+    blobHTTPHeaders: { blobContentType: "application/gzip" },
+  });
+  return blockBlobClient.url;
+};
 
 // List all skills (with optional ?q= text search)
 apiRoute(ctx.app, ctx.registry, {
@@ -186,6 +214,84 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
+// Discover skills available in a GitHub repo by scanning well-known directories.
+// MUST be defined before /:id(*) to avoid being caught by the wildcard.
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/skills/discover",
+  tags: ["Skills"],
+  summary: "Discover skills in a GitHub repository",
+  query: z.object({ source: z.string() }),
+  response: z.array(SkillDiscoveryResultSchema),
+  errorResponses: {
+    400: { description: "Missing or malformed source parameter" },
+    404: { description: "Repository not found" },
+    502: { description: "GitHub API error" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const source = (req.query.source as string | undefined)?.trim();
+      if (!source) {
+        res.status(400).json({ error: "Query parameter 'source' is required (e.g. 'owner/repo')" });
+        return;
+      }
+      if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source)) {
+        res.status(400).json({ error: "source must be in the form 'owner/repo'" });
+        return;
+      }
+
+      try {
+        const results = await ctx.skillResolver.discoverSkills(source);
+
+        // Enrich with library status: which skills are already imported, and
+        // whether the most recent stored revision lags behind the current
+        // upstream commit on `skillPath`. This drives the wizard's 3-state UI
+        // (New / Up to date / Update available).
+        const existingDocs = await ctx.skillCollection
+          .find({ source, deletedAt: { $exists: false } }, { projection: { skillName: 1 } })
+          .toArray();
+        const existingNames = new Set(existingDocs.map((d) => d.skillName));
+
+        const enriched = await Promise.all(
+          results.map(async (r) => {
+            if (!existingNames.has(r.skillName)) {
+              return { ...r, existsInLibrary: false };
+            }
+            // Both calls are independent — run in parallel.
+            const [latestRevs, upstreamSha] = await Promise.all([
+              ctx.skillRevisionStore.listBySkill(source, r.skillName, { limit: 1 }),
+              ctx.skillResolver.getLatestCommitSha(source, r.skillPath).catch(() => undefined),
+            ]);
+            const latest = latestRevs[0];
+            const currentSha = latest?.commitHash;
+            const updateAvailable =
+              !!upstreamSha && !!currentSha && upstreamSha !== currentSha;
+            return {
+              ...r,
+              existsInLibrary: true,
+              ...(currentSha ? { currentRevisionCommitSha: currentSha } : {}),
+              ...(upstreamSha ? { latestUpstreamCommitSha: upstreamSha } : {}),
+              updateAvailable,
+              ...(latest ? { lastImportedAt: latest.resolvedAt.toISOString() } : {}),
+            };
+          })
+        );
+
+        res.json(enriched);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/not found/i.test(message)) {
+          res.status(404).json({ error: message });
+          return;
+        }
+        res.status(502).json({ error: `GitHub discovery failed: ${message}` });
+      }
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
 // List skill revisions for a given skill slug (source/skillName)
 // NOTE: Must be before the generic GET /:id(*) to avoid the greedy wildcard matching "slug/revisions" as the id.
 apiRoute(ctx.app, ctx.registry, {
@@ -276,6 +382,8 @@ apiRoute(ctx.app, ctx.registry, {
       const now = new Date();
       const existing = await ctx.skillCollection.findOne({ _id });
 
+      let responseSkill: SkillDocument & { id: string };
+      let status = 200;
       if (existing) {
         // Upsert: un-delete if soft-deleted, update fields
         await ctx.skillCollection.updateOne(
@@ -293,7 +401,7 @@ apiRoute(ctx.app, ctx.registry, {
           }
         );
         const updated = await ctx.skillCollection.findOne({ _id });
-        res.json({ ...updated, id: updated!._id });
+        responseSkill = { ...(updated as SkillDocument), id: updated!._id };
       } else {
         const skillDoc: SkillDocument = {
           _id,
@@ -305,8 +413,21 @@ apiRoute(ctx.app, ctx.registry, {
           createdAt: now,
         };
         await ctx.skillCollection.insertOne(skillDoc as any);
-        res.status(201).json({ ...skillDoc, id: skillDoc._id });
+        responseSkill = { ...skillDoc, id: skillDoc._id };
+        status = 201;
       }
+
+      // Auto-resolve from GitHub so the user doesn't need to click "Resolve".
+      // Failures are non-fatal: the skill is already saved and the user can
+      // retry resolution manually via POST /skills/:id/resolve.
+      try {
+        await ctx.skillResolver.resolve(source, skillName, ctx.skillRevisionStore, uploadSkillArchive);
+      } catch (resolveError) {
+        const message = resolveError instanceof Error ? resolveError.message : String(resolveError);
+        console.warn(`Auto-resolve failed for skill ${_id}: ${message}`);
+      }
+
+      res.status(status).json(responseSkill);
     } catch (error) {
       next(error);
     }
@@ -506,33 +627,7 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
 
-      // Upload archive to blob storage
-      const uploadArchive = async (archiveName: string, data: Buffer): Promise<string> => {
-        if (!ctx.storageConnectionString && !ctx.storageAccountName) {
-          throw new Error("Blob storage not configured — cannot store skill archives");
-        }
-
-        let blobServiceClient: BlobServiceClient;
-        if (ctx.storageConnectionString) {
-          blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
-        } else {
-          const credential = new DefaultAzureCredential();
-          blobServiceClient = new BlobServiceClient(
-            `https://${ctx.storageAccountName}.blob.core.windows.net`,
-            credential
-          );
-        }
-
-        const containerClient = blobServiceClient.getContainerClient("skill-archives");
-        await containerClient.createIfNotExists();
-        const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
-        await blockBlobClient.upload(data, data.length, {
-          blobHTTPHeaders: { blobContentType: "application/gzip" },
-        });
-        return blockBlobClient.url;
-      };
-
-      const revision = await ctx.skillResolver.resolve(skill.source, skill.skillName, ctx.skillRevisionStore, uploadArchive);
+      const revision = await ctx.skillResolver.resolve(skill.source, skill.skillName, ctx.skillRevisionStore, uploadSkillArchive);
       res.json(revision);
     } catch (error) {
       next(error);

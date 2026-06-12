@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 /**
- * When the API returns a masked secret value it uses the sentinel "<secret>".
+ * When the API returns a masked secret value it uses the sentinel `"<secret>"`.
  * The UI should display an empty input (so the user types a new value to
  * replace the secret) rather than the literal sentinel string.
  *

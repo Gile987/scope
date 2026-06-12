@@ -16,9 +16,11 @@ import { useState } from "react";
 interface TurnTimelineProps {
   turns: ConversationTurn[];
   runId: string;
+  /** If provided, uses per-run URLs for a specific historical attempt */
+  attemptRunId?: string;
 }
 
-export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
+export function TurnTimeline({ turns, runId, attemptRunId }: TurnTimelineProps) {
   const [expandedTurns, setExpandedTurns] = useState<Set<number>>(
     // Expand last turn by default
     new Set(turns.length > 0 ? [turns[turns.length - 1].iteration] : [])
@@ -93,7 +95,7 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                       className="h-7 gap-1"
                       onClick={(e) => {
                         e.stopPropagation();
-                        window.open(api.snapshotUrl(runId, turn.iteration), "_blank");
+                        window.open(attemptRunId ? api.runSnapshotUrl(runId, attemptRunId, turn.iteration) : api.snapshotUrl(runId, turn.iteration), "_blank");
                       }}
                     >
                       <Download className="h-3 w-3" />
@@ -107,11 +109,25 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                       className="h-7 gap-1"
                       onClick={(e) => {
                         e.stopPropagation();
-                        window.open(api.harUrl(runId, turn.iteration), "_blank");
+                        window.open(attemptRunId ? api.runHarUrl(runId, attemptRunId, turn.iteration) : api.harUrl(runId, turn.iteration), "_blank");
                       }}
                     >
                       <FileText className="h-3 w-3" />
                       HAR
+                    </Button>
+                  )}
+                  {turn.atifUrl && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 gap-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(api.atifUrl(runId, turn.iteration), "_blank");
+                      }}
+                    >
+                      <Download className="h-3 w-3" />
+                      ATIF
                     </Button>
                   )}
                   {turn.videoUrls && turn.videoUrls.length > 0 && (
@@ -121,7 +137,7 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                       className="h-7 gap-1"
                       onClick={(e) => {
                         e.stopPropagation();
-                        window.open(api.videoUrl(runId, turn.iteration), "_blank");
+                        window.open(attemptRunId ? api.runVideoUrl(runId, attemptRunId, turn.iteration) : api.videoUrl(runId, turn.iteration), "_blank");
                       }}
                     >
                       <Video className="h-3 w-3" />
@@ -171,9 +187,15 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                 {/* Coding agent response */}
                 <div>
                   <h4 className="text-sm font-medium mb-1">Coding Agent Response</h4>
-                  <div className="prose prose-sm dark:prose-invert max-w-none bg-muted/50 rounded-md p-3 max-h-64 overflow-y-auto">
-                    <MarkdownRenderer>{turn.codingAgentResponse}</MarkdownRenderer>
-                  </div>
+                  {turn.codingAgentResponse ? (
+                    <div className="prose prose-sm dark:prose-invert max-w-none bg-muted/50 rounded-md p-3 max-h-64 overflow-y-auto">
+                      <MarkdownRenderer>{turn.codingAgentResponse}</MarkdownRenderer>
+                    </div>
+                  ) : (
+                    <p className="text-xs italic text-muted-foreground">
+                      No assistant response captured — see raw chat / HAR for the full transcript.
+                    </p>
+                  )}
                 </div>
 
                 <Separator />

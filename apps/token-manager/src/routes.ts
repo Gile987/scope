@@ -25,14 +25,17 @@ const VALID_TYPES: KeyType[] = [
   "github-oauth-cookie-state",
   "anthropic-api-key",
   "anthropic-oauth",
+  "azure-ai-foundry",
 ];
 const VALID_CAPABILITIES: KeyCapability[] = [
   "github-models",
+  "github-public-api",
   "copilot-models",
   "copilot-sdk",
   "copilot-cli",
   "claude-code-cli",
-  "anthropic-api"
+  "anthropic-api",
+  "azure-ai-inference",
 ];
 
 export function createKeyRouter(

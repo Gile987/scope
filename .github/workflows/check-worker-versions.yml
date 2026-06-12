@@ -50,8 +50,9 @@ jobs:
       # pnpm/action-setup@v4 is not allowed on EMU
       - name: Install pnpm
         run: |
-          curl -fsSL https://get.pnpm.io/install.sh | sh -
-          echo "$HOME/.local/share/pnpm" >> $GITHUB_PATH
+          corepack enable
+          corepack prepare pnpm@10.29.1 --activate
+          pnpm --version
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -144,19 +145,33 @@ jobs:
           # List open issues with the worker-update label and filter by title prefix.
           # Using list + jq instead of --search to avoid GitHub search index lag
           # which can cause duplicate issues when runs happen close together.
-          ISSUE_URL=$(gh issue list --state open --label worker-update --json title,url \
-            --jq '[.[] | select(.title | startswith("chore(${{ matrix.worker }}): update to"))] | .[0].url // empty')
-          if [ -n "$ISSUE_URL" ]; then
+          ISSUE_JSON=$(gh issue list --state open --label worker-update --json title,url,number \
+            --jq '[.[] | select(.title | startswith("chore(${{ matrix.worker }}): update to"))] | .[0] // empty')
+          if [ -n "$ISSUE_JSON" ]; then
+            ISSUE_URL=$(echo "$ISSUE_JSON" | jq -r '.url')
+            ISSUE_NUMBER=$(echo "$ISSUE_JSON" | jq -r '.number')
+            ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+            echo "issue_number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
             echo "Existing open issue found: $ISSUE_URL"
+
+            # Check if the existing issue is for the exact same versions
+            if [ "$ISSUE_TITLE" == "${{ steps.check.outputs.title }}" ]; then
+              echo "same_version=true" >> $GITHUB_OUTPUT
+              echo "Existing issue matches current versions — skipping creation"
+            else
+              echo "same_version=false" >> $GITHUB_OUTPUT
+              echo "Existing issue is for different versions — will supersede"
+            fi
           else
             echo "exists=false" >> $GITHUB_OUTPUT
+            echo "same_version=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Create issue
         id: create_issue
-        if: steps.check.outputs.updates_available == 'true' && steps.existing.outputs.exists == 'false'
+        if: steps.check.outputs.updates_available == 'true' && (steps.existing.outputs.exists == 'false' || steps.existing.outputs.same_version == 'false')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -191,6 +206,16 @@ jobs:
             --label "worker-update")
           echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
 
+      - name: Close superseded issue
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.same_version == 'false' && steps.create_issue.outputs.issue_url != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment ${{ steps.existing.outputs.issue_number }} \
+            --body "Superseded by ${{ steps.create_issue.outputs.issue_url }} which tracks newer versions."
+          gh issue close ${{ steps.existing.outputs.issue_number }} \
+            --reason "not planned"
+
       - name: Write job summary
         if: always() && steps.check.outputs.exit_code != '2'
         run: |
@@ -212,6 +237,9 @@ jobs:
           EOF
             if [ -n "${{ steps.create_issue.outputs.issue_url }}" ]; then
               echo "📝 **Issue created:** ${{ steps.create_issue.outputs.issue_url }}" >> $GITHUB_STEP_SUMMARY
+              if [ "${{ steps.existing.outputs.exists }}" == "true" ] && [ "${{ steps.existing.outputs.same_version }}" == "false" ]; then
+                echo "🔄 **Superseded issue closed:** ${{ steps.existing.outputs.issue_url }}" >> $GITHUB_STEP_SUMMARY
+              fi
             elif [ "${{ steps.existing.outputs.exists }}" == "true" ]; then
               echo "ℹ️ **Issue already exists:** ${{ steps.existing.outputs.issue_url }}" >> $GITHUB_STEP_SUMMARY
             fi

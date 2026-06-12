@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -72,24 +72,26 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     await log("info", "Starting Claude Code ACP processor", {
       inputLength: message.length,
       model: options?.model,
+      reasoningEffort: options?.reasoningEffort,
       mcpServerCount: this.mcpConfigs.length,
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
       skillCount: skillConfigs.length,
       skills: skillConfigs.map((s) => s.name),
     });
 
-    // DevProxy integration — start recording if enabled
-    let devProxy: DevProxyClient | null = null;
-    if (DevProxyClient.isEnabled()) {
-      devProxy = new DevProxyClient();
+    // Proxy integration — start recording if enabled
+    let devProxy: ProxyClient | null = null;
+    if (isProxyEnabled()) {
+      const proxy = createProxyClient();
       try {
-        await log("info", "DevProxy enabled — waiting for sidecar to be ready...");
-        await devProxy.waitForReady();
+        await log("info", `Proxy enabled [${proxy.backend}] — waiting for sidecar to be ready...`);
+        await proxy.waitForReady();
         const certPath = process.env.NODE_EXTRA_CA_CERTS || "/tmp/dev-proxy-ca.crt";
-        await devProxy.downloadCertificate(certPath);
-        await log("info", "DevProxy CA cert installed", { certPath });
-        await devProxy.startRecording();
-        await log("info", "DevProxy recording started");
+        await proxy.downloadCertificate(certPath);
+        await log("info", "Proxy CA cert installed", { certPath });
+        await proxy.startRecording();
+        devProxy = proxy;
+        await log("info", `Proxy recording started [${proxy.backend}]`, { proxyUrl: proxy.proxyUrl });
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         await log("warn", `DevProxy setup failed, continuing without HAR capture: ${msg}`);
@@ -115,7 +117,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       if (options?.model) {
         env.ANTHROPIC_MODEL = options.model;
       }
-      // When DevProxy is active, ensure the subprocess routes through the proxy
+      // When proxy is active, ensure the subprocess routes through the proxy
       if (devProxy) {
         const existingNodeOptions = process.env.NODE_OPTIONS || "";
         env.NODE_OPTIONS = [existingNodeOptions, "--use-env-proxy"].filter(Boolean).join(" ");
@@ -124,8 +126,14 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         const noProxy = ["localhost", "127.0.0.1", ...(gatewayHost ? [gatewayHost] : [])].join(",");
         env.NO_PROXY = noProxy;
         env.no_proxy = noProxy;
-      } else if (!DevProxyClient.isEnabled()) {
-        // DevProxy not configured — clear proxy vars so subprocess makes direct calls
+        // Use session-scoped proxy URL so the gateway can resolve the exact session
+        // from the Proxy-Authorization header instead of relying on IP-based lookup.
+        env.HTTP_PROXY = devProxy.proxyUrl;
+        env.HTTPS_PROXY = devProxy.proxyUrl;
+        env.http_proxy = devProxy.proxyUrl;
+        env.https_proxy = devProxy.proxyUrl;
+      } else if (!isProxyEnabled()) {
+        // Proxy not configured — clear proxy vars so subprocess makes direct calls
         env.HTTP_PROXY = "";
         env.HTTPS_PROXY = "";
         env.http_proxy = "";
@@ -144,6 +152,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         mcpServers: this.gateway && this.mcpConfigs.length > 0
           ? [{ type: "http" as const, slug: "mcp-gateway", name: "mcp-gateway", url: this.gateway.mcpEndpoint }]
           : [],
+        reasoningEffort: options?.reasoningEffort,
       });
 
       await log("info", "Claude Code processing complete", { 
@@ -189,6 +198,7 @@ async function main(): Promise<void> {
     redisPassword: process.env.REDIS_PASSWORD || "",
     apiBaseUrl: process.env.SCOPE_MT_API_URL,
     tokenManagerUrl: process.env.TOKEN_MANAGER_URL,
+    postProcessorQueueName: process.env.QUEUE_NAME_POST_PROCESSOR || "post-processor-queue",
   };
 
   const processor = new ClaudeCodeProcessor();

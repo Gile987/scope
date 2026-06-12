@@ -8,13 +8,22 @@ import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
-import { TaskPromptStore, SkillRevisionStore, SkillResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage } from "shared";
-import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, ProfileDocument, ProfileVersionDocument } from "shared";
+import { TaskPromptStore, SkillRevisionStore, SkillResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore } from "shared";
+import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, ProfileDocument, ProfileVersionDocument, HeartbeatStore } from "shared";
+import { acquireGitHubPublicApiToken } from "./github-api-token.js";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
 import { registerFeatureFlagRoutes } from "./routes/feature-flags.js";
 import { registerSystemRoutes } from "./routes/system.js";
-import { registerRequestsRoutes } from "./routes/requests.js";
+import { registerRequestsRoutes } from "./routes/requests/index.js";
+import { registerRequestsCancelRoutes } from "./routes/requests/cancel.js";
+import { registerRequestsLogsRoutes } from "./routes/requests/logs.js";
+import { registerRequestsHarRoutes } from "./routes/requests/har.js";
+import { registerRequestsAtifRoutes } from "./routes/requests/atif.js";
+import { registerRequestsVideoRoutes } from "./routes/requests/video.js";
+import { registerRequestsToolCallsRoutes } from "./routes/requests/tool-calls.js";
+import { registerRequestsSnapshotsRoutes } from "./routes/requests/snapshots.js";
+import { registerRequestsArchiveRoutes } from "./routes/requests/archive.js";
 import { registerCriteriaRoutes } from "./routes/criteria.js";
 import { registerPromptFeaturesRoutes } from "./routes/prompt-features.js";
 import { registerTaskPromptsRoutes } from "./routes/task-prompts.js";
@@ -95,6 +104,7 @@ let profileCollection: Collection<ProfileDocument>;
 let profileVersionCollection: Collection<ProfileVersionDocument>;
 let skillResolver: SkillResolver;
 let blobStorage: BlobStorage;
+let heartbeatStore: HeartbeatStore;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
 
@@ -122,7 +132,7 @@ async function initializeClients(): Promise<void> {
   skillRevisionCollection = db.collection<SkillRevisionDocument>("skill-revisions");
   skillRevisionStore = new SkillRevisionStore(skillRevisionCollection);
   skillResolver = new SkillResolver({
-    githubToken: process.env.GITHUB_TOKEN,
+    tokenProvider: acquireGitHubPublicApiToken,
   });
   profileCollection = db.collection<ProfileDocument>("profiles");
   profileVersionCollection = db.collection<ProfileVersionDocument>("profile-versions");
@@ -149,8 +159,8 @@ async function initializeClients(): Promise<void> {
 
   // Seed default agents (upsert — always updates name and modelProvider, preserves existing models)
   const defaultAgents: Array<{ _id: string; name: string; modelProvider?: string }> = [
-    { _id: "coder-acp-claude-code", name: "Claude Code (ACP)", modelProvider: "anthropic" },
-    { _id: "coder-acp-copilot", name: "Copilot (ACP)", modelProvider: "github-copilot" },
+    { _id: "coder-acp-claude-code", name: "Claude Code CLI", modelProvider: "anthropic" },
+    { _id: "coder-acp-copilot", name: "GitHub Copilot CLI", modelProvider: "github-copilot" },
   ];
   for (const agent of defaultAgents) {
     await agentCollection.updateOne(
@@ -193,6 +203,16 @@ async function initializeClients(): Promise<void> {
 
   // Initialize blob storage (used for log persistence and snapshots)
   blobStorage = new BlobStorage({ storageAccountName, storageConnectionString });
+
+  // Initialize Redis-backed heartbeat store. Workers write per-run
+  // heartbeats here; the API enriches `processing` runs with the latest
+  // value so the portal can render "Last heartbeat: Xs ago". Failures are
+  // non-fatal: a missing heartbeat just means no enrichment for that run.
+  heartbeatStore = new RedisHeartbeatStore({
+    redisHost: process.env.REDIS_HOST || "",
+    redisPort: parseInt(process.env.REDIS_PORT || "6300", 10),
+    redisPassword: process.env.REDIS_PASSWORD || "",
+  });
 }
 
 // --- OpenAPI documentation (lazy — Swagger UI mounted in main() after all routes register) ---
@@ -228,6 +248,7 @@ const routeCtx: RouteContext = {
   get queueClients() { return queueClients; },
   get reportQueueClient() { return reportQueueClient; },
   get blobStorage() { return blobStorage; },
+  get heartbeatStore() { return heartbeatStore; },
   getOrCreateQueueClient: createQueueClientFactory(storageConnectionString, storageAccountName),
   validWorkers: VALID_WORKERS,
   storageConnectionString,
@@ -239,6 +260,14 @@ const routeCtx: RouteContext = {
 registerSecretsRoutes(routeCtx);
 registerSystemRoutes(routeCtx);
 registerRequestsRoutes(routeCtx);
+registerRequestsCancelRoutes(routeCtx);
+registerRequestsLogsRoutes(routeCtx);
+registerRequestsHarRoutes(routeCtx);
+registerRequestsAtifRoutes(routeCtx);
+registerRequestsVideoRoutes(routeCtx);
+registerRequestsToolCallsRoutes(routeCtx);
+registerRequestsSnapshotsRoutes(routeCtx);
+registerRequestsArchiveRoutes(routeCtx);
 registerCriteriaRoutes(routeCtx);
 registerPromptFeaturesRoutes(routeCtx);
 registerTaskPromptsRoutes(routeCtx);

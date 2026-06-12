@@ -7,6 +7,9 @@ import { MongoClient } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { RequestScheduler, WorkerTypeConfig } from "./request-scheduler.js";
+import { PostProcessorDispatcher } from "./post-processor-dispatcher.js";
+import { StuckRunReaper } from "./stuck-run-reaper.js";
+import { RedisHeartbeatStore, type HeartbeatStore } from "shared";
 import type { RequestDocument } from "shared";
 
 // ── Configuration ────────────────────────────────────────────────────
@@ -28,6 +31,60 @@ const POLL_INTERVAL_MS = parseInt(
   10,
 );
 const HEALTH_PORT = parseInt(process.env.PORT || "8080", 10);
+
+/**
+ * Parse a positive-integer env var with validation. Returns `fallback` (with a
+ * loud warning) when the value is missing, non-numeric, non-integer, or below
+ * `min`. Used for reaper safety controls where a `NaN` could otherwise disable
+ * the circuit-breaker or create a tight sweep loop.
+ */
+function parsePositiveInt(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  label: string,
+): number {
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < min) {
+    console.warn(
+      `[Scheduler] Invalid ${label}=${JSON.stringify(raw)} (need integer >= ${min}); using ${fallback}`,
+    );
+    return fallback;
+  }
+  return n;
+}
+
+// ── Stuck-run reaper config ──────────────────────────────────────────
+// The reaper is the authoritative backstop that fails runs stuck in
+// `processing` whose worker died without writing a terminal state. It needs
+// Redis to read per-run liveness heartbeats. Redis is treated as NON-FATAL:
+// if it is not configured or unreachable, the reaper self-disables while the
+// dispatch loop keeps running.
+//
+// Disabled by default: set SCOPE_REAPER_ENABLED=true to turn it on.
+
+const REAPER_ENABLED = process.env.SCOPE_REAPER_ENABLED === "true";
+const REAPER_POLL_INTERVAL_MS = parsePositiveInt(
+  process.env.SCOPE_REAPER_POLL_INTERVAL_MS,
+  60000,
+  1000,
+  "SCOPE_REAPER_POLL_INTERVAL_MS",
+);
+const REAPER_MAX_PER_SWEEP = parsePositiveInt(
+  process.env.SCOPE_REAPER_MAX_PER_SWEEP,
+  30,
+  1,
+  "SCOPE_REAPER_MAX_PER_SWEEP",
+);
+// Staleness threshold — kept in sync with the redelivery handler so both
+// recovery paths agree on when a worker is "dead".
+const RUN_HEARTBEAT_STALE_MS = parsePositiveInt(
+  process.env.SCOPE_RUN_HEARTBEAT_STALE_MS,
+  120000,
+  1000,
+  "SCOPE_RUN_HEARTBEAT_STALE_MS",
+);
 
 /**
  * Parse per-worker-type queue depth config from environment.
@@ -124,6 +181,62 @@ async function main(): Promise<void> {
   scheduler.start();
   console.log("[Scheduler] Dispatch loop started");
 
+  // Start the post-processor dispatcher
+  const postProcessorQueueName = process.env.QUEUE_NAME_POST_PROCESSOR || "post-processor-queue";
+  const postProcessorQueueClient = createQueueClient(postProcessorQueueName);
+  await postProcessorQueueClient.createIfNotExists();
+  console.log(`[Scheduler] Ensured post-processor queue exists: ${postProcessorQueueName}`);
+
+  const ppPollIntervalMs = parseInt(
+    process.env.SCHEDULER_PP_POLL_INTERVAL_MS || "30000",
+    10,
+  );
+
+  const postProcessorDispatcher = new PostProcessorDispatcher(
+    collection,
+    db,
+    postProcessorQueueClient,
+    ppPollIntervalMs,
+  );
+  postProcessorDispatcher.start();
+  console.log("[Scheduler] Post-processor dispatch loop started");
+
+  // Start the stuck-run reaper (authoritative backstop). Redis is non-fatal:
+  // on misconfig or connection failure the reaper self-disables (its sweeps
+  // skip when ping() fails) while the dispatch loop above keeps running.
+  let heartbeatStore: HeartbeatStore | null = null;
+  let stuckRunReaper: StuckRunReaper | null = null;
+  if (REAPER_ENABLED && process.env.REDIS_HOST) {
+    try {
+      heartbeatStore = new RedisHeartbeatStore({
+        redisHost: process.env.REDIS_HOST || "",
+        redisPort: parseInt(process.env.REDIS_PORT || "6300", 10),
+        redisPassword: process.env.REDIS_PASSWORD || "",
+      });
+      stuckRunReaper = new StuckRunReaper(collection, heartbeatStore, {
+        pollIntervalMs: REAPER_POLL_INTERVAL_MS,
+        staleThresholdMs: RUN_HEARTBEAT_STALE_MS,
+        maxPerSweep: REAPER_MAX_PER_SWEEP,
+      });
+      stuckRunReaper.start();
+      console.log(
+        `[Scheduler] Stuck-run reaper started (poll=${REAPER_POLL_INTERVAL_MS}ms, stale=${RUN_HEARTBEAT_STALE_MS}ms, maxPerSweep=${REAPER_MAX_PER_SWEEP})`,
+      );
+    } catch (err) {
+      // Never let reaper setup take down the scheduler — dispatch is critical.
+      console.error(
+        "[Scheduler] Failed to start stuck-run reaper (continuing without it):",
+        err,
+      );
+      stuckRunReaper = null;
+      heartbeatStore = null;
+    }
+  } else {
+    console.warn(
+      `[Scheduler] Stuck-run reaper disabled (${REAPER_ENABLED ? "REDIS_HOST not set" : "SCOPE_REAPER_ENABLED not set to true"})`,
+    );
+  }
+
   // Start health check server
   const healthServer = createHealthServer();
   healthServer.listen(HEALTH_PORT, () => {
@@ -134,6 +247,9 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     console.log("[Scheduler] Shutting down...");
     await scheduler.stop();
+    await postProcessorDispatcher.stop();
+    if (stuckRunReaper) await stuckRunReaper.stop();
+    if (heartbeatStore) await heartbeatStore.close();
     healthServer.close();
     await mongoClient.close();
     console.log("[Scheduler] Shutdown complete");

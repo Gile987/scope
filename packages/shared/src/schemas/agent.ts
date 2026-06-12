@@ -6,6 +6,12 @@ import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 
 extendZodWithOpenApi(z);
 
+export const AgentCapabilitiesSchema = z
+  .object({
+    supportsReasoningEffort: z.boolean().optional(),
+  })
+  .openapi("AgentCapabilities");
+
 export const AgentVersionSchema = z
   .object({
     agentVersion: z.string(),
@@ -28,6 +34,8 @@ export const CreateAgentInputSchema = z
     modelProvider: z.string().optional(),
     supportedModels: z.array(z.string()).optional(),
     defaultModel: z.string().optional(),
+    available: z.boolean().optional(),
+    capabilities: AgentCapabilitiesSchema.optional(),
   })
   .openapi("CreateAgentInput");
 
@@ -38,6 +46,8 @@ export const UpdateAgentInputSchema = z
     modelProvider: z.string().optional(),
     supportedModels: z.array(z.string()).optional(),
     defaultModel: z.string().optional(),
+    available: z.boolean().optional(),
+    capabilities: AgentCapabilitiesSchema.optional(),
   })
   .openapi("UpdateAgentInput");
 
@@ -49,6 +59,8 @@ export const AgentResponseSchema = z
     modelProvider: z.string().optional(),
     supportedModels: z.array(z.string()),
     defaultModel: z.string().optional(),
+    available: z.boolean().optional(),
+    capabilities: AgentCapabilitiesSchema.optional(),
     versions: z.array(AgentVersionSchema).optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),

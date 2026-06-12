@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -14,12 +14,17 @@ dotenv.config();
  * routes traffic through the DevProxy MITM proxy.
  * When DevProxy is disabled (or setup failed), strips proxy env vars and clears
  * NODE_EXTRA_CA_CERTS to prevent the subprocess from loading a non-existent cert.
+ *
+ * @param proxyUrl - Optional session-scoped proxy URL (e.g. http://sessionId@host:port).
+ *   When provided, overrides the inherited HTTP_PROXY/HTTPS_PROXY so the subprocess
+ *   routes through the correct session.
  */
 export function buildSubprocessEnv(
   githubToken: string,
   devProxyEnabled: boolean,
   currentNodeOptions?: string,
   gatewayUrl?: string,
+  proxyUrl?: string,
 ): Record<string, string> {
   const gatewayHost = gatewayUrl ? new URL(gatewayUrl).hostname : null;
   const noProxy = ["localhost", "127.0.0.1", ...(gatewayHost ? [gatewayHost] : [])].join(",");
@@ -30,6 +35,12 @@ export function buildSubprocessEnv(
       NODE_TLS_REJECT_UNAUTHORIZED: "0",
       NO_PROXY: noProxy,
       no_proxy: noProxy,
+      ...(proxyUrl ? {
+        HTTP_PROXY: proxyUrl,
+        HTTPS_PROXY: proxyUrl,
+        http_proxy: proxyUrl,
+        https_proxy: proxyUrl,
+      } : {}),
     } : {
       HTTP_PROXY: "",
       HTTPS_PROXY: "",
@@ -104,30 +115,32 @@ class CopilotProcessor implements WorkerProcessor {
     await log("info", "Starting Copilot ACP processor", {
       inputLength: message.length,
       model: options?.model,
+      reasoningEffort: options?.reasoningEffort,
       mcpServerCount: this.mcpConfigs.length,
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
       skillCount: skillConfigs.length,
       skills: skillConfigs.map((s) => s.name),
     });
 
-    // DevProxy integration — start recording if enabled
-    let devProxy: DevProxyClient | null = null;
+    // Proxy integration — start recording if enabled
+    let devProxy: ProxyClient | null = null;
     let sslCertFile: string | undefined;
-    if (DevProxyClient.isEnabled()) {
-      devProxy = new DevProxyClient();
+    if (isProxyEnabled()) {
+      const proxy = createProxyClient();
       try {
-        await log("info", "DevProxy enabled — waiting for sidecar to be ready...");
-        await devProxy.waitForReady();
+        await log("info", `Proxy enabled [${proxy.backend}] — waiting for sidecar to be ready...`);
+        await proxy.waitForReady();
         // Download CA cert if needed (for NODE_EXTRA_CA_CERTS)
         const certPath = process.env.NODE_EXTRA_CA_CERTS || "/tmp/dev-proxy-ca.crt";
-        await devProxy.downloadCertificate(certPath);
+        await proxy.downloadCertificate(certPath);
         // Create combined CA bundle for native binaries (SSL_CERT_FILE)
         // The copilot binary is a native executable that doesn't use NODE_EXTRA_CA_CERTS
         const bundlePath = "/tmp/ca-bundle-combined.crt";
-        sslCertFile = await devProxy.createCombinedCaBundle(certPath, bundlePath);
-        await log("info", "DevProxy CA cert installed for native binaries", { sslCertFile });
-        await devProxy.startRecording();
-        await log("info", "DevProxy recording started");
+        sslCertFile = await proxy.createCombinedCaBundle(certPath, bundlePath);
+        await log("info", "Proxy CA cert installed for native binaries", { sslCertFile });
+        await proxy.startRecording();
+        devProxy = proxy;
+        await log("info", `Proxy recording started [${proxy.backend}]`, { proxyUrl: proxy.proxyUrl });
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         await log("warn", `DevProxy setup failed, continuing without HAR capture: ${msg}`);
@@ -137,7 +150,7 @@ class CopilotProcessor implements WorkerProcessor {
 
     try {
       // Acquire token dynamically (env var fallback or Token Manager)
-      const githubToken = await tokenClient.acquireToken("copilot-sdk");
+      const githubToken = await tokenClient.acquireToken("copilot-cli");
       await log("info", "Acquired GITHUB_TOKEN", {
         preview: `${githubToken.substring(0, 7)}...(${githubToken.length} chars)`,
       });
@@ -146,6 +159,9 @@ class CopilotProcessor implements WorkerProcessor {
       const args = ["--acp", "--yolo"];
       if (options?.model) {
         args.push("--model", options.model);
+      }
+      if (options?.reasoningEffort) {
+        args.push("--reasoning-effort", options.reasoningEffort);
       }
       // The Copilot CLI does not support MCP servers via ACP newSession.mcpServers
       // (agentCapabilities.mcpCapabilities is undefined). Instead, pass the gateway
@@ -159,13 +175,15 @@ class CopilotProcessor implements WorkerProcessor {
       const result = await runACPSession(message, {
         command: "copilot",
         args,
-        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL),
+        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL, devProxy?.proxyUrl),
         cwd: this.workspacePath!,
         onLog: async (msg) => {
           await log("debug", msg);
         },
         mcpServers: [],
+        sessionTimeoutMs: process.env.ACP_SESSION_TIMEOUT_MS ? Number(process.env.ACP_SESSION_TIMEOUT_MS) : undefined,
         model: options?.model,
+        reasoningEffort: options?.reasoningEffort,
       });
 
       await log("info", "Copilot processing complete", { 
@@ -211,6 +229,7 @@ async function main(): Promise<void> {
     redisPassword: process.env.REDIS_PASSWORD || "",
     apiBaseUrl: process.env.SCOPE_MT_API_URL,
     tokenManagerUrl: process.env.TOKEN_MANAGER_URL,
+    postProcessorQueueName: process.env.QUEUE_NAME_POST_PROCESSOR || "post-processor-queue",
   };
 
   const processor = new CopilotProcessor();

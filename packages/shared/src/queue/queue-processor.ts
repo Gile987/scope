@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { DequeuedMessageItem } from "@azure/storage-queue";
+import { DequeuedMessageItem, QueueClient } from "@azure/storage-queue";
+import { DefaultAzureCredential } from "@azure/identity";
 import os from "node:os";
 import {
   RequestDocument,
@@ -16,6 +17,9 @@ import type { McpServerConfig } from "../types/mcp.js";
 import type { SkillConfig } from "../types/skill.js";
 import type { ExtensionConfig } from "../types/extension.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
+import { cancelExit } from "./cancel-exit.js";
+import type { VisibilityHeartbeat } from "./visibility-heartbeat.js";
+import { HEARTBEAT_VISIBILITY_SECONDS } from "./visibility-heartbeat.js";
 import { BlobStorage } from "../storage/blob-storage.js";
 import { withRetry } from "../utils/retry.js";
 import { sanitizeHarFile } from "../har/har-parser.js";
@@ -34,10 +38,50 @@ import { extractSkillsToWorkspace } from "../skills/skill-extractor.js";
  */
 export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocument> {
   private processor: WorkerProcessor;
+  private postProcessorQueueClient: QueueClient | null = null;
 
   constructor(config: QueueProcessorConfig, processor: WorkerProcessor) {
     super(config, processor.workerName);
     this.processor = processor;
+
+    // Create post-processor queue client if configured (event-driven dispatch)
+    if (config.postProcessorQueueName) {
+      if (config.storageConnectionString) {
+        this.postProcessorQueueClient = new QueueClient(
+          config.storageConnectionString,
+          config.postProcessorQueueName,
+        );
+      } else {
+        const credential = new DefaultAzureCredential();
+        const queueUrl = `https://${config.storageAccountName}.queue.core.windows.net`;
+        this.postProcessorQueueClient = new QueueClient(
+          `${queueUrl}/${config.postProcessorQueueName}`,
+          credential,
+        );
+      }
+    }
+  }
+
+  /**
+   * Enqueue a post-processing message (non-fatal on failure — polling dispatcher
+   * will catch up within 2s if this fails).
+   */
+  private async enqueuePostProcessing(requestId: string, runId: string): Promise<void> {
+    if (!this.postProcessorQueueClient) return;
+    try {
+      const message = Buffer.from(
+        JSON.stringify({ type: "atif", requestId, runId }),
+      ).toString("base64");
+      await this.postProcessorQueueClient.sendMessage(message);
+      console.log(`[${this.workerName}] Post-processing enqueued for ${requestId}`);
+    } catch (err) {
+      console.warn(`[${this.workerName}] Failed to enqueue post-processing for ${requestId}:`, err);
+    }
+  }
+
+  /** Override base hook to enqueue post-processing when a run completes via the error path. */
+  protected override async onRunTerminal(requestId: string, runId: string): Promise<void> {
+    await this.enqueuePostProcessing(requestId, runId);
   }
 
   /** Build workerVersion and OS fields for stamping on request documents.
@@ -63,7 +107,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   protected async handleRequest(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
-    currentPopReceipt: string,
+    heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     payload?: Record<string, unknown>,
   ): Promise<void> {
@@ -80,7 +124,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         messageRunId,
         currentRunId,
       });
-      await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
     // If the request was paused while sitting in the queue, discard the
@@ -90,7 +134,144 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         `[${this.workerName}] Request ${requestDoc._id} is paused — discarding queue message`,
       );
       await log("info", `Request paused — discarding queue message`);
-      await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
+    // Terminal status guard: if the run is already done (e.g. cancelled while
+    // this message was in the queue or redelivered after process.exit), discard.
+    if (requestDoc.run?.status === "done") {
+      console.log(
+        `[${this.workerName}] Request ${requestDoc._id} is already terminal (done) — discarding queue message`,
+      );
+      await log("info", `Run already terminal — discarding queue message`);
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
+    // Redelivery handling: if the run is already in "processing" state, the
+    // message was redelivered by Azure Storage Queue while the original
+    // worker was busy. There are two cases we need to disambiguate using
+    // the per-run liveness heartbeat in Redis (run.worker stays in Mongo as
+    // persistent identity):
+    //
+    //   1. Original worker is alive (fresh Redis heartbeat) — a spurious
+    //      redelivery (transient queue-extension miss, throttling, etc.).
+    //      Drop the duplicate message and leave the run untouched so the
+    //      original worker keeps making progress.
+    //
+    //   2. Original worker is dead (stale or missing Redis heartbeat AND
+    //      run was picked up long enough ago) — mark the run failed
+    //      atomically so the user can retry.
+    //
+    // Atomicity of the claim is gated on the existing run.worker.instanceId
+    // in the findOneAndUpdate filter: if a peer worker has already taken
+    // over (rewriting run.worker.instanceId), our update no-ops.
+    if (requestDoc.run?.status === "processing") {
+      const staleThresholdMs =
+        Number(process.env.SCOPE_RUN_HEARTBEAT_STALE_MS) ||
+        2 * HEARTBEAT_VISIBILITY_SECONDS * 1000;
+      // How far to push a duplicate's visibility when the original worker is
+      // still alive. Defaults to the staleness threshold so the message
+      // resurfaces for another liveness re-check right around the time the
+      // run would be declared dead if the worker stopped beating.
+      const redeliverDeferMs =
+        Number(process.env.SCOPE_RUN_REDELIVER_DEFER_MS) || staleThresholdMs;
+      const heartbeatAt = await this.heartbeatStore.get(requestDoc.run._id);
+      const startedAt = requestDoc.run.startedAt instanceof Date
+        ? requestDoc.run.startedAt
+        : requestDoc.run.startedAt
+          ? new Date(requestDoc.run.startedAt as any)
+          : undefined;
+      const ageMs = heartbeatAt ? Date.now() - heartbeatAt.getTime() : Infinity;
+      // Missing-heartbeat guard: if Redis returns null we don't immediately
+      // declare the worker dead — a transient Redis blip would otherwise
+      // mass-fail healthy in-flight runs. Only treat "missing" as stale if
+      // the run was picked up longer ago than the staleness threshold.
+      const isStale = heartbeatAt
+        ? ageMs > staleThresholdMs
+        : (!startedAt || Date.now() - startedAt.getTime() > staleThresholdMs);
+      const workerInfo = requestDoc.run.worker;
+      const workerDesc = workerInfo
+        ? `instance=${workerInfo.instanceId}${workerInfo.podName ? ` pod=${workerInfo.podName}` : ""}`
+        : "unknown worker";
+
+      if (!isStale) {
+        // Original worker is still beating. Do NOT delete the duplicate —
+        // that would destroy the only at-least-once recovery trigger if the
+        // original worker later dies hard (the scheduler only dispatches
+        // `pending` runs, never `processing`). Instead, re-defer the message
+        // so it resurfaces later for another liveness re-check: if the worker
+        // is still alive then, we re-defer again (cheap); if it died, the
+        // next dequeue sees a stale heartbeat and marks the run failed.
+        const beatDesc = heartbeatAt
+          ? `last beat ${Math.round(ageMs / 1000)}s ago`
+          : `no heartbeat yet, picked up ${startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : "?"}s ago`;
+        const deferSeconds = Math.max(1, Math.round(redeliverDeferMs / 1000));
+        console.warn(
+          `[${this.workerName}] Duplicate message for ${requestDoc._id} (runId=${requestDoc.run._id}) — original worker still alive (${workerDesc}, ${beatDesc}); re-deferring ${deferSeconds}s`,
+        );
+        await log(
+          "warn",
+          `Duplicate queue message re-deferred — original worker still heart-beating (${workerDesc}, ${beatDesc})`,
+          { runId: requestDoc.run._id },
+        );
+        // Stop THIS (duplicate) worker's visibility heartbeat first so the pop
+        // receipt is frozen — otherwise a concurrent heartbeat tick could
+        // rotate it out from under our re-defer. safeDeferMessage swallows
+        // failures so a stale receipt never falls through to the error path.
+        const frozenReceipt = heartbeat.stop();
+        await this.safeDeferMessage(message.messageId, frozenReceipt, deferSeconds);
+        return;
+      }
+
+      const errorMsg = `Worker presumed dead (${workerDesc}, last heartbeat ${heartbeatAt ? `${Math.round(ageMs / 1000)}s ago` : "never"}, threshold ${Math.round(staleThresholdMs / 1000)}s); queue message redelivered while run was in 'processing' state`;
+      // Atomic claim: gate on the *current* run.worker.instanceId. If a
+      // peer worker has already taken over (rewrote run.worker.instanceId)
+      // between our read and write, our filter no-ops and we drop the dupe.
+      const currentOwnerId = workerInfo?.instanceId;
+      const claim = await withRetry(() => this.collection.findOneAndUpdate(
+        {
+          _id: requestDoc._id,
+          "run._id": requestDoc.run!._id,
+          "run.status": "processing",
+          ...(currentOwnerId
+            ? { "run.worker.instanceId": currentOwnerId }
+            : { "run.worker": { $exists: false } }),
+        } as any,
+        {
+          $set: {
+            "run.status": "done",
+            "run.outcome": "failed",
+            "run.error": errorMsg,
+            "run.finishedAt": new Date(),
+            "run.updatedAt": new Date(),
+            updatedAt: new Date(),
+            ...(this.postProcessorQueueClient ? { "run.postProcessorStatus": "queued" } : {}),
+          },
+        } as any,
+      ));
+      if (claim) {
+        console.warn(
+          `[${this.workerName}] Stale-heartbeat redelivery for ${requestDoc._id} (runId=${requestDoc.run._id}, ${workerDesc}) — marked run as failed`,
+        );
+        await log(
+          "error",
+          `Run marked failed: ${errorMsg}. Use the retry endpoint to start a new attempt.`,
+          { final: true, runId: requestDoc.run._id },
+        );
+        // Run is terminal — drop the heartbeat key so the API stops
+        // surfacing it (TTL would expire it eventually anyway).
+        await this.heartbeatStore.delete(requestDoc.run!._id);
+        // Enqueue post-processing even for failed runs (partial trajectory is useful)
+        await this.enqueuePostProcessing(requestDoc._id, requestDoc.run!._id);
+      } else {
+        // Either the original worker resumed beating between our read and
+        // write, or a concurrent retry already demoted this run, or the
+        // original just finished. Nothing to do — drop the duplicate.
+        console.log(
+          `[${this.workerName}] Redelivery for ${requestDoc._id} but run state / heartbeat changed concurrently — discarding`,
+        );
+      }
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
     // Resolve MCP server slugs to configs via API
@@ -165,7 +346,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Resolved extensions: ${extensionConfigs.map(e => e.version ? `${e.id}@${e.version}` : e.id).join(", ")}`);
     }
 
-    await this.processMultiTurn(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs, extensionConfigs);
+    await this.processMultiTurn(requestDoc, message, heartbeat, log, mcpServerConfigs, skillConfigs, extensionConfigs);
   }
 
   /**
@@ -231,7 +412,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   private async processMultiTurn(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
-    currentPopReceipt: string,
+    heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     mcpServerConfigs?: McpServerConfig[],
     skillConfigs?: SkillConfig[],
@@ -251,40 +432,54 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     // Update status to iterating (preserve logs from handleRequest — MCP/skill resolution).
     // Write to run.* (run-retry-attempts) plus a top-level updatedAt for index freshness.
+    // Stamp run.worker (instance identity) atomically with the status change
+    // so the redelivery handler in another worker can immediately see this
+    // pickup. The accompanying liveness heartbeat is written to Redis (not
+    // Mongo) immediately after to avoid recurring CosmosDB RU cost.
     const versionFields = this.getVersionFields();
+    const now = new Date();
     await withRetry(() => this.collection.updateOne(
       { _id: requestId },
       {
         $set: {
           "run.status": "processing",
-          "run.startedAt": new Date(),
-          "run.updatedAt": new Date(),
+          "run.startedAt": now,
+          "run.updatedAt": now,
+          "run.worker": {
+            instanceId: this.instanceId,
+            ...(this.podName ? { podName: this.podName } : {}),
+          },
           "run.turns": [],
           "run.workerVersion": versionFields.workerVersion,
           "run.os": versionFields.os,
-          updatedAt: new Date(),
+          updatedAt: now,
         },
       }
     ));
+    // Seed the Redis liveness heartbeat right after pickup so a redelivery
+    // arriving immediately afterwards sees a fresh beat instead of falling
+    // through to the missing-heartbeat guard.
+    await this.heartbeatStore.set(requestDoc.run!._id, now);
 
-    // Extend queue message visibility for long-running multi-turn.
-    // updateMessage returns a new pop receipt that must be used for subsequent operations.
-    const visibilityTimeout = MULTI_TURN_DEFAULTS.VISIBILITY_TIMEOUT_SECONDS;
-    try {
-      const updateResponse = await this.queueClient.updateMessage(
-        message.messageId,
-        currentPopReceipt,
-        message.messageText,
-        visibilityTimeout
-      );
-      currentPopReceipt = updateResponse.popReceipt!;
-    } catch (error) {
-      console.warn(`[${this.workerName}] Failed to extend message visibility: ${error}`);
-    }
+    // Subscribe to instant cancel notifications via Redis Pub/Sub.
+    // If a cancel signal arrives, exit immediately — the run is already
+    // marked done/failed in DB by the cancel API. K8s (or docker compose
+    // restart) will bring up a fresh worker.
+    const unsubCancel = this.heartbeatStore.subscribeCancellation(
+      requestDoc.run!._id,
+      () => {
+        console.log(
+          `[${this.workerName}] Run ${requestDoc.run!._id} cancelled via pub/sub — exiting process`,
+        );
+        cancelExit();
+      },
+    );
 
     await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
       criteria: requestDoc.scenario.criteria,
       maxIterations: requestDoc.maxIterations,
+      ...(requestDoc.model ? { model: requestDoc.model } : {}),
+      ...(requestDoc.reasoningEffort ? { reasoningEffort: requestDoc.reasoningEffort } : {}),
     });
 
     // Only create JudgeClient when criteria exist and judge will actually be called
@@ -349,6 +544,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         log,
         personaInstructions: requestDoc.personaInstructions,
         model: requestDoc.model,
+        reasoningEffort: requestDoc.reasoningEffort,
         mcpServerConfigs,
         skillConfigs,
         extensionConfigs,
@@ -369,6 +565,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       if (this.processor.teardown) {
         await this.processor.teardown(log);
       }
+      // Unsubscribe from cancel notifications — normal completion path
+      unsubCancel();
     }
 
     const finalStatus = "done";
@@ -387,8 +585,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     const totalAiCallCount = result.turns.reduce((sum, t) => sum + (t.aiCallCount ?? 0), 0);
 
-    await withRetry(() => this.collection.updateOne(
-      { _id: requestId },
+    // Guard final write: only update if the run is still "processing" for this
+    // specific run._id. If a cancel already set status="done", this no-ops.
+    const finalWrite = await withRetry(() => this.collection.updateOne(
+      { _id: requestId, "run._id": runId, "run.status": "processing" },
       {
         $set: {
           "run.status": finalStatus,
@@ -399,17 +599,35 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           updatedAt: new Date(),
           ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),
           ...(result.passed ? {} : { "run.error": result.finalResult }),
+          // Claim for post-processing atomically so polling dispatcher won't re-enqueue
+          ...(this.postProcessorQueueClient ? { "run.postProcessorStatus": "queued" } : {}),
         },
       }
     ));
 
-    console.log(
-      `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
-    );
+    if (finalWrite.matchedCount === 0) {
+      console.warn(
+        `[${this.workerName}] Final write for ${requestId} (runId=${runId}) did not match — run was cancelled or retried concurrently`,
+      );
+      await log("warn", "Run was cancelled or retried concurrently — skipping final update");
+    } else {
+      console.log(
+        `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
+      );
 
-    // Fire-and-forget report generation
-    await this.triggerReportGeneration(requestId);
+      // Event-driven post-processor dispatch — enqueue immediately on completion
+      await this.enqueuePostProcessing(requestId, runId);
+    }
 
-    await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+    // Drop the Redis liveness heartbeat now that the run is terminal so it
+    // doesn't surface in the API's "still processing" enrichment. (TTL would
+    // eventually expire it anyway, but explicit cleanup is tidier.)
+    await this.heartbeatStore.delete(requestDoc.run!._id);
+
+    // Stop the heartbeat before deleting so the pop receipt is stable —
+    // a tick landing between read and delete would invalidate it. The
+    // base class also calls stop() in its finally block (it's idempotent).
+    const finalPopReceipt = heartbeat.stop();
+    await this.safeDeleteMessage(message.messageId, finalPopReceipt);
   }
 }

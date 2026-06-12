@@ -10,6 +10,8 @@ import {
   uploadBundledHarFiles,
   detectBundledChatFiles,
   uploadBundledChatFiles,
+  detectBundledToolCallsFiles,
+  uploadBundledToolCallsFiles,
   packRunIntoTar,
   type BlobUploader,
   type BlobDownloader,
@@ -80,6 +82,22 @@ describe("rewriteHarUrlsForArchive", () => {
     rewriteHarUrlsForArchive(resource);
     expect(resource.run.harUrl).toBe("https://storage.blob.core.windows.net/snapshots/abc/capture.har");
     expect(resource.run.turns[0].harUrl).toBe("https://storage.blob.core.windows.net/snapshots/abc/iter-1/capture.har");
+  });
+
+  it("rewrites per-turn toolCallsUrl to iteration-N.tool-calls.jsonl", () => {
+    const resource = {
+      run: {
+        turns: [
+          { iteration: 1, toolCallsUrl: "https://storage.blob.core.windows.net/snapshots/abc/iter-1/tool-calls.jsonl" },
+          { iteration: 2, toolCallsUrl: "https://storage.blob.core.windows.net/snapshots/abc/iter-2/tool-calls.jsonl" },
+          { iteration: 3 },
+        ],
+      },
+    };
+    const result = rewriteHarUrlsForArchive(resource);
+    expect(result.run!.turns![0].toolCallsUrl).toBe("iteration-1.tool-calls.jsonl");
+    expect(result.run!.turns![1].toolCallsUrl).toBe("iteration-2.tool-calls.jsonl");
+    expect(result.run!.turns![2].toolCallsUrl).toBeUndefined();
   });
 });
 
@@ -309,6 +327,20 @@ describe("rewriteHarUrlsForArchive — rawChatUrl", () => {
     expect(result.run!.turns![0].rawChatUrl).toBe("iteration-1.chat-export.json");
   });
 
+  it("rewrites per-turn chatResultUrl to iteration-N.chat-result.json", () => {
+    const resource = {
+      run: {
+        turns: [
+          { iteration: 1, chatResultUrl: "https://storage.blob.core.windows.net/snapshots/abc/runs/abc/iteration-1/chat-result.json" },
+          { iteration: 2, chatResultUrl: "https://storage.blob.core.windows.net/snapshots/abc/runs/abc/iteration-2/chat-result.json" },
+        ],
+      },
+    };
+    const result = rewriteHarUrlsForArchive(resource);
+    expect(result.run!.turns![0].chatResultUrl).toBe("iteration-1.chat-result.json");
+    expect(result.run!.turns![1].chatResultUrl).toBe("iteration-2.chat-result.json");
+  });
+
   it("does not mutate the original resource rawChatUrl", () => {
     const resource = {
       run: {
@@ -437,6 +469,95 @@ describe("uploadBundledChatFiles", () => {
     });
 
     expect(topLevelUrl).toBeUndefined();
+    expect(uploaded).toHaveLength(0);
+  });
+});
+
+// --- detectBundledToolCallsFiles ---
+
+describe("detectBundledToolCallsFiles", () => {
+  it("detects per-iteration tool-calls JSONL files", () => {
+    const files = [
+      "iteration-1.tool-calls.jsonl",
+      "iteration-2.tool-calls.jsonl",
+      "iteration-1.har",
+      "run.yaml",
+    ];
+    const result = detectBundledToolCallsFiles(files);
+    expect(result).toEqual([
+      { fileName: "iteration-1.tool-calls.jsonl", iteration: 1 },
+      { fileName: "iteration-2.tool-calls.jsonl", iteration: 2 },
+    ]);
+  });
+
+  it("ignores tool-calls files with unexpected names", () => {
+    const files = ["random.tool-calls.jsonl", "tool-calls.jsonl", "run.tool-calls.jsonl"];
+    expect(detectBundledToolCallsFiles(files)).toEqual([]);
+  });
+
+  it("returns empty when no tool-calls files present", () => {
+    expect(detectBundledToolCallsFiles(["run.yaml", "iteration-1.har"])).toEqual([]);
+  });
+});
+
+// --- uploadBundledToolCallsFiles ---
+
+describe("uploadBundledToolCallsFiles", () => {
+  function makeMockContainerClient() {
+    const uploaded: Array<{ blobName: string; filePath: string; contentType: string; tags: Record<string, string> }> = [];
+    const client: BlobUploader = {
+      getBlockBlobClient(blobName: string) {
+        return {
+          url: `https://mock.blob.core.windows.net/snapshots/${blobName}`,
+          async uploadFile(filePath: string, options?: { blobHTTPHeaders?: { blobContentType?: string }; tags?: Record<string, string> }) {
+            uploaded.push({
+              blobName,
+              filePath,
+              contentType: options?.blobHTTPHeaders?.blobContentType ?? "",
+              tags: options?.tags ?? {},
+            });
+          },
+        };
+      },
+    };
+    return { client, uploaded };
+  }
+
+  it("uploads per-iteration JSONL files and sets toolCallsUrl on matching turns", async () => {
+    const { client, uploaded } = makeMockContainerClient();
+    const turns: Array<{ iteration: number; toolCallsUrl?: string }> = [
+      { iteration: 1 },
+      { iteration: 2 },
+    ];
+
+    await uploadBundledToolCallsFiles({
+      toolCallsFiles: [
+        { fileName: "iteration-1.tool-calls.jsonl", iteration: 1 },
+        { fileName: "iteration-2.tool-calls.jsonl", iteration: 2 },
+      ],
+      runDir: "/tmp/extracted/run789",
+      runId: "run789",
+      turns,
+      containerClient: client,
+    });
+
+    expect(uploaded).toHaveLength(2);
+    expect(uploaded[0].blobName).toBe("run789/iteration-1/tool-calls.jsonl");
+    expect(uploaded[0].contentType).toBe("application/x-ndjson");
+    expect(uploaded[1].blobName).toBe("run789/iteration-2/tool-calls.jsonl");
+    expect(turns[0].toolCallsUrl).toBe("https://mock.blob.core.windows.net/snapshots/run789/iteration-1/tool-calls.jsonl");
+    expect(turns[1].toolCallsUrl).toBe("https://mock.blob.core.windows.net/snapshots/run789/iteration-2/tool-calls.jsonl");
+  });
+
+  it("does nothing when no tool-calls files are provided", async () => {
+    const { client, uploaded } = makeMockContainerClient();
+    await uploadBundledToolCallsFiles({
+      toolCallsFiles: [],
+      runDir: "/tmp/extracted/run000",
+      runId: "run000",
+      turns: [],
+      containerClient: client,
+    });
     expect(uploaded).toHaveLength(0);
   });
 });
@@ -686,5 +807,41 @@ describe("packRunIntoTar", () => {
     const names = entries.map(e => e.name);
     expect(names).toContain("run-008/logs.jsonl");
     expect(entries.find(e => e.name === "run-008/logs.jsonl")!.data).toEqual(logData);
+  });
+
+  it("bundles per-turn IChatAgentResult2 envelope as iteration-N.chat-result.json", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const envelope1 = Buffer.from('{"metadata":{"toolCallRounds":[{"response":"hi"}]}}');
+    const envelope2 = Buffer.from('{"metadata":{"toolCallRounds":[{"response":"bye"}]}}');
+    const container = makeMockBlobContainer({
+      "run-009/runs/run-009/iteration-1/chat-result.json": { body: envelope1, length: envelope1.length },
+      "run-009/runs/run-009/iteration-2/chat-result.json": { body: envelope2, length: envelope2.length },
+    });
+
+    const run: ArchivableRun = {
+      _id: "run-009",
+      run: {
+        turns: [
+          { iteration: 1, chatResultUrl: "https://storage.blob.core.windows.net/snapshots/run-009/runs/run-009/iteration-1/chat-result.json" },
+          { iteration: 2, chatResultUrl: "https://storage.blob.core.windows.net/snapshots/run-009/runs/run-009/iteration-2/chat-result.json" },
+        ],
+      },
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    await packRunIntoTar(p, run, container, "run-009", () => true);
+    p.finalize();
+
+    const entries = await entriesPromise;
+    const names = entries.map(e => e.name);
+    expect(names).toContain("run-009/iteration-1.chat-result.json");
+    expect(names).toContain("run-009/iteration-2.chat-result.json");
+    expect(entries.find(e => e.name === "run-009/iteration-1.chat-result.json")!.data).toEqual(envelope1);
+    expect(entries.find(e => e.name === "run-009/iteration-2.chat-result.json")!.data).toEqual(envelope2);
+
+    const yaml = entries.find(e => e.name === "run-009/run.yaml")!.data.toString();
+    expect(yaml).toContain("iteration-1.chat-result.json");
+    expect(yaml).not.toContain("blob.core.windows.net");
   });
 });

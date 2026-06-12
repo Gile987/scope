@@ -21,9 +21,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Trash2, Loader2, Save, Plus } from "lucide-react";
 import { formatDate } from "@/lib/utils";
-import { unmaskSecretValue } from "@/lib/mcp-secrets";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
+import { SecretInput } from "@/components/ui/secret-input";
 
 export function McpServerDetail() {
   const { slug } = useParams<{ slug: string }>();
@@ -57,11 +57,11 @@ export function McpServerDetail() {
       setUrl(server.url ?? "");
       setCommand(server.command ?? "");
       setArgs(server.args ? server.args.join(" ") : "");
-      setEnvPairs(server.env ? Object.entries(server.env).map(([k, v]) => ({ name: k, value: unmaskSecretValue(v) })) : []);
+      setEnvPairs(server.env ? Object.entries(server.env).map(([k]) => ({ name: k, value: "" })) : []);
       setSessionMode(server.sessionMode ?? "stateless");
       setVersion(server.version ?? "");
       setDescription(server.description ?? "");
-      setHeaders(server.headers ? server.headers.map(h => ({ name: h.name, value: unmaskSecretValue(h.value) })) : []);
+      setHeaders(server.headers ? server.headers.map(h => ({ name: h.name, value: "" })) : []);
     }
   }, [server]);
 
@@ -89,24 +89,57 @@ export function McpServerDetail() {
 
   const handleSave = () => {
     if (isStdio) {
+      const envPayload = Object.fromEntries(
+        envPairs
+          .filter((p) => p.name)
+          .map((p) => [p.name, p.value]),
+      );
+
+      // Guard: if a key is new (not in the originally-fetched env) and has no value,
+      // the API would delete the old secret but not create one for the new key.
+      const originalEnvKeys = new Set(server?.env ? Object.keys(server.env) : []);
+      const renamedWithoutValue = Object.entries(envPayload).find(
+        ([key, value]) => !value && !originalEnvKeys.has(key),
+      );
+      if (renamedWithoutValue) {
+        toast.error(`Enter a value for "${renamedWithoutValue[0]}" or remove the row`);
+        return;
+      }
+
       updateMutation.mutate({
         name,
         type,
         command,
         args: args.trim() ? args.trim().split(/\s+/) : undefined,
-        env: envPairs.length > 0 ? Object.fromEntries(envPairs.filter(p => p.name && p.value).map(p => [p.name, p.value])) : undefined,
+        // Always send env object so the API can reconcile removals.
+        // Sending `{}` explicitly clears all env secrets (user removed all pairs).
+        env: envPayload,
         sessionMode,
         version: version.trim() || undefined,
         description: description.trim() || undefined,
       });
     } else {
-      const filteredHeaders = headers.filter(h => h.name && h.value);
+      const filteredHeaders = headers.filter(h => h.name);
+
+      // Guard: if a header name is new (not in the originally-fetched headers) and has no
+      // value, the API would delete the old secret but not create one for the new name.
+      const originalHeaderNames = new Set(server?.headers?.map(h => h.name) ?? []);
+      const renamedWithoutValue = filteredHeaders.find(
+        h => !h.value && !originalHeaderNames.has(h.name),
+      );
+      if (renamedWithoutValue) {
+        toast.error(`Enter a value for "${renamedWithoutValue.name}" or remove the row`);
+        return;
+      }
+
       updateMutation.mutate({
         name,
         type,
         url,
         description: description.trim() || undefined,
-        headers: filteredHeaders.length > 0 ? filteredHeaders : undefined,
+        // Always send headers array so the API can reconcile removals.
+        // Sending `[]` explicitly clears all header secrets (user removed all headers).
+        headers: filteredHeaders,
       });
     }
   };
@@ -119,11 +152,11 @@ export function McpServerDetail() {
       setUrl(server.url ?? "");
       setCommand(server.command ?? "");
       setArgs(server.args ? server.args.join(" ") : "");
-      setEnvPairs(server.env ? Object.entries(server.env).map(([k, v]) => ({ name: k, value: unmaskSecretValue(v) })) : []);
+      setEnvPairs(server.env ? Object.entries(server.env).map(([k]) => ({ name: k, value: "" })) : []);
       setSessionMode(server.sessionMode ?? "stateless");
       setVersion(server.version ?? "");
       setDescription(server.description ?? "");
-      setHeaders(server.headers ? server.headers.map(h => ({ name: h.name, value: unmaskSecretValue(h.value) })) : []);
+      setHeaders(server.headers ? server.headers.map(h => ({ name: h.name, value: "" })) : []);
     }
   };
 
@@ -409,13 +442,13 @@ export function McpServerDetail() {
                       placeholder="Header name"
                       value={header.name}
                       onChange={(e) => updateHeader(idx, "name", e.target.value)}
-                      className="font-mono text-sm"
+                      className="font-mono text-sm w-1/3 shrink-0"
                     />
-                    <Input
-                      placeholder="Header value"
-                      type="password"
+                    <SecretInput
+                      placeholder="Enter new value"
                       value={header.value}
                       onChange={(e) => updateHeader(idx, "value", e.target.value)}
+                      containerClassName="flex-1"
                       className="font-mono text-sm"
                     />
                     <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-destructive" onClick={() => removeHeader(idx)}>
@@ -431,9 +464,7 @@ export function McpServerDetail() {
                 {server.headers.map((h, idx) => (
                   <div key={idx} className="flex items-center gap-2 text-sm">
                     <Badge variant="secondary" className="font-mono text-xs">{h.name}</Badge>
-                    <span className="text-muted-foreground font-mono text-xs">
-                      {h.name.toLowerCase() === "authorization" ? "••••••••" : h.value}
-                    </span>
+                    <span className="text-muted-foreground font-mono text-xs">••••••••</span>
                   </div>
                 ))}
               </div>
@@ -471,13 +502,13 @@ export function McpServerDetail() {
                       placeholder="KEY"
                       value={pair.name}
                       onChange={(e) => updateEnvPair(idx, "name", e.target.value)}
-                      className="font-mono text-sm"
+                      className="font-mono text-sm w-1/3 shrink-0"
                     />
-                    <Input
-                      placeholder={pair.value === "" && server?.env?.[pair.name] === "<secret>" ? "(already set — enter new value to change)" : "value"}
-                      type="password"
+                    <SecretInput
+                      placeholder={pair.value === "" && server?.env?.[pair.name] === "<secret>" ? "(unchanged — enter new value to update)" : "value"}
                       value={pair.value}
                       onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
+                      containerClassName="flex-1"
                       className="font-mono text-sm"
                     />
                     <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-destructive" onClick={() => removeEnvPair(idx)}>
@@ -490,10 +521,10 @@ export function McpServerDetail() {
           ) : (
             (server.env && Object.keys(server.env).length > 0) ? (
               <div className="space-y-2">
-                {Object.entries(server.env).map(([k, v]) => (
+                {Object.entries(server.env).map(([k]) => (
                   <div key={k} className="flex items-center gap-2 text-sm">
                     <Badge variant="secondary" className="font-mono text-xs">{k}</Badge>
-                    <span className="text-muted-foreground font-mono text-xs">{v === "<secret>" ? "••••••••" : v}</span>
+                    <span className="text-muted-foreground font-mono text-xs">••••••••</span>
                   </div>
                 ))}
               </div>

@@ -522,18 +522,16 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--url",
         ],
       },
-      "delete": {
+      "cancel": {
         "options": [
           "--id",
           "--url",
         ],
       },
-      "demo": {
+      "delete": {
         "options": [
-          "--count",
-          "--message",
+          "--id",
           "--url",
-          "--workers",
         ],
       },
       "download": {
@@ -565,8 +563,10 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "list": {
         "options": [
           "--include-deleted",
+          "--max-iterations",
           "--output",
           "--submission-id",
+          "--turns",
           "--url",
           "--worker",
         ],
@@ -580,6 +580,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       },
       "retry": {
         "options": [
+          "--force",
           "--id",
           "--url",
         ],
@@ -594,6 +595,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "submit": {
         "options": [
           "--agent-version",
+          "--base-profile",
           "--criteria",
           "--extensions",
           "--max-iterations",
@@ -602,6 +604,9 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--model",
           "--no-stream",
           "--persona",
+          "--profile",
+          "--profile-variations-file",
+          "--reasoning-effort",
           "--scenario",
           "--skills",
           "--traits",
@@ -610,6 +615,12 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         ],
       },
       "upload": {
+        "options": [
+          "--dry-run",
+          "--url",
+        ],
+      },
+      "upload-batch": {
         "options": [
           "--dry-run",
           "--url",
@@ -714,6 +725,11 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         ],
       },
     },
+  },
+  "update": {
+    "options": [
+      "--force",
+    ],
   },
 }
 `;

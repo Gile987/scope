@@ -4,17 +4,19 @@
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { RetryConfirmDialog } from "@/components/RetryConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
+import { EnrichmentBadge } from "@/components/EnrichmentBadge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { LogViewer } from "@/components/LogViewer";
 import { TurnTimeline } from "@/components/TurnTimeline";
@@ -26,11 +28,44 @@ import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown } from "lucide-react";
+import { CriteriaBadge } from "@/components/CriteriaBadge";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
-import { useState, useMemo } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { RunState } from "@/types";
+import { useShiftModifier } from "@/hooks/useShiftModifier";
+import { getRetryButtonState } from "@/components/RetryButton";
+
+/** A compact labeled stat: a micro uppercase label above its value. */
+function MetaItem({ label, value, title }: { label: string; value: ReactNode; title?: string }) {
+  return (
+    <div className="flex flex-col gap-0.5" title={title}>
+      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">{label}</span>
+      <span className="text-sm leading-tight text-foreground">{value}</span>
+    </div>
+  );
+}
+
+/** A labeled group of resource chips (MCP servers, skills, extensions). */
+function ResourceLinks({ label, items, hrefBase }: { label: string; items: string[]; hrefBase: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">{label}</span>
+      <div className="flex flex-wrap items-center gap-1">
+        {items.map((slug) => (
+          <Link
+            key={slug}
+            to={`${hrefBase}/${slug}`}
+            className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors"
+          >
+            {slug}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function RunDetail() {
   const { id, tab } = useParams<{ id: string; tab?: string }>();
@@ -42,16 +77,21 @@ export function RunDetail() {
   const [reportsView, setReportsView] = useState<"grid" | "list">("grid");
   const [reportsFilter, setReportsFilter] = useState<"latest" | "all">("latest");
   const [showAttempts, setShowAttempts] = useState(false);
+  const [retryConfirmOpen, setRetryConfirmOpen] = useState(false);
+  const isForceRetryModifierActive = useShiftModifier();
 
   const { data: run, isLoading, error } = useQuery({
     queryKey: ["run", id],
     queryFn: () => api.getRun(id!),
     enabled: !!id,
     refetchInterval: (query) => {
-      const status = query.state.data?.run?.status;
-      // Stop polling once terminal (done)
-      if (status === "done") return false;
-      return 5_000;
+      const data = query.state.data;
+      const status = data?.run?.status;
+      const ppStatus = data?.run?.postProcessorStatus;
+      // Keep polling while run is in progress OR post-processing is pending/in-progress
+      if (status !== "done") return 5_000;
+      if (ppStatus && ppStatus !== "done" && ppStatus !== "failed") return 5_000;
+      return false;
     },
   });
 
@@ -93,10 +133,23 @@ export function RunDetail() {
   // Lift the log stream so it can be shared between LogViewer and CriteriaGraphView
   // Must be called unconditionally (before any early returns) per Rules of Hooks
   // The SSE endpoint handles completed runs by replaying blob logs then closing.
+  // When viewing a historical run, use the per-run logs endpoint; otherwise use the
+  // default endpoint with attemptNumber for reconnection on retry.
+  const logStreamUrlBuilder = useMemo(() => {
+    if (isViewingHistorical && activeRun?._id && run?._id) {
+      const requestId = run._id;
+      const runId = activeRun._id;
+      return (_id: string, fromStart: boolean) => api.runLogsUrl(requestId, runId, fromStart);
+    }
+    return api.logsUrl;
+  }, [isViewingHistorical, activeRun?._id, run?._id]);
+
   const logStream = useLogStream({
     id: run?._id ?? "",
     enabled: !!run,
     fromStart: true,
+    attemptNumber: activeRun?.attemptNumber,
+    urlBuilder: logStreamUrlBuilder,
   });
 
   const effectiveLogs = logStream.logs;
@@ -155,7 +208,7 @@ export function RunDetail() {
   });
 
   const retryMutation = useMutation({
-    mutationFn: () => api.retryRun(id!),
+    mutationFn: (options?: { force?: boolean }) => api.retryRun(id!, options),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["run", id] });
       toast.success(`Retry started — attempt #${data.attemptNumber}`);
@@ -173,6 +226,17 @@ export function RunDetail() {
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to pause");
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: () => api.cancelRun(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["run", id] });
+      toast.success("Run cancelled");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to cancel");
     },
   });
 
@@ -204,6 +268,37 @@ export function RunDetail() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // For completed runs, use the FINAL turn's criteriaResults to build a
+  // criterionId -> pass/fail/undefined lookup map.
+  // Using the final turn (not the latest turn with any results) avoids
+  // presenting stale pass/fail state from an earlier iteration when the
+  // last turn ended without evaluation (e.g. judge failure).
+  // "not evaluated" is preserved as undefined so skipped criteria are not
+  // collapsed into a failing `false` state.
+  const latestCriteriaResultsMap = useMemo(() => {
+    if (activeRun?.status !== "done") return undefined;
+    const turns = activeRun?.turns ?? [];
+    const lastTurn = turns.length > 0 ? turns[turns.length - 1] : undefined;
+    if (!lastTurn?.criteriaResults?.length) return new Map<string, boolean | undefined>();
+
+    return new Map<string, boolean | undefined>(
+      lastTurn.criteriaResults.map((r) => [
+        r.criterionId,
+        r.evaluated ? r.passed : undefined,
+      ])
+    );
+  }, [activeRun?.status, activeRun?.turns]);
+
+  // Prefer scenario criteria as the canonical list.
+  // If unavailable on a completed run, fall back to whatever the judge evaluated.
+  const displayedCriteria = useMemo(() => {
+    if ((run?.scenario?.criteria?.length ?? 0) > 0) return run?.scenario?.criteria ?? [];
+    if (activeRun?.status === "done" && latestCriteriaResultsMap) {
+      return Array.from(latestCriteriaResultsMap.keys());
+    }
+    return [] as string[];
+  }, [run?.scenario?.criteria, activeRun?.status, latestCriteriaResultsMap]);
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -234,6 +329,9 @@ export function RunDetail() {
   const videoCount = (activeRun?.setupVideoUrls?.length ?? 0)
     + (activeRun?.videoUrls?.length ?? 0)
     + (activeRun?.turns?.reduce((n, t) => n + (t.videoUrls?.length ?? 0), 0) ?? 0);
+  const isSuccessfulCompletedRun = activeRun?.status === "done" && activeRun?.outcome === "succeeded";
+  const canShowRetry = !isViewingHistorical && activeRun?.status === "done";
+  const retryButtonState = getRetryButtonState(!!isSuccessfulCompletedRun, retryMutation.isPending, isForceRetryModifierActive);
 
   // Compute aggregate token usage: for one-shot runs use activeRun?.tokenUsage,
   // for multi-turn runs sum per-turn token usage
@@ -252,7 +350,16 @@ export function RunDetail() {
         )
       : undefined);
 
+   const skillIdsFromRevisions = Array.from(new Set((run.skillRevisions ?? []).map((ref) => {
+     const at = ref.lastIndexOf("@");
+     return at > 0 ? ref.substring(0, at) : ref;
+   })));
+   const skillIds = skillIdsFromRevisions.length > 0
+     ? skillIdsFromRevisions
+     : (run.skills ?? []);
+
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="space-y-6">
       {/* Back link + header */}
       <div>
@@ -263,102 +370,102 @@ export function RunDetail() {
         </Link>
 
         <div className="flex items-start justify-between">
-          <div className="space-y-1">
+          <div className="space-y-3">
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold tracking-tight font-mono">{id}</h1>
               <button
                 onClick={copyId}
                 className="text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Copy run ID"
                 title="Copy run ID"
               >
                 {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                <span className="sr-only">Copy run ID</span>
               </button>
             </div>
-            <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              <StatusBadge status={activeRun?.status ?? "pending"} />
+
+            {/* Tier 1 — semantic status pills */}
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge
+                status={activeRun?.status ?? "pending"}
+                worker={activeRun?.worker}
+                lastHeartbeatAt={activeRun?.lastHeartbeatAt}
+                startedAt={activeRun?.startedAt}
+              />
               {activeRun?.status === "done" && <OutcomeBadge outcome={activeRun?.outcome} />}
-              <span className="font-mono">{run.workerType}</span>
+              {activeRun?.status === "done" && (
+                <EnrichmentBadge status={activeRun.postProcessorStatus} version={activeRun.postProcessorVersion} />
+              )}
+            </div>
+
+            {/* Tier 2 — labeled configuration + metrics */}
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <MetaItem label="Worker" value={<span className="font-mono">{run.workerType}</span>} />
               {run.model && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono">{run.model}</span>
-                </>
+                <MetaItem
+                  label="Model"
+                  value={
+                    <span className="font-mono">
+                      {run.model}
+                      {run.reasoningEffort && ` (${run.reasoningEffort})`}
+                    </span>
+                  }
+                />
               )}
               {run.agentVersion && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono text-xs cursor-default" title={activeRun?.workerVersion ? `Worker: ${activeRun?.workerVersion}` : undefined}>{run.agentVersion}</span>
-                </>
+                <MetaItem
+                  label="Version"
+                  title={activeRun?.workerVersion ? `Worker: ${activeRun?.workerVersion}` : undefined}
+                  value={<span className="font-mono">{run.agentVersion}</span>}
+                />
               )}
-              <Separator orientation="vertical" className="h-4" />
-              <span>Created {formatDate(run.createdAt)}</span>
-              {run.maxIterations && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span>Max {run.maxIterations} iterations</span>
-                </>
-              )}
+              <MetaItem label="Created" value={formatDate(run.createdAt)} />
+              {run.maxIterations && <MetaItem label="Max iterations" value={run.maxIterations} />}
               {(() => {
                 const totalDuration = activeRun?.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
                 return totalDuration ? (
-                  <>
-                    <Separator orientation="vertical" className="h-4" />
-                    <span className="font-mono text-xs" title={`${totalDuration.toLocaleString()}ms total`}>
-                      {formatDuration(totalDuration)}
-                    </span>
-                  </>
+                  <MetaItem
+                    label="Duration"
+                    title={`${totalDuration.toLocaleString()}ms total`}
+                    value={<span className="font-mono">{formatDuration(totalDuration)}</span>}
+                  />
                 ) : null;
               })()}
               {totalTokenUsage && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono text-xs">
-                    {totalTokenUsage.promptTokens.toLocaleString()}↑ · {totalTokenUsage.completionTokens.toLocaleString()}↓
-                  </span>
-                </>
+                <MetaItem
+                  label="Tokens (in/out)"
+                  value={
+                    <span className="font-mono">
+                      {totalTokenUsage.promptTokens.toLocaleString()}↑ · {totalTokenUsage.completionTokens.toLocaleString()}↓
+                    </span>
+                  }
+                />
               )}
               {activeRun?.aiCallCount !== undefined && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono text-xs" title="LLM completion calls">
-                    {activeRun?.aiCallCount} LLM calls
-                  </span>
-                </>
-              )}
-              {run.mcpServers && run.mcpServers.length > 0 && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span>MCP:</span>
-                  {run.mcpServers.map((slug) => (
-                    <Link key={slug} to={`/mcp-servers/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
-                      {slug}
-                    </Link>
-                  ))}
-                </>
-              )}
-              {run.skills && run.skills.length > 0 && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span>Skills:</span>
-                  {run.skills.map((slug) => (
-                    <Link key={slug} to={`/skills/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
-                      {slug}
-                    </Link>
-                  ))}
-                </>
-              )}
-              {run.extensions && run.extensions.length > 0 && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span>Extensions:</span>
-                  {run.extensions.map((id) => (
-                    <Link key={id} to={`/extensions/${id}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
-                      {id}
-                    </Link>
-                  ))}
-                </>
+                <MetaItem
+                  label="LLM calls"
+                  title="LLM completion calls"
+                  value={<span className="font-mono">{activeRun?.aiCallCount}</span>}
+                />
               )}
             </div>
+
+            {/* Tier 3 — resource attachments */}
+            {((run.mcpServers && run.mcpServers.length > 0) ||
+              (run.skills && run.skills.length > 0) ||
+              (run.extensions && run.extensions.length > 0)) && (
+              <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
+                {run.mcpServers && run.mcpServers.length > 0 && (
+                  <ResourceLinks label="MCP" items={run.mcpServers} hrefBase="/mcp-servers" />
+                )}
+                {run.skills && run.skills.length > 0 && (
+                  <ResourceLinks label="Skills" items={run.skills} hrefBase="/skills" />
+                )}
+                {run.extensions && run.extensions.length > 0 && (
+                  <ResourceLinks label="Extensions" items={run.extensions} hrefBase="/extensions" />
+                )}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
           {hasMultipleAttempts && attempts && attempts.length > 0 && (
@@ -396,7 +503,12 @@ export function RunDetail() {
                             }}
                           >
                             <span className="font-mono font-medium w-5 text-right">#{attempt.attemptNumber}</span>
-                            <StatusBadge status={attempt.status ?? "pending"} />
+                            <StatusBadge
+                              status={attempt.status ?? "pending"}
+                              worker={attempt.worker}
+                              lastHeartbeatAt={attempt.lastHeartbeatAt}
+                              startedAt={attempt.startedAt}
+                            />
                             {attempt.status === "done" && <OutcomeBadge outcome={attempt.outcome} />}
                             {duration ? (
                               <span className="font-mono text-muted-foreground">{formatDuration(duration)}</span>
@@ -418,19 +530,26 @@ export function RunDetail() {
               variant="outline"
               size="sm"
               className="gap-1.5"
-              onClick={() => window.open(api.archiveUrl(run._id), "_blank")}
+              onClick={() => window.open(isViewingHistorical && activeRun?._id ? api.runArchiveUrl(run._id, activeRun._id) : api.archiveUrl(run._id), "_blank")}
             >
               <Archive className="h-4 w-4" />
               Download Archive
             </Button>
           )}
-          {activeRun?.status === "done" && !isViewingHistorical && (
+          {canShowRetry && (
             <Button
               variant="outline"
               size="sm"
               className="gap-1.5"
-              onClick={() => retryMutation.mutate()}
-              disabled={retryMutation.isPending}
+              onClick={() => {
+                if (isSuccessfulCompletedRun) {
+                  setRetryConfirmOpen(true);
+                } else {
+                  retryMutation.mutate({ force: false });
+                }
+              }}
+              disabled={retryButtonState.disabled}
+              title={retryButtonState.title}
             >
               <RotateCcw className="h-4 w-4" />
               {retryMutation.isPending ? "Retrying…" : "Retry"}
@@ -446,6 +565,22 @@ export function RunDetail() {
             >
               <Pause className="h-4 w-4" />
               {pauseMutation.isPending ? "Pausing…" : "Pause"}
+            </Button>
+          )}
+          {(activeRun?.status === "pending" || activeRun?.status === "queued" || activeRun?.status === "processing") && !isViewingHistorical && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-destructive border-destructive/50 hover:bg-destructive/10"
+              onClick={() => {
+                if (window.confirm("Are you sure you want to cancel this run? This will mark it as failed and kill any active worker.")) {
+                  cancelMutation.mutate();
+                }
+              }}
+              disabled={cancelMutation.isPending}
+            >
+              <X className="h-4 w-4" />
+              {cancelMutation.isPending ? "Cancelling…" : "Cancel"}
             </Button>
           )}
           {activeRun?.status === "paused" && !isViewingHistorical && (
@@ -506,7 +641,7 @@ export function RunDetail() {
       {/* Tabs */}
       <Tabs
         value={tab || (activeRun?.turns && activeRun?.turns.length > 0 ? "turns" : "logs")}
-        onValueChange={(value) => navigate(`/runs/${id}/${value}`)}
+        onValueChange={(value) => navigate(`/runs/${id}/${value}${selectedRunId ? `?runId=${selectedRunId}` : ""}`)}
       >
         <TabsList>
           <TabsTrigger value="turns">
@@ -527,13 +662,13 @@ export function RunDetail() {
 
         {/* Turns tab */}
         <TabsContent value="turns" className="mt-4">
-          <TurnTimeline turns={activeRun?.turns ?? []} runId={run._id} />
+          <TurnTimeline turns={activeRun?.turns ?? []} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
         </TabsContent>
 
         {/* Conversation tab — chat-style view of agent/judge exchanges */}
         {activeRun?.turns && activeRun?.turns.length > 0 && (
           <TabsContent value="conversation" className="mt-4">
-            <ConversationView turns={activeRun?.turns} task={run.scenario?.task} runId={run._id} />
+            <ConversationView turns={activeRun?.turns} task={run.scenario?.task} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
           </TabsContent>
         )}
 
@@ -542,9 +677,9 @@ export function RunDetail() {
           <TabsContent value="network" className="mt-4">
             {/* If multi-turn, show per-iteration selector; otherwise one viewer */}
             {activeRun?.turns && activeRun?.turns.some(t => t.harUrl) ? (
-              <HarIterationTabs runId={run._id} turns={activeRun?.turns} />
+              <HarIterationTabs runId={run._id} turns={activeRun?.turns} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
             ) : (
-              <HarNetworkViewer runId={run._id} />
+              <HarNetworkViewer runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
             )}
           </TabsContent>
         )}
@@ -553,17 +688,17 @@ export function RunDetail() {
         {hasVideoData && (
           <TabsContent value="video" className="mt-4">
             {activeRun?.turns && activeRun?.turns.some(t => t.videoUrls?.length) ? (
-              <VideoIterationTabs runId={run._id} turns={activeRun?.turns} setupVideoUrls={activeRun?.setupVideoUrls} />
+              <VideoIterationTabs runId={run._id} turns={activeRun?.turns} setupVideoUrls={activeRun?.setupVideoUrls} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
             ) : (
               <div className="space-y-4">
                 {activeRun?.setupVideoUrls && activeRun?.setupVideoUrls.length > 0 && (
                   activeRun?.setupVideoUrls.map((_, i) => (
-                    <VideoPlayer key={`setup-${i}`} src={api.videoUrl(run._id, undefined, i, "setup")} label="Setup" />
+                    <VideoPlayer key={`setup-${i}`} src={isViewingHistorical && activeRun?._id ? api.runVideoUrl(run._id, activeRun._id, undefined, i, "setup") : api.videoUrl(run._id, undefined, i, "setup")} label="Setup" />
                   ))
                 )}
                 {activeRun?.videoUrls && activeRun?.videoUrls.length > 0 && (
                   activeRun?.videoUrls.map((_, i) => (
-                    <VideoPlayer key={i} src={api.videoUrl(run._id, undefined, i)} label={(activeRun?.videoUrls?.length ?? 0) > 1 ? `Video ${i + 1}` : undefined} />
+                    <VideoPlayer key={i} src={isViewingHistorical && activeRun?._id ? api.runVideoUrl(run._id, activeRun._id, undefined, i) : api.videoUrl(run._id, undefined, i)} label={(activeRun?.videoUrls?.length ?? 0) > 1 ? `Video ${i + 1}` : undefined} />
                   ))
                 )}
               </div>
@@ -725,7 +860,16 @@ export function RunDetail() {
               <CardContent className="space-y-3">
                 <div>
                   <h4 className="text-sm font-medium mb-1">Task</h4>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{run.scenario?.task ?? "–"}</p>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5 cursor-default">
+                        {run.scenario?.task ?? "–"}
+                      </p>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-sm whitespace-pre-wrap">
+                      {run.scenario?.task ?? "–"}
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
                 {run.scenario?.version && (
                   <div>
@@ -733,15 +877,22 @@ export function RunDetail() {
                     <Badge variant="outline">{run.scenario!.version}</Badge>
                   </div>
                 )}
-                {(run.scenario?.criteria?.length ?? 0) > 0 && (
+                {displayedCriteria.length > 0 && (
                   <div>
-                    <h4 className="text-sm font-medium mb-1">Criteria ({run.scenario?.criteria?.length})</h4>
+                    <h4 className="text-sm font-medium mb-1">Criteria ({displayedCriteria.length})</h4>
                     <div className="flex flex-wrap gap-1.5">
-                      {run.scenario?.criteria?.map((c, i) => (
-                        <Badge key={i} variant="secondary" className="font-mono text-xs">
-                          {c}
-                        </Badge>
-                      ))}
+                      {displayedCriteria.map((c) => {
+                        return (
+                          <CriteriaBadge
+                            key={c}
+                            criterionId={c}
+                            result={latestCriteriaResultsMap?.get(c)}
+                            evaluated={activeRun?.status === "done"}
+                            showStateLabel={activeRun?.status === "done"}
+                            link={false}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -860,6 +1011,42 @@ export function RunDetail() {
                       <span className="font-mono font-medium">{run.model}</span>
                     </div>
                   )}
+                  {run.reasoningEffort && (
+                    <div>
+                      <span className="text-muted-foreground">Reasoning Effort:</span>{" "}
+                      <span className="font-mono font-medium">{run.reasoningEffort}</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Enrichment card */}
+            {activeRun?.status === "done" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Enrichment</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Status:</span>{" "}
+                    <EnrichmentBadge status={activeRun.postProcessorStatus} version={activeRun.postProcessorVersion} />
+                  </div>
+                  {activeRun.postProcessorVersion !== undefined && (
+                    <div>
+                      <span className="text-muted-foreground">Version:</span>{" "}
+                      <span className="font-mono font-medium">v{activeRun.postProcessorVersion}</span>
+                    </div>
+                  )}
+                  {activeRun.postProcessorStatus === "done" && activeRun.turns?.some(t => t.atifUrl) && (
+                    <div>
+                      <span className="text-muted-foreground">Artifacts:</span>{" "}
+                      <span className="font-medium">ATIF trajectory</span>
+                      <span className="text-muted-foreground ml-1">
+                        ({activeRun.turns?.filter(t => t.atifUrl).length ?? 0} iteration{(activeRun.turns?.filter(t => t.atifUrl).length ?? 0) !== 1 ? "s" : ""})
+                      </span>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -884,6 +1071,28 @@ export function RunDetail() {
                         </Badge>
                       );
                     })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Skills card */}
+            {skillIds.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    Skills ({skillIds.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-1.5">
+                    {skillIds.map((skillId) => (
+                      <Link key={skillId} to={`/skills/${skillId}`}>
+                        <Badge variant="secondary" className="font-mono text-xs hover:bg-accent transition-colors">
+                          {skillId}
+                        </Badge>
+                      </Link>
+                    ))}
                   </div>
                 </CardContent>
               </Card>
@@ -987,11 +1196,19 @@ export function RunDetail() {
         {/* Tool Calls tab — HAR captures & tool calls summary */}
         {hasHarData && (
           <TabsContent value="tool-calls" className="mt-4 space-y-4">
-            <ToolCallsTab runId={run._id} turns={activeRun?.turns} harUrl={activeRun?.harUrl} />
+            <ToolCallsTab runId={run._id} turns={activeRun?.turns} harUrl={activeRun?.harUrl} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
           </TabsContent>
         )}
       </Tabs>
+
+      <RetryConfirmDialog
+        open={retryConfirmOpen}
+        onOpenChange={setRetryConfirmOpen}
+        onConfirm={() => retryMutation.mutate({ force: true })}
+        isPending={retryMutation.isPending}
+      />
     </div>
+    </TooltipProvider>
   );
 }
 
@@ -999,7 +1216,7 @@ export function RunDetail() {
 // Helper: per-iteration HAR viewer tabs for multi-turn runs
 // ---------------------------------------------------------------------------
 
-function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration: number; harUrl?: string }[] }) {
+function HarIterationTabs({ runId, turns, attemptRunId }: { runId: string; turns: { iteration: number; harUrl?: string }[]; attemptRunId?: string }) {
   const turnsWithHar = turns.filter(t => t.harUrl);
   const [activeIteration, setActiveIteration] = useState(turnsWithHar[0]?.iteration);
 
@@ -1007,7 +1224,7 @@ function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration:
 
   // Single iteration — no sub-tabs needed
   if (turnsWithHar.length === 1) {
-    return <HarNetworkViewer runId={runId} iteration={turnsWithHar[0].iteration} />;
+    return <HarNetworkViewer runId={runId} iteration={turnsWithHar[0].iteration} attemptRunId={attemptRunId} />;
   }
 
   return (
@@ -1026,7 +1243,7 @@ function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration:
         ))}
       </div>
       {activeIteration !== undefined && (
-        <HarNetworkViewer runId={runId} iteration={activeIteration} />
+        <HarNetworkViewer runId={runId} iteration={activeIteration} attemptRunId={attemptRunId} />
       )}
     </div>
   );
@@ -1036,7 +1253,7 @@ function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration:
 // Helper: per-iteration video player tabs for multi-turn runs
 // ---------------------------------------------------------------------------
 
-function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; turns: { iteration: number; videoUrls?: string[] }[]; setupVideoUrls?: string[] }) {
+function VideoIterationTabs({ runId, turns, setupVideoUrls, attemptRunId }: { runId: string; turns: { iteration: number; videoUrls?: string[] }[]; setupVideoUrls?: string[]; attemptRunId?: string }) {
   const turnsWithVideo = turns.filter(t => t.videoUrls && t.videoUrls.length > 0);
   const hasSetupVideo = setupVideoUrls && setupVideoUrls.length > 0;
   const [activeTab, setActiveTab] = useState<string>(hasSetupVideo ? "setup" : String(turnsWithVideo[0]?.iteration));
@@ -1044,6 +1261,9 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; t
   if (turnsWithVideo.length === 0 && !hasSetupVideo) return null;
 
   const activeTurn = turnsWithVideo.find(t => String(t.iteration) === activeTab);
+  const videoUrlFn = attemptRunId
+    ? (iteration?: number, index?: number, phase?: string) => api.runVideoUrl(runId, attemptRunId, iteration, index, phase)
+    : (iteration?: number, index?: number, phase?: string) => api.videoUrl(runId, iteration, index, phase);
 
   return (
     <div className="space-y-3">
@@ -1077,7 +1297,7 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; t
           {setupVideoUrls.map((_, i) => (
             <VideoPlayer
               key={`setup-${i}`}
-              src={api.videoUrl(runId, undefined, i, "setup")}
+              src={videoUrlFn(undefined, i, "setup")}
               label={setupVideoUrls.length > 1 ? `Setup Video ${i + 1}` : "Setup"}
             />
           ))}
@@ -1088,7 +1308,7 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; t
           {activeTurn.videoUrls!.map((_, i) => (
             <VideoPlayer
               key={`${activeTab}-${i}`}
-              src={api.videoUrl(runId, Number(activeTab), i)}
+              src={videoUrlFn(Number(activeTab), i)}
               label={activeTurn.videoUrls!.length > 1 ? `Video ${i + 1}` : undefined}
             />
           ))}
@@ -1118,14 +1338,17 @@ function ExpandableCell({ children, className = "" }: { children: React.ReactNod
   );
 }
 
-function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: ConversationTurn[]; harUrl?: string }) {
-  const { allToolCalls, isLoading } = useAllTurnsToolCalls(runId, turns, harUrl);
+function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; turns?: ConversationTurn[]; harUrl?: string; attemptRunId?: string }) {
+  const { allToolCalls, isLoading } = useAllTurnsToolCalls(runId, turns, harUrl, attemptRunId);
 
   // Group by tool name for summary
   const byName = new Map<string, number>();
   for (const tc of allToolCalls) {
     byName.set(tc.name, (byName.get(tc.name) ?? 0) + 1);
   }
+
+  const harDownloadUrl = attemptRunId ? api.runHarUrl(runId, attemptRunId) : api.harUrl(runId);
+  const harIterationUrl = (iteration: number) => attemptRunId ? api.runHarUrl(runId, attemptRunId, iteration) : api.harUrl(runId, iteration);
 
   return (
     <>
@@ -1136,7 +1359,7 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
             variant="outline"
             size="sm"
             className="gap-1.5"
-            onClick={() => window.open(api.harUrl(runId), "_blank")}
+            onClick={() => window.open(harDownloadUrl, "_blank")}
           >
             <Download className="h-4 w-4" />
             Download HAR
@@ -1245,7 +1468,7 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
                     variant="outline"
                     size="sm"
                     className="gap-1 font-mono text-xs"
-                    onClick={() => window.open(api.harUrl(runId, t.iteration), "_blank")}
+                    onClick={() => window.open(harIterationUrl(t.iteration), "_blank")}
                   >
                     <Download className="h-3 w-3" />
                     Iteration {t.iteration}

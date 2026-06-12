@@ -1,12 +1,35 @@
-# Build stage — produces a statically-linked musl binary
-FROM rust:1.88-alpine AS builder
-RUN apk add --no-cache musl-dev
+# syntax=docker/dockerfile:1.7
+#
+# Dependency builds are isolated via cargo-chef so they live in a regular image
+# layer (keyed only on Cargo.toml/Cargo.lock via recipe.json). That layer is
+# preserved by the GitHub Actions Docker layer cache (`cache-to: type=gha`),
+# whereas BuildKit `--mount=type=cache` mounts are NOT exported to GHA cache and
+# therefore caused every CI build to recompile every crate from scratch.
+
+FROM rust:1.88-alpine AS chef
+RUN apk add --no-cache musl-dev && cargo install cargo-chef --locked --version 0.1.68
 WORKDIR /build
-# Cache dependencies in a separate layer
+
+# Planner stage — produces a recipe.json describing the dependency graph.
+# Source changes invalidate this stage, but recipe.json content only changes
+# when Cargo.toml / Cargo.lock change, so the cook stage stays cached.
+FROM chef AS planner
 COPY Cargo.toml Cargo.lock* ./
-RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release && rm -rf src
 COPY src/ src/
-RUN touch src/main.rs && cargo build --release
+RUN cargo chef prepare --recipe-path recipe.json
+
+# Builder stage — cook deps first (cached layer), then build the app.
+FROM chef AS builder
+COPY --from=planner /build/recipe.json recipe.json
+# Cook compiles dependencies only. Output lives in the image layer (no cache
+# mounts) so it is reused across CI runs as long as recipe.json is unchanged.
+RUN cargo chef cook --release --recipe-path recipe.json
+# Now bring in the real sources and build the actual binary. Deps are reused
+# from the cook layer; only gateway's own crate is recompiled.
+COPY Cargo.toml Cargo.lock* ./
+COPY src/ src/
+RUN cargo build --release && \
+    cp target/release/gateway /usr/local/bin/gateway
 
 # Dev stage: cargo-watch for hot reload (used by docker-compose.dev.yml)
 FROM rust:1.88-alpine AS dev
@@ -16,12 +39,13 @@ COPY Cargo.toml Cargo.lock* ./
 COPY src/ src/
 COPY config/ config/
 EXPOSE 18000 18897
-CMD ["cargo", "watch", "-x", "run -- --config /config/proxy.yaml --port 18000 --api-port 18897 --cert-dir /tmp/scope-gateway/certs"]
+CMD ["cargo", "watch", "-x", "run -- --config /build/config/default.yaml --port 18000 --api-port 18897 --cert-dir /tmp/scope-gateway/certs"]
 
 # Runtime stage — minimal image with just the binary
 FROM alpine:3.21 AS runtime
 RUN apk add --no-cache ca-certificates wget
-COPY --from=builder /build/target/release/gateway /usr/local/bin/gateway
+COPY --from=builder /usr/local/bin/gateway /usr/local/bin/gateway
+COPY config/default.yaml /config/default.yaml
 EXPOSE 18000 18897
 ENTRYPOINT ["gateway"]
-CMD ["--config", "/config/proxy.yaml"]
+CMD ["--config", "/config/default.yaml"]

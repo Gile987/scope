@@ -9,6 +9,7 @@
  */
 
 import { writeFile, readFile, access } from "node:fs/promises";
+import { platform } from "node:os";
 import type { WorkerLogFn } from "../types/types.js";
 import type { HarCollectionResult } from "../har/extract-metadata.js";
 
@@ -39,8 +40,23 @@ export interface ProxyClient {
   /** Start recording / session. */
   startRecording(): Promise<void>;
 
+  /**
+   * The proxy URL to use for HTTP_PROXY / HTTPS_PROXY.
+   * For the gateway backend, this includes the session ID in the userinfo field
+   * after startRecording() is called (e.g. `http://<sessionId>@host:port`).
+   * For other backends, returns the base apiUrl.
+   */
+  readonly proxyUrl: string;
+
   /** Stop recording / session, collect HAR, extract metadata. */
   stopAndCollectHar(log: WorkerLogFn): Promise<HarCollectionResult>;
+
+  /**
+   * Collect HAR for a specific iteration without destroying the session.
+   * Rotates the iteration counter so subsequent exchanges go to a new file.
+   * Only supported by the gateway backend; other backends should throw.
+   */
+  collectHar(iteration: number, log: WorkerLogFn): Promise<HarCollectionResult>;
 }
 
 /**
@@ -103,12 +119,17 @@ export async function createCombinedCaBundle(
 
   const proxyCert = await readFile(proxyCertPath, "utf-8");
 
-  const systemCaBundlePaths = [
-    "/etc/ssl/certs/ca-certificates.crt",
-    "/etc/pki/tls/certs/ca-bundle.crt",
-    "/etc/ssl/ca-bundle.pem",
-    "/etc/ssl/cert.pem",
-  ];
+  // On Windows there are no PEM bundle files on disk — Node.js uses the
+  // Windows certificate store natively. Only search for system bundles on
+  // Linux/macOS where they exist as files.
+  const systemCaBundlePaths = platform() === "win32"
+    ? []
+    : [
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/ca-bundle.pem",
+        "/etc/ssl/cert.pem",
+      ];
 
   let systemCerts = "";
   for (const bundlePath of systemCaBundlePaths) {

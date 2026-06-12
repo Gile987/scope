@@ -12,6 +12,8 @@ interface UseLogStreamOptions {
   enabled?: boolean;
   /** Start from the beginning (default: true) */
   fromStart?: boolean;
+  /** Attempt number — used to detect when a new attempt is created and reconnect (default: undefined) */
+  attemptNumber?: number;
   /** Custom URL builder (default: api.logsUrl). Use api.reportLogsUrl for reports. */
   urlBuilder?: (id: string, fromStart: boolean) => string;
 }
@@ -28,6 +30,7 @@ export function useLogStream({
   id,
   enabled = true,
   fromStart = true,
+  attemptNumber,
   urlBuilder = api.logsUrl,
 }: UseLogStreamOptions): UseLogStreamReturn {
   const [logs, setLogs] = useState<LogEvent[]>([]);
@@ -40,6 +43,17 @@ export function useLogStream({
 
   useEffect(() => {
     if (!enabled || !id) return;
+
+    // Close any existing connection when dependencies change (especially attemptNumber)
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    // Reset state for fresh connection
+    setLogs([]);
+    setIsDone(false);
+    setError(null);
 
     const url = urlBuilder(id, fromStart);
     const es = new EventSource(url);
@@ -104,7 +118,7 @@ export function useLogStream({
       eventSourceRef.current = null;
       setIsConnected(false);
     };
-  }, [id, enabled, fromStart, urlBuilder]);
+  }, [id, enabled, fromStart, attemptNumber, urlBuilder]);
 
   return { logs, isConnected, isDone, error, clear };
 }

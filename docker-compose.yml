@@ -22,8 +22,8 @@
 # Shared environment blocks (YAML anchors)
 # ---------------------------------------------------------------------------
 x-common-env: &common-env
-  MONGO_CONNECTION_STRING: mongodb://mongodb:27017
-  MONGO_DATABASE: requests-db
+  MONGO_CONNECTION_STRING: ${MONGO_CONNECTION_STRING:-mongodb://mongodb:27017}
+  MONGO_DATABASE: ${MONGO_DATABASE:-requests-db}
   MONGO_COLLECTION: requests
   REDIS_HOST: redis
   REDIS_PORT: "6379"
@@ -40,6 +40,7 @@ x-worker-env: &worker-env
 x-worker-deps: &worker-deps
   mongodb:
     condition: service_healthy
+    required: false
   redis:
     condition: service_healthy
   azurite:
@@ -55,6 +56,7 @@ services:
   # MongoDB (compatible with CosmosDB MongoDB API)
   mongodb:
     image: mongo:7.0
+    profiles: [mongodb]
     ports:
       - "${MONGODB_PORT:-27000}:27017"
     environment:
@@ -84,7 +86,8 @@ services:
       retries: 5
 
   # Lowkey Vault (Azure Key Vault emulator)
-  # Persists vault state via export/import. On first start, seeds from import.json.hbs.
+  # Persists vault state via export/import. On first start, seeds export.json
+  # inline so remote Docker daemon setups don't depend on bind-mounted files.
   lowkey-vault:
     image: nagyesta/lowkey-vault:7.2.0-ubi10-minimal
     ports:
@@ -97,16 +100,13 @@ services:
         --LOWKEY_VAULT_NAMES=-
         --LOWKEY_IMPORT_LOCATION=/import/export.json
         --LOWKEY_EXPORT_LOCATION=/import/export.json
-        --LOWKEY_IMPORT_TEMPLATE_HOST=lowkey-vault
-        --LOWKEY_IMPORT_TEMPLATE_PORT=8443
     volumes:
       - lowkey_vault_data:/import
-      - ./config/lowkey-vault/import.json.hbs:/import/seed.json.hbs:ro
     entrypoint:
       [
         "/bin/sh",
         "-c",
-        "[ -f /import/export.json ] || cp /import/seed.json.hbs /import/export.json; exec java -jar /lowkey-vault.jar $$LOWKEY_ARGS",
+        "[ -f /import/export.json ] || printf '%s\n' '{\"vaults\":[{\"attributes\":{\"baseUri\":\"https://lowkey-vault:8443\",\"recoveryLevel\":\"Recoverable+Purgeable\",\"recoverableDays\":90,\"created\":0,\"deleted\":null},\"keys\":{},\"secrets\":{},\"certificates\":{}}]}' > /import/export.json; exec java -jar /lowkey-vault.jar $$LOWKEY_ARGS",
       ]
     healthcheck:
       test: ["CMD", "curl", "-fk", "https://localhost:8443/ping"]
@@ -138,6 +138,18 @@ services:
       timeout: 5s
       retries: 5
 
+  # Creates the 'har' blob container in Azurite for the gateway HAR plugin.
+  azurite-init:
+    image: mcr.microsoft.com/azure-cli:2.68.0
+    restart: "no"
+    depends_on:
+      azurite:
+        condition: service_healthy
+    environment:
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+    command: >
+      sh -c "az storage container create --name har --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true"
+
   # ===========================================================================
   # Application services
   # ===========================================================================
@@ -150,11 +162,12 @@ services:
       dockerfile: apps/api/Dockerfile
       target: builder
     environment:
-      MONGO_CONNECTION_STRING: mongodb://mongodb:27017
-      MONGO_DATABASE: requests-db
+      MONGO_CONNECTION_STRING: ${MONGO_CONNECTION_STRING:-mongodb://mongodb:27017}
+      MONGO_DATABASE: ${MONGO_DATABASE:-requests-db}
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
     restart: "no"
     working_dir: /app
     command: ["pnpm", "--filter", "db-migrations", "migrate:up"]
@@ -167,6 +180,13 @@ services:
     restart: on-failure:5
     ports:
       - "${API_PORT:-3100}:80"
+    env_file:
+      # .env.local holds developer-managed values that worktree-env must not
+      # overwrite: AZURE_AI_INFERENCE_ENDPOINT, AZURE_AI_INFERENCE_API_KEY,
+      # and LLM_MODEL. Optional — the API falls back to GitHub Models when
+      # the Foundry vars aren't set, and uses gpt-4.1 when LLM_MODEL isn't.
+      - path: .env.local
+        required: false
     environment:
       <<: *common-env
       PORT: "80"
@@ -174,32 +194,35 @@ services:
       AZURE_STORAGE_QUEUE_WORKER_1: queue-coder-acp-claude-code
       AZURE_STORAGE_QUEUE_WORKER_2: queue-coder-acp-copilot
       AZURE_STORAGE_QUEUE_REPORT: report-queue
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_MODELS_API_KEY: ${GITHUB_MODELS_API_KEY:-${GITHUB_TOKEN}}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4.1}
       GIT_COMMIT: ${GIT_COMMIT:-development}
       BUILD_TIME: ${BUILD_TIME:-}
       SCOPE_ENVIRONMENT: ${SCOPE_ENVIRONMENT:-}
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
       redis:
         condition: service_healthy
       azurite:
         condition: service_healthy
       db-migrate:
         condition: service_completed_successfully
-
-  # Register agent definitions and versions (local dev — no real version env vars)
   register-agents:
-    image: curlimages/curl:latest
+    image: alpine:3.21
     depends_on:
       api:
         condition: service_started
+    volumes:
+      - ./apps/workers:/workers:ro
     restart: "no"
     entrypoint:
       - /bin/sh
       - -c
       - |
+        apk add --no-cache curl yq > /dev/null 2>&1
+
         API_URL="http://api:80"
 
         # Retry wrapper: retries a curl up to 10 times with 3s delay
@@ -215,6 +238,13 @@ services:
           return 1
         }
 
+        # Register agent from its agent.yaml file
+        register_agent() {
+          WORKER_NAME="$$1"
+          AGENT_JSON=$$(yq -o=json /workers/$$WORKER_NAME/agent.yaml)
+          post "/api/v1/agents" "$$AGENT_JSON"
+        }
+
         echo "Waiting for API to be ready..."
         until curl -sf "$$API_URL/health" > /dev/null 2>&1; do
           echo "API not ready, retrying in 3s..."
@@ -222,21 +252,13 @@ services:
         done
         echo "API healthy, registering agents..."
 
+        # Upsert agents from agent.yaml files
+        register_agent "coder-acp-copilot"
+        register_agent "coder-acp-claude-code"
 
-
-        # Upsert agent: coder-acp-copilot
-        post "/api/v1/agents" '{"_id":"coder-acp-copilot","name":"Copilot (ACP)","description":"GitHub Copilot coding agent via ACP protocol","modelProvider":"github-copilot"}'
-
-        # Register dev version: coder-acp-copilot
+        # Register dev versions
         post "/api/v1/agents/coder-acp-copilot/versions" '{"agentVersion":"copilot-dev","workerVersion":"copilot-dev-local-dev","components":{"COPILOT_CLI_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-copilot"}'
-
-        # Upsert agent: coder-acp-claude-code
-        post "/api/v1/agents" '{"_id":"coder-acp-claude-code","name":"Claude Code (ACP)","description":"Anthropic Claude Code coding agent via ACP protocol","modelProvider":"anthropic"}'
-
-        # Register dev version: coder-acp-claude-code
         post "/api/v1/agents/coder-acp-claude-code/versions" '{"agentVersion":"claude-agent-acp-dev-sdk-dev","workerVersion":"claude-agent-acp-dev-sdk-dev-local-dev","components":{"CLAUDE_CODE_ACP_VERSION":"dev","CLAUDE_AGENT_SDK_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-claude-code"}'
-
-
 
         echo ""
         echo "All agents and dev versions registered."
@@ -325,6 +347,7 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
       lowkey-vault:
         condition: service_healthy
 
@@ -344,6 +367,7 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
       azurite:
         condition: service_healthy
       db-migrate:
@@ -375,26 +399,38 @@ services:
       dockerfile: Dockerfile
     profiles: [gateway, vscode-electron-driver-ext]
     environment:
-      RUST_LOG: debug,gateway::internal=info
+      RUST_LOG: debug,gateway::internal=info,azure_core::policies::transport=info
       COPILOT_TOKEN_REFRESH_BUFFER_SECS: 120
       COPILOT_TOKEN_MINT_RETRIES: 3
       COPILOT_TOKEN_MINT_BACKOFF_MS: 500
       COPILOT_MAX_SESSION_DURATION_SECS: 3600
+      AZURE_STORAGE_USE_EMULATOR: "true"
+      AZURITE_BLOB_HOST: azurite
+      AZURITE_BLOB_PORT: "10000"
+      BLOB_STORAGE_URL: "http://azurite:10000/devstoreaccount1"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ""
+      TOKEN_MANAGER_URL: http://token-manager:80
     ulimits:
       nofile:
         soft: 65536
         hard: 65536
     volumes:
-      - ./apps/gateway/config/default.yaml:/config/proxy.yaml:ro
       - gateway_cert:/certs
     ports:
       - "${GATEWAY_API_PORT:-18900}:18000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:18000/health || exit 1"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 12
       start_period: 120s
+    depends_on:
+      azurite-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   # Claude Code worker (via ACP)
   coder-acp-claude-code:
@@ -402,7 +438,7 @@ services:
       context: .
       dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
       args:
-        CLAUDE_CODE_ACP_VERSION: ${CLAUDE_CODE_ACP_VERSION}
+        CLAUDE_CODE_ACP_VERSION: ${CLAUDE_CODE_ACP_VERSION:-}
     profiles: [claude-code]
     environment:
       <<: *worker-env
@@ -412,10 +448,8 @@ services:
       # DevProxy integration (enabled by default when using claude-code profile)
       DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
       DEV_PROXY_API_URL: http://devproxy-claude-code:18897
+      DEV_PROXY_URL: http://devproxy-claude-code:18000
       DEV_PROXY_HAR_DIR: /har-output
-      HTTP_PROXY: http://devproxy-claude-code:18000
-      HTTPS_PROXY: http://devproxy-claude-code:18000
-      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-claude-code,mcp-gateway-claude-code"
       NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
       MCP_GATEWAY_URL: http://mcp-gateway-claude-code:8080
     volumes:
@@ -491,6 +525,8 @@ services:
     build:
       context: .
       dockerfile: apps/workers/coder-acp-copilot/Dockerfile
+      args:
+        COPILOT_CLI_VERSION: ${COPILOT_CLI_VERSION:-}
     profiles: [copilot]
     environment:
       <<: *worker-env
@@ -500,10 +536,8 @@ services:
       # DevProxy integration (enabled by default when using copilot profile)
       DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
       DEV_PROXY_API_URL: http://devproxy-copilot:18897
+      DEV_PROXY_URL: http://devproxy-copilot:18000
       DEV_PROXY_HAR_DIR: /har-output
-      HTTP_PROXY: http://devproxy-copilot:18000
-      HTTPS_PROXY: http://devproxy-copilot:18000
-      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-copilot,mcp-gateway-copilot"
       NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
       MCP_GATEWAY_URL: http://mcp-gateway-copilot:8080
     volumes:
@@ -520,13 +554,14 @@ services:
 
   # DevProxy sidecar for Copilot worker (HAR capture)
   devproxy-copilot:
-    image: ghcr.io/dotnet/dev-proxy:2.1.0
+    build:
+      context: ./apps/workers/coder-acp-copilot
+      dockerfile: devproxy.Dockerfile
     profiles: [copilot]
     user: "1000:1000"
     working_dir: /har-output
-    command: ["--config-file", "/config/devproxyrc.json", "--record"]
+    command: ["--config-file", "/etc/devproxy/devproxyrc.json", "--record"]
     volumes:
-      - ./apps/workers/coder-acp-copilot/devproxy-config.json:/config/devproxyrc.json:ro
       - copilot_har_output:/har-output
       - copilot_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
     ports:
@@ -536,7 +571,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 10s
+      # First run generates the root CA into the cert volume, which can
+      # take 1-2 minutes before the API listener accepts requests.
+      start_period: 180s
     depends_on:
       devproxy-copilot-init:
         condition: service_completed_successfully
@@ -593,12 +630,49 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
       redis:
         condition: service_healthy
       azurite:
         condition: service_healthy
       api:
         condition: service_started
+
+  register-version-post-processor:
+    build:
+      context: .
+      dockerfile: apps/workers/post-processor/Dockerfile
+    profiles: [post-processor]
+    environment:
+      <<: *common-env
+    depends_on:
+      mongodb:
+        condition: service_healthy
+        required: false
+    restart: "no"
+    entrypoint: ["npx", "tsx", "apps/workers/post-processor/src/register-version.ts"]
+
+  post-processor:
+    build:
+      context: .
+      dockerfile: apps/workers/post-processor/Dockerfile
+    profiles: [post-processor]
+    environment:
+      <<: *common-env
+      AZURE_STORAGE_QUEUE_POSTPROCESSOR: post-processor-queue
+      SCOPE_MT_API_URL: http://api:80
+    depends_on:
+      mongodb:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+      api:
+        condition: service_started
+      register-version-post-processor:
+        condition: service_completed_successfully
 
 volumes:
   mongodb_data:

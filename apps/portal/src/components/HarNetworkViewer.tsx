@@ -43,6 +43,8 @@ interface HarNetworkViewerProps {
   runId: string;
   /** If provided, fetches HAR for a specific iteration */
   iteration?: number;
+  /** If provided, uses per-run URL for a specific historical attempt */
+  attemptRunId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +61,19 @@ function formatBytes(bytes: number): string {
 function formatMs(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)} ms`;
   return `${(ms / 1000).toFixed(2)} s`;
+}
+
+function formatStarted(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    const ms = String(d.getMilliseconds()).padStart(3, "0");
+    return `${hh}:${mm}:${ss}.${ms}`;
+  } catch {
+    return iso;
+  }
 }
 
 function methodColor(method: string): string {
@@ -138,11 +153,11 @@ function decodeBody(content: HarResponse["content"]): string | null {
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
-export function HarNetworkViewer({ runId, iteration }: HarNetworkViewerProps) {
+export function HarNetworkViewer({ runId, iteration, attemptRunId }: HarNetworkViewerProps) {
   const [filter, setFilter] = useState("");
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
 
-  const { data: har, isLoading, error } = useHarData<HarFile>(runId, iteration);
+  const { data: har, isLoading, error } = useHarData<HarFile>(runId, iteration, true, attemptRunId);
 
   const entries = useMemo(() => {
     if (!har) return [];
@@ -206,7 +221,7 @@ export function HarNetworkViewer({ runId, iteration }: HarNetworkViewerProps) {
           variant="outline"
           size="sm"
           className="gap-1.5"
-          onClick={() => window.open(api.harUrl(runId, iteration), "_blank")}
+          onClick={() => window.open(attemptRunId ? api.runHarUrl(runId, attemptRunId, iteration) : api.harUrl(runId, iteration), "_blank")}
         >
           <Download className="h-3 w-3" />
           Download HAR
@@ -243,6 +258,7 @@ export function HarNetworkViewer({ runId, iteration }: HarNetworkViewerProps) {
                 <thead>
                   <tr className="border-b bg-muted/50 text-left">
                     <th className="p-2 pl-3 font-medium w-[60px]">Method</th>
+                    <th className="p-2 font-medium w-[100px]">Started</th>
                     <th className="p-2 font-medium">URL</th>
                     <th className="p-2 font-medium w-[60px]">Status</th>
                     <th className="p-2 font-medium w-[60px]">Type</th>
@@ -264,6 +280,9 @@ export function HarNetworkViewer({ runId, iteration }: HarNetworkViewerProps) {
                         <span className={cn("font-mono text-xs font-semibold px-1.5 py-0.5 rounded", methodColor(entry.request.method))}>
                           {entry.request.method}
                         </span>
+                      </td>
+                      <td className="p-2 text-xs text-muted-foreground tabular-nums" title={`UTC: ${new Date(entry.startedDateTime).toISOString()}\nLocal: ${new Date(entry.startedDateTime).toString()}`}>
+                        {formatStarted(entry.startedDateTime)}
                       </td>
                       <td className="p-2 truncate max-w-[400px]">
                         <span className="font-mono text-xs" title={entry.request.url}>

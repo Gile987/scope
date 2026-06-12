@@ -187,6 +187,15 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    const wantsSecretReconciliation = env !== undefined || headers !== undefined;
+
+    // Detect a transport-kind change across the stdio boundary.
+    // GET interprets all Token Manager secrets as env (stdio) or headers (http/sse),
+    // so keeping them when the type changes would return them as the wrong kind.
+    const existingIsStdio = existing.type === "stdio";
+    const newIsStdio = type !== undefined ? type === "stdio" : existingIsStdio;
+    const typeChangesKind = type !== undefined && existingIsStdio !== newIsStdio;
+
     const updateFields: Record<string, unknown> = { updatedAt: new Date() };
     if (name !== undefined) updateFields.name = name;
     if (type !== undefined) updateFields.type = type;
@@ -198,19 +207,65 @@ apiRoute(ctx.app, ctx.registry, {
     if (description !== undefined) updateFields.description = description;
 
     const mongoUpdate: Record<string, unknown> = { $set: updateFields };
-    if (mcpSecretClient && (env !== undefined || headers !== undefined)) {
+    if (mcpSecretClient && wantsSecretReconciliation) {
       (mongoUpdate as any).$unset = { env: "", headers: "" };
     }
 
     await ctx.mcpServerCollection.updateOne({ _id: id }, mongoUpdate);
 
-    // Replace all secrets in Token Manager if provided
-    if (mcpSecretClient && (env !== undefined || headers !== undefined)) {
-      await mcpSecretClient.deleteAllSecrets(id);
-      if (env && Object.keys(env).length > 0) {
-        await mcpSecretClient.storeEnv(id, env);
-      } else if (headers && headers.length > 0) {
-        await mcpSecretClient.storeHeaders(id, headers);
+    // When the transport kind changes (stdio ↔ non-stdio) and no explicit secret
+    // reconciliation was requested, delete all existing secrets — GET would otherwise
+    // re-interpret them as the wrong type (env ↔ headers).
+    if (mcpSecretClient && typeChangesKind && !wantsSecretReconciliation) {
+      const itemsToDelete = await mcpSecretClient.listSecrets(id);
+      await Promise.all(itemsToDelete.map((item) => mcpSecretClient!.deleteSecret(id, item.name)));
+    }
+
+    // Reconcile secrets in Token Manager when secret fields are provided.
+    // - Empty/`"<secret>"` values preserve the existing secret for that key.
+    // - Keys omitted from the payload are deleted.
+    // - An empty env object (`{}`) or empty headers array (`[]`) deletes all existing secrets.
+    // Only one of env/headers may be present (enforced above).
+    if (mcpSecretClient && wantsSecretReconciliation) {
+      const existingItems = await mcpSecretClient.listSecrets(id);
+      const existingNames = new Set(existingItems.map((item) => item.name));
+
+      if (env !== undefined) {
+        const submittedEntries = Object.entries(env);
+        const submittedNames = new Set(submittedEntries.map(([name]) => name));
+
+        // Delete secrets that the client explicitly removed (including all when env is {}).
+        for (const name of existingNames) {
+          if (!submittedNames.has(name)) {
+            await mcpSecretClient.deleteSecret(id, name);
+          }
+        }
+
+        // Upsert only explicit new values; keep existing values when masked/empty.
+        for (const [name, rawValue] of submittedEntries) {
+          const valueStr = String(rawValue ?? "");
+          if (valueStr && valueStr !== "<secret>") {
+            await mcpSecretClient.storeSecret(id, name, valueStr);
+          }
+        }
+      }
+
+      if (headers !== undefined) {
+        const submittedNames = new Set(headers.map((h) => h.name));
+
+        // Delete secrets that the client explicitly removed (including all when headers is []).
+        for (const name of existingNames) {
+          if (!submittedNames.has(name)) {
+            await mcpSecretClient.deleteSecret(id, name);
+          }
+        }
+
+        // Upsert only explicit new values; keep existing values when masked/empty.
+        for (const header of headers) {
+          if (header.value && header.value !== "<secret>") {
+            await mcpSecretClient.storeSecret(id, header.name, header.value);
+          }
+        }
       }
     }
 

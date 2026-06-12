@@ -9,7 +9,7 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 import { mapYamlReportTemplate } from "../utils/yaml-mappers.js";
 
 export function registerReportTemplateCommands(program: Command): void {
@@ -27,7 +27,7 @@ configureHelp(reportTemplate);
 reportTemplate
   .command("models")
   .description("List models available for report generation")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/available-models`);
@@ -55,7 +55,7 @@ withOutputOption(
 reportTemplate
   .command("list")
   .description("List all report templates")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -111,7 +111,7 @@ reportTemplate
   .command("get")
   .description("Get details of a single report template")
   .requiredOption("-i, --id <id>", "Report template ID (slug)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -185,7 +185,7 @@ reportTemplate
   .option("--trigger-type <type>", "Trigger type: always, criteria, taskPrompt, promptFeature")
   .option("--trigger-ids <ids...>", "Trigger IDs (criteria IDs, task prompt IDs, or feature IDs)")
   .option("--trigger-match <match>", "Trigger match mode: any or all (default: all)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {
@@ -250,7 +250,7 @@ reportTemplate
   .option("--trigger-type <type>", "New trigger type: always, criteria, taskPrompt, promptFeature")
   .option("--trigger-ids <ids...>", "Trigger IDs")
   .option("--trigger-match <match>", "Trigger match mode: any or all")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
@@ -307,7 +307,7 @@ reportTemplate
   .command("delete")
   .description("Delete a report template (soft-delete)")
   .requiredOption("-i, --id <id>", "Report template ID (slug)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${options.id}`, {
@@ -332,7 +332,7 @@ reportTemplate
   .description("Import report templates from a YAML file (upsert via create/update)")
   .argument("<path>", "Path to a .yaml file or directory of .yaml files")
   .option("--dry-run", "Preview what would be imported without sending to API")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (inputPath: string, options) => {
     try {
       const absPath = resolve(inputPath);

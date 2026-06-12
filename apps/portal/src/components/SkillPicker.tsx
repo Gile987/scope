@@ -7,12 +7,12 @@ import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { X, Search, Download, Loader2, ChevronDown, ChevronUp, Globe, BookOpen } from "lucide-react";
 import type { SkillDocument, SkillRevisionDocument, SkillSearchResult } from "@/types";
 import { toast } from "sonner";
+import { SkillImportWizard } from "@/components/SkillImportWizard";
 
 // ---------------------------------------------------------------------------
 // Parse "slug@commitHash" → { slug, commitHash } or "slug" → { slug }
@@ -97,11 +97,6 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
   const [manualOpen, setManualOpen] = useState(false);
-
-  // Manual add fields
-  const [manualSource, setManualSource] = useState("");
-  const [manualSkillName, setManualSkillName] = useState("");
-  const [manualDisplayName, setManualDisplayName] = useState("");
 
   const debouncedQuery = useDebounce(query, 300);
 
@@ -195,28 +190,6 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ["skills"] });
       toast.success(`Skill "${created._id}" imported`);
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to import skill");
-    },
-  });
-
-  // ─── Manual import mutation ─────────────────────────────────────────
-  const manualImportMutation = useMutation({
-    mutationFn: () =>
-      api.createSkill({
-        source: manualSource.trim(),
-        skillName: manualSkillName.trim(),
-        name: manualDisplayName.trim(),
-        origin: "manual",
-      }),
-    onSuccess: (created) => {
-      queryClient.invalidateQueries({ queryKey: ["skills"] });
-      toast.success(`Skill "${created._id}" imported`);
-      setManualSource("");
-      setManualSkillName("");
-      setManualDisplayName("");
-      setManualOpen(false);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to import skill");
@@ -477,57 +450,12 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
           className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           {manualOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-          Add manually by repo slug
+          Import from a GitHub repo
         </button>
 
         {manualOpen && (
-          <div className="mt-2 rounded-md border p-3 space-y-3 bg-muted/30">
-            <div className="grid gap-2">
-              <Label className="text-xs">GitHub Repository</Label>
-              <Input
-                placeholder="e.g. owner/repo"
-                value={manualSource}
-                onChange={(e) => setManualSource(e.target.value)}
-                className="h-8 text-sm font-mono"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label className="text-xs">Skill Name</Label>
-              <Input
-                placeholder="e.g. azure-deploy"
-                value={manualSkillName}
-                onChange={(e) => setManualSkillName(e.target.value)}
-                className="h-8 text-sm font-mono"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label className="text-xs">Display Name</Label>
-              <Input
-                placeholder="e.g. Azure Deploy"
-                value={manualDisplayName}
-                onChange={(e) => setManualDisplayName(e.target.value)}
-                className="h-8 text-sm"
-              />
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              disabled={
-                !manualSource.trim() ||
-                !manualSkillName.trim() ||
-                !manualDisplayName.trim() ||
-                manualImportMutation.isPending
-              }
-              onClick={() => manualImportMutation.mutate()}
-            >
-              {manualImportMutation.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Download className="h-3.5 w-3.5" />
-              )}
-              Import
-            </Button>
+          <div className="mt-2">
+            <SkillImportWizard onClose={() => setManualOpen(false)} />
           </div>
         )}
       </div>

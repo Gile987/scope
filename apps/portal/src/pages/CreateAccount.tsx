@@ -10,6 +10,7 @@ import type { AccountType, CreateAccountRequest } from "@/types";
 import { ACCOUNT_TYPE_LABELS } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -148,9 +149,8 @@ export function CreateAccount() {
 
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input
+              <SecretInput
                 id="password"
-                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Account password"
@@ -161,14 +161,13 @@ export function CreateAccount() {
             <div className="space-y-2">
               <Label htmlFor="totpUri">TOTP URI</Label>
               <div className="flex gap-2">
-                <Input
+                <SecretInput
                   id="totpUri"
-                  type="password"
                   value={totpUri}
                   onChange={(e) => setTotpUri(e.target.value)}
                   placeholder="otpauth://totp/... or base32 secret"
                   autoComplete="off"
-                  className="flex-1"
+                  containerClassName="flex-1"
                 />
                 <input
                   ref={fileInputRef}

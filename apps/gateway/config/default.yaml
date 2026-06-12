@@ -7,7 +7,13 @@ urlsToWatch:
 port: 18000
 certDir: /tmp/scope-gateway/certs
 logLevel: info
-defaultPluginSettings:
+plugins:
   har:
     outputDir: /tmp/scope-gateway/har-output
+    appendTimeoutSecs: 120
+  copilotToken: {}
+defaultSessionPluginSettings:
+  har:
     redactCredentials: true
+harBlob:
+  containerName: "har"

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi } from "vitest";
-import { runACPSession, selectModel } from "./acp-client.js";
+import { runACPSession, selectModel, selectReasoningEffort } from "./acp-client.js";
 import type * as acp from "@agentclientprotocol/sdk";
 import os from "node:os";
 
@@ -183,5 +183,86 @@ describe("selectModel", () => {
 
     await expect(selectModel(connection, session, "gpt-5.4", (msg) => logs.push(msg))).resolves.toBeUndefined();
     expect(logs.some((l) => l.includes('session/set_model failed'))).toBe(true);
+  });
+});
+
+describe("selectReasoningEffort", () => {
+  function makeConnection(overrides?: Partial<acp.ClientSideConnection>): acp.ClientSideConnection {
+    return {
+      setSessionConfigOption: vi.fn().mockResolvedValue({ configOptions: [] }),
+      ...overrides,
+    } as unknown as acp.ClientSideConnection;
+  }
+
+  function makeSession(overrides?: Partial<acp.NewSessionResponse>): acp.NewSessionResponse {
+    return {
+      sessionId: "session-1",
+      ...overrides,
+    } as acp.NewSessionResponse;
+  }
+
+  it("sets effort via setSessionConfigOption when thought_level config option exists", async () => {
+    const connection = makeConnection();
+    const session = makeSession({
+      configOptions: [
+        { id: "reasoning_effort", category: "thought_level", name: "Reasoning Effort", currentValue: "medium", options: [], type: "select" },
+      ],
+    });
+    const logs: string[] = [];
+
+    const result = await selectReasoningEffort(connection, session, "high", (msg) => logs.push(msg));
+
+    expect(connection.setSessionConfigOption).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      configId: "reasoning_effort",
+      value: "high",
+    });
+    expect(result).toBe("high");
+    expect(logs).toContain('Reasoning effort set to "high" via session/set_config_option (configId: reasoning_effort)');
+  });
+
+  it("warns when configOptions is undefined", async () => {
+    const connection = makeConnection();
+    const session = makeSession({ configOptions: undefined });
+    const logs: string[] = [];
+
+    const result = await selectReasoningEffort(connection, session, "low", (msg) => logs.push(msg));
+
+    expect(connection.setSessionConfigOption).not.toHaveBeenCalled();
+    expect(result).toBeUndefined();
+    expect(logs.some((l) => l.includes("does not advertise config options"))).toBe(true);
+  });
+
+  it("warns when no thought_level config option exists", async () => {
+    const connection = makeConnection();
+    const session = makeSession({
+      configOptions: [
+        { id: "model-picker", category: "model", name: "Model", currentValue: "gpt-4o", options: [], type: "select" },
+      ],
+    });
+    const logs: string[] = [];
+
+    const result = await selectReasoningEffort(connection, session, "high", (msg) => logs.push(msg));
+
+    expect(connection.setSessionConfigOption).not.toHaveBeenCalled();
+    expect(result).toBeUndefined();
+    expect(logs.some((l) => l.includes('does not advertise a "thought_level" config option'))).toBe(true);
+  });
+
+  it("warns and returns undefined when setSessionConfigOption throws", async () => {
+    const connection = makeConnection({
+      setSessionConfigOption: vi.fn().mockRejectedValue(new Error("config not writable")),
+    });
+    const session = makeSession({
+      configOptions: [
+        { id: "reasoning_effort", category: "thought_level", name: "Reasoning Effort", currentValue: "medium", options: [], type: "select" },
+      ],
+    });
+    const logs: string[] = [];
+
+    const result = await selectReasoningEffort(connection, session, "high", (msg) => logs.push(msg));
+
+    expect(result).toBeUndefined();
+    expect(logs.some((l) => l.includes("session/set_config_option failed"))).toBe(true);
   });
 });

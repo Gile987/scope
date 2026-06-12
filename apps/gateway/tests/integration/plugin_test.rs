@@ -25,20 +25,28 @@ impl CounterPlugin {
     }
 }
 
+use async_trait::async_trait;
+
+#[async_trait]
 impl ProxyPlugin for CounterPlugin {
     fn name(&self) -> &str {
         "counter"
     }
 
-    fn on_session_start(&self, _session_id: &SessionId, _settings: &serde_json::Value) {}
+    async fn on_session_start(&self, _session_id: &SessionId, _settings: &serde_json::Value) {}
 
-    fn on_exchange(&self, _session_id: &SessionId, _exchange: &HttpExchange) {
+    async fn on_exchange(
+        &self,
+        _session_id: &SessionId,
+        _exchange: &HttpExchange,
+        _iteration: u32,
+    ) {
         self.exchange_count.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn on_session_stop(&self, _session_id: &SessionId) {}
+    async fn on_session_stop(&self, _session_id: &SessionId) {}
 
-    fn on_session_clear(&self, _session_id: &SessionId) {}
+    async fn on_session_clear(&self, _session_id: &SessionId) {}
 
     fn api_routes(&self) -> Option<axum::Router> {
         None
@@ -54,15 +62,16 @@ async fn har_plugin_lifecycle() {
     let client = reqwest::Client::new();
 
     // Create session with HAR settings
+    let session_id = uuid::Uuid::new_v4().to_string();
     let resp = client
         .post(gw.api_url("/api/v1/sessions"))
-        .json(&serde_json::json!({"plugins": {"har": {"redactCredentials": true}}}))
+        .json(
+            &serde_json::json!({"id": session_id, "plugins": {"har": {"redactCredentials": true}}}),
+        )
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), 201);
-    let body: serde_json::Value = resp.json().await.unwrap();
-    let session_id = body["id"].as_str().unwrap().to_string();
 
     // Stop session
     let resp = client
@@ -74,7 +83,7 @@ async fn har_plugin_lifecycle() {
 
     // Get HAR
     let resp = client
-        .get(gw.api_url(&format!("/api/v1/sessions/{}/har", session_id)))
+        .get(gw.api_url(&format!("/api/v1/sessions/{}/har?iteration=1", session_id)))
         .send()
         .await
         .unwrap();
@@ -85,8 +94,8 @@ async fn har_plugin_lifecycle() {
 }
 
 /// Custom plugin implementing ProxyPlugin receives exchanges.
-#[test]
-fn custom_plugin_receives_exchanges() {
+#[tokio::test]
+async fn custom_plugin_receives_exchanges() {
     let counter = Arc::new(CounterPlugin::new());
 
     let registry = gateway::plugin::PluginRegistry::new(vec![counter.clone()]);
@@ -95,7 +104,7 @@ fn custom_plugin_receives_exchanges() {
 
     // Simulate session start
     let settings = std::collections::HashMap::new();
-    registry.on_session_start(&sid, &settings);
+    registry.on_session_start(&sid, &settings).await;
 
     // Simulate exchange
     let exchange = HttpExchange {
@@ -115,17 +124,17 @@ fn custom_plugin_receives_exchanges() {
         elapsed_ms: 10,
     };
 
-    registry.on_exchange(&sid, &exchange);
-    registry.on_exchange(&sid, &exchange);
+    registry.on_exchange(&sid, &exchange, 1).await;
+    registry.on_exchange(&sid, &exchange, 1).await;
 
     assert_eq!(counter.count(), 2);
 
-    registry.on_session_stop(&sid);
+    registry.on_session_stop(&sid).await;
 }
 
 /// Multiple plugins all receive the same exchanges.
-#[test]
-fn multiple_plugins_receive_exchanges() {
+#[tokio::test]
+async fn multiple_plugins_receive_exchanges() {
     let counter1 = Arc::new(CounterPlugin::new());
     let counter2 = Arc::new(CounterPlugin::new());
 
@@ -134,7 +143,7 @@ fn multiple_plugins_receive_exchanges() {
     let sid = "test".to_string();
 
     let settings = std::collections::HashMap::new();
-    registry.on_session_start(&sid, &settings);
+    registry.on_session_start(&sid, &settings).await;
 
     let exchange = HttpExchange {
         request: ExchangeRequest {
@@ -153,7 +162,7 @@ fn multiple_plugins_receive_exchanges() {
         elapsed_ms: 5,
     };
 
-    registry.on_exchange(&sid, &exchange);
+    registry.on_exchange(&sid, &exchange, 1).await;
 
     assert_eq!(counter1.count(), 1);
     assert_eq!(counter2.count(), 1);

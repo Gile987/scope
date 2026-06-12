@@ -33,6 +33,34 @@ export function generateOutputFormatsHelp(
   return output;
 }
 
+/** Environment variable definition for help text generation */
+export interface EnvVarDef {
+  description: string;
+  default?: string;
+}
+
+/**
+ * Generate a help text block documenting environment variables read by the CLI.
+ * Appended to the main program --help via addHelpText('after', ...).
+ */
+export function generateEnvVarsHelp(
+  envVars: Record<string, EnvVarDef>,
+): string {
+  const entries = Object.entries(envVars);
+  const nameWidth = Math.max(...entries.map(([name]) => name.length));
+
+  let output = '\n' + styleText('bold', 'Environment Variables:') + '\n';
+  for (const [name, def] of entries) {
+    output += `  ${styleText('cyan', name.padEnd(nameWidth))}  ${def.description}`;
+    if (def.default !== undefined) {
+      output += ` ${styleText('italic', `(default: ${def.default})`)}`;
+    }
+    output += '\n';
+  }
+  output += '\n  ' + styleText('italic', 'Variables are also loaded from a .env file in the current directory.') + '\n';
+  return output;
+}
+
 /**
  * Recursively collect all commands and subcommands from a Commander program
  */
@@ -41,7 +69,7 @@ function getAllCommands(cmd: Command, prefix = ''): Array<{ name: string; descri
 
   for (const subCmd of cmd.commands) {
     const fullName = prefix ? `${prefix} ${subCmd.name()}` : subCmd.name();
-    const options = subCmd.options.map(opt => `${opt.flags} - ${opt.description}`);
+    const options = subCmd.options.filter((opt) => !opt.hidden).map(opt => `${opt.flags} - ${opt.description}`);
     const args = subCmd.registeredArguments.map(
       (arg) => `<${arg.name()}>${arg.required ? '' : '?'} - ${arg.description}`
     );
@@ -91,9 +119,10 @@ export function configureHelp(program: Command): void {
       output += '  ' + helper.commandUsage(cmd) + '\n\n';
 
       // Global options
-      if (cmd.options.length > 0) {
+      const visibleGlobalOptions = cmd.options.filter((option) => !option.hidden);
+      if (visibleGlobalOptions.length > 0) {
         output += styleText('bold', 'Global Options:') + '\n';
-        for (const option of cmd.options) {
+        for (const option of visibleGlobalOptions) {
           const term = helper.optionTerm(option);
           const desc = helper.optionDescription(option);
           output += '  ' + styleText('green', term.padEnd(termWidth)) + '  ' + desc + '\n';

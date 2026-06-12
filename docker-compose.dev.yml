@@ -180,10 +180,38 @@ services:
         - action: rebuild
           path: ./pnpm-lock.yaml
 
+  register-version-post-processor:
+    build:
+      target: dev
+
+  post-processor:
+    build:
+      target: dev
+    develop:
+      watch:
+        - action: sync
+          path: ./apps/workers/post-processor/src
+          target: /app/apps/workers/post-processor/src
+        - action: sync
+          path: ./packages/shared/src
+          target: /app/packages/shared/src
+        - action: sync
+          path: ./config
+          target: /app/config
+        - action: rebuild
+          path: ./apps/workers/post-processor/package.json
+        - action: rebuild
+          path: ./pnpm-lock.yaml
+
   # Gateway: cargo-watch inside dev container, sync source files in
   gateway:
     build:
       target: dev
+    # Cold cargo build can take 4-5 minutes on first run; the base
+    # `start_period: 120s` is enough once the target/ cache is populated
+    # but not on a fresh container. Bump it for the dev profile only.
+    healthcheck:
+      start_period: 360s
     develop:
       watch:
         - action: sync

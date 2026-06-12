@@ -5,6 +5,7 @@ import { defineTool } from "@github/copilot-sdk";
 import { readFileSync, readdirSync, statSync, existsSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
+import type { RequestDocument } from "shared";
 
 /**
  * Create tools for the report agent to access run data via the REST API
@@ -29,20 +30,22 @@ export function createReportTools(
         if (!response.ok) {
           return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
         }
-        const run = await response.json();
+        const request: RequestDocument = await response.json();
+        const run = request.run;
         return {
-          id: run._id,
-          task: run.scenario?.task,
-          criteria: run.scenario?.criteria,
-          workerType: run.workerType,
-          status: run.status,
-          persona: run.persona,
-          personaInstructions: run.personaInstructions,
-          maxIterations: run.maxIterations,
-          turnCount: run.turns?.length || 0,
-          createdAt: run.createdAt,
-          updatedAt: run.updatedAt,
-          error: run.error,
+          id: request._id,
+          task: request.scenario?.task,
+          criteria: request.scenario?.criteria,
+          workerType: request.workerType,
+          status: run?.status,
+          outcome: run?.outcome,
+          persona: request.persona,
+          personaInstructions: request.personaInstructions,
+          maxIterations: request.maxIterations,
+          turnCount: run?.turns?.length || 0,
+          createdAt: request.createdAt,
+          updatedAt: request.updatedAt,
+          error: run?.error,
         };
       } catch (err) {
         return { error: `Failed to fetch run summary: ${err}` };
@@ -63,8 +66,9 @@ export function createReportTools(
         if (!response.ok) {
           return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
         }
-        const run = await response.json();
-        const turns = (run.turns || []).map((turn: any) => ({
+        const request: RequestDocument = await response.json();
+        const run = request.run;
+        const turns = (run?.turns || []).map((turn: any) => ({
           iteration: turn.iteration,
           passed: turn.passed,
           timestamp: turn.timestamp,
@@ -103,8 +107,9 @@ export function createReportTools(
         if (!response.ok) {
           return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
         }
-        const run = await response.json();
-        const turn = (run.turns || []).find((t: any) => t.iteration === args.iteration);
+        const request: RequestDocument = await response.json();
+        const run = request.run;
+        const turn = (run?.turns || []).find((t: any) => t.iteration === args.iteration);
         if (!turn) {
           return { error: `Turn ${args.iteration} not found` };
         }
@@ -138,8 +143,9 @@ export function createReportTools(
         if (!response.ok) {
           return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
         }
-        const run = await response.json();
-        const turns = run.turns || [];
+        const request: RequestDocument = await response.json();
+        const run = request.run;
+        const turns = run?.turns || [];
 
         // Collect all criterion IDs
         const criterionIds = new Set<string>();
@@ -341,6 +347,40 @@ export function createReportTools(
     },
   });
 
+  const getAtifTrajectory = defineTool("get_atif_trajectory", {
+    description:
+      "Get the ATIF (AI Task Interchange Format) trajectory for a specific iteration or the latest one. " +
+      "Returns the full structured trajectory including events, tool calls, and agent actions. " +
+      "Use this to analyze the agent's step-by-step behavior during an iteration.",
+    parameters: {
+      type: "object",
+      properties: {
+        iteration: {
+          type: "number",
+          description:
+            "The iteration number (1-based) to fetch the ATIF trajectory for.",
+        },
+      },
+      required: ["iteration"],
+    },
+    handler: async (args: { iteration: number }) => {
+      try {
+        const url = `${apiBaseUrl}/api/v1/requests/${requestId}/atif?iteration=${args.iteration}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+          if (response.status === 404) {
+            return { error: "No ATIF trajectory available for this iteration" };
+          }
+          return { error: `Failed to fetch ATIF: ${response.status} ${response.statusText}` };
+        }
+        const trajectory = await response.json();
+        return { trajectory, iteration: args.iteration };
+      } catch (err) {
+        return { error: `Failed to fetch ATIF trajectory: ${err}` };
+      }
+    },
+  });
+
   const searchInsights = defineTool("search_insights", {
     description:
       "Search existing insights by keyword query. Use this to check if a similar insight already exists before creating a new one. Returns matching insights sorted by reference count.",
@@ -478,6 +518,7 @@ export function createReportTools(
     listTurns,
     getTurnDetail,
     getCriteriaTrajectory,
+    getAtifTrajectory,
     extractSnapshot,
     readFile,
     listDirectory,

@@ -58,15 +58,41 @@ The Token Manager uses a **capability-based model** where tokens are associated 
 | `github-oauth` | `gho_` / `ghu_` | OAuth token from `gh auth login` |
 | `github-oauth-cookie-state` | `{` (JSON) | Browser-extracted session cookies |
 | `anthropic-api-key` | `sk-ant-` | Anthropic API key for Claude |
+| `azure-ai-foundry` | `{` (JSON) | Endpoint + API key + optional model for an Azure AI Foundry chat-completions deployment |
+
+The `azure-ai-foundry` secret stores a JSON blob:
+
+```json
+{ "endpoint": "https://<resource>.services.ai.azure.com/models", "apiKey": "…", "model": "gpt-4.1-mini" }
+```
+
+It is registered from the Portal at `/secrets/keys/new`. The API
+validates new keys by issuing a single `chat/completions` probe against
+the endpoint with `max_tokens=1`, so a misconfigured endpoint (missing
+`/models` suffix) or a wrong deployment name surfaces immediately at
+registration time.
 
 ### Capabilities
 
 | Capability | Description |
 |------------|-------------|
 | `github-models` | Access to GitHub Models API (GPT-4o, etc.) |
+| `github-public-api` | Read-only access to the GitHub REST API for public repos (skill discovery / resolution) |
 | `copilot-sdk` | GitHub Copilot SDK integration |
 | `copilot-cli` | GitHub Copilot CLI authentication |
 | `claude-code-cli` | Anthropic Claude Code CLI |
+| `azure-ai-inference` | Chat-completion inference against an Azure AI Foundry deployment (used by the portal's AI features) |
+
+`github-public-api` is granted to **any** valid GitHub bearer token (PAT classic, PAT fine-grained, OAuth, scopeless OAuth) since public-repo reads require no scopes.
+
+### Acquisition Fallback Chain
+
+`TokenManagerClient.acquireToken(capability)` resolves a token in three tiers, returning the first one that succeeds:
+
+1. **Capability-specific env var** — e.g. `GITHUB_MODELS_TOKEN` for `github-models`, `ANTHROPIC_API_KEY` for `claude-code-cli`. Mapping lives in `KEY_CAPABILITY_ENV_VARS`.
+3. **Token Manager HTTP service** — `GET /tokens/acquire?capability=...` against `TOKEN_MANAGER_URL`. This is the only tier used in production K8s deployments, where no static token env vars are mounted.
+
+The API's discovery endpoint uses this chain via the `github-api-token` helper to acquire a `github-public-api` token per call, so each request can be served by a different token in round-robin.
 
 ### Token Type + Permissions → Capabilities Matrix
 
@@ -180,17 +206,56 @@ if (result) {
 
 ### LLM Module Integration
 
-The API's LLM module acquires tokens with this priority:
+The API's portal-LLM modules (`llm.ts`, `prompt-feature-llm.ts`,
+`task-prompt-llm.ts`) all go through a shared
+`acquireInferenceClient()` helper in `apps/api/src/llm-token.ts`. The
+helper resolves a chat-completions client in this order, returning the
+first source that succeeds:
 
-1. `GITHUB_MODELS_API_KEY` environment variable (explicit override)
-2. Token Manager → acquire `github-models` capability
-3. `GITHUB_TOKEN` fallback (for backward compatibility)
+1. **Azure AI Foundry via env vars** —
+   `AZURE_AI_INFERENCE_ENDPOINT` + `AZURE_AI_INFERENCE_API_KEY`.
+   Endpoint URLs missing the `/models` suffix are auto-corrected with a
+   warning.
+2. **Azure AI Foundry via the Token Manager** — fetched directly via
+   `POST {TOKEN_MANAGER_URL}/api/v1/keys/acquire {capability:
+   "azure-ai-inference"}` so the helper receives the full JSON blob
+   (endpoint + key + model), not just the API key. The capability
+   `azure-ai-inference` is derived from any registered `azure-ai-foundry`
+   key.
+3. **GitHub Models** — `GITHUB_MODELS_API_KEY` env var, then
+   `TokenManagerClient.acquireToken("github-models")`, then `GITHUB_TOKEN`.
+
+Each successful acquisition logs a single line:
+
+```
+[llm-token] inference provider: source=… via=… endpoint=… model=…
+```
+
+`via` distinguishes `azure-ai-foundry-env`,
+`azure-ai-foundry-token-manager`, `github-models-env`,
+`github-models-token-manager`, and `github-token`.
+
+When none of the three tiers is configured, the helper throws a single
+"LLM not configured" error that the route handlers convert into a 503
+with an actionable message pointing at `/secrets/keys/new`.
+
+**No automatic failover at request time.** The chain only steps down
+when the predecessor returns *nothing* (env var unset, no key
+registered). It does **not** step down when the predecessor returns a
+credential that then 4xx/5xx's on the chat-completion call — that error
+propagates to the user verbatim. This is intentional: silent fallback
+would mask a misconfigured higher-priority backend (e.g. a wrong Foundry
+deployment name) and the operator would never realise they were paying
+the slower fallback's latency.
 
 ```typescript
-import { acquireGitHubModelsToken } from "./llm-token";
+import { acquireInferenceClient } from "./llm-token.js";
 
-const token = await acquireGitHubModelsToken();
-if (!token) {
-  throw new Error("No GitHub Models token available");
-}
+const { client, model: foundryModel } = await acquireInferenceClient();
+const modelName = explicit || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
+await client.path("/chat/completions").post({ body: { messages, model: modelName, … } });
 ```
+
+The legacy `acquireGitHubModelsToken()` helper still exists for callers
+that specifically need a GitHub Models bearer token; it follows the same
+1→3 chain restricted to the GitHub Models tiers.

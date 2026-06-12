@@ -53,6 +53,7 @@ import {
   CreateAgentInputSchema,
   AgentResponseSchema,
   AgentVersionSchema,
+  AgentCapabilitiesSchema,
   RegisterAgentVersionInputSchema,
   PatchAgentVersionInputSchema,
   // model
@@ -379,6 +380,34 @@ describe("request schemas", () => {
     it("accepts status filter", () => {
       const result = ListRequestsQuerySchema.parse({ status: "done" });
       expect(result.status).toBe("done");
+    });
+
+    it("accepts last-page query flag", () => {
+      const result = ListRequestsQuerySchema.parse({ last: "true" });
+      expect(result.last).toBe("true");
+    });
+
+    it("accepts iteration-count filters with operators", () => {
+      const result = ListRequestsQuerySchema.parse({
+        turns: "5",
+        turnsOp: "gte",
+        maxIterations: "10",
+        maxIterationsOp: "lte",
+      });
+      expect(result.turns).toBe(5);
+      expect(result.turnsOp).toBe("gte");
+      expect(result.maxIterations).toBe(10);
+      expect(result.maxIterationsOp).toBe("lte");
+    });
+
+    it("rejects invalid operator", () => {
+      expect(() =>
+        ListRequestsQuerySchema.parse({ turns: "1", turnsOp: "ne" }),
+      ).toThrow();
+    });
+
+    it("rejects negative turns", () => {
+      expect(() => ListRequestsQuerySchema.parse({ turns: "-1" })).toThrow();
     });
   });
 
@@ -939,6 +968,62 @@ describe("agent schemas", () => {
 
     it("rejects 'deprecated'", () => {
       expect(() => PatchAgentVersionInputSchema.parse({ status: "deprecated" })).toThrow();
+    });
+  });
+
+  describe("AgentCapabilitiesSchema", () => {
+    it("accepts supportsReasoningEffort: true", () => {
+      const result = AgentCapabilitiesSchema.parse({ supportsReasoningEffort: true });
+      expect(result.supportsReasoningEffort).toBe(true);
+    });
+
+    it("accepts supportsReasoningEffort: false", () => {
+      const result = AgentCapabilitiesSchema.parse({ supportsReasoningEffort: false });
+      expect(result.supportsReasoningEffort).toBe(false);
+    });
+
+    it("accepts empty object (all fields optional)", () => {
+      const result = AgentCapabilitiesSchema.parse({});
+      expect(result.supportsReasoningEffort).toBeUndefined();
+    });
+  });
+
+  describe("CreateAgentInputSchema with capabilities", () => {
+    it("accepts capabilities with supportsReasoningEffort", () => {
+      const result = CreateAgentInputSchema.parse({
+        _id: "agent1",
+        name: "Copilot",
+        capabilities: { supportsReasoningEffort: true },
+      });
+      expect(result.capabilities?.supportsReasoningEffort).toBe(true);
+    });
+
+    it("accepts agent without capabilities (backwards-compatible)", () => {
+      const result = CreateAgentInputSchema.parse({ _id: "a", name: "n" });
+      expect(result.capabilities).toBeUndefined();
+    });
+  });
+
+  describe("AgentResponseSchema with capabilities", () => {
+    it("includes capabilities in response", () => {
+      const result = AgentResponseSchema.parse({
+        _id: "a1",
+        name: "Copilot",
+        supportedModels: ["m1"],
+        createdAt: NOW,
+        capabilities: { supportsReasoningEffort: true },
+      });
+      expect(result.capabilities?.supportsReasoningEffort).toBe(true);
+    });
+
+    it("works without capabilities (backwards-compatible)", () => {
+      const result = AgentResponseSchema.parse({
+        _id: "a1",
+        name: "Agent",
+        supportedModels: [],
+        createdAt: NOW,
+      });
+      expect(result.capabilities).toBeUndefined();
     });
   });
 });

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import EventSource from "eventsource";
 import { execSync } from "child_process";
 import { mkdtempSync, mkdirSync, createWriteStream, rmSync, readFileSync, readdirSync, existsSync, statSync } from "fs";
@@ -9,16 +9,13 @@ import { tmpdir } from "os";
 import { join, resolve, dirname, basename } from "path";
 import { pipeline } from "stream/promises";
 import { Readable } from "stream";
-import React from "react";
-import { render } from "ink";
-import { DemoApp } from "../components/DemoApp.js";
 import { resolveScenarioAndPersona } from "../config-loader.js";
 import { configureHelp } from "../utils/helpFormatter.js";
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon, styleText } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { runGetAction } from "../run-get-action.js";
-import { normalizeUrl, printFollowUpCommands, DEFAULT_WORKERS, withOutputOption } from "../utils/shared.js";
+import { normalizeUrl, printFollowUpCommands, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 
 export function registerRunCommands(program: Command): void {
 const run = program
@@ -41,14 +38,21 @@ run
   .option("-c, --criteria <criteria...>", "Evaluation criteria (overrides scenario criteria)")
   .option("--max-iterations <number>", "Max judge iterations for multi-turn mode", parseInt)
   .option("--model <model>", "Model to use for the coding agent")
+  .option("--reasoning-effort <level>", "Reasoning effort level (e.g. low, medium, high)")
   .option("--mcp-servers <slugs...>", "MCP server slugs to use for this run")
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
   .option("--extensions <ids...>", "VS Code extension IDs to install for this run (e.g. ms-python.python)")
   .option("--agent-version <version>", "Agent version to target (e.g. copilot-0.0.415); defaults to latest active")
+  .option("--profile <id>", "Saved profile to apply (supplies worker, model, extensions, etc.)")
+  .addOption(new Option("--base-profile <id>", "Deprecated alias for --profile.").hideHelp())
+  .option("--profile-variations-file <path>", "Path to JSON file containing profile variation entries")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
-  .action(async (options) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion } = options;
+  .action(async (options, command) => {
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile } = options;
+    // `--profile` is the documented flag; `--base-profile` is kept as a hidden
+    // back-compat alias. Both resolve to the same request `profileId`.
+    const profileId = profile ?? baseProfile;
 
     try {
       // Resolve scenario + persona YAML if provided
@@ -90,6 +94,9 @@ run
       if (model) {
         body.model = model;
       }
+      if (reasoningEffort) {
+        body.reasoningEffort = reasoningEffort;
+      }
       if (personaInstructions) {
         body.personaInstructions = personaInstructions;
       }
@@ -108,8 +115,39 @@ run
       if (agentVersion) {
         body.agentVersion = agentVersion;
       }
+      if (profileId) {
+        body.profileId = profileId;
+      }
 
-      const response = await fetch(`${normalizeUrl(url)}/api/v1/requests?worker=${worker}`, {
+      if (profileVariationsFile) {
+        if (!profileId) {
+          console.error(errorText("Error: --profile is required when --profile-variations-file is provided"));
+          process.exit(1);
+        }
+
+        const raw = readFileSync(resolve(profileVariationsFile), "utf8");
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) {
+          console.error(errorText("Error: profile variations file must be a JSON array"));
+          process.exit(1);
+        }
+
+        body.profileVariations = parsed;
+      }
+
+      // In variation mode the API derives the worker per-variation from each
+      // profile's workerType, and explicitly rejects `?worker=`. Skip the
+      // query param so the request isn't 400'd, and warn if --worker was
+      // explicitly passed (default values are silently ignored).
+      const isVariationSubmit = Array.isArray(body.profileVariations) && body.profileVariations.length > 0;
+      if (isVariationSubmit && command.getOptionValueSource("worker") === "cli") {
+        console.warn(label("Warning:"), "--worker is ignored in variation mode; worker is derived per-variation from each profile's workerType.");
+      }
+      const submitUrl = isVariationSubmit
+        ? `${normalizeUrl(url)}/api/v1/requests`
+        : `${normalizeUrl(url)}/api/v1/requests?worker=${worker}`;
+
+      const response = await fetch(submitUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -126,9 +164,16 @@ run
       if (result.submissionId) console.log(`${label('Submission:')} ${value(result.submissionId)}`);
       console.log(`${label('Worker:')} ${value(result.workerType)}`);
       if (result.model) console.log(`${label('Model:')} ${value(result.model)}`);
+      if (result.reasoningEffort) console.log(`${label('Reasoning Effort:')} ${value(result.reasoningEffort)}`);
       console.log(`${label('Mode:')} ${value(result.mode || 'one-shot')}`);
       console.log(`${label('Status:')} ${value(result.status)}`);
 
+      // Display warnings (e.g. model effort compatibility)
+      if (result.warnings && Array.isArray(result.warnings)) {
+        for (const warning of result.warnings) {
+          console.log(`${errorText('⚠ Warning:')} ${warning}`);
+        }
+      }
       if (!stream) {
         printFollowUpCommands(result.id);
         return;
@@ -221,7 +266,7 @@ run
   .command("status")
   .description("Get status of a request")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -268,7 +313,7 @@ run
   .command("get")
   .description("Get full details of a run")
   .requiredOption("-i, --id <id>", "Run ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     await runGetAction({ id: options.id, url: options.url, output: options.output });
@@ -278,7 +323,7 @@ run
   .command("logs")
   .description("Stream logs for a request")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .option("--from-start", "Include historical logs from start")
   .action(async (options) => {
     const { id } = options;
@@ -337,9 +382,11 @@ withOutputOption(
 run
   .command("list")
   .description("List all requests")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .option("-w, --worker <worker>", "Filter by worker")
   .option("--submission-id <id>", "Filter by submission ID")
+  .option("--turns <expr>", "Filter by actual turns (e.g. '>=5', '<=10', '=3')")
+  .option("--max-iterations <expr>", "Filter by configured maxIterations (e.g. '>=5', '<=10', '=3')")
   .option("--include-deleted", "Include soft-deleted runs")
 )
   .action(async (options) => {
@@ -352,6 +399,25 @@ run
       }
       if (options.submissionId) {
         params.set("submissionId", options.submissionId);
+      }
+      const parseIterExpr = (raw: string, name: string): { op: "eq" | "gte" | "lte"; value: number } => {
+        const m = /^(>=|<=|=)?\s*(\d+)$/.exec(String(raw).trim());
+        if (!m) {
+          throw new Error(`Invalid ${name} expression '${raw}'. Use forms like '>=5', '<=10', '=3', or '5'.`);
+        }
+        const opSym = m[1] ?? "=";
+        const op = opSym === ">=" ? "gte" : opSym === "<=" ? "lte" : "eq";
+        return { op, value: Number(m[2]) };
+      };
+      if (options.turns !== undefined) {
+        const { op, value } = parseIterExpr(options.turns, "--turns");
+        params.set("turns", String(value));
+        params.set("turnsOp", op);
+      }
+      if (options.maxIterations !== undefined) {
+        const { op, value } = parseIterExpr(options.maxIterations, "--max-iterations");
+        params.set("maxIterations", String(value));
+        params.set("maxIterationsOp", op);
       }
       if (options.includeDeleted) {
         params.set("includeDeleted", "true");
@@ -367,41 +433,43 @@ run
         process.exit(1);
       }
 
-      const requests = await response.json();
-      if (Array.isArray(requests) && requests.length === 0) {
+      const responseBody = await response.json();
+      const requests = Array.isArray(responseBody)
+        ? responseBody
+        : Array.isArray(responseBody?.data)
+          ? responseBody.data
+          : [];
+
+      if (requests.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner('No requests found.'));
         return;
       }
-      if (Array.isArray(requests)) {
-        if (!isMachineReadable(format)) {
-          console.log(label(`Found ${requests.length} request(s):\n`));
-        }
-
-        const displayFields: DisplayField[] = [
-          { key: 'id', label: 'ID',
-            formatter: (req: any) => req.id ?? '(no id)',
-            tableFormatter: (req: any) => value(req.id ?? '(no id)'),
-          },
-          { key: 'workerType', label: 'Worker',
-            formatter: (req: any) => req.workerType ?? 'unknown',
-          },
-          { key: 'status', label: 'Status',
-            formatter: (req: any) => req.run?.status ?? 'unknown',
-            tableFormatter: (req: any) => {
-              const s = req.run?.status ?? 'unknown';
-              const o = req.run?.outcome;
-              return o === 'succeeded' ? successText(s) : o === 'failed' || o === 'finished' ? errorText(s) : value(s);
-            },
-          },
-          { key: 'submissionId', label: 'Submission',
-            formatter: (req: any) => req.submissionId ? req.submissionId.substring(0, 8) : '–',
-          },
-        ];
-
-        console.log(formatData(requests, displayFields, format));
-      } else {
-        console.log(JSON.stringify(requests, null, 2));
+      if (!isMachineReadable(format)) {
+        console.log(label(`Found ${requests.length} request(s):\n`));
       }
+
+      const displayFields: DisplayField[] = [
+        { key: 'id', label: 'ID',
+          formatter: (req: any) => req.id ?? '(no id)',
+          tableFormatter: (req: any) => value(req.id ?? '(no id)'),
+        },
+        { key: 'workerType', label: 'Worker',
+          formatter: (req: any) => req.workerType ?? 'unknown',
+        },
+        { key: 'status', label: 'Status',
+          formatter: (req: any) => req.run?.status ?? 'unknown',
+          tableFormatter: (req: any) => {
+            const s = req.run?.status ?? 'unknown';
+            const o = req.run?.outcome;
+            return o === 'succeeded' ? successText(s) : o === 'failed' || o === 'finished' ? errorText(s) : value(s);
+          },
+        },
+        { key: 'submissionId', label: 'Submission',
+          formatter: (req: any) => req.submissionId ? req.submissionId.substring(0, 8) : '–',
+        },
+      ];
+
+      console.log(formatData(requests, displayFields, format));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
@@ -409,39 +477,10 @@ run
   });
 
 run
-  .command("demo")
-  .description("Run concurrent requests to all coders with a live TUI dashboard")
-  .requiredOption("-m, --message <message>", "Message/prompt to send to all coders")
-  .option("-c, --count <count>", "Number of requests to send to each coder", "5")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
-  .option("-w, --workers <workers>", "Comma-separated list of workers", DEFAULT_WORKERS.join(","))
-  .action((options) => {
-    const { message, count, url, workers: workersStr } = options;
-    const workersList = workersStr.split(",").map((w: string) => w.trim());
-    const countNum = parseInt(count, 10);
-
-    if (isNaN(countNum) || countNum < 1) {
-      console.error(errorText("Error: count must be a positive integer"));
-      process.exit(1);
-    }
-
-    console.clear();
-    const { waitUntilExit } = render(
-      React.createElement(DemoApp, {
-        apiUrl: url,
-        message,
-        count: countNum,
-        workers: workersList,
-      })
-    );
-    waitUntilExit().catch(() => {});
-  });
-
-run
   .command("delete")
   .description("Soft-delete a run (can still be listed with --include-deleted)")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     const { id, url } = options;
     try {
@@ -461,13 +500,58 @@ run
   });
 
 run
+  .command("cancel")
+  .description("Cancel one or more runs (marks as failed and signals active workers to exit)")
+  .requiredOption("-i, --id <ids...>", "Request ID(s) to cancel")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .action(async (options) => {
+    const { id: ids, url } = options;
+    const baseUrl = normalizeUrl(url);
+    try {
+      if (ids.length === 1) {
+        const response = await fetch(`${baseUrl}/api/v1/requests/${ids[0]}/cancel`, { method: "POST" });
+        if (!response.ok) {
+          const error = await response.json();
+          console.error(errorText("Error:"), error.error || JSON.stringify(error));
+          process.exit(1);
+        }
+        const result = await response.json() as { id: string; previousStatus: string; status: string; outcome: string };
+        console.log(`${successText('Cancelled run')} ${value(result.id)} (was ${result.previousStatus})`);
+      } else {
+        const response = await fetch(`${baseUrl}/api/v1/requests/bulk-cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        });
+        if (!response.ok) {
+          const error = await response.json();
+          console.error(errorText("Error:"), error.error || JSON.stringify(error));
+          process.exit(1);
+        }
+        const result = await response.json() as { cancelled: number; skipped: number; results: { id: string; cancelled: boolean; previousStatus?: string; error?: string }[] };
+        for (const r of result.results) {
+          if (r.cancelled) {
+            console.log(`${successText('Cancelled')} ${value(r.id)} (was ${r.previousStatus})`);
+          } else {
+            console.log(`${errorText('Skipped')} ${value(r.id)}: ${r.error}`);
+          }
+        }
+        console.log(`\n${label('Total:')} ${result.cancelled} cancelled, ${result.skipped} skipped`);
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+run
   .command("download")
   .description("Download all artifacts of a run (workspaces + run document)")
   .requiredOption("-i, --id <id>", "Request ID")
   .option("-o, --output <path>", "Output file path (default: <id>.tar.gz)")
   .option("-e, --extract", "Extract the archive after downloading")
   .option("-d, --dir <path>", "Extraction directory (implies --extract)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     const { id, url } = options;
     const shouldExtract = options.extract || !!options.dir;
@@ -548,7 +632,7 @@ run
   .option("-o, --output <path>", "Output file path (default: batch-<timestamp>.tar.gz)")
   .option("-e, --extract", "Extract the archive after downloading")
   .option("-d, --dir <path>", "Extraction directory (implies --extract)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     const { url } = options;
     const shouldExtract = options.extract || !!options.dir;
@@ -645,7 +729,7 @@ run
   .description("Upload a run archive to the API (previously downloaded via 'run download')")
   .argument("<path>", "Path to .tar.gz archive or extracted directory")
   .option("--dry-run", "Preview what would be uploaded without sending")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (inputPath: string, options) => {
     const { url, dryRun } = options;
 
@@ -746,19 +830,100 @@ run
     }
   });
 
+run
+  .command("upload-batch")
+  .description("Upload a batch run archive (multiple runs in one .tar.gz, as produced by 'run download-batch')")
+  .argument("<path>", "Path to batch .tar.gz archive")
+  .option("--dry-run", "Preview what would be uploaded without sending")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .action(async (inputPath: string, options) => {
+    const { url, dryRun } = options;
+
+    try {
+      const resolvedPath = resolve(inputPath);
+      if (!existsSync(resolvedPath)) {
+        console.error(errorText(`Path not found: ${resolvedPath}`));
+        process.exit(1);
+      }
+      if (!resolvedPath.endsWith(".tar.gz")) {
+        console.error(errorText("Input must be a .tar.gz batch archive"));
+        process.exit(1);
+      }
+
+      const archiveStats = statSync(resolvedPath);
+      const archiveSizeKB = Math.round(archiveStats.size / 1024);
+
+      console.log(`${label('Archive:')} ${value(resolvedPath)}`);
+      console.log(`${label('Size:')} ${value(`${archiveSizeKB} KB`)}`);
+      console.log();
+
+      if (dryRun) {
+        console.log(warnBanner("Dry run - no data will be uploaded"));
+        console.log(`Would upload to: ${normalizeUrl(url)}/api/v1/runs/upload-batch`);
+        return;
+      }
+
+      console.log(`${label('Uploading to')} ${value(normalizeUrl(url))}...`);
+
+      const formData = new FormData();
+      const archiveBuffer = readFileSync(resolvedPath);
+      const blob = new Blob([archiveBuffer], { type: "application/gzip" });
+      formData.append("archive", blob, basename(resolvedPath));
+
+      const response = await fetch(`${normalizeUrl(url)}/api/v1/runs/upload-batch`, {
+        method: "POST",
+        body: formData,
+      });
+
+      // 201 = all imported, 207 = partial, 400 = none / bad input
+      if (response.status === 400) {
+        const errorData = await response.json().catch(() => ({ error: response.statusText }));
+        console.error(errorText(`Error: ${errorData.error || response.statusText}`));
+        process.exit(1);
+      }
+
+      const result = await response.json() as {
+        imported: { id: string; status: string; iterations: number }[];
+        failed: { id?: string; error: string; statusCode: number }[];
+      };
+
+      console.log();
+      if (result.imported.length > 0) {
+        console.log(successText(`Imported ${result.imported.length} run(s):`));
+        for (const r of result.imported) {
+          console.log(`  ${value(r.id)} — ${r.status} (${r.iterations} iter)`);
+        }
+      }
+      if (result.failed.length > 0) {
+        console.log();
+        console.log(warnBanner(`${result.failed.length} run(s) failed:`));
+        for (const f of result.failed) {
+          console.log(`  ${errorText(f.id ?? '<unknown>')} — [${f.statusCode}] ${f.error}`);
+        }
+        // Exit non-zero on partial failure so CI / scripts notice.
+        process.exit(1);
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
 // ─── Run-retry-attempts (issue #658) ──────────────────────────────────────
 
 run
   .command("retry")
   .description("Retry a request — starts a new attempt while preserving previous attempts in history")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-f, --force", "Allow retrying a successful run")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
-    const { id } = options;
+    const { id, force } = options;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${id}/retry`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: force ? JSON.stringify({ force: true }) : undefined,
       });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: response.statusText }));
@@ -777,7 +942,7 @@ run
       console.log(successText("Retry started"));
       console.log(`${label('Request ID:')} ${value(result.requestId)}`);
       console.log(`${label('New run ID:')} ${value(result.runId)}`);
-      console.log(`${label('Attempt:')} ${value(result.attemptNumber)}`);
+      console.log(`${label('Attempt:')} ${value(String(result.attemptNumber))}`);
       printFollowUpCommands(result.requestId);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
@@ -790,7 +955,7 @@ run
   .command("attempts")
   .description("List all attempts for a request (current + history)")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
