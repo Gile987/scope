@@ -291,7 +291,7 @@ describe("run submit gates", () => {
           scenario: { task: "Implement the task", criteria: [] },
           maxIterations: 3,
           gates: [
-            { gate: "select", promptId: "", criteria: ["implements_task"] },
+            { gate: "select", criteria: ["implements_task"] },
             { gate: "build", promptId: "build-prompt", criteria: [], maxIterations: 1 },
           ],
         }),

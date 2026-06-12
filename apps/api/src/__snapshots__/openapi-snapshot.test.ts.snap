@@ -1123,10 +1123,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "promptId": {
             "type": "string",
           },
+          "promptText": {
+            "type": "string",
+          },
         },
         "required": [
           "gate",
-          "promptId",
           "criteria",
         ],
         "type": "object",
