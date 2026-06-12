@@ -476,4 +476,13 @@ export class BlobStorage {
       rmSync(tempDir, { recursive: true, force: true });
     }
   }
+
+  /**
+   * Downloads a blob from the snapshots container into a Buffer.
+   * Accepts a blob name (path within the container).
+   */
+  async downloadBlobToBuffer(blobName: string): Promise<Buffer> {
+    const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
+    return blockBlobClient.downloadToBuffer();
+  }
 }

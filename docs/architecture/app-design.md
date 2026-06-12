@@ -23,7 +23,7 @@ flowchart LR
 |---------|---------------|
 | `api` | REST API (Express), SSE log streaming, run management, criteria CRUD |
 | `cli` | Command-line interface for submitting tasks, streaming logs, managing runs |
-| `portal` | Vue.js web UI for run management, insights, criteria graph editing |
+| `portal` | React web UI for run management, insights, criteria graph editing |
 | `judge` | Evaluation engine — executes criteria against agent output |
 | `shared` | Types, database models, queue/blob/redis clients, config loaders |
 | `workers/*` | Coding agent adapters — each implements the same interface for a different agent |
@@ -91,9 +91,20 @@ Currently all versions of an agent share a single queue (e.g., `queue-coder-acp-
 4. API looks up `AgentVersion.queueName` and routes message to that queue
 5. `agentVersion` and `model` are persisted on the `RequestDocument`
 
+Profile fan-out mode is also supported for comparative runs:
+
+1. User selects a base `profileId` (optionally pinned via `profileId@version`) and a `profileVariations[]` array of profile spec strings to compare against (e.g. `["def456", "ghi789@2"]`)
+2. API parses each spec, validates every variation upfront, then expands one submit call into multiple requests under one shared `submissionId`
+3. Each expanded request resolves configuration from its variation profile; unpinned specs resolve to `latestVersion`
+4. Expanded requests persist `profileId` and `profileVersionId` on each `RequestDocument` for indexing and traceability
+
 ## Real-Time Log Streaming
 
 Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API subscribes and relays them as Server-Sent Events (SSE) to CLI and Portal clients.
+
+## Portal Shell
+
+The Portal desktop shell uses a persistent left navigation sidebar. It defaults to the compact icon rail, and users can expand it to show navigation labels; the choice is stored in `localStorage` under `scope:layout:sidebar-expanded`. Mobile navigation remains a sheet-based menu with labels always visible.
 
 ## Criteria System
 

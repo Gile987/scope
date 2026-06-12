@@ -264,11 +264,13 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
         undefined,
         undefined,
         { documentId, runId: logRunId },
-        // Bump the per-run liveness heartbeat in Redis on every successful
-        // tick so the redelivery handler can distinguish a real worker crash
-        // from a spurious queue redelivery. Stored in Redis (not Mongo) to
-        // avoid the recurring CosmosDB RU cost of writing every 15 s for
-        // every active run.
+        // Bump the per-run liveness heartbeat in Redis on a dedicated interval
+        // (decoupled from the queue-visibility extension) so the redelivery
+        // handler and StuckRunReaper can distinguish a real worker crash from a
+        // spurious queue redelivery — or from a transient Azure Queue
+        // visibility-extension failure under load (issue #1064). Stored in
+        // Redis (not Mongo) to avoid the recurring CosmosDB RU cost of writing
+        // every 15 s for every active run.
         async () => {
           await this.heartbeatStore.set(logRunId, new Date());
           // Fallback cancel check: if the Pub/Sub message was missed (e.g.
@@ -317,13 +319,17 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
 
           // Try to record the failure on the current run (run.* shape).
           // The runId in the queue message ensures we don't overwrite a run
-          // that was started by a concurrent retry.
+          // that was started by a concurrent retry. The status:"processing"
+          // guard ensures we don't clobber a run already marked terminal by a
+          // cancel, a concurrent retry, or the stuck-run reaper — mirroring the
+          // success-path final write. A non-match is always a "skip" (never a
+          // legacy fallback), since a runId-bearing message targets a migrated
+          // run.* document.
           const runId = (typeof payload?.runId === "string" ? payload.runId : undefined);
           const errMsg = error instanceof Error ? error.message : String(error);
-          let updated = false;
           if (runId) {
             const result = await withRetry(() => this.collection.updateOne(
-              { _id: documentId, "run._id": runId } as any,
+              { _id: documentId, "run._id": runId, "run.status": "processing" } as any,
               {
                 $set: {
                   "run.status": "done",
@@ -335,13 +341,18 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
                 },
               } as any
             ));
-            updated = (result.matchedCount ?? 0) > 0;
-            if (updated) {
+            if ((result.matchedCount ?? 0) > 0) {
               // Run is terminal — drop the Redis liveness heartbeat.
               await this.heartbeatStore.delete(runId);
+              await this.onRunTerminal(documentId, runId);
+            } else {
+              // Already terminal (cancelled / reaped) or superseded by a retry
+              // — leave the existing terminal state untouched.
+              console.warn(
+                `[${this.workerName}] Failure write for ${documentId} (runId=${runId}) did not match — run already terminal or retried concurrently; skipping`,
+              );
             }
-          }
-          if (!updated) {
+          } else {
             // Legacy fallback: top-level fields (pre-migration / no runId in message).
             await withRetry(() => this.collection.updateOne(
               { _id: documentId } as any,
@@ -398,6 +409,15 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
   ): Promise<void>;
 
   /**
+   * Hook called when a run reaches terminal state ("done").
+   * Override in subclasses to trigger follow-up actions (e.g. post-processing).
+   * Default implementation is a no-op.
+   */
+  protected async onRunTerminal(_requestId: string, _runId: string): Promise<void> {
+    // No-op by default — subclasses can override
+  }
+
+  /**
    * Delete a queue message, logging a warning instead of throwing on failure.
    */
   protected async safeDeleteMessage(messageId: string, popReceipt: string): Promise<void> {
@@ -405,6 +425,38 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
       await this.queueClient.deleteMessage(messageId, popReceipt);
     } catch (error) {
       console.warn(`[${this.workerName}] Failed to delete queue message (may have expired or been reprocessed): ${error}`);
+    }
+  }
+
+  /**
+   * Re-defer a queue message by extending its visibility timeout, logging a
+   * warning instead of throwing on failure.
+   *
+   * Used by the redelivery handler when it dequeues a duplicate of a run whose
+   * original worker is still alive: instead of permanently deleting the
+   * duplicate (which would destroy the only at-least-once recovery trigger if
+   * the original worker later dies hard), we push the message's visibility out
+   * so it resurfaces later for another liveness re-check.
+   *
+   * Failures MUST be swallowed: a stale pop receipt (e.g. the message was
+   * re-leased between our read and this call) must never bubble into the base
+   * error path, which would false-fail a healthy in-flight run. If the defer
+   * fails the message simply becomes visible again on its own.
+   */
+  protected async safeDeferMessage(
+    messageId: string,
+    popReceipt: string,
+    visibilityTimeoutSeconds: number,
+  ): Promise<void> {
+    try {
+      await this.queueClient.updateMessage(
+        messageId,
+        popReceipt,
+        undefined,
+        visibilityTimeoutSeconds,
+      );
+    } catch (error) {
+      console.warn(`[${this.workerName}] Failed to re-defer queue message (will resurface on its own): ${error}`);
     }
   }
 

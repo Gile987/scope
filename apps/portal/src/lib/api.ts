@@ -80,8 +80,9 @@ export const api = {
   /** Submit a new run (or multiple runs if count > 1) */
   submitRun: (body: {
     scenario: { task: string; criteria: string[]; version?: "v1" | "v2" };
-    worker: string;
+    worker?: string;
     model?: string;
+    reasoningEffort?: string;
     maxIterations?: number;
     personaInstructions?: string;
     persona?: { personality: string; experience: string; verbosity: string; type: string };
@@ -89,9 +90,12 @@ export const api = {
     mcpServers?: string[];
     skills?: string[];
     agentVersion?: string;
+    profileId?: string;
+    profileVariations?: string[];
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
-    return request(`/requests?worker=${encodeURIComponent(worker)}`, {
+    const url = worker ? `/requests?worker=${encodeURIComponent(worker)}` : `/requests`;
+    return request(url, {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -205,6 +209,12 @@ export const api = {
   /** Get full run archive download URL (.tar.gz with run.yaml + iteration snapshots) */
   archiveUrl: (id: string): string => {
     return `${BASE}/requests/${id}/archive`;
+  },
+
+  /** Get ATIF trajectory download URL */
+  atifUrl: (id: string, iteration?: number): string => {
+    const qs = iteration ? `?iteration=${iteration}` : "";
+    return `${BASE}/requests/${id}/atif${qs}`;
   },
 
   /** Download a batch archive of multiple runs as a single .tar.gz */

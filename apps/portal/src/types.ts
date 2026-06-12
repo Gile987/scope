@@ -48,6 +48,7 @@ export interface ConversationTurn {
    *  without fetching the JSONL blob. */
   toolCallCount?: number;
   aiCallCount?: number;
+  atifUrl?: string;
 }
 
 export interface Scenario {
@@ -109,6 +110,8 @@ export interface RunState {
   updatedAt?: string;
   pausedAt?: string;
   resumedAt?: string;
+  postProcessorVersion?: number;
+  postProcessorStatus?: "queued" | "processing" | "done" | "failed";
 }
 
 export interface Run {
@@ -117,6 +120,7 @@ export interface Run {
   scenario?: Scenario;
   workerType: string;
   model?: string;
+  reasoningEffort?: string;
   agentVersion?: string;
   /** Per-attempt mutable state for the current attempt. */
   run?: RunState;
@@ -151,7 +155,8 @@ export interface CursorPaginatedResponse<T> {
 
 export const WORKER_TYPES = [
   "coder-acp-claude-code",
-  "coder-acp-copilot"
+  "coder-acp-copilot",
+  "coder-acp-copilot-windows"
 ] as const;
 
 export type WorkerType = (typeof WORKER_TYPES)[number];
@@ -362,6 +367,7 @@ export interface BulkResubmitOverrides {
   profileId?: string | null;
   workerType?: string;
   model?: string | null;
+  reasoningEffort?: string | null;
   maxIterations?: number | null;
   mcpServers?: string[] | null;
   skillRevisions?: string[] | null;
@@ -483,10 +489,10 @@ export interface ReportTemplate {
 // =============================================================================
 
 export type KeyType =
-  "github-pat-classic" | "github-pat-fine-grained" | "github-oauth" | "github-oauth-cookie-state" | "anthropic-api-key" | "anthropic-oauth";
+  "github-pat-classic" | "github-pat-fine-grained" | "github-oauth" | "github-oauth-cookie-state" | "anthropic-api-key" | "anthropic-oauth" | "azure-ai-foundry";
 
 export type KeyCapability =
-  "github-models" | "github-public-api" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api";
+  "github-models" | "github-public-api" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api" | "azure-ai-inference";
 
 export type KeyValidationStatus =
   | "valid"
@@ -547,6 +553,7 @@ export const KEY_TYPE_LABELS: Record<KeyType, string> = {
   "github-oauth-cookie-state": "GitHub OAuth Cookie State",
   "anthropic-api-key": "Anthropic API Key",
   "anthropic-oauth": "Anthropic OAuth (Subscription)",
+  "azure-ai-foundry": "Azure AI Foundry",
 };
 
 export const KEY_CAPABILITY_LABELS: Record<KeyCapability, string> = {
@@ -556,7 +563,8 @@ export const KEY_CAPABILITY_LABELS: Record<KeyCapability, string> = {
   "copilot-sdk": "Copilot SDK",
   "copilot-cli": "Copilot CLI",
   "claude-code-cli": "Claude Code CLI",
-  "anthropic-api": "Anthropic API"
+  "anthropic-api": "Anthropic API",
+  "azure-ai-inference": "Azure AI Inference",
 };
 
 export const KEY_CAPABILITY_DESCRIPTIONS: Record<KeyCapability, string> = {
@@ -566,7 +574,8 @@ export const KEY_CAPABILITY_DESCRIPTIONS: Record<KeyCapability, string> = {
   "copilot-sdk": "Use the Copilot SDK to make LLM requests programmatically",
   "copilot-cli": "Run GitHub Copilot in the CLI for code suggestions",
   "claude-code-cli": "Run Claude Code as an agentic coding assistant",
-  "anthropic-api": "Access the Anthropic REST API (model scanning, direct API calls)"
+  "anthropic-api": "Access the Anthropic REST API (model scanning, direct API calls)",
+  "azure-ai-inference": "Chat-completion inference against an Azure AI Foundry deployment",
 };
 
 /**
@@ -582,10 +591,11 @@ export const KEY_TYPE_EXPECTED_CAPABILITIES: Record<KeyType, KeyCapability[]> = 
   "github-oauth-cookie-state": [],
   "anthropic-api-key": ["claude-code-cli", "anthropic-api"],
   "anthropic-oauth": ["claude-code-cli"],
+  "azure-ai-foundry": ["azure-ai-inference"],
 };
 
 export const ALL_CAPABILITIES: KeyCapability[] = [
-  "github-models", "github-public-api", "copilot-models", "copilot-sdk", "copilot-cli", "claude-code-cli", "anthropic-api"
+  "github-models", "github-public-api", "copilot-models", "copilot-sdk", "copilot-cli", "claude-code-cli", "anthropic-api", "azure-ai-inference",
 ];
 
 // Account types
@@ -636,6 +646,11 @@ export interface AgentVersion {
   createdAt: string;
 }
 
+// Agent capabilities declared at the worker level
+export interface AgentCapabilities {
+  supportsReasoningEffort?: boolean;
+}
+
 // Coding Agent types
 export interface CodingAgent {
   _id: string;
@@ -645,6 +660,7 @@ export interface CodingAgent {
   supportedModels: string[];
   defaultModel?: string;
   available?: boolean;
+  capabilities?: AgentCapabilities;
   versions?: AgentVersion[];
   createdAt: string;
   updatedAt?: string;
@@ -746,6 +762,15 @@ export interface InsightWithReference extends Insight {
 // =============================================================================
 
 /** A scanned model tracked across agents and providers */
+export interface ModelCapabilities {
+  reasoningEffort?: string[];
+  toolCalls?: boolean;
+  vision?: boolean;
+  streaming?: boolean;
+  adaptiveThinking?: boolean;
+  maxThinkingBudget?: number;
+}
+
 export interface Model {
   _id: string;
   modelId: string;
@@ -757,6 +782,7 @@ export interface Model {
   providerAvailableFrom?: string;
   providerEndOfLife?: string;
   metadata?: Record<string, unknown>;
+  capabilities?: ModelCapabilities;
 }
 
 // =============================================================================
@@ -887,6 +913,7 @@ export interface ProfileVersionDocument {
   version: number;
   workerType: string;
   model: string;
+  reasoningEffort?: string;
   agentVersion?: string;
   mcpServers?: string[];
   skillRevisions?: string[];
@@ -913,6 +940,7 @@ export interface AggregateStats {
 export interface GroupUniformValues {
   workerType?: string;
   model?: string;
+  reasoningEffort?: string;
   agentVersion?: string;
   platform?: string;
   mcpServers?: string[];

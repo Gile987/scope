@@ -12,6 +12,7 @@ import {
   ConversationTurn,
   DependencyGraph,
   TokenManagerClient,
+  withRetry,
 } from "shared";
 
 export interface JudgeStrategyContext {
@@ -28,18 +29,26 @@ export interface JudgeStrategyContext {
 /**
  * Base class for judge evaluation strategies
  */
-/** Default timeout for sendAndWait calls (5 minutes) */
-const DEFAULT_JUDGE_TIMEOUT = 300_000;
+/** Default timeout for sendAndWait calls (8 minutes) */
+const DEFAULT_JUDGE_TIMEOUT = 480_000;
+
+/** Default number of retries for sendAndWait calls */
+const DEFAULT_JUDGE_RETRIES = 3;
 
 export abstract class JudgeStrategy {
   protected model: string;
   protected timeout: number;
+  protected maxRetries: number;
   protected tokenClient: TokenManagerClient;
 
   constructor(model?: string) {
     this.model = model || process.env.JUDGE_MODEL || "gpt-4.1";
     this.timeout = parseInt(process.env.JUDGE_TIMEOUT || String(DEFAULT_JUDGE_TIMEOUT));
+    this.maxRetries = parseInt(process.env.JUDGE_RETRIES || String(DEFAULT_JUDGE_RETRIES));
     this.tokenClient = new TokenManagerClient();
+    console.log(
+      `[judge-strategy] Initialized: model=${this.model}, timeout=${this.timeout}ms, retries=${this.maxRetries}`
+    );
   }
 
   abstract evaluate(
@@ -224,7 +233,7 @@ export abstract class JudgeStrategy {
   }
 
   /**
-   * Run a Copilot session with given prompt and tools
+   * Run a Copilot session with given prompt and tools, retrying on timeout.
    */
   protected async runCopilotSession(
     workspacePath: string,
@@ -232,6 +241,38 @@ export abstract class JudgeStrategy {
     userPrompt: string
   ): Promise<string> {
     const tools = this.createFileTools(workspacePath);
+
+    return withRetry(
+      () => this.doRunCopilotSession(tools, systemPrompt, userPrompt),
+      {
+        maxRetries: this.maxRetries,
+        baseDelayMs: 10_000,
+        maxDelayMs: 30_000,
+        isRetryable: (error) => {
+          const msg = error instanceof Error ? error.message : String(error);
+          return (
+            msg.includes("timeout") ||
+            msg.includes("Timeout") ||
+            msg.includes("aborted") ||
+            msg.includes("ECONNRESET") ||
+            msg.includes("socket hang up")
+          );
+        },
+        onRetry: (error, attempt) => {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.warn(
+            `[judge-strategy] sendAndWait attempt ${attempt} failed (retrying in ≤30s): ${msg.substring(0, 200)}`
+          );
+        },
+      }
+    );
+  }
+
+  private async doRunCopilotSession(
+    tools: ReturnType<typeof this.createFileTools>,
+    systemPrompt: string,
+    userPrompt: string
+  ): Promise<string> {
     const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
     const client = new CopilotClient({ githubToken });
     let fullResponse = "";
@@ -255,6 +296,8 @@ export abstract class JudgeStrategy {
 
       return fullResponse;
     } catch (error) {
+      // Ensure client is stopped even on failure
+      try { await client.stop(); } catch { /* ignore cleanup errors */ }
       console.error("[judge-strategy] Copilot SDK error:", error);
       throw new Error(
         `Judge evaluation failed: ${error instanceof Error ? error.message : String(error)}`

@@ -142,7 +142,7 @@ export function CriterionDetail() {
 
   if (isLoading) {
     return (
-      <div className="max-w-2xl mx-auto space-y-4">
+      <div className="max-w-2xl space-y-4">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-64 w-full" />
       </div>
@@ -151,7 +151,7 @@ export function CriterionDetail() {
 
   if (error || !criterion) {
     return (
-      <div className="max-w-2xl mx-auto space-y-4">
+      <div className="max-w-2xl space-y-4">
         <Link to="/criteria" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Back to Criteria
         </Link>
@@ -163,7 +163,7 @@ export function CriterionDetail() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="max-w-2xl space-y-6">
       <Link to="/criteria" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4" /> Back to Criteria
       </Link>

@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ACPClientHandler } from "./acp-client.js";
+import { ACPClientHandler, selectReasoningEffort } from "./acp-client.js";
 
 describe("ACPClientHandler", () => {
   let workspace: string;
@@ -193,5 +193,89 @@ describe("ACPClientHandler", () => {
 
       expect(readFileSync(join(workspace, "a/c.txt"), "utf-8")).toBe("ok");
     });
+  });
+});
+
+describe("selectReasoningEffort", () => {
+  function makeConnection(overrides?: Record<string, unknown>) {
+    return {
+      setSessionConfigOption: vi.fn().mockResolvedValue(undefined),
+      ...overrides,
+    } as any;
+  }
+
+  function makeSession(overrides?: Record<string, unknown>) {
+    return {
+      sessionId: "session-1",
+      ...overrides,
+    } as any;
+  }
+
+  it("sets effort via setSessionConfigOption when thought_level config option exists", async () => {
+    const connection = makeConnection();
+    const session = makeSession({
+      configOptions: [
+        { id: "reasoning_effort", category: "thought_level", name: "Reasoning Effort", currentValue: "medium", options: [], type: "select" },
+      ],
+    });
+    const logs: string[] = [];
+
+    const result = await selectReasoningEffort(connection, session, "high", (msg) => logs.push(msg));
+
+    expect(connection.setSessionConfigOption).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      configId: "reasoning_effort",
+      value: "high",
+    });
+    expect(result).toBe("high");
+    expect(logs).toContain('Reasoning effort set to "high" via session/set_config_option (configId: reasoning_effort)');
+  });
+
+  it("warns when configOptions is undefined", async () => {
+    const connection = makeConnection();
+    const session = makeSession({ configOptions: undefined });
+    const logs: string[] = [];
+
+    const result = await selectReasoningEffort(connection, session, "high", (msg) => logs.push(msg));
+
+    expect(result).toBeUndefined();
+    expect(connection.setSessionConfigOption).not.toHaveBeenCalled();
+    expect(logs[0]).toContain("does not advertise config options");
+    expect(logs[0]).toContain('"high"');
+  });
+
+  it("warns when no thought_level config option is found and lists available options", async () => {
+    const connection = makeConnection();
+    const session = makeSession({
+      configOptions: [
+        { id: "model_selector", category: "model", name: "Model", currentValue: "claude-sonnet", options: [], type: "select" },
+      ],
+    });
+    const logs: string[] = [];
+
+    const result = await selectReasoningEffort(connection, session, "medium", (msg) => logs.push(msg));
+
+    expect(result).toBeUndefined();
+    expect(connection.setSessionConfigOption).not.toHaveBeenCalled();
+    expect(logs[0]).toContain('does not advertise a "thought_level" config option');
+    expect(logs[0]).toContain("model_selector (category: model)");
+  });
+
+  it("warns and returns undefined on RPC error", async () => {
+    const connection = makeConnection({
+      setSessionConfigOption: vi.fn().mockRejectedValue(new Error("config not writable")),
+    });
+    const session = makeSession({
+      configOptions: [
+        { id: "reasoning_effort", category: "thought_level", name: "Reasoning Effort", currentValue: "medium", options: [], type: "select" },
+      ],
+    });
+    const logs: string[] = [];
+
+    const result = await selectReasoningEffort(connection, session, "high", (msg) => logs.push(msg));
+
+    expect(result).toBeUndefined();
+    expect(logs[0]).toContain("session/set_config_option failed");
+    expect(logs[0]).toContain("config not writable");
   });
 });

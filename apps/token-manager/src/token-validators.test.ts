@@ -147,6 +147,53 @@ describe("validateToken", () => {
       expect(fetchSpy).not.toHaveBeenCalled();
     });
   });
+  describe("azure-ai-foundry", () => {
+    it("returns valid for successful foundry probe", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+      } as Response);
+
+      const result = await validateToken("azure-ai-foundry", JSON.stringify({
+        endpoint: "https://example.services.ai.azure.com/models",
+        apiKey: "foundry-key",
+        model: "gpt-4.1",
+      }));
+
+      expect(result.status).toBe("valid");
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "https://example.services.ai.azure.com/models/chat/completions?api-version=2024-05-01-preview",
+        expect.anything()
+      );
+    });
+
+    it("rejects non-azure endpoint without making a network call", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const result = await validateToken("azure-ai-foundry", JSON.stringify({
+        endpoint: "https://example.com/models",
+        apiKey: "foundry-key",
+      }));
+
+      expect(result.status).toBe("invalid");
+      expect(result.error).toMatch(/services\.ai\.azure\.com/);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("rejects non-https endpoint without making a network call", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const result = await validateToken("azure-ai-foundry", JSON.stringify({
+        endpoint: "http://example.services.ai.azure.com/models",
+        apiKey: "foundry-key",
+      }));
+
+      expect(result.status).toBe("invalid");
+      expect(result.error).toMatch(/HTTPS/);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+  });
+
   describe("dispatcher", () => {
     it("calls correct validator for each type", async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({

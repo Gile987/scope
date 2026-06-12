@@ -115,6 +115,7 @@ class CopilotProcessor implements WorkerProcessor {
     await log("info", "Starting Copilot ACP processor", {
       inputLength: message.length,
       model: options?.model,
+      reasoningEffort: options?.reasoningEffort,
       mcpServerCount: this.mcpConfigs.length,
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
       skillCount: skillConfigs.length,
@@ -149,7 +150,7 @@ class CopilotProcessor implements WorkerProcessor {
 
     try {
       // Acquire token dynamically (env var fallback or Token Manager)
-      const githubToken = await tokenClient.acquireToken("copilot-sdk");
+      const githubToken = await tokenClient.acquireToken("copilot-cli");
       await log("info", "Acquired GITHUB_TOKEN", {
         preview: `${githubToken.substring(0, 7)}...(${githubToken.length} chars)`,
       });
@@ -158,6 +159,9 @@ class CopilotProcessor implements WorkerProcessor {
       const args = ["--acp", "--yolo"];
       if (options?.model) {
         args.push("--model", options.model);
+      }
+      if (options?.reasoningEffort) {
+        args.push("--reasoning-effort", options.reasoningEffort);
       }
       // The Copilot CLI does not support MCP servers via ACP newSession.mcpServers
       // (agentCapabilities.mcpCapabilities is undefined). Instead, pass the gateway
@@ -177,7 +181,9 @@ class CopilotProcessor implements WorkerProcessor {
           await log("debug", msg);
         },
         mcpServers: [],
+        sessionTimeoutMs: process.env.ACP_SESSION_TIMEOUT_MS ? Number(process.env.ACP_SESSION_TIMEOUT_MS) : undefined,
         model: options?.model,
+        reasoningEffort: options?.reasoningEffort,
       });
 
       await log("info", "Copilot processing complete", { 
@@ -223,6 +229,7 @@ async function main(): Promise<void> {
     redisPassword: process.env.REDIS_PASSWORD || "",
     apiBaseUrl: process.env.SCOPE_MT_API_URL,
     tokenManagerUrl: process.env.TOKEN_MANAGER_URL,
+    postProcessorQueueName: process.env.QUEUE_NAME_POST_PROCESSOR || "post-processor-queue",
   };
 
   const processor = new CopilotProcessor();

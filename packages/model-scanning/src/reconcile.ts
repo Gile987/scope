@@ -34,6 +34,7 @@ export async function reconcileModels(
         ? { providerEndOfLife: m.providerEndOfLife }
         : {}),
       ...(m.metadata ? { metadata: m.metadata } : {}),
+      ...(m.capabilities ? { capabilities: m.capabilities } : {}),
     })),
     scannedAt: scanResult.scannedAt.toISOString(),
   };

@@ -8,14 +8,15 @@ import { RetryConfirmDialog } from "@/components/RetryConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
+import { EnrichmentBadge } from "@/components/EnrichmentBadge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { LogViewer } from "@/components/LogViewer";
 import { TurnTimeline } from "@/components/TurnTimeline";
@@ -30,11 +31,41 @@ import { ReportThumbnail } from "@/components/ReportThumbnail";
 import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
-import { useState, useMemo } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { RunState } from "@/types";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { getRetryButtonState } from "@/components/RetryButton";
+
+/** A compact labeled stat: a micro uppercase label above its value. */
+function MetaItem({ label, value, title }: { label: string; value: ReactNode; title?: string }) {
+  return (
+    <div className="flex flex-col gap-0.5" title={title}>
+      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">{label}</span>
+      <span className="text-sm leading-tight text-foreground">{value}</span>
+    </div>
+  );
+}
+
+/** A labeled group of resource chips (MCP servers, skills, extensions). */
+function ResourceLinks({ label, items, hrefBase }: { label: string; items: string[]; hrefBase: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">{label}</span>
+      <div className="flex flex-wrap items-center gap-1">
+        {items.map((slug) => (
+          <Link
+            key={slug}
+            to={`${hrefBase}/${slug}`}
+            className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors"
+          >
+            {slug}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function RunDetail() {
   const { id, tab } = useParams<{ id: string; tab?: string }>();
@@ -54,10 +85,13 @@ export function RunDetail() {
     queryFn: () => api.getRun(id!),
     enabled: !!id,
     refetchInterval: (query) => {
-      const status = query.state.data?.run?.status;
-      // Stop polling once terminal (done)
-      if (status === "done") return false;
-      return 5_000;
+      const data = query.state.data;
+      const status = data?.run?.status;
+      const ppStatus = data?.run?.postProcessorStatus;
+      // Keep polling while run is in progress OR post-processing is pending/in-progress
+      if (status !== "done") return 5_000;
+      if (ppStatus && ppStatus !== "done" && ppStatus !== "failed") return 5_000;
+      return false;
     },
   });
 
@@ -325,6 +359,7 @@ export function RunDetail() {
      : (run.skills ?? []);
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="space-y-6">
       {/* Back link + header */}
       <div>
@@ -335,18 +370,22 @@ export function RunDetail() {
         </Link>
 
         <div className="flex items-start justify-between">
-          <div className="space-y-1">
+          <div className="space-y-3">
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold tracking-tight font-mono">{id}</h1>
               <button
                 onClick={copyId}
                 className="text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Copy run ID"
                 title="Copy run ID"
               >
                 {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                <span className="sr-only">Copy run ID</span>
               </button>
             </div>
-            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+
+            {/* Tier 1 — semantic status pills */}
+            <div className="flex flex-wrap items-center gap-2">
               <StatusBadge
                 status={activeRun?.status ?? "pending"}
                 worker={activeRun?.worker}
@@ -354,88 +393,79 @@ export function RunDetail() {
                 startedAt={activeRun?.startedAt}
               />
               {activeRun?.status === "done" && <OutcomeBadge outcome={activeRun?.outcome} />}
-              <span className="font-mono">{run.workerType}</span>
+              {activeRun?.status === "done" && (
+                <EnrichmentBadge status={activeRun.postProcessorStatus} version={activeRun.postProcessorVersion} />
+              )}
+            </div>
+
+            {/* Tier 2 — labeled configuration + metrics */}
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <MetaItem label="Worker" value={<span className="font-mono">{run.workerType}</span>} />
               {run.model && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono">{run.model}</span>
-                </>
+                <MetaItem
+                  label="Model"
+                  value={
+                    <span className="font-mono">
+                      {run.model}
+                      {run.reasoningEffort && ` (${run.reasoningEffort})`}
+                    </span>
+                  }
+                />
               )}
               {run.agentVersion && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono text-xs cursor-default" title={activeRun?.workerVersion ? `Worker: ${activeRun?.workerVersion}` : undefined}>{run.agentVersion}</span>
-                </>
+                <MetaItem
+                  label="Version"
+                  title={activeRun?.workerVersion ? `Worker: ${activeRun?.workerVersion}` : undefined}
+                  value={<span className="font-mono">{run.agentVersion}</span>}
+                />
               )}
-              <Separator orientation="vertical" className="h-4" />
-              <span>Created {formatDate(run.createdAt)}</span>
-              {run.maxIterations && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span>Max {run.maxIterations} iterations</span>
-                </>
-              )}
+              <MetaItem label="Created" value={formatDate(run.createdAt)} />
+              {run.maxIterations && <MetaItem label="Max iterations" value={run.maxIterations} />}
               {(() => {
                 const totalDuration = activeRun?.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
                 return totalDuration ? (
-                  <>
-                    <Separator orientation="vertical" className="h-4" />
-                    <span className="font-mono text-xs" title={`${totalDuration.toLocaleString()}ms total`}>
-                      {formatDuration(totalDuration)}
-                    </span>
-                  </>
+                  <MetaItem
+                    label="Duration"
+                    title={`${totalDuration.toLocaleString()}ms total`}
+                    value={<span className="font-mono">{formatDuration(totalDuration)}</span>}
+                  />
                 ) : null;
               })()}
               {totalTokenUsage && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono text-xs">
-                    {totalTokenUsage.promptTokens.toLocaleString()}↑ · {totalTokenUsage.completionTokens.toLocaleString()}↓
-                  </span>
-                </>
+                <MetaItem
+                  label="Tokens (in/out)"
+                  value={
+                    <span className="font-mono">
+                      {totalTokenUsage.promptTokens.toLocaleString()}↑ · {totalTokenUsage.completionTokens.toLocaleString()}↓
+                    </span>
+                  }
+                />
               )}
               {activeRun?.aiCallCount !== undefined && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono text-xs" title="LLM completion calls">
-                    {activeRun?.aiCallCount} LLM calls
-                  </span>
-                </>
-              )}
-              {run.mcpServers && run.mcpServers.length > 0 && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span>MCP:</span>
-                  {run.mcpServers.map((slug) => (
-                    <Link key={slug} to={`/mcp-servers/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
-                      {slug}
-                    </Link>
-                  ))}
-                </>
-              )}
-              {run.skills && run.skills.length > 0 && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span>Skills:</span>
-                  {run.skills.map((slug) => (
-                    <Link key={slug} to={`/skills/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
-                      {slug}
-                    </Link>
-                  ))}
-                </>
-              )}
-              {run.extensions && run.extensions.length > 0 && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span>Extensions:</span>
-                  {run.extensions.map((id) => (
-                    <Link key={id} to={`/extensions/${id}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
-                      {id}
-                    </Link>
-                  ))}
-                </>
+                <MetaItem
+                  label="LLM calls"
+                  title="LLM completion calls"
+                  value={<span className="font-mono">{activeRun?.aiCallCount}</span>}
+                />
               )}
             </div>
+
+            {/* Tier 3 — resource attachments */}
+            {((run.mcpServers && run.mcpServers.length > 0) ||
+              (run.skills && run.skills.length > 0) ||
+              (run.extensions && run.extensions.length > 0)) && (
+              <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
+                {run.mcpServers && run.mcpServers.length > 0 && (
+                  <ResourceLinks label="MCP" items={run.mcpServers} hrefBase="/mcp-servers" />
+                )}
+                {run.skills && run.skills.length > 0 && (
+                  <ResourceLinks label="Skills" items={run.skills} hrefBase="/skills" />
+                )}
+                {run.extensions && run.extensions.length > 0 && (
+                  <ResourceLinks label="Extensions" items={run.extensions} hrefBase="/extensions" />
+                )}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
           {hasMultipleAttempts && attempts && attempts.length > 0 && (
@@ -830,7 +860,16 @@ export function RunDetail() {
               <CardContent className="space-y-3">
                 <div>
                   <h4 className="text-sm font-medium mb-1">Task</h4>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{run.scenario?.task ?? "–"}</p>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5 cursor-default">
+                        {run.scenario?.task ?? "–"}
+                      </p>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-sm whitespace-pre-wrap">
+                      {run.scenario?.task ?? "–"}
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
                 {run.scenario?.version && (
                   <div>
@@ -970,6 +1009,42 @@ export function RunDetail() {
                     <div>
                       <span className="text-muted-foreground">Model:</span>{" "}
                       <span className="font-mono font-medium">{run.model}</span>
+                    </div>
+                  )}
+                  {run.reasoningEffort && (
+                    <div>
+                      <span className="text-muted-foreground">Reasoning Effort:</span>{" "}
+                      <span className="font-mono font-medium">{run.reasoningEffort}</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Enrichment card */}
+            {activeRun?.status === "done" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Enrichment</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Status:</span>{" "}
+                    <EnrichmentBadge status={activeRun.postProcessorStatus} version={activeRun.postProcessorVersion} />
+                  </div>
+                  {activeRun.postProcessorVersion !== undefined && (
+                    <div>
+                      <span className="text-muted-foreground">Version:</span>{" "}
+                      <span className="font-mono font-medium">v{activeRun.postProcessorVersion}</span>
+                    </div>
+                  )}
+                  {activeRun.postProcessorStatus === "done" && activeRun.turns?.some(t => t.atifUrl) && (
+                    <div>
+                      <span className="text-muted-foreground">Artifacts:</span>{" "}
+                      <span className="font-medium">ATIF trajectory</span>
+                      <span className="text-muted-foreground ml-1">
+                        ({activeRun.turns?.filter(t => t.atifUrl).length ?? 0} iteration{(activeRun.turns?.filter(t => t.atifUrl).length ?? 0) !== 1 ? "s" : ""})
+                      </span>
                     </div>
                   )}
                 </CardContent>
@@ -1133,6 +1208,7 @@ export function RunDetail() {
         isPending={retryMutation.isPending}
       />
     </div>
+    </TooltipProvider>
   );
 }
 

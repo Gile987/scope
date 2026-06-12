@@ -184,4 +184,84 @@ describe("scanCopilotModels", () => {
       version: "2025-04-14",
     });
   });
+
+  it("should extract capabilities from capabilities.supports", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: "claude-opus-4.7",
+              capabilities: {
+                supports: {
+                  reasoning_effort: ["medium"],
+                  tool_calls: true,
+                  vision: true,
+                  streaming: true,
+                  adaptive_thinking: true,
+                  max_thinking_budget: 32000,
+                },
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await scanCopilotModels("token");
+
+    expect(result.models[0].capabilities).toEqual({
+      reasoningEffort: ["medium"],
+      toolCalls: true,
+      vision: true,
+      streaming: true,
+      adaptiveThinking: true,
+      maxThinkingBudget: 32000,
+    });
+  });
+
+  it("should extract multiple reasoning effort levels", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: "gpt-5.5",
+              capabilities: {
+                supports: {
+                  reasoning_effort: ["none", "low", "medium", "high", "xhigh"],
+                  tool_calls: true,
+                },
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await scanCopilotModels("token");
+
+    expect(result.models[0].capabilities?.reasoningEffort).toEqual([
+      "none", "low", "medium", "high", "xhigh",
+    ]);
+  });
+
+  it("should not include capabilities when capabilities.supports is absent", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: "model-no-caps" },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await scanCopilotModels("token");
+
+    expect(result.models[0].capabilities).toBeUndefined();
+  });
 });

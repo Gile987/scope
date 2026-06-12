@@ -13,17 +13,31 @@ export function truncate(str: string, len: number): string {
 }
 
 export function formatDate(date: string | Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date(date));
+  const d = new Date(date);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const MM = pad(d.getMonth() + 1);
+  const DD = pad(d.getDate());
+  const YY = pad(d.getFullYear() % 100);
+  const HH = pad(d.getHours());
+  const mm = pad(d.getMinutes());
+  const ss = pad(d.getSeconds());
+  return `${MM}/${DD}/${YY} ${HH}:${mm}:${ss}`;
 }
 
 export function formatId(id: string): string {
   return id.slice(0, 8);
+}
+
+/** Convert a behavior description to a snake_case ID suggestion */
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^[^a-z]+/, "")
+    .replace(/_+/g, "_")
+    .replace(/_$/, "")
+    .slice(0, 40);
 }
 
 export function formatDuration(ms: number): string {

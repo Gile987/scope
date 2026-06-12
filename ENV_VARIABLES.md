@@ -10,21 +10,131 @@ The sophisticated criteria system can be configured via environment variables in
 
 Base URL of the Scope API used by all CLI commands. Override this to point the CLI at a remote or Docker-hosted API instance.
 
-## LLM Configuration (Criteria Prompt Generation)
+## LLM Configuration (Portal AI Features)
+
+The portal's AI features — criteria prompt generation, prompt-feature
+extraction/generation, and task-prompt generation/variation — all call an
+OpenAI-style chat-completions endpoint through the
+[`@azure-rest/ai-inference`](https://www.npmjs.com/package/@azure-rest/ai-inference)
+SDK. Two backends are supported, resolved in `acquireInferenceClient`
+([`apps/api/src/llm-token.ts`](apps/api/src/llm-token.ts)) using the
+following priority order. The **first source that returns a credential
+wins**; later sources are not consulted.
+
+| # | Source | Trigger | `via` log tag |
+|---|--------|---------|---------------|
+| 1 | Azure AI Foundry via env vars | `AZURE_AI_INFERENCE_ENDPOINT` + `AZURE_AI_INFERENCE_API_KEY` both set | `azure-ai-foundry-env` |
+| 2 | Azure AI Foundry via Token Manager | At least one `azure-ai-foundry` key registered at the Portal `/secrets/keys/new` (recommended for integration / prod — credentials live in Key Vault, the API round-robins across valid keys) | `azure-ai-foundry-token-manager` |
+| 3 | GitHub Models via env var | `GITHUB_MODELS_API_KEY` set | `github-models-env` |
+| 4 | GitHub Models via Token Manager | A `github-models` key registered at `/secrets/keys/new` | `github-models-token-manager` |
+| 5 | Bare GitHub token fallback | `GITHUB_TOKEN` set | `github-token` |
+
+**Two important properties of this chain:**
+
+- **Foundry beats GitHub Models, and env vars beat the Token Manager
+  within each backend.** Having both a Foundry env var and a registered
+  `github-models` key means every call goes to Foundry; the GitHub
+  Models key is dormant.
+- **There is no automatic failover at request time.** The chain only
+  steps down when the predecessor returns *nothing* (env var unset, no
+  key registered). It does **not** step down when the predecessor
+  returns a credential that then 4xx/5xx's on the actual chat-completion
+  call. This is intentional — silent fallback would mask misconfiguration
+  (e.g. a wrong Foundry deployment name) and hide the real error from
+  the user.
+
+If no source returns a credential, the portal's AI buttons return HTTP
+`503` with a single actionable error message (`LLM not configured: no
+inference backend available. Please register a new secret key for GitHub
+Model or Azure Foundry.`), and the rest of the API works unchanged.
+
+Every successful acquisition also logs a single line so operators can
+verify which provider served a given AI call:
+
+```
+[llm-token] inference provider: source=azure-ai-foundry via=azure-ai-foundry-env endpoint=https://<resource>.services.ai.azure.com/models model=gpt-4.1-mini
+```
+
+> **Local dev with Docker Compose:** the three Foundry-related variables
+> (`AZURE_AI_INFERENCE_ENDPOINT`, `AZURE_AI_INFERENCE_API_KEY`, `LLM_MODEL`)
+> must live in **`.env.local`** at the repo root, **not** `.env`. The `.env`
+> file is auto-generated per worktree by `worktree-env` and will overwrite
+> manual edits. `.env.local` is gitignored and is loaded into the `api`
+> service via Compose's `env_file:` directive (`required: false`).
+>
+> ```bash
+> cp .env.local.example .env.local
+> # edit .env.local with your Foundry endpoint, key, and model
+> docker compose up -d --force-recreate --no-deps api
+> ```
+>
+> Compose only re-reads `env_file:` when the container is **created**, so
+> `docker compose restart api` will *not* pick up `.env.local` changes.
+> Use `--force-recreate` (or restart the whole stack with
+> `pnpm docker:up:copilot` / `pnpm docker:dev:copilot`) after editing the
+> file.
+
+### AZURE_AI_INFERENCE_ENDPOINT
+**Required (with `AZURE_AI_INFERENCE_API_KEY`) to use Azure AI Foundry**
+**Type:** URL string
+
+Base URL of the Azure AI Foundry inference endpoint (e.g.
+`https://<foundry-resource>.services.ai.azure.com/models`). When set together
+with `AZURE_AI_INFERENCE_API_KEY` the API issues all portal-LLM calls to this
+endpoint and ignores GitHub Models. This is the recommended production
+configuration: GitHub Models' public endpoint regularly takes >1 minute under
+load (see [#847](https://github.com/growth-ecosystems/scope-core/issues/847)),
+while a Foundry deployment of the same model returns in well under a second.
+
+> **The `/models` suffix is required.** The Azure portal shows the resource
+> URL without it, but the inference data plane only responds on
+> `/models/chat/completions`. Without the suffix every call returns HTTP
+> 404 "Resource not found". The API auto-appends `/models` when it detects
+> a bare `services.ai.azure.com` host and emits a warning at startup, but
+> you should fix the env var to silence it.
+>
+> ```
+> ✅ https://<resource>.services.ai.azure.com/models
+> ❌ https://<resource>.services.ai.azure.com
+> ```
+
+- **Docker Compose:** put in `.env.local` (see note above).
+- **Kubernetes:** sourced from the `azure-ai-inference-secrets`
+  ExternalSecret (Key Vault key `azure-ai-inference-endpoint`).
+
+### AZURE_AI_INFERENCE_API_KEY
+**Required (with `AZURE_AI_INFERENCE_ENDPOINT`) to use Azure AI Foundry**
+**Type:** string
+
+API key for the Foundry endpoint.
+
+- **Docker Compose:** put in `.env.local` (see note above).
+- **Kubernetes:** sourced from the `azure-ai-inference-secrets`
+  ExternalSecret (Key Vault key `azure-ai-inference-api-key`).
 
 ### GITHUB_MODELS_API_KEY
-**Required for AI prompt generation**
+**Optional (used as fallback when Foundry is not configured)**
 **Type:** string
 
-GitHub personal access token (with the `models` read permission) used to authenticate with GitHub Models (`https://models.inference.ai.azure.com`) via the Azure AI Inference SDK. When set, the API can auto-generate evaluation prompts from natural-language behavior descriptions during criteria creation.
+GitHub personal access token (with the `models` read permission) used to
+authenticate with GitHub Models (`https://models.inference.ai.azure.com`).
+Useful for local dev where no Foundry endpoint is available. Goes in `.env`
+(or `.env.base`) since it is read via Compose variable substitution, not
+the api service's `env_file`.
 
-> **Note:** This is separate from `GITHUB_TOKEN`, which is used by the Judge and worker services for Copilot SDK / ACP access and does **not** need the `models` permission.
+> **Note:** This is separate from `GITHUB_TOKEN`, which is used by the Judge
+> and worker services for Copilot SDK / ACP access and does **not** need the
+> `models` permission. If `GITHUB_MODELS_API_KEY` is unset the API also
+> accepts `GITHUB_TOKEN` (or `TOKEN_MANAGER_URL` with a registered
+> `github-models` token) as a fallback.
 
 ### LLM_MODEL
-**Default:** `gpt-4.1`
+**Default:** `gpt-4.1` (applied inside the API when unset)
 **Type:** string
 
-The model name to use for criteria prompt generation via GitHub Models. Examples: `gpt-4.1`, `gpt-4o`, `gpt-4.1-mini`.
+Model name / deployment name used by both backends. For Foundry, this must
+match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
+`gpt-4o`, `gpt-4.1-mini`. Put in `.env.local` (see note above).
 
 ## Judge Strategy Configuration
 
@@ -42,10 +152,28 @@ The model name to use for criteria prompt generation via GitHub Models. Examples
 Maximum number of criteria to evaluate in parallel when using `independent` strategy.
 
 ### JUDGE_TIMEOUT
-**Default:** `300000` (5 minutes)
+**Default:** `480000` (8 minutes)
 **Type:** integer (milliseconds)
 
 Timeout for each Copilot SDK `sendAndWait` call. If the LLM takes longer than this to complete a response, the call will fail with a timeout error. Increase this if you see `Timeout after Xms waiting for session.idle` errors.
+
+### JUDGE_RETRIES
+**Default:** `3`
+**Type:** integer
+
+Number of retry attempts for judge-side LLM calls (`sendAndWait`). When a timeout or transient error occurs, the judge retries with exponential backoff (10s base, 30s max). Set to `0` to disable retries.
+
+### JUDGE_CLIENT_TIMEOUT
+**Default:** `600000` (10 minutes)
+**Type:** integer (milliseconds)
+
+Timeout for the HTTP request from workers to the judge service (`/api/v1/evaluate`). This covers the full end-to-end evaluation including all criteria. Increase this if you see `The operation was aborted due to timeout` errors in the multi-turn loop.
+
+### JUDGE_CLIENT_RETRIES
+**Default:** `2`
+**Type:** integer
+
+Maximum number of retry attempts when the judge client encounters a timeout or transient network error. Uses exponential backoff (5s base, 30s max). Set to `0` to disable retries.
 
 ## Feedback Configuration
 
@@ -149,7 +277,53 @@ Timeout for the Copilot SDK session used by the report-generator worker. If the 
 
 Git commit hash embedded in reporter metadata. Automatically set during CI/CD builds. Used to track which version of the report-generator produced a given report.
 
+## Scheduler Configuration
+
+### SCHEDULER_POLL_INTERVAL_MS
+**Default:** `2000`
+**Type:** integer (milliseconds)
+
+How often the request scheduler polls MongoDB for pending requests to dispatch to coder workers. Applies to all worker types. Lower values reduce queue latency; higher values save RUs.
+
+### SCHEDULER_PP_POLL_INTERVAL_MS
+**Default:** `30000`
+**Type:** integer (milliseconds)
+
+How often the post-processor dispatcher polls for completed runs needing post-processing. This is a **backfill/catch-up** mechanism — the primary dispatch path is event-driven (coder workers enqueue directly on run completion). The 30s default keeps idle RU consumption low while still catching missed events or version-upgrade backfills within a reasonable window. Reduce temporarily for large backfills.
+
+### QUEUE_NAME_POST_PROCESSOR
+**Default:** `post-processor-queue`
+**Type:** string
+
+Azure Storage Queue name used by both the scheduler (to enqueue post-processing work) and the post-processor worker (to dequeue). Must match between the two services.
+
+### SCOPE_REAPER_ENABLED
+**Default:** `false`
+**Type:** boolean (`true` to enable)
+
+Kill-switch for the scheduler's stuck-run reaper. **Disabled by default** — set to `true` (and ensure `REDIS_HOST` is set) to run a periodic backstop sweep that fails `processing` runs whose worker died without writing a terminal state and whose queue message no longer triggers recovery. When disabled, the queue redelivery path still operates. Redis is **non-fatal**: even when enabled, if `REDIS_HOST` is absent or the heartbeat store can't be constructed, the reaper self-disables and the dispatch loop keeps running.
+
+### SCOPE_REAPER_POLL_INTERVAL_MS
+**Default:** `60000`
+**Type:** integer (milliseconds)
+
+How often the stuck-run reaper sweeps MongoDB for stale `processing` runs. A run must look stale in **two consecutive** sweeps before it is reaped, so the effective time-to-reap after the staleness threshold is roughly one extra poll interval. Invalid/non-positive values fall back to the default.
+
+### SCOPE_REAPER_MAX_PER_SWEEP
+**Default:** `30`
+**Type:** integer
+
+Circuit-breaker bound on how many runs a single reaper sweep may fail. If a sweep would reap more than this, it **skips and logs loudly** instead — a high count implies a systemic slowdown (e.g. CosmosDB 429 storm lagging heartbeats fleet-wide) rather than that many independent worker deaths. Invalid/non-positive values fall back to the default.
+
+The reaper reuses `SCOPE_RUN_HEARTBEAT_STALE_MS` (Worker Configuration, below) as its staleness threshold. The scheduler must therefore have Redis credentials (`redis-secrets`) to read per-run heartbeats; see [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#stuck-run-reaper-scheduler-backstop).
+
 ## Worker Configuration
+
+### ACP_SESSION_TIMEOUT_MS
+**Default:** `3600000` (60 minutes)
+**Type:** integer (milliseconds)
+
+Maximum time the `coder-acp-copilot` worker waits for a Copilot CLI ACP session to complete before terminating it. If the agent takes longer than this to produce a response, the session is killed and the iteration fails with a timeout error. Increase for complex tasks that require extended processing. Set to `0` to disable the timeout entirely (not recommended in production).
 
 ### SCOPE_RUN_HEARTBEAT_STALE_MS
 **Default:** `120000` (2 × `HEARTBEAT_VISIBILITY_SECONDS`)
@@ -157,11 +331,17 @@ Git commit hash embedded in reporter metadata. Automatically set during CI/CD bu
 
 Threshold used by the queue-processor redelivery handler to decide whether an in-flight `processing` run is still alive. When a worker dequeues a duplicate message for a run already in `processing`, it reads the per-run liveness heartbeat from Redis (`run-heartbeat:<runId>`) and compares `Date.now() - lastBeat`:
 
-- **≤ threshold** → original worker is alive; drop the duplicate, leave the run untouched.
+- **≤ threshold** → original worker is alive; **re-defer** the duplicate (push its visibility out by `SCOPE_RUN_REDELIVER_DEFER_MS`), leave the run untouched. The message is **not** deleted — it is the recovery token if the original worker later dies hard.
 - **> threshold** → worker presumed dead; mark the run failed atomically.
-- **missing key** → fall back to `run.startedAt`. If picked up ≤ threshold ago, drop (transient race / Redis blip); otherwise mark failed.
+- **missing key** → fall back to `run.startedAt`. If picked up ≤ threshold ago, re-defer (transient race / Redis blip); otherwise mark failed.
 
-Lower values fail crashed runs faster but increase the risk of false positives if the heartbeat is briefly delayed (network, throttling, GC). The default gives the per-run heartbeat (every 15s) a generous 8× margin. See [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#liveness-heartbeat--redelivery).
+Lower values fail crashed runs faster but increase the risk of false positives if the heartbeat is briefly delayed (network, throttling, GC). The default gives the per-run heartbeat (every 15s) a generous 8× margin. This value is also the staleness threshold used by the scheduler's stuck-run reaper — keep the scheduler and workers on the same value so both recovery paths agree on "worker dead". See [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#liveness-heartbeat--redelivery).
+
+### SCOPE_RUN_REDELIVER_DEFER_MS
+**Default:** value of `SCOPE_RUN_HEARTBEAT_STALE_MS` (`120000`)
+**Type:** integer (milliseconds)
+
+How far the queue-processor pushes out a duplicate message's visibility when the original worker is still alive (fresh heartbeat). The duplicate is re-deferred rather than deleted so the message survives as the at-least-once recovery token; each time it resurfaces, a fresh heartbeat re-defers it (cheap) and a stale heartbeat marks the run failed. Defaulting to the staleness threshold makes the re-check cadence match the staleness window.
 
 ### SCOPE_RUN_HEARTBEAT_REDIS_TTL_MS
 **Default:** `300000` (5 × `HEARTBEAT_VISIBILITY_SECONDS`)

@@ -1,26 +1,38 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
-import type { ReportTrigger } from "@/types";
+import type { ReportTemplate, ReportTrigger } from "@/types";
 import { Button } from "@/components/ui/button";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2, Eye, RefreshCw } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Plus, Trash2 } from "lucide-react";
 import { truncate } from "@/lib/utils";
+import {
+  ListLayout,
+  FilterRail,
+  FilterSection,
+  CheckboxFilterGroup,
+  ClearFiltersLink,
+  DataTable,
+  Pagination,
+  CustomizeColumnsPanel,
+  CustomizeColumnsLink,
+  useHiddenColumns,
+  useListUrlState,
+  type DataTableColumn,
+  type CustomizeColumnsOption,
+} from "@/components/list-layout";
+
+const TRIGGER_TYPES = ["always", "criteria", "taskPrompt", "promptFeature"] as const;
+const FILTER_KEYS = ["trigger"] as const;
 
 function triggerSummary(trigger?: ReportTrigger): string {
   if (!trigger) return "always (no trigger configured)";
@@ -53,7 +65,12 @@ function triggerVariant(type: string): "default" | "secondary" | "outline" | "de
 
 export function ReportTemplateList() {
   const queryClient = useQueryClient();
-  const [triggerFilter, setTriggerFilter] = useState<"all" | "always" | "criteria" | "taskPrompt" | "promptFeature">("all");
+  const navigate = useNavigate();
+  const location = useLocation();
+  const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+
+  const columnVisibility = useHiddenColumns({ storageKey: "report-templates", defaultHidden: [] });
 
   const { data: templates = [], isLoading, isRefetching } = useQuery({
     queryKey: ["report-templates"],
@@ -65,147 +82,228 @@ export function ReportTemplateList() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["report-templates"] }),
   });
 
-  const filtered = templates.filter((t) => {
-    if (triggerFilter === "all") return true;
-    return triggerType(t.trigger) === triggerFilter;
-  });
+  const triggerOptions = useMemo(
+    () =>
+      TRIGGER_TYPES.map((t) => ({
+        value: t,
+        label: t,
+        count: templates.filter((tmpl) => triggerType(tmpl.trigger) === t).length,
+      })),
+    [templates],
+  );
+
+  const filteredTemplates = useMemo(() => {
+    const triggers = state.getFilterList("trigger");
+    const q = state.search.trim().toLowerCase();
+    return templates.filter((t) => {
+      if (triggers.length > 0 && !triggers.includes(triggerType(t.trigger))) return false;
+      if (q) {
+        const blob = `${t.id} ${t.name} ${triggerType(t.trigger)}`.toLowerCase();
+        if (!blob.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [templates, state]);
+
+  const total = filteredTemplates.length;
+  const pageStart = (state.page - 1) * state.pageSize;
+  const pageItems = filteredTemplates.slice(pageStart, pageStart + state.pageSize);
+
+  const columnOptions: CustomizeColumnsOption[] = [
+    { id: "id", label: "ID", required: true },
+    { id: "name", label: "Name" },
+    { id: "trigger", label: "Trigger" },
+    { id: "model", label: "Model" },
+    { id: "systemPrompt", label: "Sys Prompt" },
+    { id: "userPrompt", label: "User Prompt" },
+  ];
+
+  const columns: DataTableColumn<ReportTemplate>[] = [
+    {
+      id: "id",
+      header: "ID",
+      sortable: true,
+      width: "180px",
+      cell: (t) => <span className="font-mono text-sm font-medium">{t.id}</span>,
+    },
+    {
+      id: "name",
+      header: "Name",
+      width: "200px",
+      hidden: columnVisibility.isHidden("name"),
+      cell: (t) => <span className="text-sm">{t.name}</span>,
+    },
+    {
+      id: "trigger",
+      header: "Trigger",
+      hidden: columnVisibility.isHidden("trigger"),
+      cell: (t) => {
+        const tType = triggerType(t.trigger);
+        return (
+          <Badge variant={triggerVariant(tType)} className="text-xs font-mono">
+            {triggerSummary(t.trigger)}
+          </Badge>
+        );
+      },
+    },
+    {
+      id: "model",
+      header: "Model",
+      width: "120px",
+      hidden: columnVisibility.isHidden("model"),
+      cell: (t) => (
+        <span className="text-sm text-muted-foreground">
+          {t.model ?? <span className="italic">default (gpt-4.1)</span>}
+        </span>
+      ),
+    },
+    {
+      id: "systemPrompt",
+      header: "Sys Prompt",
+      width: "100px",
+      hidden: columnVisibility.isHidden("systemPrompt"),
+      cell: (t) => (
+        <span className="text-sm text-muted-foreground">
+          {t.systemPrompt ? t.systemPrompt.mode : "—"}
+        </span>
+      ),
+    },
+    {
+      id: "userPrompt",
+      header: "User Prompt",
+      hidden: columnVisibility.isHidden("userPrompt"),
+      cell: (t) => (
+        <span className="text-sm text-muted-foreground">{truncate(t.userPrompt, 80)}</span>
+      ),
+    },
+    {
+      id: "actions",
+      header: "",
+      width: "60px",
+      align: "right",
+      cell: (t) => (
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-destructive"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete template?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will delete <strong>{t.id}</strong>. Existing reports generated from this template will not be affected.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => deleteMutation.mutate(t.id)}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ),
+    },
+  ];
+
+  const activeTab = location.pathname.startsWith("/reports/templates") ? "templates" : "reports";
 
   return (
-    <div className="space-y-6">
-      {/* Page header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Report Templates</h1>
-          <p className="text-muted-foreground">Manage report generation templates and their triggers</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {isRefetching && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
-          <Select value={triggerFilter} onValueChange={(v) => setTriggerFilter(v as any)}>
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="Filter by trigger" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All triggers</SelectItem>
-              <SelectItem value="always">Always</SelectItem>
-              <SelectItem value="criteria">Criteria</SelectItem>
-              <SelectItem value="taskPrompt">Task Prompt</SelectItem>
-              <SelectItem value="promptFeature">Prompt Feature</SelectItem>
-            </SelectContent>
-          </Select>
-          <Link to="/reports/templates/new">
-            <Button className="gap-1.5">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="border-b border-border/60 px-6 pt-3">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => navigate(v === "templates" ? "/reports/templates" : "/reports")}
+        >
+          <TabsList>
+            <TabsTrigger value="reports">Reports</TabsTrigger>
+            <TabsTrigger value="templates">Templates</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+      <div className="min-h-0 flex-1">
+        <ListLayout
+          title="Report Templates"
+          description="Manage report generation templates and their triggers"
+          railStorageKey="report-templates"
+          actions={
+            <Button size="sm" className="gap-1.5" onClick={() => navigate("/reports/templates/new")}>
               <Plus className="h-4 w-4" /> New Template
             </Button>
-          </Link>
-        </div>
-      </div>
-
-      {/* Table */}
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-12 w-full" />
-          ))}
-        </div>
-      ) : templates.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          No report templates defined yet. Reports will use the default prompt.
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          No templates match the selected filter.
-        </div>
-      ) : (
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[180px]">ID</TableHead>
-                <TableHead className="w-[200px]">Name</TableHead>
-                <TableHead>Trigger</TableHead>
-                <TableHead className="w-[120px]">Model</TableHead>
-                <TableHead className="w-[100px]">Sys Prompt</TableHead>
-                <TableHead>User Prompt</TableHead>
-                <TableHead className="w-[80px]" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((t) => {
-                const tType = triggerType(t.trigger);
-                return (
-                  <TableRow key={t.id}>
-                    <TableCell>
-                      <Link
-                        to={`/reports/templates/${t.id}`}
-                        className="font-mono text-sm font-medium hover:underline"
-                      >
-                        {t.id}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-sm">{t.name}</TableCell>
-                    <TableCell>
-                      <Badge variant={triggerVariant(tType)} className="text-xs font-mono">
-                        {triggerSummary(t.trigger)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {t.model ?? <span className="italic">default (gpt-4.1)</span>}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {t.systemPrompt ? t.systemPrompt.mode : "—"}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {truncate(t.userPrompt, 80)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1 justify-end">
-                        <Link to={`/reports/templates/${t.id}`}>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </Link>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete template?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will delete <strong>{t.id}</strong>. Existing reports generated from this template will not be affected.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => deleteMutation.mutate(t.id)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-
-      {!isLoading && (
-        <p className="text-sm text-muted-foreground">
-          {filtered.length === templates.length
-            ? `${templates.length} ${templates.length === 1 ? "template" : "templates"} total`
-            : `${filtered.length} of ${templates.length} ${templates.length === 1 ? "template" : "templates"}`
           }
-        </p>
-      )}
+          filterRail={
+            <FilterRail
+              search={state.search}
+              onSearchChange={state.setSearch}
+              searchPlaceholder="Search templates…"
+              refreshing={isRefetching}
+              footer={
+                <>
+                  <ClearFiltersLink onClick={state.clearFilters} disabled={!state.hasActiveFilters} />
+                  <CustomizeColumnsLink onClick={() => setCustomizeOpen(true)} />
+                </>
+              }
+            >
+              <FilterSection title="Trigger" storageKey="report-templates-trigger">
+                <CheckboxFilterGroup
+                  options={triggerOptions}
+                  selected={state.getFilterList("trigger")}
+                  onToggle={(v) => state.toggleFilterValue("trigger", v)}
+                />
+              </FilterSection>
+            </FilterRail>
+          }
+          secondaryPanel={
+            customizeOpen ? (
+              <CustomizeColumnsPanel
+                columns={columnOptions}
+                hidden={columnVisibility.hidden}
+                onToggle={columnVisibility.toggle}
+                onSetHidden={columnVisibility.setHidden}
+                onReset={columnVisibility.reset}
+                onClose={() => setCustomizeOpen(false)}
+              />
+            ) : null
+          }
+          onSecondaryClose={() => setCustomizeOpen(false)}
+        >
+          <div className="flex flex-col gap-3">
+            <DataTable
+              items={pageItems}
+              columns={columns}
+              getRowId={(t) => t.id}
+              onRowClick={(t) => navigate(`/reports/templates/${t.id}`)}
+              sort={state.sort}
+              sortDir={state.sortDir}
+              onSortChange={state.toggleSort}
+              loading={isLoading}
+              loadingRows={state.pageSize}
+              emptyState={
+                state.hasActiveFilters
+                  ? "No templates match your filters"
+                  : "No report templates defined yet. Reports will use the default prompt."
+              }
+            />
+            <Pagination
+              page={state.page}
+              pageSize={state.pageSize}
+              total={total}
+              onPageChange={state.setPage}
+              onPageSizeChange={state.setPageSize}
+              itemLabel="templates"
+            />
+          </div>
+        </ListLayout>
+      </div>
     </div>
   );
 }

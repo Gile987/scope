@@ -74,3 +74,21 @@ export async function withRetry<T>(
 
   return policy.execute(() => fn());
 }
+
+/**
+ * TC39 method decorator that wraps an async method with retry logic.
+ *
+ * Usage:
+ *   @Retry({ maxRetries: 3, baseDelayMs: 1000, isRetryable: () => true })
+ *   async myMethod() { ... }
+ */
+export function Retry(options?: RetryOptions) {
+  return function <T extends (...args: any[]) => Promise<any>>(
+    target: T,
+    context: ClassMethodDecoratorContext,
+  ): T {
+    return function (this: any, ...args: any[]) {
+      return withRetry(() => target.apply(this, args), options);
+    } as unknown as T;
+  };
+}

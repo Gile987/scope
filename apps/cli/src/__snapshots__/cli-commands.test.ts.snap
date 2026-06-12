@@ -534,14 +534,6 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--url",
         ],
       },
-      "demo": {
-        "options": [
-          "--count",
-          "--message",
-          "--url",
-          "--workers",
-        ],
-      },
       "download": {
         "options": [
           "--dir",
@@ -603,6 +595,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "submit": {
         "options": [
           "--agent-version",
+          "--base-profile",
           "--criteria",
           "--extensions",
           "--max-iterations",
@@ -611,6 +604,9 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--model",
           "--no-stream",
           "--persona",
+          "--profile",
+          "--profile-variations-file",
+          "--reasoning-effort",
           "--scenario",
           "--skills",
           "--traits",
@@ -729,6 +725,11 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         ],
       },
     },
+  },
+  "update": {
+    "options": [
+      "--force",
+    ],
   },
 }
 `;

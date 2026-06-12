@@ -460,6 +460,8 @@ mod tests {
                 receive: 0.0,
                 ssl: -1.0,
             },
+            resource_type: None,
+            websocket_messages: None,
         };
 
         writer.append("s2", 1, &entry).await;
@@ -521,6 +523,8 @@ mod tests {
                 receive: 0.0,
                 ssl: -1.0,
             },
+            resource_type: None,
+            websocket_messages: None,
         };
 
         // Write to iter 1.
