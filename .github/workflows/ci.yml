@@ -147,7 +147,14 @@ jobs:
   integration-test:
     name: Integration Tests (${{ matrix.worker.name }})
     needs: [detect-changes]
+    # Dependabot-triggered runs execute in the isolated Dependabot secret
+    # context and cannot access the repository secrets these tests require
+    # (Docker Hub login, GH_AUTH_*, COPILOT_GITHUB_TOKEN). Skip them for the
+    # dependabot[bot] actor so the job reports "skipped" (which CI Summary
+    # accepts) instead of failing at the Docker Hub login step. Human pushes to
+    # a Dependabot branch and workflow_dispatch runs still execute with secrets.
     if: >-
+      github.actor != 'dependabot[bot]' &&
       github.repository == 'growth-ecosystems/scope-core' &&
       (
         github.event_name == 'workflow_dispatch' ||
