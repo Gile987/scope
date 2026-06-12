@@ -158,7 +158,6 @@ export function SubmitRun() {
   const [reasoningEffort, setReasoningEffort] = useState<string>("");
   const [maxIterations, setMaxIterations] = useState<number>(10);
   const [occurrences, setOccurrences] = useState<number>(5);
-  const [priority, setPriority] = useState<number>(0);
 
   // Optional add-ons
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -495,7 +494,6 @@ export function SubmitRun() {
       ...(inVariationMode ? {} : { ...(model ? { model } : {}) }),
       ...(inVariationMode ? {} : { ...(reasoningEffort ? { reasoningEffort } : {}) }),
       maxIterations,
-      ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
       ...(inVariationMode ? {} : { ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}) }),
       ...(inVariationMode ? {} : { ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}) }),
@@ -773,7 +771,7 @@ export function SubmitRun() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="maxIterations">Max iterations</Label>
               <Input
@@ -783,17 +781,6 @@ export function SubmitRun() {
                 max={50}
                 value={maxIterations}
                 onChange={(e) => setMaxIterations(Math.max(1, Math.min(50, parseInt(e.target.value) || 1)))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="priority">Priority</Label>
-              <Input
-                id="priority"
-                type="number"
-                min={-100}
-                max={100}
-                value={priority}
-                onChange={(e) => setPriority(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
               />
             </div>
             <div className="space-y-2">
