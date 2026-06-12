@@ -58,7 +58,7 @@ export interface SkillDiscoveryEntry {
 
 /**
  * Well-known directories to search for skills in a GitHub repo,
- * per the skills.sh CLI discovery order.
+ * per the Agent Skills specification (https://agentskills.io/specification).
  */
 const SKILL_SEARCH_DIRS = [
   'skills',
