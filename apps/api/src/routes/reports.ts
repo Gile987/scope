@@ -472,7 +472,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Reports"],
   summary: "Trigger reports",
   body: TriggerReportsInputSchema,
-  response: z.object({ triggered: z.number(), reports: z.array(ReportResponseSchema) }),
+  response: z.object({ triggered: z.number(), templatesEvaluated: z.number(), reports: z.array(ReportResponseSchema) }),
   successStatus: 201,
   errorResponses: {
     400: { description: "Invalid input" },
@@ -535,7 +535,7 @@ apiRoute(ctx.app, ctx.registry, {
       }
 
       console.log(`Trigger evaluation for run ${requestId}: ${created.length}/${templates.length} templates matched`);
-      res.status(201).json({ triggered: created.length, reports: created });
+      res.status(201).json({ triggered: created.length, templatesEvaluated: templates.length, reports: created });
     } catch (error) {
       next(error);
     }

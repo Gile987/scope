@@ -199,7 +199,13 @@ export function RunDetail() {
   const generateReport = useMutation({
     mutationFn: () => api.triggerReports(id!),
     onSuccess: (data) => {
-      toast.success(`${data.triggered} report(s) queued`);
+      if (data.triggered > 0) {
+        toast.success(`${data.triggered} report(s) queued`);
+      } else if (data.templatesEvaluated === 0) {
+        toast.warning("No report templates configured. Create a report template with a matching trigger to generate reports.");
+      } else {
+        toast.warning(`No report templates matched this run (${data.templatesEvaluated} evaluated). Check your template triggers.`);
+      }
       refetchReports();
     },
     onError: (err) => {

@@ -555,7 +555,7 @@ export const api = {
   // ─── Reports ──────────────────────────────────────────────────────────────
 
   /** Trigger report generation for a run — evaluates all templates and creates one report per match */
-  triggerReports: (requestId: string): Promise<{ triggered: number; reports: { id: string; requestId: string; templateId?: string; status: string }[] }> => {
+  triggerReports: (requestId: string): Promise<{ triggered: number; templatesEvaluated: number; reports: { id: string; requestId: string; templateId?: string; status: string }[] }> => {
     return request("/reports/trigger", {
       method: "POST",
       body: JSON.stringify({ requestId }),

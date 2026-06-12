@@ -6329,12 +6329,16 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                       },
                       "type": "array",
                     },
+                    "templatesEvaluated": {
+                      "type": "number",
+                    },
                     "triggered": {
                       "type": "number",
                     },
                   },
                   "required": [
                     "triggered",
+                    "templatesEvaluated",
                     "reports",
                   ],
                   "type": "object",
