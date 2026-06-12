@@ -335,12 +335,12 @@ function NumericComparatorRow({
   onChange: (next: { op: IterationOp; value: string }) => void;
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-16 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
+    <div className="flex min-w-0 items-center gap-1.5">
+      <span className="w-12 shrink-0 truncate text-xs font-medium text-muted-foreground" title={label}>{label}</span>
       <Select value={op} onValueChange={(v) => onChange({ op: v as IterationOp, value })}>
         <SelectTrigger
           aria-label={`${ariaLabel} comparator`}
-          className="h-8 w-16 px-2 text-xs"
+          className="h-8 w-14 shrink-0 px-2 text-xs"
         >
           <SelectValue />
         </SelectTrigger>
@@ -371,7 +371,7 @@ function NumericComparatorRow({
           if (!Number.isFinite(n) || n < 0) return;
           onChange({ op, value: String(Math.floor(n)) });
         }}
-        className="h-8 flex-1 text-xs"
+        className="h-8 w-full min-w-0 flex-1 text-xs"
       />
     </div>
   );
