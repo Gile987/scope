@@ -1759,7 +1759,7 @@ export function RunsList() {
     <ListLayout
       title="Runs"
       description={
-        estimatedTotal != null
+        estimatedTotal != null && estimatedTotal > 0
           ? `~${estimatedTotal.toLocaleString()} runs total`
           : "Manage and monitor benchmark runs"
       }
