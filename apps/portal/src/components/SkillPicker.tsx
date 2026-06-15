@@ -316,7 +316,7 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={handleKeyDown}
-          placeholder="Search skills…"
+          placeholder="Search for skills…"
           className="h-9 pl-9 font-mono text-sm"
         />
         {fetchingExternal && debouncedQuery.length >= 2 && (
@@ -450,7 +450,7 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
           className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           {manualOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-          Import from a GitHub repo
+          Import from repository
         </button>
 
         {manualOpen && (
