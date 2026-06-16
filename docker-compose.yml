@@ -150,6 +150,24 @@ services:
     command: >
       sh -c "az storage container create --name har --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true"
 
+  # Azure Cosmos DB vNext Emulator (ephemeral services POC)
+  # Used for execution-based scenario evaluation — not started by default.
+  # Start with: docker compose --profile ephemeral-services up
+  cosmosdb-emulator:
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-latest
+    profiles: [ephemeral-services]
+    ports:
+      - "${COSMOSDB_EMULATOR_PORT:-8081}:8081"    # Cosmos DB endpoint
+      - "${COSMOSDB_EXPLORER_PORT:-1234}:1234"    # Data Explorer UI
+    environment:
+      AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE: "false"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
   # ===========================================================================
   # Application services
   # ===========================================================================
