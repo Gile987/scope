@@ -373,6 +373,9 @@ export interface WorkerProcessorOptions {
   /** Current iteration number (1-based) for multi-turn runs. Used by the
    *  proxy HAR rotation logic so each iteration gets its own HAR file. */
   iteration?: number;
+  /** Environment variables from provisioned ephemeral services (e.g. COSMOS_ENDPOINT).
+   *  Merged into the agent subprocess environment. */
+  serviceEnvVars?: Record<string, string>;
 }
 
 // Result returned by a worker processor

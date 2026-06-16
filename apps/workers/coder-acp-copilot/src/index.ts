@@ -18,6 +18,7 @@ dotenv.config();
  * @param proxyUrl - Optional session-scoped proxy URL (e.g. http://sessionId@host:port).
  *   When provided, overrides the inherited HTTP_PROXY/HTTPS_PROXY so the subprocess
  *   routes through the correct session.
+ * @param serviceEnvVars - Optional env vars from provisioned ephemeral services.
  */
 export function buildSubprocessEnv(
   githubToken: string,
@@ -25,6 +26,7 @@ export function buildSubprocessEnv(
   currentNodeOptions?: string,
   gatewayUrl?: string,
   proxyUrl?: string,
+  serviceEnvVars?: Record<string, string>,
 ): Record<string, string> {
   const gatewayHost = gatewayUrl ? new URL(gatewayUrl).hostname : null;
   const noProxy = ["localhost", "127.0.0.1", ...(gatewayHost ? [gatewayHost] : [])].join(",");
@@ -48,6 +50,7 @@ export function buildSubprocessEnv(
       https_proxy: "",
       NODE_EXTRA_CA_CERTS: "",
     }),
+    ...serviceEnvVars,
   };
 }
 
@@ -175,7 +178,7 @@ class CopilotProcessor implements WorkerProcessor {
       const result = await runACPSession(message, {
         command: "copilot",
         args,
-        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL, devProxy?.proxyUrl),
+        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL, devProxy?.proxyUrl, options?.serviceEnvVars),
         cwd: this.workspacePath!,
         onLog: async (msg) => {
           await log("debug", msg);

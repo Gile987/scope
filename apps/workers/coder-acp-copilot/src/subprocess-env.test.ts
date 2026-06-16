@@ -71,4 +71,22 @@ describe("buildSubprocessEnv", () => {
     expect(buildSubprocessEnv(token, true).GITHUB_TOKEN).toBe(token);
     expect(buildSubprocessEnv(token, false).GITHUB_TOKEN).toBe(token);
   });
+
+  describe("service env vars", () => {
+    it("merges service env vars into the result", () => {
+      const serviceEnvVars = {
+        COSMOS_ENDPOINT: "https://localhost:8081",
+        COSMOS_KEY: "test-key",
+      };
+      const env = buildSubprocessEnv(token, false, undefined, undefined, undefined, serviceEnvVars);
+      expect(env.COSMOS_ENDPOINT).toBe("https://localhost:8081");
+      expect(env.COSMOS_KEY).toBe("test-key");
+      expect(env.GITHUB_TOKEN).toBe(token);
+    });
+
+    it("does not fail when serviceEnvVars is undefined", () => {
+      const env = buildSubprocessEnv(token, false, undefined, undefined, undefined, undefined);
+      expect(env.GITHUB_TOKEN).toBe(token);
+    });
+  });
 });
