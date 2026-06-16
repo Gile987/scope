@@ -7,6 +7,30 @@ export type PromptType = GateId;
 
 export const GATE_ORDER: readonly GateId[] = GATES;
 
+/**
+ * Gates whose portal visibility is gated behind a feature flag. A gate listed
+ * here is hidden from authoring/selection surfaces unless its flag is explicitly
+ * enabled (fail-closed — hidden while flags load or when the flag is missing/off).
+ * Gates not listed here are always visible.
+ */
+export const GATE_FEATURE_FLAGS: Partial<Record<GateId, string>> = {
+  run: "gates-run",
+  deploy: "gates-deploy",
+};
+
+/**
+ * Returns the ordered gate list with flag-controlled gates removed unless their
+ * mapped flag is explicitly enabled. Pure helper — `enabledFlags` maps a flag
+ * key to its enabled state (absent key ⇒ treated as disabled ⇒ gate hidden).
+ */
+export function visibleGateOrder(enabledFlags: Record<string, boolean>): GateId[] {
+  return GATE_ORDER.filter((gate) => {
+    const flagKey = GATE_FEATURE_FLAGS[gate];
+    if (!flagKey) return true;
+    return enabledFlags[flagKey] === true;
+  });
+}
+
 export interface GateMetadata {
   id: GateId;
   label: string;

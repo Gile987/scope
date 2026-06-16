@@ -24,7 +24,8 @@ import { formatDate, formatId, truncate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { Stepper } from "@/components/Stepper";
-import { GATE_METADATA, GATE_ORDER, type PromptType } from "@/lib/gates";
+import { GATE_METADATA, type PromptType } from "@/lib/gates";
+import { useVisibleGates } from "@/hooks/useVisibleGates";
 import { KbdBadge } from "@/components/KbdBadge";
 import {
   ListLayout,
@@ -61,6 +62,7 @@ export function TaskPromptList() {
   const [newText, setNewText] = useState("");
   const [newType, setNewType] = useState<PromptType>("select");
   const [customizeOpen, setCustomizeOpen] = useState(false);
+  const visibleGates = useVisibleGates();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const detailOutlet = useOutlet();
@@ -297,7 +299,7 @@ export function TaskPromptList() {
                       <SelectValue placeholder="Prompt type" />
                     </SelectTrigger>
                     <SelectContent>
-                      {GATE_ORDER.map((gate) => (
+                      {visibleGates.map((gate) => (
                         <SelectItem key={gate} value={gate}>
                           {GATE_METADATA[gate].label}
                         </SelectItem>
@@ -387,7 +389,7 @@ export function TaskPromptList() {
         >
           <FilterSection title="Prompt type" defaultOpen>
             <CheckboxFilterGroup
-              options={GATE_ORDER.map((gate) => ({ value: gate, label: GATE_METADATA[gate].label }))}
+              options={visibleGates.map((gate) => ({ value: gate, label: GATE_METADATA[gate].label }))}
               selected={selectedTypes}
               onToggle={(value) => state.setFilter("type", selectedTypes.includes(value as PromptType) ? [] : [value])}
             />

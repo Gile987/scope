@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -35,10 +35,10 @@ import {
 } from "@/components/ReasoningEffortSelect";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
+import { useVisibleGates } from "@/hooks/useVisibleGates";
 import { KbdBadge } from "@/components/KbdBadge";
 import {
   GATE_METADATA,
-  GATE_ORDER,
   orderGates,
   validateGateConfigs,
   type GateConfig,
@@ -72,8 +72,6 @@ type GateDraft = {
   criteria: string[];
   maxIterations: number;
 };
-
-const NON_SELECT_GATES = GATE_ORDER.filter((gate): gate is Exclude<GateId, "select"> => gate !== "select");
 
 function createGateDraft(maxIterations: number): GateDraft {
   return {
@@ -175,6 +173,15 @@ function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disab
 export function SubmitRun() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  // Non-select gates visible in the authoring UI. Run/Deploy are hidden behind
+  // feature flags until ready; gateDrafts still holds all gates so its shape is
+  // stable, but hidden gates are never rendered, counted, validated, or submitted.
+  const visibleGates = useVisibleGates();
+  const visibleNonSelectGates = useMemo(
+    () => visibleGates.filter((gate): gate is Exclude<GateId, "select"> => gate !== "select"),
+    [visibleGates],
+  );
 
   // Form state
   const [task, setTask] = useState("");
@@ -533,7 +540,7 @@ export function SubmitRun() {
     }
   };
 
-  const configuredGateCount = NON_SELECT_GATES.filter((gate) => gateDrafts[gate].enabled).length;
+  const configuredGateCount = visibleNonSelectGates.filter((gate) => gateDrafts[gate].enabled).length;
   const gatesEnabled = configuredGateCount > 0;
   const gateConfigs: GateConfig[] = gatesEnabled
     ? orderGates([
@@ -543,7 +550,7 @@ export function SubmitRun() {
           criteria: pickedCriteria,
           maxIterations,
         },
-        ...NON_SELECT_GATES
+        ...visibleNonSelectGates
           .filter((gate) => gateDrafts[gate].enabled)
           .map((gate): GateConfig => ({
             gate,
@@ -555,7 +562,7 @@ export function SubmitRun() {
     : [];
   const gateValidationErrors = gatesEnabled ? validateGateConfigs(gateConfigs, maxIterations) : [];
   const promptValidationErrors = gatesEnabled
-    ? NON_SELECT_GATES.flatMap((gate) => {
+    ? visibleNonSelectGates.flatMap((gate) => {
         const draft = gateDrafts[gate];
         return draft.enabled && !draft.promptText.trim()
           ? [`${GATE_METADATA[gate].label} gate needs a ${GATE_METADATA[gate].label} prompt.`]
@@ -940,7 +947,7 @@ export function SubmitRun() {
             </div>
           </div>
 
-          {NON_SELECT_GATES.map((gate, index) => {
+          {visibleNonSelectGates.map((gate, index) => {
             const meta = GATE_METADATA[gate];
             const draft = gateDrafts[gate];
             return (

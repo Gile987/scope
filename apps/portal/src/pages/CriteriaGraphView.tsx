@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { List, Plus, X } from "lucide-react";
 import type { CriteriaGraphData } from "@/types";
 import { GATE_ORDER, GATE_METADATA, isCriterionCompatibleWithGate, type GateId } from "@/lib/gates";
+import { useVisibleGates } from "@/hooks/useVisibleGates";
 import { useRef, useState, useMemo } from "react";
 
 // Simple DAG layout using topological sort + layering
@@ -97,6 +98,7 @@ export function CriteriaGraphView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [selectedGates, setSelectedGates] = useState<GateId[]>([]);
+  const visibleGates = useVisibleGates();
 
   const toggleGate = (gate: GateId) =>
     setSelectedGates((prev) => (prev.includes(gate) ? prev.filter((g) => g !== gate) : [...prev, gate]));
@@ -142,7 +144,7 @@ export function CriteriaGraphView() {
   const gateFilterBar = (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-sm text-muted-foreground">Gate:</span>
-      {GATE_ORDER.map((gate) => {
+      {visibleGates.map((gate) => {
         const active = selectedGates.includes(gate);
         const count = gateCounts.get(gate) ?? 0;
         return (

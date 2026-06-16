@@ -6,11 +6,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import {
   GATE_METADATA,
-  GATE_ORDER,
   formatGateList,
   orderGateIds,
   type GateId,
 } from "@/lib/gates";
+import { useVisibleGates } from "@/hooks/useVisibleGates";
 
 interface GateCompatibilityPickerProps {
   value: GateId[] | undefined;
@@ -34,6 +34,14 @@ export function GateCompatibilityPicker({
   const lockedSet = new Set(lockedGates ?? []);
   const hasLocked = lockedSet.size > 0;
 
+  // Render only flag-visible gates, plus any locked gate (a forced gate must be
+  // shown). Hidden gates (e.g. Run/Deploy when off) are not rendered, but any
+  // pre-existing value for them is preserved — toggling visible rows never
+  // strips a hidden gate the criterion was already marked compatible with.
+  const visibleGates = useVisibleGates();
+  const visibleSet = new Set<GateId>(visibleGates);
+  const renderGates = orderGateIds([...new Set<GateId>([...visibleGates, ...lockedSet])]);
+
   const toggleGate = (gate: GateId) => {
     if (lockedSet.has(gate)) return;
     const next = selectedSet.has(gate)
@@ -46,13 +54,16 @@ export function GateCompatibilityPicker({
 
   const unselectAll = () => {
     if (!hasLocked) return;
-    onChange(orderGateIds([...lockedSet]));
+    // Keep locked gates and any selected-but-hidden gates (don't silently drop
+    // compatibility the user can't see to re-add).
+    const hiddenSelected = selected.filter((g) => !visibleSet.has(g) && !lockedSet.has(g));
+    onChange(orderGateIds([...lockedSet, ...hiddenSelected]));
   };
 
   return (
     <div className="space-y-3">
       <div className="grid gap-2 sm:grid-cols-2">
-        {GATE_ORDER.map((gate) => {
+        {renderGates.map((gate) => {
           const meta = GATE_METADATA[gate];
           const isLocked = lockedSet.has(gate);
           return (

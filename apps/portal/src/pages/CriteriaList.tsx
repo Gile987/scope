@@ -15,7 +15,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2, Eye, GitBranch } from "lucide-react";
 import { truncate } from "@/lib/utils";
-import { formatGateList, GATE_ORDER, GATE_METADATA, isCriterionCompatibleWithGate, type GateId } from "@/lib/gates";
+import { formatGateList, GATE_METADATA, isCriterionCompatibleWithGate, type GateId } from "@/lib/gates";
+import { useVisibleGates } from "@/hooks/useVisibleGates";
 import {
   ListLayout,
   FilterRail,
@@ -51,6 +52,7 @@ export function CriteriaList() {
   const { id: activeId } = useParams<{ id?: string }>();
   const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
   const visibility = useHiddenColumns({ storageKey: "criteria" });
+  const visibleGates = useVisibleGates();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
@@ -104,12 +106,12 @@ export function CriteriaList() {
 
   const gateFilterOptions = useMemo(
     () =>
-      GATE_ORDER.map((gate) => ({
+      visibleGates.map((gate) => ({
         value: gate,
         label: GATE_METADATA[gate].label,
         count: criteria.filter((c) => isCriterionCompatibleWithGate(c.gates, gate)).length,
       })),
-    [criteria],
+    [criteria, visibleGates],
   );
 
   const total = sortedCriteria.length;
