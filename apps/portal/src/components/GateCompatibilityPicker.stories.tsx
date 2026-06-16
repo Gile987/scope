@@ -3,6 +3,7 @@
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
+import { http, HttpResponse } from "msw";
 import { GateCompatibilityPicker } from "./GateCompatibilityPicker";
 import { GATE_ORDER, type GateId } from "@/lib/gates";
 
@@ -14,6 +15,20 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+// Enables the flag-gated Run + Deploy gates so the full 5-gate grid renders.
+const allGatesEnabled = {
+  msw: {
+    handlers: [
+      http.get("/api/v1/feature-flags", () =>
+        HttpResponse.json([
+          { key: "gates-run", label: "Run Gate", enabled: true, updatedAt: "" },
+          { key: "gates-deploy", label: "Deploy Gate", enabled: true, updatedAt: "" },
+        ]),
+      ),
+    ],
+  },
+};
 
 function StatefulExample({
   initial,
@@ -35,6 +50,7 @@ export const SelectAndBuild: Story = {
 
 export const AllGatesSelected: Story = {
   args: { value: [...GATE_ORDER], onChange: () => {} },
+  parameters: allGatesEnabled,
   render: () => <StatefulExample initial={[...GATE_ORDER]} />,
 };
 

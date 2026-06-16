@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { initialize, mswLoader } from "msw-storybook-addon";
 import { mswHandlers } from "./msw-handlers";
+import { FeatureFlagProvider } from "../src/contexts/FeatureFlagContext";
 import "../src/index.css";
 
 initialize({ onUnhandledRequest: "bypass" });
@@ -20,9 +21,11 @@ const preview: Preview = {
       });
       return (
         <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <Story />
-          </MemoryRouter>
+          <FeatureFlagProvider>
+            <MemoryRouter>
+              <Story />
+            </MemoryRouter>
+          </FeatureFlagProvider>
         </QueryClientProvider>
       );
     },

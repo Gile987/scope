@@ -2,11 +2,23 @@
 // Licensed under the MIT License.
 
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { GateCompatibilityPicker } from "./GateCompatibilityPicker";
 import { GATE_ORDER, type GateId } from "@/lib/gates";
+
+// Enable all gate flags so the picker renders the full 5-gate grid.
+vi.mock("@/contexts/FeatureFlagContext", () => ({
+  useFeatureFlags: () => ({
+    flags: [
+      { key: "gates-run", label: "Run Gate", enabled: true, updatedAt: "" },
+      { key: "gates-deploy", label: "Deploy Gate", enabled: true, updatedAt: "" },
+    ],
+    isLoading: false,
+    isFeatureEnabled: () => true,
+  }),
+}));
 
 afterEach(() => cleanup());
 
