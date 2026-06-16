@@ -157,12 +157,13 @@ services:
     image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-latest
     profiles: [ephemeral-services]
     ports:
-      - "${COSMOSDB_EMULATOR_PORT:-8081}:8081"    # Cosmos DB endpoint
+      - "${COSMOSDB_EMULATOR_PORT:-8081}:8081"    # Cosmos DB endpoint (HTTP)
       - "${COSMOSDB_EXPLORER_PORT:-1234}:1234"    # Data Explorer UI
+      - "${COSMOSDB_HEALTH_PORT:-8080}:8080"      # Health/readiness probes
     environment:
       AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE: "false"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/alive"]
       interval: 5s
       timeout: 3s
       retries: 30

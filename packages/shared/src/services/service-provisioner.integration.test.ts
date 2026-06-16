@@ -23,19 +23,20 @@ describe.skipIf(SKIP)("service-provisioner (integration)", () => {
     ports: [
       { host: 18081, container: 8081 },
       { host: 11234, container: 1234 },
+      { host: 18080, container: 8080 },
     ],
     environment: {
       AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE: "false",
     },
     healthCheck: {
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"],
+      test: ["CMD", "curl", "-f", "http://localhost:8080/alive"],
       intervalSeconds: 5,
       timeoutSeconds: 3,
       retries: 30,
       startPeriodSeconds: 30,
     },
     envVars: {
-      COSMOS_ENDPOINT: "https://localhost:${ports.8081}",
+      COSMOS_ENDPOINT: "http://localhost:${ports.8081}",
       COSMOS_KEY: "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==",
       COSMOS_DATABASE: "conference-planner",
     },
@@ -62,7 +63,7 @@ describe.skipIf(SKIP)("service-provisioner (integration)", () => {
   }, 30_000);
 
   it("resolves COSMOS_ENDPOINT with the host port", () => {
-    expect(context.envVars.COSMOS_ENDPOINT).toBe("https://localhost:18081");
+    expect(context.envVars.COSMOS_ENDPOINT).toBe("http://localhost:18081");
   });
 
   it("resolves COSMOS_KEY with the emulator default key", () => {

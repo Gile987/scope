@@ -165,6 +165,7 @@ apiRoute(ctx.app, ctx.registry, {
         task: scenarioObj.task as string,
         criteria: Array.isArray(scenarioObj.criteria) ? (scenarioObj.criteria as string[]) : [],
         ...(scenarioObj.version === "v1" || scenarioObj.version === "v2" ? { version: scenarioObj.version } : {}),
+        ...(Array.isArray(scenarioObj.services) && scenarioObj.services.length > 0 ? { services: scenarioObj.services } : {}),
       };
 
       const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";
@@ -706,11 +707,12 @@ apiRoute(ctx.app, ctx.registry, {
       }
     }
 
-    // Normalize scenario: ensure criteria is always an array, preserve version
+    // Normalize scenario: ensure criteria is always an array, preserve version and services
     const scenario: RequestDocument['scenario'] = {
       task: scenarioObj.task as string,
       criteria: Array.isArray(scenarioObj.criteria) ? scenarioObj.criteria as string[] : [],
       ...(scenarioObj.version === 'v1' || scenarioObj.version === 'v2' ? { version: scenarioObj.version } : {}),
+      ...(Array.isArray(scenarioObj.services) && scenarioObj.services.length > 0 ? { services: scenarioObj.services } : {}),
     };
 
     const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";

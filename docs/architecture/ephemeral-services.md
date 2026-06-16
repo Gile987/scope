@@ -44,7 +44,7 @@ services:
       retries: 30
       startPeriodSeconds: 30
     envVars:
-      COSMOS_ENDPOINT: "https://localhost:${ports.8081}"
+      COSMOS_ENDPOINT: "http://localhost:${ports.8081}"
       COSMOS_KEY: "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw=="
       COSMOS_DATABASE: "conference-planner"
 ```
