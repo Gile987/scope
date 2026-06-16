@@ -109,3 +109,9 @@ flowchart TB
 All Azure services are deployed behind **Private Endpoints** within the AKS VNet.
 
 For the detailed 5-layer architecture model, see [Architecture Layers](architecture-layers.md).
+
+## Ephemeral Services
+
+Scenarios can declare backing services (databases, caches) that are automatically provisioned per run. Containers are started before the agent receives the task, connection info is injected via environment variables, and containers are destroyed after evaluation.
+
+See [Ephemeral Services](ephemeral-services.md) for the full architecture.
