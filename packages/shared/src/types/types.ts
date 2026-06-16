@@ -83,9 +83,58 @@ export interface Persona {
   type: UserType;
 }
 
+/** Health check configuration for an ephemeral service container. */
+export interface ServiceHealthCheck {
+  /** Command to run inside the container (e.g. ["CMD", "curl", "-f", "http://localhost:8080/health"]) */
+  test: string[];
+  /** Interval between checks in seconds */
+  intervalSeconds: number;
+  /** Timeout for each check in seconds */
+  timeoutSeconds: number;
+  /** Number of retries before marking unhealthy */
+  retries: number;
+  /** Grace period before starting checks in seconds */
+  startPeriodSeconds: number;
+}
+
+/** Port mapping for an ephemeral service container. */
+export interface ServicePort {
+  /** Host port */
+  host: number;
+  /** Container port */
+  container: number;
+}
+
+/**
+ * Declares an ephemeral service that must be provisioned for a scenario run.
+ * The platform provisions the container, waits for it to be healthy, and injects
+ * connection env vars into the agent subprocess.
+ */
+export interface ServiceDeclaration {
+  /** Unique name for this service within the scenario (e.g. "cosmosdb") */
+  name: string;
+  /** Container image reference */
+  image: string;
+  /** Port mappings */
+  ports: ServicePort[];
+  /** Environment variables passed to the container */
+  environment?: Record<string, string>;
+  /** Health check configuration */
+  healthCheck?: ServiceHealthCheck;
+  /**
+   * Mapping of env var names to inject into the agent subprocess.
+   * Keys are the env var names the agent code will use (e.g. "COSMOS_ENDPOINT").
+   * Values are templates resolved from the running container
+   * (e.g. "https://localhost:${ports.8081}").
+   */
+  envVars: Record<string, string>;
+}
+
 export interface Scenario {
   task: string;
   criteria: string[];  // criteria IDs
+  /** Optional ephemeral services required for execution-based evaluation. */
+  services?: ServiceDeclaration[];
 }
 
 export interface TraitDescriptions {
