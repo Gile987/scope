@@ -1,0 +1,10 @@
+id: conf_planner_cleanup
+prompt: |
+  Seeded data can be cleaned up without deleting unrelated data.
+  A cleanup mechanism (endpoint, script, or teardown function) removes the
+  conference data created by the seed without affecting other databases or
+  containers in the Cosmos DB instance.
+  - passes: Cleanup removes seeded conference data while preserving other data
+  - fails: No cleanup mechanism, deletes everything, or leaves orphaned data
+depends_on:
+  - conf_planner_seed_data

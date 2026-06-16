@@ -1,0 +1,9 @@
+id: conf_planner_reject_overlap
+prompt: |
+  Overlapping sessions are rejected when adding to an attendee's schedule.
+  If an attendee already has a session at a given time slot, attempting to add
+  another session that overlaps in time is rejected with an appropriate error.
+  - passes: Overlap detection works correctly and returns a meaningful error
+  - fails: Overlapping sessions are allowed or overlap check is not implemented
+depends_on:
+  - conf_planner_add_to_schedule

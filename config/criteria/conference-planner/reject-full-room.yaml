@@ -1,0 +1,9 @@
+id: conf_planner_reject_full_room
+prompt: |
+  Full sessions are rejected when room capacity is reached.
+  When the number of attendees signed up for a session equals the room's capacity,
+  additional attendees are prevented from joining with an appropriate error.
+  - passes: Capacity enforcement works and returns a meaningful error when full
+  - fails: Capacity not enforced or rooms have no capacity limits
+depends_on:
+  - conf_planner_add_to_schedule

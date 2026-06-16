@@ -1,0 +1,69 @@
+version: v2
+task: |
+  Build a full-stack Conference Planner application in Python using FastAPI for the backend and a simple server-rendered UI.
+
+  The application should let attendees browse conference sessions, view speaker details, and manage a personal schedule.
+
+  Use Azure Cosmos DB to store conference data. Create containers for sessions, speakers, and attendee schedules. Sessions and speakers should be scoped to a conference ID. Attendee schedules should be scoped to an attendee ID.
+
+  Seed the app with a realistic two-day conference:
+
+  - 20 sessions
+  - 6 speakers
+  - 4 rooms
+  - 3 tracks: AI Apps, Cloud Native, Data Platform
+  - Overlapping sessions
+  - Room capacity limits
+  - One speaker assigned to two sessions at the same time
+
+  The app should support:
+
+  - Listing all sessions
+  - Filtering sessions by track
+  - Viewing all sessions for a speaker
+  - Viewing session details including time, room, track, speaker, and capacity
+  - Adding a session to an attendee's schedule
+  - Preventing an attendee from adding overlapping sessions
+  - Preventing attendees from joining a session after room capacity is reached
+  - Removing a session from an attendee's schedule
+  - Moving a session to a different room or time
+  - Showing schedule conflicts caused by moved sessions
+
+  Include a simple server-rendered UI using FastAPI templates for browsing sessions and managing the attendee schedule, plus backend APIs for all required actions. Use environment-based configuration for Cosmos DB connection settings.
+
+  Use the Cosmos DB vNext emulator for local development and automated testing.
+
+criteria:
+  - conf_planner_seed_data
+  - conf_planner_list_sessions
+  - conf_planner_filter_by_track
+  - conf_planner_query_by_speaker
+  - conf_planner_session_details
+  - conf_planner_add_to_schedule
+  - conf_planner_reject_overlap
+  - conf_planner_reject_full_room
+  - conf_planner_remove_from_schedule
+  - conf_planner_move_session
+  - conf_planner_conflict_detection
+  - conf_planner_cleanup
+
+services:
+  - name: cosmosdb
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-latest
+    ports:
+      - host: 8081
+        container: 8081
+      - host: 1234
+        container: 1234
+    environment:
+      AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE: "false"
+    healthCheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      intervalSeconds: 5
+      timeoutSeconds: 3
+      retries: 30
+      startPeriodSeconds: 30
+    envVars:
+      COSMOS_ENDPOINT: "https://localhost:${ports.8081}"
+      COSMOS_KEY: "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw=="
+      COSMOS_DATABASE: "conference-planner"

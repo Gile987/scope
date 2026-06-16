@@ -1,0 +1,9 @@
+id: conf_planner_list_sessions
+prompt: |
+  All sessions can be listed from the API.
+  The endpoint returns all 20 seeded sessions with their basic metadata
+  (title, time, room, track, speaker).
+  - passes: GET request returns all sessions with correct fields
+  - fails: Endpoint missing, returns errors, or returns incomplete data
+depends_on:
+  - conf_planner_seed_data

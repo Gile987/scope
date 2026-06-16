@@ -1,0 +1,9 @@
+id: conf_planner_filter_by_track
+prompt: |
+  Sessions can be filtered by track name.
+  Filtering by each of the 3 tracks (AI Apps, Cloud Native, Data Platform)
+  returns only sessions belonging to that track.
+  - passes: Filter parameter returns correct subset of sessions for each track
+  - fails: Filtering is not implemented, returns all sessions, or returns wrong results
+depends_on:
+  - conf_planner_seed_data

@@ -1,0 +1,9 @@
+id: conf_planner_remove_from_schedule
+prompt: |
+  Attendees can remove sessions from their schedule.
+  After removal, the session no longer appears in the attendee's schedule
+  and the room capacity slot is freed.
+  - passes: Remove operation succeeds and the session is gone from the schedule
+  - fails: Remove not implemented, session still appears, or capacity not freed
+depends_on:
+  - conf_planner_add_to_schedule

@@ -1,0 +1,9 @@
+id: conf_planner_seed_data
+prompt: |
+  Seed data is created successfully in the Cosmos DB emulator.
+  The application creates containers for sessions, speakers, and attendee schedules.
+  The seed includes exactly 20 sessions, 6 speakers, 4 rooms, and 3 tracks
+  (AI Apps, Cloud Native, Data Platform). Sessions have overlapping times,
+  room capacity limits, and at least one speaker assigned to two simultaneous sessions.
+  - passes: Running the seed script/startup populates the emulator with the correct data counts and structure
+  - fails: Seed data is missing, incomplete, or fails to write to the emulator

@@ -1,0 +1,10 @@
+id: conf_planner_conflict_detection
+prompt: |
+  Moved sessions expose conflicts for affected attendee schedules.
+  When a session is moved to a new time that overlaps with other sessions
+  in attendees' schedules, the system identifies and reports these conflicts.
+  - passes: After moving a session, affected attendees' conflicts are surfaced via API
+  - fails: Conflict detection not implemented or doesn't account for schedule overlaps after moves
+depends_on:
+  - conf_planner_move_session
+  - conf_planner_add_to_schedule

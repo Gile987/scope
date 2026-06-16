@@ -1,0 +1,9 @@
+id: conf_planner_move_session
+prompt: |
+  Sessions can be moved to a different room or time.
+  An admin/organizer API endpoint allows changing a session's room or time slot.
+  The update persists and is reflected in subsequent queries.
+  - passes: Move operation updates room or time and the change is visible in session details
+  - fails: Move not implemented, update doesn't persist, or endpoint missing
+depends_on:
+  - conf_planner_seed_data

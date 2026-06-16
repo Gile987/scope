@@ -1,0 +1,9 @@
+id: conf_planner_session_details
+prompt: |
+  Session details include speaker, room, time, track, and capacity.
+  Fetching a single session by ID returns all required fields with correct values
+  matching the seeded data.
+  - passes: Session detail endpoint returns all required fields accurately
+  - fails: Missing fields, incorrect data, or endpoint not implemented
+depends_on:
+  - conf_planner_seed_data

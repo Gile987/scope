@@ -1,0 +1,9 @@
+id: conf_planner_add_to_schedule
+prompt: |
+  Attendees can add sessions to their personal schedule.
+  After adding a session, it appears in the attendee's schedule.
+  The operation is scoped to an attendee ID.
+  - passes: Adding a session succeeds and the session appears in the attendee's schedule
+  - fails: Add operation fails, not scoped to attendee, or session doesn't persist
+depends_on:
+  - conf_planner_seed_data

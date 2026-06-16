@@ -1,0 +1,9 @@
+id: conf_planner_query_by_speaker
+prompt: |
+  Sessions can be queried by speaker.
+  Given a speaker ID or name, the API returns all sessions assigned to that speaker.
+  The speaker with two simultaneous sessions should show both.
+  - passes: Query returns correct sessions for a given speaker
+  - fails: Speaker query not implemented or returns incorrect results
+depends_on:
+  - conf_planner_seed_data
