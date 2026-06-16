@@ -110,6 +110,43 @@ gate type (see §4.5).
 | `run` | App runs / serves correctly | "Server starts", "GET / returns 200" |
 | `deploy` | Deploys to target environment | "azd up succeeds", "Resource provisioned" |
 
+#### 4.1.1 Portal visibility flags (Run / Deploy)
+
+The **Run** and **Deploy** gates are functionally complete end-to-end but not yet
+ready to surface to users. Two DB-backed feature flags hide them from the **portal
+authoring surfaces only**, each defaulting **off** so they can be revealed
+independently when ready:
+
+| Flag key | Label | Default | Hides |
+| --- | --- | --- | --- |
+| `gates-run` | Run Gate | `false` | Run gate |
+| `gates-deploy` | Deploy Gate | `false` | Deploy gate |
+
+Both are seeded by the API on startup (`apps/api/src/index.ts`, idempotent via
+`$setOnInsert`) and toggled from the portal **Admin** page like any other flag.
+
+Scope and semantics:
+
+- **Portal authoring/selection surfaces only.** Submit Run, the criteria
+  compatibility picker, the criteria list/graph gate filters, and the task-prompt
+  type/gate filters all hide a flag-gated gate when its flag is off. The **backend,
+  Judge, and CLI stay fully permissive** — the gates remain runnable via API/CLI so
+  they can be tested before launch.
+- **Run-state surfaces always show every gate.** Run Detail (gate status strip,
+  per-gate turns, Logs DAG tabs) reflects an *actual run's* gates. Because the
+  backend stays permissive, a run may legitimately include Run/Deploy, so those
+  surfaces are never filtered.
+- **Fail-closed.** Visibility is driven by `useVisibleGates()` (portal), which reads
+  the raw flags list (not the fail-open `isFeatureEnabled`) and shows a flag-gated
+  gate **only** when its flag is explicitly `true`. While flags load or if a flag is
+  missing, the gate stays hidden. The pure helper `visibleGateOrder(enabledFlags)`
+  and the mapping `GATE_FEATURE_FLAGS = { run: "gates-run", deploy: "gates-deploy" }`
+  live in `apps/portal/src/lib/gates.ts`.
+- **No data loss.** The compatibility picker renders only visible gates but
+  **preserves** any pre-existing hidden-gate values on a criterion when toggling or
+  using "Unselect all" — it never silently strips a Run/Deploy compatibility the user
+  can't see to re-add.
+
 ### 4.2 Criterion ↔ gate compatibility
 
 Add an optional `gates` field to the criterion model. Semantics:
@@ -461,6 +498,9 @@ Per the CLI ↔ Portal parity rule, both must expose gate selection.
       **New…** action, that originating gate is **locked** (rendered checked and
       disabled so it cannot be unchecked), and an **Unselect all** convenience
       reduces the selection to just the locked gate.
+    - **Flag-hidden gates** (Run/Deploy when their flag is off — §4.1.1) are omitted
+      from every authoring surface here, but Run Detail still renders them for runs
+      that used them.
 - **Run detail** (Portal + CLI): group turns by gate; show per-gate status and
   the "downstream skipped" state. On the Portal **Logs** tab, the criteria DAG is
   shown per gate behind a gate tab strip (one tab per configured gate, labelled with
