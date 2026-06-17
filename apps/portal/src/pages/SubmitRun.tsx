@@ -871,114 +871,6 @@ export function SubmitRun() {
         </CardContent>
       </Card>
 
-      {/* ─── Agent ─────────────────────────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Agent</CardTitle>
-          <CardDescription>Coding agent, model and version</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {profileLocked && (
-            <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground">
-              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-              <span>
-                These settings are managed by the selected profile in <span className="font-medium">Profile Variations</span> below.
-                Clear the profile to edit them manually.
-              </span>
-            </div>
-          )}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="space-y-2">
-              <div className="flex h-6 items-center gap-1.5">
-                <Label htmlFor="worker">Worker *</Label>
-                <HelpTooltip
-                  text="The runtime that drives the coding agent: GitHub Copilot, Claude Code, or VS Code Web with Copilot Chat."
-                  docs="choosingAgent"
-                />
-              </div>
-              <Select value={worker} onValueChange={setWorker} disabled={profileLocked}>
-                <SelectTrigger id="worker">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableAgents.length > 0
-                    ? availableAgents.map((a: CodingAgent) => (
-                        <SelectItem key={a._id} value={a._id}>
-                          {a.name}
-                        </SelectItem>
-                      ))
-                    : WORKER_TYPES.map((w) => (
-                        <SelectItem key={w} value={w}>
-                          {w}
-                        </SelectItem>
-                      ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {selectedAgent && selectedAgent.supportedModels.length > 0 && (
-              <div className="space-y-2">
-                <Label htmlFor="model">Model *</Label>
-                {/* Model is required; ignore spurious empty-value callbacks Radix
-                    emits when the default is applied asynchronously after mount. */}
-                <Select
-                  value={model}
-                  onValueChange={(v) => {
-                    if (v) setModel(v);
-                  }}
-                  disabled={profileLocked}
-                >
-                  <SelectTrigger id="model">
-                    <SelectValue placeholder="Select model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <ModelSelectItems
-                      models={selectedAgent.supportedModels}
-                      capabilitiesMap={modelCapabilitiesMap}
-                      defaultModel={selectedAgent.defaultModel}
-                    />
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            {supportedEfforts.length > 0 && (
-              <div className="space-y-2">
-                <ReasoningEffortSelect
-                  supportedEfforts={supportedEfforts}
-                  value={reasoningEffort}
-                  onChange={onEffortChange}
-                  disabled={profileLocked}
-                  noSelectionLabel="Any (no preference)"
-                  workerEffortWarning={workerEffortWarning}
-                />
-              </div>
-            )}
-          </div>
-
-          {sortedVersions.length > 0 && (
-            <AdvancedSection show={advanced}>
-              <div className="space-y-2 sm:max-w-xs">
-                <Label htmlFor="agentVersion">Agent version *</Label>
-                <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion} disabled={profileLocked}>
-                  <SelectTrigger id="agentVersion">
-                    <SelectValue placeholder="Latest" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sortedVersions.map((v, i) => (
-                      <SelectItem key={v.agentVersion} value={v.agentVersion}>
-                        {v.agentVersion}{i === 0 ? " (latest)" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Defaults to the latest version. Pin an older build only to reproduce a past run.
-                </p>
-              </div>
-            </AdvancedSection>
-          )}
-        </CardContent>
-      </Card>
-
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-1.5">
@@ -1277,6 +1169,114 @@ export function SubmitRun() {
             {compositionProfileCount > 0 ? `${compositionProfileCount} profiles` : "manual mode"} ·{" "}
             {selectedVariationCount} variations · {expandedRunCount} expanded runs
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ─── Agent ─────────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Agent</CardTitle>
+          <CardDescription>Coding agent, model and version</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {profileLocked && (
+            <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <span>
+                These settings are managed by the selected profile in <span className="font-medium">Profile Variations</span> below.
+                Clear the profile to edit them manually.
+              </span>
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
+              <div className="flex h-6 items-center gap-1.5">
+                <Label htmlFor="worker">Worker *</Label>
+                <HelpTooltip
+                  text="The runtime that drives the coding agent: GitHub Copilot, Claude Code, or VS Code Web with Copilot Chat."
+                  docs="choosingAgent"
+                />
+              </div>
+              <Select value={worker} onValueChange={setWorker} disabled={profileLocked}>
+                <SelectTrigger id="worker">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableAgents.length > 0
+                    ? availableAgents.map((a: CodingAgent) => (
+                        <SelectItem key={a._id} value={a._id}>
+                          {a.name}
+                        </SelectItem>
+                      ))
+                    : WORKER_TYPES.map((w) => (
+                        <SelectItem key={w} value={w}>
+                          {w}
+                        </SelectItem>
+                      ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {selectedAgent && selectedAgent.supportedModels.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="model">Model *</Label>
+                {/* Model is required; ignore spurious empty-value callbacks Radix
+                    emits when the default is applied asynchronously after mount. */}
+                <Select
+                  value={model}
+                  onValueChange={(v) => {
+                    if (v) setModel(v);
+                  }}
+                  disabled={profileLocked}
+                >
+                  <SelectTrigger id="model">
+                    <SelectValue placeholder="Select model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <ModelSelectItems
+                      models={selectedAgent.supportedModels}
+                      capabilitiesMap={modelCapabilitiesMap}
+                      defaultModel={selectedAgent.defaultModel}
+                    />
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {supportedEfforts.length > 0 && (
+              <div className="space-y-2">
+                <ReasoningEffortSelect
+                  supportedEfforts={supportedEfforts}
+                  value={reasoningEffort}
+                  onChange={onEffortChange}
+                  disabled={profileLocked}
+                  noSelectionLabel="Any (no preference)"
+                  workerEffortWarning={workerEffortWarning}
+                />
+              </div>
+            )}
+          </div>
+
+          {sortedVersions.length > 0 && (
+            <AdvancedSection show={advanced}>
+              <div className="space-y-2 sm:max-w-xs">
+                <Label htmlFor="agentVersion">Agent version *</Label>
+                <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion} disabled={profileLocked}>
+                  <SelectTrigger id="agentVersion">
+                    <SelectValue placeholder="Latest" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sortedVersions.map((v, i) => (
+                      <SelectItem key={v.agentVersion} value={v.agentVersion}>
+                        {v.agentVersion}{i === 0 ? " (latest)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Defaults to the latest version. Pin an older build only to reproduce a past run.
+                </p>
+              </div>
+            </AdvancedSection>
+          )}
         </CardContent>
       </Card>
 
