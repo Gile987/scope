@@ -1,12 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { slugify } from "@/lib/utils";
 import { toast } from "sonner";
-import type { GateId } from "@/lib/gates";
+import { gatesSatisfyInvariant, type GateId } from "@/lib/gates";
 
 export interface UseCriteriaWizardOptions {
   /** Pre-populated parent dependency IDs */
@@ -54,6 +54,34 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
     [id, existingCriteria],
   );
   const canContinue = behavior.trim().length > 0 && id.trim().length > 0 && idValid && !idExists && !criteriaLoading;
+
+  // Gate compatibility lookup for parent/child suggestion filtering.
+  const criterionGatesById = useMemo(() => {
+    const map = new Map<string, GateId[] | undefined>();
+    for (const c of existingCriteria) map.set(c.id, c.gates);
+    return map;
+  }, [existingCriteria]);
+
+  // Keep parent/child selections consistent with the chosen gates. A parent must
+  // be compatible with every gate this criterion applies to; a child may only be
+  // compatible with a subset of them. Incompatible entries (e.g. AI suggestions
+  // generated before the gates were narrowed) are pruned so the DAG invariant the
+  // API enforces can never be violated from the wizard. Unknown ids (criteria not
+  // yet loaded) are retained until their gates are known.
+  useEffect(() => {
+    setDependsOn((prev) => {
+      const next = prev.filter(
+        (pid) => !criterionGatesById.has(pid) || gatesSatisfyInvariant(criterionGatesById.get(pid), gates),
+      );
+      return next.length === prev.length ? prev : next;
+    });
+    setAcceptedChildren((prev) => {
+      const next = prev.filter(
+        (cid) => !criterionGatesById.has(cid) || gatesSatisfyInvariant(gates, criterionGatesById.get(cid)),
+      );
+      return next.length === prev.length ? prev : next;
+    });
+  }, [gates, criterionGatesById, suggestedParents, suggestedChildren]);
 
   // Auto-suggest ID from behavior (unless manually edited)
   const handleBehaviorChange = useCallback(

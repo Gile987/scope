@@ -184,6 +184,7 @@ i.e. a parent must be compatible with at least every gate its child is compatibl
 
 - **Consequence:** ancestor resolution can never pull a criterion into a gate it is incompatible with — the situation is impossible by construction.
 - **Enforcement:** validated at criteria create/update (alongside the existing cycle check in `CriteriaStore`) and again at request submit. A violation is a clear validation error, e.g. `"builds_clean is compatible with build but its dependency uses_express is not (compatible with: select)."`
+- **Authoring (portal):** the criteria creation wizard never offers a dependency that would violate the invariant. In the Review & Create step the **Parents** picker only lists criteria whose compatibility ⊇ the criterion's selected gates, and the **Children** picker only lists criteria whose compatibility ⊆ those gates. AI-suggested parents/children are filtered through the same predicate, and if the user narrows the gate selection after suggestions are generated, any now-incompatible parent/child is pruned from the selection automatically (`useCriteriaWizard`). This keeps the wizard from ever submitting a request the API would reject.
 - **Example:** if `builds_clean` (gates `[build]`) depends on `compiles`, then `compiles` must include `build` in its gates (or be unrestricted). A `select`-only `compiles` would be rejected.
 
 YAML example (`config/criteria/builds_clean.yaml`):

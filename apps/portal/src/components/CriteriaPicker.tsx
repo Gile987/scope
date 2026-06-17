@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, X, Sparkles } from "lucide-react";
 import { GATE_METADATA, isCriterionCompatibleWithGate, type GateId } from "@/lib/gates";
+import type { CriteriaDocument } from "@/types";
 
 interface CriteriaPickerProps {
   selected: string[];
@@ -22,9 +23,15 @@ interface CriteriaPickerProps {
   trailingAction?: ReactNode;
   /** Restrict suggestions to criteria compatible with this gate */
   gate?: GateId;
+  /**
+   * Additional predicate restricting which criteria are offered as suggestions.
+   * Used to enforce gate-compatibility invariants (e.g. only show criteria that
+   * can legally be a parent/child of the criterion being authored).
+   */
+  filter?: (criterion: CriteriaDocument) => boolean;
 }
 
-export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, trailingAction, gate }: CriteriaPickerProps) {
+export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, trailingAction, gate, filter }: CriteriaPickerProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -37,18 +44,20 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
     queryFn: () => api.listCriteria(),
   });
 
-  // Filter: show unselected criteria matching query and gate compatibility.
+  // Filter: show unselected criteria matching query, gate compatibility, and
+  // any additional caller-supplied predicate (e.g. parent/child gate invariant).
   const suggestions = useMemo(() => {
     const available = criteria.filter((c) =>
       !selected.includes(c.id) &&
-      (!gate || isCriterionCompatibleWithGate(c.gates, gate))
+      (!gate || isCriterionCompatibleWithGate(c.gates, gate)) &&
+      (!filter || filter(c))
     );
     if (!query.trim()) return available.slice(0, 8);
     const q = query.toLowerCase();
     return available.filter(
       (c) => c.id.toLowerCase().includes(q) || c.prompt.toLowerCase().includes(q),
     );
-  }, [criteria, selected, query, gate]);
+  }, [criteria, selected, query, gate, filter]);
 
   // Reset highlight when suggestions change
   useEffect(() => {
