@@ -918,7 +918,15 @@ export function SubmitRun() {
             {selectedAgent && selectedAgent.supportedModels.length > 0 && (
               <div className="space-y-2">
                 <Label htmlFor="model">Model *</Label>
-                <Select value={model} onValueChange={setModel} disabled={profileLocked}>
+                {/* Model is required; ignore spurious empty-value callbacks Radix
+                    emits when the default is applied asynchronously after mount. */}
+                <Select
+                  value={model}
+                  onValueChange={(v) => {
+                    if (v) setModel(v);
+                  }}
+                  disabled={profileLocked}
+                >
                   <SelectTrigger id="model">
                     <SelectValue placeholder="Select model" />
                   </SelectTrigger>
