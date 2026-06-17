@@ -249,7 +249,7 @@ export function TaskPromptList() {
     <ListLayout
       title={
         <span className="inline-flex items-center gap-1.5">
-          Task Prompt Library
+          Prompt Library
           <HelpTooltip
             text="Reusable, content-addressed task instructions you pick when submitting a run. Prompts are deduplicated by hash so identical text shares one entry across all runs."
             docs="taskPrompts"
