@@ -404,7 +404,9 @@ export function CriterionDetail() {
         <CardHeader>
           <CardTitle>Dependencies</CardTitle>
           <CardDescription>
-            Criteria that must pass before this one is evaluated
+            Criteria that must pass before this one is evaluated. List only direct parents —
+            the judge automatically evaluates all transitive ancestors in topological order,
+            so you don't need to repeat a parent's own dependencies here.
           </CardDescription>
         </CardHeader>
         <CardContent>

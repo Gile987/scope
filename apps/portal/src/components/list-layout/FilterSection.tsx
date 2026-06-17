@@ -79,7 +79,7 @@ export function FilterSection({
           <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
         )}
       </button>
-      {open && <div className="px-3 pb-3 pt-1 space-y-1.5">{children}</div>}
+      {open && <div className="min-w-0 px-3 pb-3 pt-1 space-y-1.5">{children}</div>}
     </div>
   );
 }

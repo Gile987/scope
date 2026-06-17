@@ -31,6 +31,7 @@ import {
   type DataTableColumn,
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 const FILTER_KEYS = ["type"] as const;
 
@@ -241,7 +242,16 @@ export function McpServerList() {
 
   return (
     <ListLayout
-      title="MCP Servers"
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          MCP Servers
+          <HelpTooltip
+            text="Model Context Protocol servers expose tools and resources (filesystem, GitHub, browser, etc.) the agent can call during a run."
+            docs="mcpServers"
+            size="md"
+          />
+        </span>
+      }
       description="Manage remote MCP servers available for benchmark runs"
       railStorageKey="mcp-servers"
       actions={

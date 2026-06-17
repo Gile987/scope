@@ -29,6 +29,7 @@ import {
   type DataTableColumn,
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 const FILTER_KEYS = [] as const;
 
@@ -198,7 +199,16 @@ export function CriteriaList() {
 
   return (
     <ListLayout
-      title="Criteria"
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          Criteria
+          <HelpTooltip
+            text="Reusable evaluation rules the judge applies to agent output. Criteria can depend on each other; descendants are skipped when a parent fails."
+            docs="criteria"
+            size="md"
+          />
+        </span>
+      }
       description="Manage evaluation criteria and their dependencies"
       railStorageKey="criteria"
       actions={

@@ -33,6 +33,7 @@ import {
   type DataTableColumn,
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 const FILTER_KEYS = ["worker"] as const;
 
@@ -266,7 +267,16 @@ export function ProfileList() {
 
   return (
     <ListLayout
-      title="Profiles"
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          Profiles
+          <HelpTooltip
+            text="Saved bundles of worker, model, skills, MCP servers and extensions. Profiles make runs reproducible and easy to compare."
+            docs="profiles"
+            size="md"
+          />
+        </span>
+      }
       description="Saved run configurations for reproducible benchmarking"
       railStorageKey="profiles"
       actions={
