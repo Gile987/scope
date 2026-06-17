@@ -779,7 +779,7 @@ export function SubmitRun() {
                 <span className="text-muted-foreground font-normal">(select from registry)</span>
               </Label>
               <HelpTooltip
-                text="Reusable evaluation rules the judge applies to agent output. Criteria can depend on each other; descendants are skipped when a parent fails."
+                text="Reusable evaluation rules the judge applies to agent output. List only direct criteria — the judge automatically evaluates all transitive ancestors, skipping descendants when a parent fails."
                 docs="criteria"
               />
             </div>
