@@ -29,7 +29,7 @@ import { ProfileCreateForm } from "@/components/ProfileCreateForm";
 import { ProfilePicker } from "@/components/ProfilePicker";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { AdvancedSection } from "@/components/AdvancedSection";
-import { Switch } from "@/components/ui/switch";
+import { AdvancedModeToggle } from "@/components/AdvancedModeToggle";
 import { useAdvancedMode } from "@/hooks/useAdvancedMode";
 import {
   ModelSelectItems,
@@ -626,18 +626,11 @@ export function SubmitRun() {
           <h1 className="text-3xl font-bold tracking-tight">New Run</h1>
           <p className="text-muted-foreground">Submit a benchmark run to a coding agent worker</p>
         </div>
-        <div className="ml-auto flex items-center gap-2 rounded-full border bg-card px-3 py-1.5">
-          <Label htmlFor="advanced-mode" className="cursor-pointer text-xs font-medium">
-            Advanced
-          </Label>
-          <HelpTooltip text="Reveal power-user settings (Agent version, Priority) across the form. Your choice is remembered." />
-          <Switch
-            id="advanced-mode"
-            checked={advanced}
-            onCheckedChange={setAdvanced}
-            aria-label="Toggle advanced options"
-          />
-        </div>
+        <AdvancedModeToggle
+          checked={advanced}
+          onCheckedChange={setAdvanced}
+          className="ml-auto"
+        />
       </div>
 
       {/* Quick Start gallery (collapsible, default closed) */}
