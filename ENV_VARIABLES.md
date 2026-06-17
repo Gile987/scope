@@ -203,6 +203,15 @@ Path to the directory containing criteria definition YAML files for v2 scenarios
 
 When set to `"true"`, displays the Pass@k metrics table on the Insights page. By default, this table is hidden. This is a Vite env var and must be prefixed with `VITE_` to be exposed to the frontend.
 
+## Portal Runtime Configuration
+
+### PORTAL_DOCS_BASE_URL
+**Default:** `https://urban-disco-1qzzq7z.pages.github.io`
+**Type:** URL string
+**Scope:** Portal container (runtime)
+
+Base URL for the public Scope docs site that in-app help tooltips link to. Unlike `VITE_*` flags (which Vite inlines into the bundle at build time), this is read at **container start**: the portal's entrypoint regenerates `/config.js` from this variable and the frontend reads it via `window.__SCOPE_CONFIG__.docsBaseUrl`. This means a single built image can be promoted across environments and still point at the correct docs deployment without a rebuild — set or override it via the Kubernetes Deployment env (`deploy/base/portal.yaml` or an overlay patch). In local Vite development the static `apps/portal/public/config.js` provides the default.
+
 ## Setting Variables
 
 ### Docker Compose
