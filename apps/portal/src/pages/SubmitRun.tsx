@@ -28,6 +28,9 @@ import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { ProfileCreateForm } from "@/components/ProfileCreateForm";
 import { ProfilePicker } from "@/components/ProfilePicker";
 import { HelpTooltip } from "@/components/HelpTooltip";
+import { AdvancedSection } from "@/components/AdvancedSection";
+import { Switch } from "@/components/ui/switch";
+import { useAdvancedMode } from "@/hooks/useAdvancedMode";
 import {
   ModelSelectItems,
   ReasoningEffortSelect,
@@ -165,6 +168,7 @@ export function SubmitRun() {
   const [reasoningEffort, setReasoningEffort] = useState<string>("");
   const [maxIterations, setMaxIterations] = useState<number>(10);
   const [occurrences, setOccurrences] = useState<number>(5);
+  const [priority, setPriority] = useState<number>(0);
 
   // Optional add-ons
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -190,6 +194,7 @@ export function SubmitRun() {
   const [saveProfileOpen, setSaveProfileOpen] = useState(false);
 
   // UI state
+  const [advanced, setAdvanced] = useAdvancedMode();
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -501,6 +506,7 @@ export function SubmitRun() {
       ...(inVariationMode ? {} : { ...(model ? { model } : {}) }),
       ...(inVariationMode ? {} : { ...(reasoningEffort ? { reasoningEffort } : {}) }),
       maxIterations,
+      ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
       ...(inVariationMode ? {} : { ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}) }),
       ...(inVariationMode ? {} : { ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}) }),
@@ -594,6 +600,10 @@ export function SubmitRun() {
     occurrences > 1 ? `×${occurrences} runs` : "",
     worker,
     model || "",
+    advanced && selectedAgentVersion && selectedAgentVersion !== sortedVersions[0]?.agentVersion
+      ? `v${selectedAgentVersion}`
+      : "",
+    advanced && priority !== 0 ? `priority ${priority}` : "",
     selectedMcpServers.length > 0 ? `${selectedMcpServers.length} MCP` : "",
     selectedSkills.length > 0 ? `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"}` : "",
     selectedExtensions.length > 0 ? `${selectedExtensions.length} ext` : "",
@@ -615,6 +625,18 @@ export function SubmitRun() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">New Run</h1>
           <p className="text-muted-foreground">Submit a benchmark run to a coding agent worker</p>
+        </div>
+        <div className="ml-auto flex items-center gap-2 rounded-full border bg-card px-3 py-1.5">
+          <Label htmlFor="advanced-mode" className="cursor-pointer text-xs font-medium">
+            Advanced
+          </Label>
+          <HelpTooltip text="Reveal power-user settings (Agent version, Priority) across the form. Your choice is remembered." />
+          <Switch
+            id="advanced-mode"
+            checked={advanced}
+            onCheckedChange={setAdvanced}
+            aria-label="Toggle advanced options"
+          />
         </div>
       </div>
 
@@ -824,6 +846,28 @@ export function SubmitRun() {
               />
             </div>
           </div>
+
+          <AdvancedSection show={advanced}>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="priority">Priority</Label>
+                  <HelpTooltip
+                    text="Scheduling priority for the run queue (-100 to 100). Higher runs are picked up first. Leave at 0 unless you need to jump the queue."
+                    docs="submitRunPortal"
+                  />
+                </div>
+                <Input
+                  id="priority"
+                  type="number"
+                  min={-100}
+                  max={100}
+                  value={priority}
+                  onChange={(e) => setPriority(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
+                />
+              </div>
+            </div>
+          </AdvancedSection>
         </CardContent>
       </Card>
 
@@ -845,7 +889,7 @@ export function SubmitRun() {
           )}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5">
+              <div className="flex h-6 items-center gap-1.5">
                 <Label htmlFor="worker">Worker *</Label>
                 <HelpTooltip
                   text="The runtime that drives the coding agent: GitHub Copilot, Claude Code, or VS Code Web with Copilot Chat."
@@ -900,32 +944,30 @@ export function SubmitRun() {
                 />
               </div>
             )}
-            {sortedVersions.length > 0 && (
-              <div className="space-y-2">
+          </div>
+
+          {sortedVersions.length > 0 && (
+            <AdvancedSection show={advanced}>
+              <div className="space-y-2 sm:max-w-xs">
                 <Label htmlFor="agentVersion">Agent version *</Label>
                 <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion} disabled={profileLocked}>
                   <SelectTrigger id="agentVersion">
                     <SelectValue placeholder="Latest" />
                   </SelectTrigger>
                   <SelectContent>
-                    {/*
-                     * Only the latest agent version is exposed to the user
-                     * (per growth-ecosystems/scope-project#124). The value
-                     * uses the current selection when present so that
-                     * profile-pinned versions still resolve in the trigger;
-                     * the label is intentionally version-number-free.
-                     */}
-                    <SelectItem
-                      key={selectedAgentVersion || sortedVersions[0].agentVersion}
-                      value={selectedAgentVersion || sortedVersions[0].agentVersion}
-                    >
-                      Latest
-                    </SelectItem>
+                    {sortedVersions.map((v, i) => (
+                      <SelectItem key={v.agentVersion} value={v.agentVersion}>
+                        {v.agentVersion}{i === 0 ? " (latest)" : ""}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Defaults to the latest version. Pin an older build only to reproduce a past run.
+                </p>
               </div>
-            )}
-          </div>
+            </AdvancedSection>
+          )}
         </CardContent>
       </Card>
 
