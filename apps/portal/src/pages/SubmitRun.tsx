@@ -883,7 +883,7 @@ export function SubmitRun() {
           </CardTitle>
           <CardDescription>
             Choose a base profile and compose profile variations for comparative runs.
-            Profile selections override the Agent, MCP Servers, Skills and Extensions chosen above.
+            Profile selections override the Agent, MCP Servers, Skills and Extensions chosen below.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1183,7 +1183,7 @@ export function SubmitRun() {
             <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
               <span>
-                These settings are managed by the selected profile in <span className="font-medium">Profile Variations</span> below.
+                These settings are managed by the selected profile in <span className="font-medium">Profile Variations</span> above.
                 Clear the profile to edit them manually.
               </span>
             </div>
