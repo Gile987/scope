@@ -31,7 +31,7 @@ COPY --from=builder /app/apps/portal/dist /usr/share/nginx/html
 COPY apps/portal/nginx.conf /etc/nginx/conf.d/default.conf
 # Runtime config generator — the stock nginx entrypoint runs scripts in
 # /docker-entrypoint.d/ before starting nginx, so config.js reflects the
-# environment's PORTAL_DOCS_BASE_URL on every container start.
+# environment's SCOPE_DOCS_BASE_URL on every container start.
 COPY apps/portal/docker-entrypoint.sh /docker-entrypoint.d/99-scope-config.sh
 RUN chmod +x /docker-entrypoint.d/99-scope-config.sh
 EXPOSE 80

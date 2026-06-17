@@ -4,7 +4,7 @@
 // Runtime configuration for the portal.
 //
 // In production this file is regenerated at container start by
-// docker-entrypoint.sh from the PORTAL_DOCS_BASE_URL environment variable, so
+// docker-entrypoint.sh from the SCOPE_DOCS_BASE_URL environment variable, so
 // the docs base URL can change per environment without rebuilding the image.
 //
 // In development (Vite) this static file is served as-is and provides the

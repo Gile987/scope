@@ -205,7 +205,7 @@ When set to `"true"`, displays the Pass@k metrics table on the Insights page. By
 
 ## Portal Runtime Configuration
 
-### PORTAL_DOCS_BASE_URL
+### SCOPE_DOCS_BASE_URL
 **Default:** `https://urban-disco-1qzzq7z.pages.github.io`
 **Type:** URL string
 **Scope:** Portal container (runtime)

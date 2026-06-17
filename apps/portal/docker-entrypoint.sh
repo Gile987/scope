@@ -7,7 +7,7 @@
 # (and then starts nginx itself) — this script must NOT exec nginx.
 set -eu
 
-DOCS_BASE_URL="${PORTAL_DOCS_BASE_URL:-https://urban-disco-1qzzq7z.pages.github.io}"
+DOCS_BASE_URL="${SCOPE_DOCS_BASE_URL:-https://urban-disco-1qzzq7z.pages.github.io}"
 CONFIG_PATH="/usr/share/nginx/html/config.js"
 
 # Escape characters that are special inside a JS double-quoted string.
