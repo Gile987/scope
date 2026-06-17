@@ -27,6 +27,10 @@ import { SkillPicker } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { ProfileCreateForm } from "@/components/ProfileCreateForm";
 import { ProfilePicker } from "@/components/ProfilePicker";
+import { HelpTooltip } from "@/components/HelpTooltip";
+import { AdvancedSection } from "@/components/AdvancedSection";
+import { AdvancedModeToggle } from "@/components/AdvancedModeToggle";
+import { useAdvancedMode } from "@/hooks/useAdvancedMode";
 import {
   ModelSelectItems,
   ReasoningEffortSelect,
@@ -129,12 +133,13 @@ interface CollapsibleCardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   disabled?: boolean;
+  help?: React.ReactNode;
   children: React.ReactNode;
 }
 
-function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disabled, children }: CollapsibleCardProps) {
+function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disabled, help, children }: CollapsibleCardProps) {
   return (
-    <Card>
+    <Card className="relative">
       <button
         type="button"
         onClick={() => onOpenChange(!open)}
@@ -157,6 +162,11 @@ function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disab
           className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
         />
       </button>
+      {help && (
+        <div className="absolute right-12 top-6 z-10" onClick={(e) => e.stopPropagation()}>
+          {help}
+        </div>
+      )}
       {open && (
         <CardContent className="pt-0">
           {children}
@@ -224,6 +234,7 @@ export function SubmitRun() {
   const [saveProfileOpen, setSaveProfileOpen] = useState(false);
 
   // UI state
+  const [advanced, setAdvanced] = useAdvancedMode();
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -698,7 +709,10 @@ export function SubmitRun() {
     occurrences > 1 ? `×${occurrences} runs` : "",
     worker,
     model || "",
-    selectedAgentVersion ? `v${selectedAgentVersion}` : "",
+    advanced && selectedAgentVersion && selectedAgentVersion !== sortedVersions[0]?.agentVersion
+      ? `v${selectedAgentVersion}`
+      : "",
+    advanced && priority !== 0 ? `priority ${priority}` : "",
     selectedMcpServers.length > 0 ? `${selectedMcpServers.length} MCP` : "",
     selectedSkills.length > 0 ? `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"}` : "",
     selectedExtensions.length > 0 ? `${selectedExtensions.length} ext` : "",
@@ -721,6 +735,11 @@ export function SubmitRun() {
           <h1 className="text-3xl font-bold tracking-tight">New Run</h1>
           <p className="text-muted-foreground">Submit a benchmark run to a coding agent worker</p>
         </div>
+        <AdvancedModeToggle
+          checked={advanced}
+          onCheckedChange={setAdvanced}
+          className="ml-auto"
+        />
       </div>
 
       {/* Quick Start gallery (collapsible, default closed) */}
@@ -766,7 +785,6 @@ export function SubmitRun() {
         </CollapsibleCard>
       )}
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
       <div className="space-y-6">
 
       {/* ─── Scenario ──────────────────────────────────────────────────── */}
@@ -777,7 +795,13 @@ export function SubmitRun() {
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="task">Task *</Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="task">Task *</Label>
+              <HelpTooltip
+                text="The natural-language instruction sent to the coding agent. Saved to the task prompt library so you can reuse it across runs."
+                docs="taskPrompts"
+              />
+            </div>
             <TaskPromptPicker onSelect={(text) => setTask(text)} />
             <Textarea
               id="task"
@@ -851,10 +875,16 @@ export function SubmitRun() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="criteria">
-              Criteria {maxIterations !== 1 && "* "}
-              <span className="text-muted-foreground font-normal">(select from registry)</span>
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="criteria">
+                Criteria {maxIterations !== 1 && "* "}
+                <span className="text-muted-foreground font-normal">(select from registry)</span>
+              </Label>
+              <HelpTooltip
+                text="Reusable evaluation rules the judge applies to agent output. List only direct criteria — the judge automatically evaluates all transitive ancestors, skipping descendants when a parent fails."
+                docs="criteria"
+              />
+            </div>
             <CriteriaPicker
               selected={pickedCriteria}
               onChange={setPickedCriteria}
@@ -885,9 +915,15 @@ export function SubmitRun() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="maxIterations">Max iterations</Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="maxIterations">Max iterations</Label>
+                <HelpTooltip
+                  text="How many judge feedback loops the agent gets. With 1, the agent runs once and the judge does not evaluate. Higher values let the agent iterate on feedback."
+                  docs="submitRunPortal"
+                />
+              </div>
               <Input
                 id="maxIterations"
                 type="number"
@@ -898,18 +934,13 @@ export function SubmitRun() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="priority">Priority</Label>
-              <Input
-                id="priority"
-                type="number"
-                min={-100}
-                max={100}
-                value={priority}
-                onChange={(e) => setPriority(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="occurrences">Occurrences</Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="occurrences">Occurrences</Label>
+                <HelpTooltip
+                  text="How many times to repeat this exact run. Useful for measuring variance across identical inputs."
+                  docs="submitRunPortal"
+                />
+              </div>
               <Input
                 id="occurrences"
                 type="number"
@@ -920,6 +951,28 @@ export function SubmitRun() {
               />
             </div>
           </div>
+
+          <AdvancedSection show={advanced}>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="priority">Priority</Label>
+                  <HelpTooltip
+                    text="Scheduling priority for the run queue (-100 to 100). Higher runs are picked up first. Leave at 0 unless you need to jump the queue."
+                    docs="submitRunPortal"
+                  />
+                </div>
+                <Input
+                  id="priority"
+                  type="number"
+                  min={-100}
+                  max={100}
+                  value={priority}
+                  onChange={(e) => setPriority(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
+                />
+              </div>
+            </div>
+          </AdvancedSection>
         </CardContent>
       </Card>
 
@@ -1067,166 +1120,17 @@ export function SubmitRun() {
       {/* ─── Agent ─────────────────────────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <CardTitle>Agent</CardTitle>
-          <CardDescription>Coding agent, model and version</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="worker">Worker *</Label>
-              <Select value={worker} onValueChange={setWorker} disabled={profileLocked}>
-                <SelectTrigger id="worker">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableAgents.length > 0
-                    ? availableAgents.map((a: CodingAgent) => (
-                        <SelectItem key={a._id} value={a._id}>
-                          {a.name}
-                        </SelectItem>
-                      ))
-                    : WORKER_TYPES.map((w) => (
-                        <SelectItem key={w} value={w}>
-                          {w}
-                        </SelectItem>
-                      ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {selectedAgent && selectedAgent.supportedModels.length > 0 && (
-              <div className="space-y-2">
-                <Label htmlFor="model">Model *</Label>
-                <Select value={model} onValueChange={setModel} disabled={profileLocked}>
-                  <SelectTrigger id="model">
-                    <SelectValue placeholder="Select model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <ModelSelectItems
-                      models={selectedAgent.supportedModels}
-                      capabilitiesMap={modelCapabilitiesMap}
-                      defaultModel={selectedAgent.defaultModel}
-                    />
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            {supportedEfforts.length > 0 && (
-              <div className="space-y-2">
-                <ReasoningEffortSelect
-                  supportedEfforts={supportedEfforts}
-                  value={reasoningEffort}
-                  onChange={onEffortChange}
-                  disabled={profileLocked}
-                  noSelectionLabel="Any (no preference)"
-                  workerEffortWarning={workerEffortWarning}
-                />
-              </div>
-            )}
-            {sortedVersions.length > 0 && (
-              <div className="space-y-2">
-                <Label htmlFor="agentVersion">Agent version *</Label>
-                <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion} disabled={profileLocked}>
-                  <SelectTrigger id="agentVersion">
-                    <SelectValue placeholder="Select version" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sortedVersions.map((v, i) => (
-                      <SelectItem key={v.agentVersion} value={v.agentVersion}>
-                        {v.agentVersion}{i === 0 ? " (latest)" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ─── MCP Servers (collapsible) ─────────────────────────────────── */}
-      {activeMcpServers.length > 0 && (
-        <CollapsibleCard
-          icon={Server}
-          title="MCP Servers"
-          summary={
-            selectedMcpServers.length === 0
-              ? "None selected"
-              : `${selectedMcpServers.length} server${selectedMcpServers.length === 1 ? "" : "s"} selected`
-          }
-          open={mcpOpen}
-          onOpenChange={setMcpOpen}
-          disabled={profileLocked}
-        >
-          <div className="space-y-2">
-            {activeMcpServers.map((s: McpServerDocument) => (
-              <label
-                key={s._id}
-                className={`flex items-center gap-3 rounded-md border p-3 transition-colors ${profileLocked ? "opacity-60" : "cursor-pointer hover:bg-accent/50"}`}
-              >
-                <Checkbox
-                  checked={selectedMcpServers.includes(s._id)}
-                  disabled={profileLocked}
-                  onCheckedChange={(checked) => {
-                    setSelectedMcpServers((prev) =>
-                      checked ? [...prev, s._id] : prev.filter((id) => id !== s._id)
-                    );
-                  }}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm">{s._id}</span>
-                    <Badge variant="outline" className="text-xs uppercase">{s.type}</Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {s.name}{s.description ? ` — ${s.description}` : ""}
-                  </p>
-                </div>
-              </label>
-            ))}
-          </div>
-        </CollapsibleCard>
-      )}
-
-      {/* ─── Skills (collapsible) ──────────────────────────────────────── */}
-      <CollapsibleCard
-        icon={BookOpen}
-        title="Skills"
-        summary={
-          selectedSkills.length === 0
-            ? "None selected"
-            : `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"} selected`
-        }
-        open={skillsOpen}
-        onOpenChange={setSkillsOpen}
-        disabled={profileLocked}
-      >
-        <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} disabled={profileLocked} />
-      </CollapsibleCard>
-
-      {/* ─── Extensions (collapsible, VS Code only) ────────────────────── */}
-      {isVscodeWorker && (
-        <CollapsibleCard
-          icon={Puzzle}
-          title="Extensions"
-          summary={
-            selectedExtensions.length === 0
-              ? "None selected"
-              : `${selectedExtensions.length} extension${selectedExtensions.length === 1 ? "" : "s"} selected`
-          }
-          open={extensionsOpen}
-          onOpenChange={setExtensionsOpen}
-          disabled={profileLocked}
-        >
-          <ExtensionPicker selected={selectedExtensions} onChange={setSelectedExtensions} disabled={profileLocked} />
-        </CollapsibleCard>
-      )}
-      </div>
-
-      <Card className="xl:sticky xl:top-6">
-        <CardHeader>
-          <CardTitle>Profile Variations</CardTitle>
+          <CardTitle className="flex items-center gap-1.5">
+            Profile Variations{" "}
+            <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+            <HelpTooltip
+              text="Profiles bundle worker, model, skills, MCP servers and extensions. Variations let you submit the same task against multiple profile configurations in one run for comparative analysis."
+              docs="profiles"
+            />
+          </CardTitle>
           <CardDescription>
             Choose a base profile and compose profile variations for comparative runs.
+            Profile selections override the Agent, MCP Servers, Skills and Extensions chosen below.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1514,6 +1418,210 @@ export function SubmitRun() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ─── Agent ─────────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Agent</CardTitle>
+          <CardDescription>Coding agent, model and version</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {profileLocked && (
+            <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <span>
+                These settings are managed by the selected profile in <span className="font-medium">Profile Variations</span> above.
+                Clear the profile to edit them manually.
+              </span>
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
+              <div className="flex h-6 items-center gap-1.5">
+                <Label htmlFor="worker">Worker *</Label>
+                <HelpTooltip
+                  text="The runtime that drives the coding agent: GitHub Copilot, Claude Code, or VS Code Web with Copilot Chat."
+                  docs="choosingAgent"
+                />
+              </div>
+              <Select value={worker} onValueChange={setWorker} disabled={profileLocked}>
+                <SelectTrigger id="worker">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableAgents.length > 0
+                    ? availableAgents.map((a: CodingAgent) => (
+                        <SelectItem key={a._id} value={a._id}>
+                          {a.name}
+                        </SelectItem>
+                      ))
+                    : WORKER_TYPES.map((w) => (
+                        <SelectItem key={w} value={w}>
+                          {w}
+                        </SelectItem>
+                      ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {selectedAgent && selectedAgent.supportedModels.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="model">Model *</Label>
+                {/* Model is required; ignore spurious empty-value callbacks Radix
+                    emits when the default is applied asynchronously after mount. */}
+                <Select
+                  value={model}
+                  onValueChange={(v) => {
+                    if (v) setModel(v);
+                  }}
+                  disabled={profileLocked}
+                >
+                  <SelectTrigger id="model">
+                    <SelectValue placeholder="Select model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <ModelSelectItems
+                      models={selectedAgent.supportedModels}
+                      capabilitiesMap={modelCapabilitiesMap}
+                      defaultModel={selectedAgent.defaultModel}
+                    />
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {supportedEfforts.length > 0 && (
+              <div className="space-y-2">
+                <ReasoningEffortSelect
+                  supportedEfforts={supportedEfforts}
+                  value={reasoningEffort}
+                  onChange={onEffortChange}
+                  disabled={profileLocked}
+                  noSelectionLabel="Any (no preference)"
+                  workerEffortWarning={workerEffortWarning}
+                />
+              </div>
+            )}
+          </div>
+
+          {sortedVersions.length > 0 && (
+            <AdvancedSection show={advanced}>
+              <div className="space-y-2 sm:max-w-xs">
+                <Label htmlFor="agentVersion">Agent version *</Label>
+                <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion} disabled={profileLocked}>
+                  <SelectTrigger id="agentVersion">
+                    <SelectValue placeholder="Latest" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sortedVersions.map((v, i) => (
+                      <SelectItem key={v.agentVersion} value={v.agentVersion}>
+                        {v.agentVersion}{i === 0 ? " (latest)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Defaults to the latest version. Pin an older build only to reproduce a past run.
+                </p>
+              </div>
+            </AdvancedSection>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ─── MCP Servers (collapsible) ─────────────────────────────────── */}
+      {activeMcpServers.length > 0 && (
+        <CollapsibleCard
+          icon={Server}
+          title="MCP Servers"
+          help={
+            <HelpTooltip
+              text="Model Context Protocol servers expose tools and resources to the agent (filesystem, GitHub, browser, etc.)."
+              docs="mcpServers"
+            />
+          }
+          summary={
+            selectedMcpServers.length === 0
+              ? "None selected"
+              : `${selectedMcpServers.length} server${selectedMcpServers.length === 1 ? "" : "s"} selected`
+          }
+          open={mcpOpen}
+          onOpenChange={setMcpOpen}
+          disabled={profileLocked}
+        >
+          <div className="space-y-2">
+            {activeMcpServers.map((s: McpServerDocument) => (
+              <label
+                key={s._id}
+                className={`flex items-center gap-3 rounded-md border p-3 transition-colors ${profileLocked ? "opacity-60" : "cursor-pointer hover:bg-accent/50"}`}
+              >
+                <Checkbox
+                  checked={selectedMcpServers.includes(s._id)}
+                  disabled={profileLocked}
+                  onCheckedChange={(checked) => {
+                    setSelectedMcpServers((prev) =>
+                      checked ? [...prev, s._id] : prev.filter((id) => id !== s._id)
+                    );
+                  }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-sm">{s._id}</span>
+                    <Badge variant="outline" className="text-xs uppercase">{s.type}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {s.name}{s.description ? ` — ${s.description}` : ""}
+                  </p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </CollapsibleCard>
+      )}
+
+      {/* ─── Skills (collapsible) ──────────────────────────────────────── */}
+      <CollapsibleCard
+        icon={BookOpen}
+        title="Skills"
+        help={
+          <HelpTooltip
+            text="Reusable instruction packs (Markdown + assets) attached to the prompt so the agent has consistent guidance."
+            docs="skills"
+          />
+        }
+        summary={
+          selectedSkills.length === 0
+            ? "None selected"
+            : `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"} selected`
+        }
+        open={skillsOpen}
+        onOpenChange={setSkillsOpen}
+        disabled={profileLocked}
+      >
+        <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} disabled={profileLocked} />
+      </CollapsibleCard>
+
+      {/* ─── Extensions (collapsible, VS Code only) ────────────────────── */}
+      {isVscodeWorker && (
+        <CollapsibleCard
+          icon={Puzzle}
+          title="Extensions"
+          help={
+            <HelpTooltip
+              text="VS Code extensions to install in the workspace before the agent starts (e.g. language servers, linters)."
+              docs="extensions"
+            />
+          }
+          summary={
+            selectedExtensions.length === 0
+              ? "None selected"
+              : `${selectedExtensions.length} extension${selectedExtensions.length === 1 ? "" : "s"} selected`
+          }
+          open={extensionsOpen}
+          onOpenChange={setExtensionsOpen}
+          disabled={profileLocked}
+        >
+          <ExtensionPicker selected={selectedExtensions} onChange={setSelectedExtensions} disabled={profileLocked} />
+        </CollapsibleCard>
+      )}
       </div>
 
       <Dialog open={createProfileOpen} onOpenChange={setCreateProfileOpen}>

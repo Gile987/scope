@@ -41,11 +41,13 @@ export function createProxyClient(): ProxyClient {
         const maxSessionDurationSecs = parseInt(process.env.COPILOT_MAX_SESSION_DURATION_SECS || "3600", 10);
         const plugins: Record<string, unknown> = {};
 
-        // Enable the copilot_token auto-refresh plugin when TOKEN_MANAGER_URL is set.
+        // Enable the copilot_token auto-refresh plugin when TOKEN_MANAGER_URL is set
+        // and GATEWAY_TOKEN_PLUGIN_ENABLED is not explicitly "false".
         // tokenManagerUrl is configured at gateway level; here we only pass per-session
         // settings (capability, refresh window, target hosts, max duration).
         const tokenManagerUrl = process.env.TOKEN_MANAGER_URL;
-        if (tokenManagerUrl) {
+        const tokenPluginEnabled = process.env.GATEWAY_TOKEN_PLUGIN_ENABLED !== "false";
+        if (tokenManagerUrl && tokenPluginEnabled) {
           plugins.copilot_token = {
             capability: process.env.COPILOT_TOKEN_CAPABILITY || "generic",
             refreshBufferSecs: 120,

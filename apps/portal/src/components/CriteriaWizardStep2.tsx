@@ -81,7 +81,9 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
         </Label>
         <CriteriaPicker selected={dependsOn} onChange={setDependsOn} aiSuggested={suggestedParents} />
         <p className="text-xs text-muted-foreground">
-          Criteria that must pass before this one is evaluated
+          Criteria that must pass before this one is evaluated. List only direct parents —
+          the judge automatically evaluates all transitive ancestors in topological order,
+          so you don't need to repeat a parent's own dependencies here.
         </p>
       </div>
 

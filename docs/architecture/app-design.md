@@ -23,7 +23,7 @@ flowchart LR
 |---------|---------------|
 | `api` | REST API (Express), SSE log streaming, run management, criteria CRUD |
 | `cli` | Command-line interface for submitting tasks, streaming logs, managing runs |
-| `portal` | Vue.js web UI for run management, insights, criteria graph editing |
+| `portal` | React web UI for run management, insights, criteria graph editing |
 | `judge` | Evaluation engine — executes criteria against agent output |
 | `shared` | Types, database models, queue/blob/redis clients, config loaders |
 | `workers/*` | Coding agent adapters — each implements the same interface for a different agent |
@@ -127,6 +127,10 @@ Profile fan-out mode is also supported for comparative runs:
 ## Real-Time Log Streaming
 
 Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API subscribes and relays them as Server-Sent Events (SSE) to CLI and Portal clients.
+
+## Portal Shell
+
+The Portal desktop shell uses a persistent left navigation sidebar. It defaults to the compact icon rail, and users can expand it to show navigation labels; the choice is stored in `localStorage` under `scope:layout:sidebar-expanded`. Mobile navigation remains a sheet-based menu with labels always visible.
 
 ## Criteria System
 

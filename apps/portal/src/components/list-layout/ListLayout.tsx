@@ -53,8 +53,8 @@ export interface ListLayoutProps {
   className?: string;
 }
 
-const DEFAULT_RAIL_WIDTH = "260px";
-const DEFAULT_DETAIL_WIDTH = "420px";
+const DEFAULT_RAIL_WIDTH = "clamp(220px, 22vw, 280px)";
+const DEFAULT_DETAIL_WIDTH = "clamp(360px, 30vw, 440px)";
 
 export function ListLayout({
   title,
@@ -111,7 +111,7 @@ export function ListLayout({
           aria-hidden={railCollapsed}
         >
           <div
-            className="h-full overflow-hidden"
+            className="h-full min-w-0 overflow-hidden"
             style={{ width: railWidth }}
           >
             {filterRail}

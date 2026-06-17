@@ -61,8 +61,10 @@ function parsePositiveInt(
 // Redis to read per-run liveness heartbeats. Redis is treated as NON-FATAL:
 // if it is not configured or unreachable, the reaper self-disables while the
 // dispatch loop keeps running.
+//
+// Disabled by default: set SCOPE_REAPER_ENABLED=true to turn it on.
 
-const REAPER_ENABLED = process.env.SCOPE_REAPER_ENABLED !== "false";
+const REAPER_ENABLED = process.env.SCOPE_REAPER_ENABLED === "true";
 const REAPER_POLL_INTERVAL_MS = parsePositiveInt(
   process.env.SCOPE_REAPER_POLL_INTERVAL_MS,
   60000,
@@ -231,7 +233,7 @@ async function main(): Promise<void> {
     }
   } else {
     console.warn(
-      `[Scheduler] Stuck-run reaper disabled (${REAPER_ENABLED ? "REDIS_HOST not set" : "SCOPE_REAPER_ENABLED=false"})`,
+      `[Scheduler] Stuck-run reaper disabled (${REAPER_ENABLED ? "REDIS_HOST not set" : "SCOPE_REAPER_ENABLED not set to true"})`,
     );
   }
 
