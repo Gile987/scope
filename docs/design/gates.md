@@ -528,9 +528,6 @@ Per the CLI ↔ Portal parity rule, both must expose gate selection.
 | Judge requests without `gate`/`toolCallsUrl` | Treated as Select gate; `read_tool_outputs` returns empty. |
 | YAML scenarios/criteria | New fields are optional; old files load unchanged. |
 
-> **Implementation plan.** The phased breakdown, sequencing, and task list for
-> building this design live in [gates implementation plan](../plans/gates.md).
-
 ## 6. Open questions & risks
 
 1. **Where do build/test/run/deploy commands execute?** This design assumes the
