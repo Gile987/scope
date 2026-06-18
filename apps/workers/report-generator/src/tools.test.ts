@@ -340,3 +340,17 @@ describe("createReportTools - duration fields", () => {
     expect(result.turns[0].durationMs).toBeUndefined();
   });
 });
+
+describe("createReportTools - permissions", () => {
+  // Regression guard for scope-doc#64: the report generator runs in a headless
+  // worker, so under the v3 Copilot SDK every tool must skip the permission
+  // prompt or it is denied at execution time ("could not request permission
+  // from user").
+  it("marks every tool to skip the permission prompt", () => {
+    const tools = createReportTools(API_BASE, REQUEST_ID, SNAPSHOTS_DIR, REPORT_ID);
+    expect(tools.length).toBeGreaterThan(0);
+    for (const tool of tools as Array<{ name: string; skipPermission?: boolean }>) {
+      expect(tool.skipPermission, `${tool.name} must skip the permission prompt`).toBe(true);
+    }
+  });
+});
