@@ -4,6 +4,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
 import { evaluateWorkspace } from "./judge-agent.js";
+import { verifyCopilotProtocol } from "./protocol-check.js";
 import { BlobStorage, RedisLogPublisher } from "shared";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -154,6 +155,24 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 async function main(): Promise<void> {
+  // Fail fast on Copilot SDK<->CLI protocol drift instead of surfacing it as an
+  // opaque per-evaluation HTTP 500. Set JUDGE_SKIP_PROTOCOL_CHECK=true to bypass.
+  if (process.env.JUDGE_SKIP_PROTOCOL_CHECK !== "true") {
+    try {
+      await verifyCopilotProtocol();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(
+        "[judge] FATAL: Copilot SDK<->CLI protocol self-check failed — refusing to start.\n" +
+          "[judge] The installed @github/copilot-sdk and the bundled @github/copilot CLI disagree on the ACP protocol version.\n" +
+          "[judge] Fix: align @github/copilot-sdk with the @github/copilot override in package.json, then rebuild the judge image.\n" +
+          "[judge] (Set JUDGE_SKIP_PROTOCOL_CHECK=true to bypass — not recommended.)\n" +
+          `[judge] Detail: ${msg}`
+      );
+      process.exit(1);
+    }
+  }
+
   app.listen(port, () => {
     console.log(`[judge] Judge service listening on port ${port}`);
   });

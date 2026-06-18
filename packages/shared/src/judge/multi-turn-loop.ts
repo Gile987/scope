@@ -16,7 +16,7 @@ import type { SkillConfig } from "../types/skill.js";
 import type { ExtensionConfig } from "../types/extension.js";
 import { BlobStorage, BlobStorageConfig } from "../storage/blob-storage.js";
 import { sanitizeHarFile, extractToolCalls } from "../har/har-parser.js";
-import { JudgeClient } from "./judge-client.js";
+import { JudgeClient, JudgeInfrastructureError } from "./judge-client.js";
 
 export interface MultiTurnConfig {
   /** The coding worker processor (unchanged interface, called per iteration) */
@@ -449,14 +449,24 @@ export async function runMultiTurnLoop(
       criteriaResults = judgeResult.criteriaResults;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      await iterLog("error", `Judge evaluation failed: ${errorMsg}`, { error: errorMsg });
+      const isInfra = error instanceof JudgeInfrastructureError;
+      const label = isInfra
+        ? "Judge infrastructure error (evaluation could not run — not a criteria failure)"
+        : "Judge evaluation failed";
+      await iterLog("error", `${label}: ${errorMsg}`, {
+        error: errorMsg,
+        ...(isInfra && {
+          judgeInfrastructureError: true,
+          ...(error.isVersionMismatch && { protocolVersionMismatch: true }),
+        }),
+      });
 
       // Persist a partial turn so video/snapshot URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
         ...(gate && { gate }),
         ...(codingResponse && { codingAgentResponse: codingResponse }),
-        judgeFeedback: `Judge evaluation failed: ${errorMsg}`,
+        judgeFeedback: `${label}: ${errorMsg}`,
         snapshotUrl,
         passed: false,
         timestamp: new Date(),
@@ -482,7 +492,7 @@ export async function runMultiTurnLoop(
         turns,
         passed: false,
         hadError: true,
-        finalResult: `Judge evaluation failed on iteration ${iteration}: ${errorMsg}`,
+        finalResult: `${label} on iteration ${iteration}: ${errorMsg}`,
       };
     }
 

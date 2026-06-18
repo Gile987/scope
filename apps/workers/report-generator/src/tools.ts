@@ -513,6 +513,12 @@ export function createReportTools(
     },
   });
 
+  // All report-generator tools run in a headless worker (no TUI). Under the v3
+  // Copilot SDK the runtime denies any tool call it can't get user approval for
+  // ("could not request permission from user"), which would silently break every
+  // tool. These are the worker's own declared data-access/inspection tools, so
+  // mark them to skip the permission prompt. Builtin tools stay permission-gated.
+  // See scope-doc#64.
   return [
     getRunSummary,
     listTurns,
@@ -526,5 +532,5 @@ export function createReportTools(
     searchInsights,
     createInsight,
     referenceInsight,
-  ];
+  ].map((tool) => ({ ...tool, skipPermission: true }));
 }
