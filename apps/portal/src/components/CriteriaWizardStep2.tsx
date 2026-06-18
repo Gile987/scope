@@ -84,7 +84,7 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
           selected={dependsOn}
           onChange={setDependsOn}
           aiSuggested={suggestedParents}
-          filter={(c) => gatesSatisfyInvariant(c.gates, gates)}
+          filter={(c) => gatesSatisfyInvariant(c.gates, gates) && !acceptedChildren.includes(c.id)}
         />
         <p className="text-xs text-muted-foreground">
           Criteria that must pass before this one is evaluated. Only criteria compatible with
@@ -105,7 +105,7 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
           selected={acceptedChildren}
           onChange={setAcceptedChildren}
           aiSuggested={suggestedChildren}
-          filter={(c) => gatesSatisfyInvariant(gates, c.gates)}
+          filter={(c) => gatesSatisfyInvariant(gates, c.gates) && !dependsOn.includes(c.id)}
         />
         <p className="text-xs text-muted-foreground">
           These criteria will be updated to depend on <span className="font-mono">{id || "this criterion"}</span> after creation.
