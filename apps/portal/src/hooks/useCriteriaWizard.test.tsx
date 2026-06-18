@@ -95,6 +95,25 @@ describe("useCriteriaWizard generation passes target gates", () => {
     );
   });
 
+  it("sends gates chosen in Step 1 (setGates before handleContinue)", async () => {
+    const { result } = renderHook(
+      () => useCriteriaWizard({ onSuccess: () => {} }),
+      { wrapper },
+    );
+
+    act(() => result.current.handleBehaviorChange("detect docker"));
+    act(() => result.current.setGates(["select", "build", "test"]));
+    act(() => result.current.handleContinue());
+
+    await waitFor(() =>
+      expect(generateCriteriaPrompt).toHaveBeenCalledWith("detect docker", undefined, [
+        "select",
+        "build",
+        "test",
+      ]),
+    );
+  });
+
   it("sends the Step-2 gate choices on regenerate (handleRegenerate)", async () => {
     const { result } = renderHook(
       () => useCriteriaWizard({ onSuccess: () => {} }),

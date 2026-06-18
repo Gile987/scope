@@ -7,8 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
-import { GateCompatibilityPicker } from "@/components/GateCompatibilityPicker";
-import { gatesSatisfyInvariant } from "@/lib/gates";
+import { gatesSatisfyInvariant, GATE_METADATA, orderGateIds } from "@/lib/gates";
 import { Loader2, Check, RefreshCw } from "lucide-react";
 import type { CriteriaWizardState } from "@/hooks/useCriteriaWizard";
 
@@ -23,8 +22,6 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
     dependsOn,
     setDependsOn,
     gates,
-    setGates,
-    lockedGates,
     prompt,
     setPrompt,
     aiGenerated,
@@ -58,19 +55,22 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
             {id}
           </Badge>
         </div>
-      </div>
-
-      <Separator />
-
-      {/* Gate compatibility */}
-      <div className="space-y-2">
-        <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
-          Gate compatibility
-        </Label>
-        <GateCompatibilityPicker value={gates} onChange={setGates} lockedGates={lockedGates} />
-        <p className="text-xs text-muted-foreground">
-          Select the gates this criterion applies to. Parents must be compatible with every selected gate.
-        </p>
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+            Gate compatibility
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {!gates || gates.length === 0 ? (
+              <Badge variant="outline">All gates</Badge>
+            ) : (
+              orderGateIds(gates).map((g) => (
+                <Badge key={g} variant="outline">
+                  {GATE_METADATA[g].label}
+                </Badge>
+              ))
+            )}
+          </div>
+        </div>
       </div>
 
       <Separator />
