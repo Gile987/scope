@@ -14,103 +14,7 @@ import type { CriteriaGraphData } from "@/types";
 import { GATE_ORDER, GATE_METADATA, isCriterionCompatibleWithGate, type GateId } from "@/lib/gates";
 import { useVisibleGates } from "@/hooks/useVisibleGates";
 import { useRef, useState, useMemo } from "react";
-
-// Find every node and edge that participates in a dependency cycle, using
-// Tarjan's strongly-connected-components algorithm. A node is "in a cycle" iff
-// it belongs to an SCC of size > 1 or has a self-edge; an edge is in a cycle iff
-// both endpoints share such an SCC. Returns the cyclic nodes/edges plus the SCC
-// groupings (each an array of node ids) for user-facing messaging. Exported for
-// testing.
-export function detectCycles(
-  nodes: CriteriaGraphData["nodes"],
-  edges: CriteriaGraphData["edges"],
-) {
-  const adj = new Map<string, string[]>();
-  const ids = new Set(nodes.map((n) => n.id));
-  for (const id of ids) adj.set(id, []);
-  for (const e of edges) {
-    if (ids.has(e.source) && ids.has(e.target)) adj.get(e.source)!.push(e.target);
-  }
-
-  const index = new Map<string, number>();
-  const lowlink = new Map<string, number>();
-  const onStack = new Set<string>();
-  const stack: string[] = [];
-  const sccOf = new Map<string, number>();
-  const sccs: string[][] = [];
-  let counter = 0;
-
-  // Iterative Tarjan to stay safe on large graphs.
-  for (const start of ids) {
-    if (index.has(start)) continue;
-    const work: Array<{ node: string; childIdx: number }> = [{ node: start, childIdx: 0 }];
-    while (work.length > 0) {
-      const frame = work[work.length - 1];
-      const v = frame.node;
-      if (frame.childIdx === 0) {
-        index.set(v, counter);
-        lowlink.set(v, counter);
-        counter++;
-        stack.push(v);
-        onStack.add(v);
-      }
-      const neighbors = adj.get(v) ?? [];
-      if (frame.childIdx < neighbors.length) {
-        const w = neighbors[frame.childIdx];
-        frame.childIdx++;
-        if (!index.has(w)) {
-          work.push({ node: w, childIdx: 0 });
-        } else if (onStack.has(w)) {
-          lowlink.set(v, Math.min(lowlink.get(v)!, index.get(w)!));
-        }
-      } else {
-        if (lowlink.get(v) === index.get(v)) {
-          const comp: string[] = [];
-          let w: string;
-          do {
-            w = stack.pop()!;
-            onStack.delete(w);
-            sccOf.set(w, sccs.length);
-            comp.push(w);
-          } while (w !== v);
-          sccs.push(comp);
-        }
-        work.pop();
-        if (work.length > 0) {
-          const parent = work[work.length - 1].node;
-          lowlink.set(parent, Math.min(lowlink.get(parent)!, lowlink.get(v)!));
-        }
-      }
-    }
-  }
-
-  const selfLoops = new Set<string>();
-  for (const e of edges) if (e.source === e.target) selfLoops.add(e.source);
-
-  const cycleNodes = new Set<string>();
-  const cycleGroups: string[][] = [];
-  for (const comp of sccs) {
-    if (comp.length > 1 || selfLoops.has(comp[0])) {
-      for (const id of comp) cycleNodes.add(id);
-      cycleGroups.push(comp);
-    }
-  }
-
-  const cycleEdges = new Set<string>();
-  for (const e of edges) {
-    if (e.source === e.target && selfLoops.has(e.source)) {
-      cycleEdges.add(`${e.source}->${e.target}`);
-      continue;
-    }
-    const a = sccOf.get(e.source);
-    const b = sccOf.get(e.target);
-    if (a !== undefined && a === b && cycleNodes.has(e.source)) {
-      cycleEdges.add(`${e.source}->${e.target}`);
-    }
-  }
-
-  return { cycleNodes, cycleEdges, cycleGroups };
-}
+import { findCycles } from "@/lib/graph-cycles";
 
 // Simple DAG layout using topological sort + layering. Exported for testing.
 export function layoutGraph(graph: CriteriaGraphData) {
@@ -158,12 +62,13 @@ export function layoutGraph(graph: CriteriaGraphData) {
     }
   }
 
-  // Identify genuine cycles via strongly-connected components (Tarjan). Every
-  // node in an SCC of size > 1 (or with a self-edge) is part of a cycle, and so
-  // is every edge whose endpoints share that SCC. This is layout-independent —
-  // unlike a back-edge heuristic it doesn't depend on which node the layering
-  // happened to place first — so the user always sees the same, correct loop.
-  const { cycleNodes, cycleEdges, cycleGroups } = detectCycles(nodes, edges);
+  // Identify genuine cycles via strongly-connected components (graphlib's
+  // Tarjan, see lib/graph-cycles). Every node in an SCC of size > 1 (or with a
+  // self-edge) is part of a cycle, and so is every edge whose endpoints share
+  // that SCC. This is layout-independent — unlike a back-edge heuristic it
+  // doesn't depend on which node the layering happened to place first — so the
+  // user always sees the same, correct loop.
+  const { cycleNodes, cycleEdges, cycleGroups } = findCycles(nodes, edges);
 
   // Assign positions with dynamic node widths
   const NODE_H = 60;
