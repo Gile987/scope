@@ -175,6 +175,12 @@ Timeout for the HTTP request from workers to the judge service (`/api/v1/evaluat
 
 Maximum number of retry attempts when the judge client encounters a timeout or transient network error. Uses exponential backoff (5s base, 30s max). Set to `0` to disable retries.
 
+### JUDGE_SKIP_PROTOCOL_CHECK
+**Default:** `false`
+**Type:** boolean (`true` to enable)
+
+At startup the judge service runs a self-check that spawns the bundled Copilot CLI and asserts its ACP protocol version matches the installed `@github/copilot-sdk`. On a mismatch (e.g. the `@github/copilot` override in `package.json` drifted ahead of the SDK) the judge logs a clear fatal message and exits instead of serving opaque per-evaluation HTTP 500s. Set to `true` to bypass the check (not recommended).
+
 ## Feedback Configuration
 
 ### FEEDBACK_MAX_CRITERIA
