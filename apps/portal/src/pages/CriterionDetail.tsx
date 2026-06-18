@@ -136,7 +136,10 @@ export function CriterionDetail() {
     if (!editGates || editGates.length === 0) return;
     updateMutation.mutate({
       prompt: prompt.trim(),
-      dependsOn: editDependsOn.length > 0 ? editDependsOn : undefined,
+      // Always send the array (even empty) so removing the last dependency
+      // persists. The backend treats `undefined` as "no change", so collapsing
+      // [] to undefined here silently dropped deletions.
+      dependsOn: editDependsOn,
       gates: editGates,
     });
   };
