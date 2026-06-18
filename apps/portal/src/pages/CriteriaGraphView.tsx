@@ -206,6 +206,71 @@ export function layoutGraph(graph: CriteriaGraphData) {
   return { nodeMap, positions, nodeWidths, NODE_MIN_W, NODE_H, totalW, totalH, minX, edges, cycleEdges, cycleNodes, cycleGroups };
 }
 
+export interface EdgeRenderSpec {
+  /** Straight edges keep the exact `<line>` geometry used for acyclic DAGs. */
+  straight: boolean;
+  line?: { x1: number; y1: number; x2: number; y2: number };
+  /** SVG path `d` for curved/self edges. */
+  d?: string;
+}
+
+// Decide how to draw a single edge. Straight downward edges (the common DAG
+// case) are emitted verbatim as a `<line>` so acyclic graphs look identical to
+// before. Edges that would otherwise overlap or run "backwards" — bidirectional
+// pairs, back-edges, and self-loops, all of which only occur inside cycles — are
+// routed as curves so every arrow stays individually visible. Exported for test.
+export function edgePath(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  opts: {
+    needsCurve: boolean;
+    isSelf: boolean;
+    side: number; // +1 | -1: which way the curve bows, so a→b and b→a separate
+    nodeH: number;
+    sourceWidth: number;
+  },
+): EdgeRenderSpec {
+  const { needsCurve, isSelf, side, nodeH, sourceWidth } = opts;
+
+  if (isSelf) {
+    // Teardrop loop anchored on the node's right edge.
+    const rx = from.x + sourceWidth / 2;
+    const top = from.y + nodeH * 0.3;
+    const bot = from.y + nodeH * 0.7;
+    const r = 38;
+    const d = `M ${rx} ${top} C ${rx + r} ${top - r}, ${rx + r} ${bot + r}, ${rx} ${bot}`;
+    return { straight: false, d };
+  }
+
+  if (!needsCurve) {
+    return {
+      straight: true,
+      line: { x1: from.x, y1: from.y + nodeH, x2: to.x, y2: to.y },
+    };
+  }
+
+  // A back-edge points to a node on the same or an earlier row. Anchor it on the
+  // top of the source / bottom of the target (instead of bottom→top) so it leaves
+  // and enters on the sides facing each other, then bow it clear of the nodes in
+  // between.
+  const isBack = to.y <= from.y;
+  const sx = from.x;
+  const sy = isBack ? from.y : from.y + nodeH;
+  const ex = to.x;
+  const ey = isBack ? to.y + nodeH : to.y;
+
+  const dx = ex - sx;
+  const dy = ey - sy;
+  const len = Math.hypot(dx, dy) || 1;
+  const px = -dy / len;
+  const py = dx / len;
+  const mag = (40 + 0.25 * len) * side;
+  const cx = (sx + ex) / 2 + px * mag;
+  const cy = (sy + ey) / 2 + py * mag;
+  const d = `M ${sx} ${sy} Q ${cx} ${cy} ${ex} ${ey}`;
+  return { straight: false, d };
+}
+
 export function CriteriaGraphView() {
   const { data: graph, isLoading } = useQuery({
     queryKey: ["criteria-graph"],
@@ -340,6 +405,8 @@ export function CriteriaGraphView() {
     }
   }
 
+  const edgeKeySet = new Set(edges.map((e) => `${e.source}->${e.target}`));
+
   return (
     <div className="space-y-6">
       {header}
@@ -426,29 +493,64 @@ export function CriteriaGraphView() {
                 const edgeKey = `${e.source}->${e.target}`;
                 const isActive = hoveredEdges.has(edgeKey);
                 const isCycle = cycleEdges.has(edgeKey);
+
+                const isSelf = e.source === e.target;
+                const reverseExists = edgeKeySet.has(`${e.target}->${e.source}`);
+                const isBack = to.y <= from.y;
+                const needsCurve = isSelf || reverseExists || isBack;
+                // Side is stable per unordered pair so a↔b edges share it; the
+                // perpendicular flips with edge direction, bowing them apart.
+                const pairKey =
+                  e.source < e.target ? `${e.source}|${e.target}` : `${e.target}|${e.source}`;
+                let h = 0;
+                for (let i = 0; i < pairKey.length; i++) h = (h * 31 + pairKey.charCodeAt(i)) | 0;
+                const side = h % 2 === 0 ? 1 : -1;
+                const spec = edgePath(from, to, {
+                  needsCurve,
+                  isSelf,
+                  side,
+                  nodeH: NODE_H,
+                  sourceWidth: nodeWidths.get(e.source) ?? NODE_MIN_W,
+                });
+
+                const strokeWidth = isCycle || isActive ? 2 : 1;
+                const className = isCycle
+                  ? "stroke-destructive"
+                  : isActive
+                    ? "stroke-primary"
+                    : "stroke-muted-foreground/30";
+                const markerEnd = isCycle
+                  ? "url(#arrowhead-cycle)"
+                  : isActive
+                    ? "url(#arrowhead-active)"
+                    : "url(#arrowhead)";
+                const dash = isCycle ? "6 4" : undefined;
+
+                if (spec.straight && spec.line) {
+                  return (
+                    <line
+                      key={edgeKey}
+                      x1={spec.line.x1}
+                      y1={spec.line.y1}
+                      x2={spec.line.x2}
+                      y2={spec.line.y2}
+                      strokeWidth={strokeWidth}
+                      strokeDasharray={dash}
+                      className={className}
+                      markerEnd={markerEnd}
+                    />
+                  );
+                }
+
                 return (
-                  <line
+                  <path
                     key={edgeKey}
-                    x1={from.x}
-                    y1={from.y + NODE_H}
-                    x2={to.x}
-                    y2={to.y}
-                    strokeWidth={isCycle || isActive ? 2 : 1}
-                    strokeDasharray={isCycle ? "6 4" : undefined}
-                    className={
-                      isCycle
-                        ? "stroke-destructive"
-                        : isActive
-                          ? "stroke-primary"
-                          : "stroke-muted-foreground/30"
-                    }
-                    markerEnd={
-                      isCycle
-                        ? "url(#arrowhead-cycle)"
-                        : isActive
-                          ? "url(#arrowhead-active)"
-                          : "url(#arrowhead)"
-                    }
+                    d={spec.d}
+                    fill="none"
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={dash}
+                    className={className}
+                    markerEnd={markerEnd}
                   />
                 );
               })}

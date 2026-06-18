@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, expect, it } from "vitest";
-import { layoutGraph, detectCycles } from "./CriteriaGraphView";
+import { layoutGraph, detectCycles, edgePath } from "./CriteriaGraphView";
 import type { CriteriaGraphData } from "@/types";
 
 function node(id: string) {
@@ -123,5 +123,59 @@ describe("detectCycles", () => {
     const { cycleGroups, cycleNodes } = detectCycles(nodes, edges);
     expect(cycleGroups.length).toBe(2);
     expect(cycleNodes.size).toBe(4);
+  });
+});
+
+describe("edgePath", () => {
+  const NODE_H = 60;
+  const W = 180;
+
+  it("draws a forward non-overlapping edge as a straight line", () => {
+    const spec = edgePath(
+      { x: 0, y: 0 },
+      { x: 0, y: 140 },
+      { needsCurve: false, isSelf: false, side: 1, nodeH: NODE_H, sourceWidth: W },
+    );
+    expect(spec.straight).toBe(true);
+    expect(spec.line).toEqual({ x1: 0, y1: NODE_H, x2: 0, y2: 140 });
+    expect(spec.d).toBeUndefined();
+  });
+
+  it("bows a bidirectional pair to opposite sides when they share a side value", () => {
+    const from = { x: 0, y: 0 };
+    const to = { x: 0, y: 140 };
+    const opts = { needsCurve: true, isSelf: false, side: 1, nodeH: NODE_H, sourceWidth: W };
+    // Both directed edges of a pair use the SAME side; the perpendicular flips
+    // with direction, so the two arcs bow to physically opposite sides.
+    const ab = edgePath(from, to, opts);
+    const ba = edgePath(to, from, opts);
+    expect(ab.straight).toBe(false);
+    expect(ba.straight).toBe(false);
+    const cxAb = Number(ab.d!.split("Q")[1].trim().split(/\s+/)[0]);
+    const cxBa = Number(ba.d!.split("Q")[1].trim().split(/\s+/)[0]);
+    expect(Math.sign(cxAb)).not.toBe(Math.sign(cxBa));
+  });
+
+  it("anchors a back-edge on the top of the source", () => {
+    // source is laid out BELOW the target (larger y) → back-edge.
+    const spec = edgePath(
+      { x: 10, y: 200 },
+      { x: 10, y: 0 },
+      { needsCurve: true, isSelf: false, side: 1, nodeH: NODE_H, sourceWidth: W },
+    );
+    expect(spec.straight).toBe(false);
+    // Path starts at the source's top (y === from.y), not its bottom.
+    expect(spec.d!.startsWith("M 10 200")).toBe(true);
+  });
+
+  it("renders a self-edge as a closed-ish loop path", () => {
+    const spec = edgePath(
+      { x: 0, y: 0 },
+      { x: 0, y: 0 },
+      { needsCurve: true, isSelf: true, side: 1, nodeH: NODE_H, sourceWidth: W },
+    );
+    expect(spec.straight).toBe(false);
+    expect(spec.d).toMatch(/^M .* C /);
+    expect(spec.line).toBeUndefined();
   });
 });
