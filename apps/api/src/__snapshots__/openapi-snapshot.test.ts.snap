@@ -3923,6 +3923,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "description": "Success",
           },
+          "400": {
+            "description": "Seed batch would introduce a dependency cycle",
+          },
         },
         "summary": "Seed criteria in bulk",
         "tags": [

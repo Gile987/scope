@@ -154,6 +154,64 @@ describe("API Endpoints", () => {
 
       expect(res.status).toBe(409);
     });
+
+    it("returns 400 when creating a criterion that introduces a cycle", async () => {
+      const dataset = [
+        { id: "a", prompt: "A", dependsOn: ["b"], createdAt: new Date() },
+      ];
+      (mocks.criteriaCollection.findOne as any).mockImplementation((f: any) =>
+        Promise.resolve(dataset.find((d) => d.id === f.id) ?? null),
+      );
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        sort: () => ({ toArray: () => Promise.resolve(dataset) }),
+        toArray: () => Promise.resolve(dataset),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/criteria")
+        .send({ id: "b", prompt: "B", dependsOn: ["a"] });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when a dependency is not gate-compatible", async () => {
+      const dataset = [
+        { id: "parent", prompt: "P", dependsOn: [], gates: ["select"], createdAt: new Date() },
+      ];
+      (mocks.criteriaCollection.findOne as any).mockImplementation((f: any) =>
+        Promise.resolve(dataset.find((d) => d.id === f.id) ?? null),
+      );
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        sort: () => ({ toArray: () => Promise.resolve(dataset) }),
+        toArray: () => Promise.resolve(dataset),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/criteria")
+        .send({ id: "child", prompt: "C", dependsOn: ["parent"], gates: ["select", "build"] });
+
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe("POST /api/v1/criteria/seed", () => {
+    it("returns 400 when the seeded batch would form a cycle", async () => {
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        toArray: () => Promise.resolve([]),
+        sort: () => ({ toArray: () => Promise.resolve([]) }),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/criteria/seed")
+        .send({
+          criteria: [
+            { id: "a", prompt: "A", dependsOn: ["b"] },
+            { id: "b", prompt: "B", dependsOn: ["a"] },
+          ],
+        });
+
+      expect(res.status).toBe(400);
+    });
   });
 
   describe("GET /api/v1/criteria/:id", () => {

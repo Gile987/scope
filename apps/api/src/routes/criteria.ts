@@ -7,17 +7,47 @@ import {
   CriteriaGraphSchema,
   CriteriaResponseSchema,
   UpdateCriteriaInputSchema,
-  gatesSatisfyInvariant,
+  CriteriaStore,
+  CriteriaStoreError,
+  CriteriaHasDependentsError,
+  DependencyGraph,
   type GateId,
 } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
-import type { CriteriaDocument, RouteContext } from "../route-context.js";
+import type { RouteContext } from "../route-context.js";
 import { computeMdp } from "../criteria-mdp.js";
 import type { MdpAnalyzableRun } from "../criteria-mdp.js";
 import { generateCriteriaPrompt, isLlmAvailable } from "../llm.js";
 import { isInferenceError } from "../llm-token.js";
 
+/**
+ * Map a thrown {@link CriteriaStoreError} to an HTTP response. Returns true when
+ * the error was handled; callers should rethrow anything that wasn't.
+ */
+function sendStoreError(
+  res: { status: (code: number) => { json: (body: unknown) => void } },
+  err: unknown,
+): boolean {
+  if (err instanceof CriteriaHasDependentsError) {
+    res.status(err.status).json({ error: err.message, dependents: err.dependents });
+    return true;
+  }
+  if (err instanceof CriteriaStoreError) {
+    res.status(err.status).json({ error: err.message });
+    return true;
+  }
+  return false;
+}
+
 export function registerCriteriaRoutes(ctx: RouteContext): void {
+
+  // Single source of truth for criteria writes (create/update/delete/seed).
+  // Built from the live ctx per call so dependency injection (and tests that
+  // swap ctx.criteriaCollection) keep working.
+  const getCriteriaStore = (): CriteriaStore =>
+    new CriteriaStore(
+      ctx.criteriaCollection as unknown as ConstructorParameters<typeof CriteriaStore>[0],
+    );
 
 // --- Criteria seed & CRUD (apiRoute) ---
 
@@ -89,10 +119,54 @@ apiRoute(ctx.app, ctx.registry, {
     seeded: z.number(),
     errors: z.array(z.string()),
   }),
+  errorResponses: {
+    400: { description: "Seed batch would introduce a dependency cycle" },
+  },
   handler: async (req, res) => {
     const { criteria } = req.body;
     let seeded = 0;
     const errors: string[] = [];
+
+    // Batch cycle guard (D1): validate the set that would result from this seed
+    // (existing active criteria + newly inserted ones; existing ids win) has no
+    // dependency cycle. Edges to ids absent from the set are filtered out so the
+    // seed stays permissive about partial/forward references — only cycles among
+    // present nodes reject the whole batch.
+    const existingDocs = await ctx.criteriaCollection
+      .find({ deletedAt: { $exists: false } })
+      .toArray();
+    const merged = new Map<string, { id: string; prompt: string; dependsOn: string[] }>();
+    for (const d of existingDocs) {
+      merged.set(d.id, { id: d.id, prompt: d.prompt, dependsOn: d.dependsOn ?? [] });
+    }
+    for (const config of criteria) {
+      const id = String(config.id ?? "").trim();
+      if (!id || merged.has(id)) continue;
+      merged.set(id, {
+        id,
+        prompt: String(config.prompt ?? "").trim(),
+        dependsOn: Array.isArray(config.dependsOn)
+          ? config.dependsOn.map((d: unknown) => String(d).trim())
+          : [],
+      });
+    }
+    const known = new Set(merged.keys());
+    const nodes = Array.from(merged.values()).map((n) => ({
+      ...n,
+      dependsOn: n.dependsOn.filter((d) => known.has(d)),
+    }));
+    try {
+      new DependencyGraph(nodes);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("ycle")) {
+        res.status(400).json({
+          error: `Seed rejected: the resulting criteria set would contain a dependency cycle (${err.message})`,
+        });
+        return;
+      }
+      // Other graph errors (e.g. unknown-node refs) are tolerated — seed is
+      // intentionally permissive about references that aren't present yet.
+    }
 
     for (const config of criteria) {
       if (!config.id || !config.prompt) {
@@ -301,45 +375,12 @@ apiRoute(ctx.app, ctx.registry, {
   },
   handler: async (req, res) => {
     const { id, prompt, dependsOn = [], gates } = req.body;
-
-    // Check for duplicates
-    const existing = await ctx.criteriaCollection.findOne({
-      id,
-      deletedAt: { $exists: false },
-    });
-    if (existing) {
-      res.status(409).json({ error: `Criteria '${id}' already exists` });
-      return;
+    try {
+      const doc = await getCriteriaStore().create({ id, prompt, dependsOn, gates });
+      res.status(201).json(doc);
+    } catch (err) {
+      if (!sendStoreError(res, err)) throw err;
     }
-
-    // Validate dependency references and the gate-compatibility invariant
-    for (const depId of dependsOn) {
-      const dep = await ctx.criteriaCollection.findOne({
-        id: depId,
-        deletedAt: { $exists: false },
-      });
-      if (!dep) {
-        res.status(400).json({ error: `Dependency '${depId}' does not exist` });
-        return;
-      }
-      if (!gatesSatisfyInvariant(dep.gates as GateId[] | undefined, gates)) {
-        res.status(400).json({
-          error: `'${id}' is compatible with more gates than its dependency '${depId}'. A dependency must be compatible with at least every gate its dependent is.`,
-        });
-        return;
-      }
-    }
-
-    const doc: CriteriaDocument = {
-      id,
-      prompt: prompt.trim(),
-      dependsOn,
-      ...(gates !== undefined ? { gates } : {}),
-      createdAt: new Date(),
-    };
-
-    await ctx.criteriaCollection.insertOne(doc as any);
-    res.status(201).json(doc);
   },
 });
 
@@ -359,90 +400,12 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res) => {
     const { id } = req.params;
     const { prompt, dependsOn, gates } = req.body;
-
-    const existing = await ctx.criteriaCollection.findOne({
-      id,
-      deletedAt: { $exists: false },
-    });
-    if (!existing) {
-      res.status(404).json({ error: `Criteria '${id}' not found` });
-      return;
+    try {
+      const updated = await getCriteriaStore().update(id, { prompt, dependsOn, gates });
+      res.json(updated);
+    } catch (err) {
+      if (!sendStoreError(res, err)) throw err;
     }
-
-    const update: Record<string, unknown> = { updatedAt: new Date() };
-    if (prompt !== undefined) {
-      update.prompt = prompt.trim();
-    }
-
-    const effectiveDependsOn =
-      dependsOn !== undefined ? dependsOn : (existing.dependsOn ?? []);
-    const effectiveGates =
-      gates !== undefined ? gates : (existing.gates as GateId[] | undefined);
-
-    if (dependsOn !== undefined) {
-      // Validate dependency references
-      for (const depId of dependsOn) {
-        const dep = await ctx.criteriaCollection.findOne({
-          id: depId,
-          deletedAt: { $exists: false },
-        });
-        if (!dep) {
-          res.status(400).json({ error: `Dependency '${depId}' does not exist` });
-          return;
-        }
-      }
-      // Self-reference check
-      if (dependsOn.includes(id)) {
-        res.status(400).json({ error: "A criterion cannot depend on itself" });
-        return;
-      }
-      update.dependsOn = dependsOn;
-    }
-
-    if (gates !== undefined) {
-      update.gates = gates;
-    }
-
-    // Enforce the downward-closed gate-compatibility invariant when either the
-    // dependencies or the gate compatibility of this criterion changes.
-    if (dependsOn !== undefined || gates !== undefined) {
-      // As a child: every parent must be compatible with at least this node's gates.
-      for (const depId of effectiveDependsOn) {
-        const dep = await ctx.criteriaCollection.findOne({
-          id: depId,
-          deletedAt: { $exists: false },
-        });
-        if (dep && !gatesSatisfyInvariant(dep.gates as GateId[] | undefined, effectiveGates)) {
-          res.status(400).json({
-            error: `'${id}' is compatible with more gates than its dependency '${depId}'. A dependency must be compatible with at least every gate its dependent is.`,
-          });
-          return;
-        }
-      }
-      // As a parent: every dependent must remain a subset of this node's gates.
-      const dependents = await ctx.criteriaCollection
-        .find({ dependsOn: id, deletedAt: { $exists: false } })
-        .toArray();
-      for (const child of dependents) {
-        if (!gatesSatisfyInvariant(effectiveGates, child.gates as GateId[] | undefined)) {
-          res.status(400).json({
-            error: `Dependent '${child.id}' is compatible with more gates than '${id}' would be after this change. A dependency must be compatible with at least every gate its dependent is.`,
-          });
-          return;
-        }
-      }
-    }
-
-    await ctx.criteriaCollection.updateOne(
-      { id, deletedAt: { $exists: false } },
-      { $set: update },
-    );
-
-    const updated = await ctx.criteriaCollection.findOne({
-      id,
-      deletedAt: { $exists: false },
-    });
-    res.json(updated);
   },
 });
 
@@ -460,35 +423,12 @@ apiRoute(ctx.app, ctx.registry, {
   },
   handler: async (req, res) => {
     const { id } = req.params;
-
-    const existing = await ctx.criteriaCollection.findOne({
-      id,
-      deletedAt: { $exists: false },
-    });
-    if (!existing) {
-      res.status(404).json({ error: `Criteria '${id}' not found` });
-      return;
+    try {
+      await getCriteriaStore().delete(id);
+      res.json({ id, deleted: true });
+    } catch (err) {
+      if (!sendStoreError(res, err)) throw err;
     }
-
-    // Check for dependents
-    const dependents = await ctx.criteriaCollection
-      .find({ dependsOn: id, deletedAt: { $exists: false } })
-      .toArray();
-
-    if (dependents.length > 0) {
-      res.status(409).json({
-        error: `Cannot delete '${id}': other criteria depend on it`,
-        dependents: dependents.map((d) => d.id),
-      });
-      return;
-    }
-
-    await ctx.criteriaCollection.updateOne(
-      { id, deletedAt: { $exists: false } },
-      { $set: { deletedAt: new Date() } },
-    );
-
-    res.json({ id, deleted: true });
   },
 });
 
