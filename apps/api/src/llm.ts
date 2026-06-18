@@ -70,15 +70,17 @@ function suggestSystemPrompt(direction: SuggestDirection): string {
   const { relationship, test, positiveExample } = DIRECTION_COPY[direction];
   return `You are an expert at organising evaluation criteria for AI coding agent benchmarks into a dependency graph.
 
-A dependency edge A → B means "B cannot be meaningfully evaluated unless A passes first". Only TRUE prerequisite relationships are edges. Two criteria that merely belong to the same topic or family are SIBLINGS, not a parent/child pair.
+A dependency edge A → B means "B cannot be meaningfully evaluated unless A passes first". Equivalently, B can never be true while A is false — B's truth REQUIRES A's truth. Only TRUE prerequisite relationships are edges. Two criteria that merely belong to the same topic or family are SIBLINGS, not a parent/child pair.
 
 Given a natural-language description of a NEW criterion and a list of EXISTING criteria, suggest ${relationship}
 
 ${test}
 
+INDEPENDENCE TEST (apply to every candidate): ask whether each criterion can be true or false irrespective of the other's outcome. If both can independently be true or false, they are INDEPENDENT — there is no dependency in either direction, so do not suggest the candidate. A dependency exists only when one criterion's truth would be impossible without the other's.
+
 STRICT RULES:
 - Do NOT suggest a candidate just because it is topically related, in the same family, or commonly seen together. Relatedness is not a dependency.
-- Reject siblings. Example: "has_unit_tests" and "has_integration_tests" are both about testing, but neither is a prerequisite of the other — they are siblings, so NEITHER should ever be suggested as a parent or child of the other.
+- Reject siblings and independent criteria. Example: "has_unit_tests" and "has_integration_tests" are both about testing, but each can be true or false regardless of the other — they are independent, so NEITHER should ever be suggested as a parent or child of the other.
 - A real prerequisite is a hard requirement: if it fails, the dependent criterion is impossible or meaningless to assess.
 - ${positiveExample}
 - When in doubt, leave it out: prefer an empty array over a weak or speculative edge.
