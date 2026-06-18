@@ -115,7 +115,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
 
   // Compute fixed position for portal-based dropdown so it isn't clipped by
   // overflow-y-auto scroll containers (e.g. dialogs).
-  const [dropdownStyle, setDropdownStyle] = useState<CSSProperties>({});
+  const [dropdownStyle, setDropdownStyle] = useState<CSSProperties>({ pointerEvents: "auto" });
 
   useEffect(() => {
     if (!open || !inputRef.current) return;
@@ -130,6 +130,10 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
           left: rect.left,
           width: rect.width,
           zIndex: 100,
+          // Re-enable interaction: a modal Radix Dialog sets pointer-events:none
+          // on <body>, and this dropdown is portaled to <body> (outside the
+          // dialog content), so without this the options render but can't be clicked.
+          pointerEvents: "auto",
         };
 
         if (
@@ -137,7 +141,8 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
           prev.top === nextStyle.top &&
           prev.left === nextStyle.left &&
           prev.width === nextStyle.width &&
-          prev.zIndex === nextStyle.zIndex
+          prev.zIndex === nextStyle.zIndex &&
+          prev.pointerEvents === nextStyle.pointerEvents
         ) {
           return prev;
         }
