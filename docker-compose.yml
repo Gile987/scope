@@ -313,9 +313,10 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ""
       # Criteria system configuration
-      # Judge/feedback models default to gpt-4.1 (the production default); override
-      # locally via .env when the dev token lacks access to that model.
-      JUDGE_MODEL: ${JUDGE_MODEL:-gpt-4.1}
+      # JUDGE_MODEL default is gpt-5.4-mini; FEEDBACK_MODEL defaults to gpt-4.1
+      # (the production default). Override either locally via .env when the dev
+      # token lacks access to a given model.
+      JUDGE_MODEL: ${JUDGE_MODEL:-gpt-5.4-mini}
       FEEDBACK_MODEL: ${FEEDBACK_MODEL:-gpt-4.1}
       JUDGE_STRATEGY: ${JUDGE_STRATEGY:-bundled} # bundled or independent
       JUDGE_MAX_PARALLELISM: ${JUDGE_MAX_PARALLELISM:-3}

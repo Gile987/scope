@@ -139,19 +139,20 @@ match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
 ## Judge Strategy Configuration
 
 ### JUDGE_MODEL
-**Default:** `gpt-4.1`
+**Default:** `gpt-5.4-mini`
 **Type:** string
 
 Model used by the judge to evaluate agent output against criteria. Defaults to
-`gpt-4.1` (the production default). Override locally (e.g. in `.env`) when the
-dev GitHub token lacks access to that model, e.g. `JUDGE_MODEL=claude-sonnet-4.5`.
+`gpt-5.4-mini` (set in code, docker-compose, and the K8s manifest). Override via
+`JUDGE_MODEL` (e.g. in `.env`) to use a different model.
 
 ### FEEDBACK_MODEL
 **Default:** `gpt-4.1`
 **Type:** string
 
 Model used by the feedback generator that produces actionable feedback for the
-coding agent between iterations. Same default and override guidance as `JUDGE_MODEL`.
+coding agent between iterations. Override locally (e.g. in `.env`) when the dev
+GitHub token lacks access to that model, e.g. `FEEDBACK_MODEL=gpt-5.4-mini`.
 
 ### JUDGE_STRATEGY
 **Default:** `bundled`

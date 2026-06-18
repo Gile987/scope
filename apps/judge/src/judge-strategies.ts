@@ -42,7 +42,7 @@ export abstract class JudgeStrategy {
   protected tokenClient: TokenManagerClient;
 
   constructor(model?: string) {
-    this.model = model || process.env.JUDGE_MODEL || "gpt-4.1";
+    this.model = model || process.env.JUDGE_MODEL || "gpt-5.4-mini";
     this.timeout = parseInt(process.env.JUDGE_TIMEOUT || String(DEFAULT_JUDGE_TIMEOUT));
     this.maxRetries = parseInt(process.env.JUDGE_RETRIES || String(DEFAULT_JUDGE_RETRIES));
     this.tokenClient = new TokenManagerClient();

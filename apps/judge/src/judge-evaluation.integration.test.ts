@@ -30,8 +30,8 @@ const hasToken = !!process.env.GITHUB_TOKEN;
 
 /**
  * The judge runs real LLM sessions, so the model must be one the test
- * credential is entitled to. The default `gpt-4.1` is frequently unavailable;
- * allow CI to override and otherwise pick a broadly-available model.
+ * credential is entitled to. Allow CI to override via JUDGE_MODEL and
+ * otherwise pick a broadly-available model.
  */
 const JUDGE_MODEL = process.env.JUDGE_MODEL || "claude-opus-4.6";
 
