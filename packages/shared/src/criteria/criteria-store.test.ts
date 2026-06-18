@@ -1,8 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { CriteriaStore } from "./criteria-store.js";
+import {
+  CriteriaDuplicateError,
+  CriteriaHasDependentsError,
+  CriteriaNotFoundError,
+  CriteriaValidationError,
+} from "./criteria-errors.js";
 import type { CriteriaDocument, GateId } from "../types/types.js";
 
 /**
@@ -112,5 +118,119 @@ describe("CriteriaStore gate-compatibility invariant", () => {
     await expect(
       store.update("child", { gates: ["select", "build"] as GateId[] }),
     ).rejects.toThrow();
+  });
+
+  it("rejects narrowing a parent below an existing dependent's gates (parent side)", async () => {
+    const col = fakeCollection([
+      { id: "parent", prompt: "p", dependsOn: [], gates: ["select", "build"], createdAt: new Date() },
+      { id: "child", prompt: "c", dependsOn: ["parent"], gates: ["select", "build"], createdAt: new Date() },
+    ]);
+    const store = new CriteriaStore(col);
+
+    // Narrowing parent to just [select] would leave child (compatible with build)
+    // depending on a parent that is not — the parent-side invariant must reject.
+    await expect(
+      store.update("parent", { gates: ["select"] as GateId[] }),
+    ).rejects.toThrow(CriteriaValidationError);
+  });
+});
+
+describe("CriteriaStore cycle detection", () => {
+  it("rejects a direct cycle on create", async () => {
+    const col = fakeCollection([
+      { id: "a", prompt: "a", dependsOn: ["b"], createdAt: new Date() },
+    ]);
+    const store = new CriteriaStore(col);
+
+    await expect(
+      store.create({ id: "b", prompt: "b", dependsOn: ["a"] }),
+    ).rejects.toThrow(CriteriaValidationError);
+  });
+
+  it("rejects a transitive cycle on update", async () => {
+    const col = fakeCollection([
+      { id: "a", prompt: "a", dependsOn: [], createdAt: new Date() },
+      { id: "b", prompt: "b", dependsOn: ["a"], createdAt: new Date() },
+      { id: "c", prompt: "c", dependsOn: ["b"], createdAt: new Date() },
+    ]);
+    const store = new CriteriaStore(col);
+
+    // a -> b -> c already; making a depend on c closes the loop a->c->b->a.
+    await expect(
+      store.update("a", { dependsOn: ["c"] }),
+    ).rejects.toThrow(CriteriaValidationError);
+  });
+
+  it("rejects a self-reference", async () => {
+    const col = fakeCollection([
+      { id: "a", prompt: "a", dependsOn: [], createdAt: new Date() },
+    ]);
+    const store = new CriteriaStore(col);
+
+    await expect(
+      store.update("a", { dependsOn: ["a"] }),
+    ).rejects.toThrow(CriteriaValidationError);
+  });
+});
+
+describe("CriteriaStore typed errors", () => {
+  it("throws CriteriaValidationError for an invalid id format", async () => {
+    const store = new CriteriaStore(fakeCollection());
+    await expect(store.create({ id: "Bad-Id", prompt: "p" })).rejects.toThrow(
+      CriteriaValidationError,
+    );
+  });
+
+  it("throws CriteriaDuplicateError when the id already exists", async () => {
+    const col = fakeCollection([
+      { id: "dup", prompt: "p", dependsOn: [], createdAt: new Date() },
+    ]);
+    const store = new CriteriaStore(col);
+    await expect(store.create({ id: "dup", prompt: "p" })).rejects.toThrow(
+      CriteriaDuplicateError,
+    );
+  });
+
+  it("throws CriteriaValidationError when a dependency does not exist", async () => {
+    const store = new CriteriaStore(fakeCollection());
+    await expect(
+      store.create({ id: "a", prompt: "p", dependsOn: ["missing"] }),
+    ).rejects.toThrow(CriteriaValidationError);
+  });
+
+  it("throws CriteriaNotFoundError on update of a missing criterion", async () => {
+    const store = new CriteriaStore(fakeCollection());
+    await expect(store.update("ghost", { prompt: "x" })).rejects.toThrow(
+      CriteriaNotFoundError,
+    );
+  });
+
+  it("throws CriteriaNotFoundError on delete of a missing criterion", async () => {
+    const store = new CriteriaStore(fakeCollection());
+    await expect(store.delete("ghost")).rejects.toThrow(CriteriaNotFoundError);
+  });
+
+  it("throws CriteriaHasDependentsError carrying dependent ids on delete", async () => {
+    const col = fakeCollection([
+      { id: "parent", prompt: "p", dependsOn: [], createdAt: new Date() },
+      { id: "child", prompt: "c", dependsOn: ["parent"], createdAt: new Date() },
+    ]);
+    const store = new CriteriaStore(col);
+
+    await expect(store.delete("parent")).rejects.toMatchObject({
+      dependents: ["child"],
+    });
+    await expect(store.delete("parent")).rejects.toBeInstanceOf(
+      CriteriaHasDependentsError,
+    );
+  });
+
+  it("deletes a criterion that has no dependents", async () => {
+    const col = fakeCollection([
+      { id: "lonely", prompt: "p", dependsOn: [], createdAt: new Date() },
+    ]);
+    const store = new CriteriaStore(col);
+    await store.delete("lonely");
+    expect(await store.get("lonely")).toBeNull();
   });
 });

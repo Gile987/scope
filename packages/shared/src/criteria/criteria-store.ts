@@ -5,6 +5,12 @@ import { Collection } from 'mongodb';
 import { CriteriaConfig, CriteriaDocument, GateId } from '../types/types.js';
 import { DependencyGraph } from '../graph/dependency-graph.js';
 import { gatesSatisfyInvariant } from '../gates/gates.js';
+import {
+  CriteriaDuplicateError,
+  CriteriaHasDependentsError,
+  CriteriaNotFoundError,
+  CriteriaValidationError,
+} from './criteria-errors.js';
 
 /**
  * MongoDB-backed criteria store for CRUD operations on criteria definitions.
@@ -38,16 +44,16 @@ export class CriteriaStore {
     const { id, prompt, dependsOn = [], gates } = input;
 
     // Validate ID format
-    if (!/^[a-z0-9_-]+$/.test(id)) {
-      throw new Error(
-        `Invalid criteria ID '${id}'. Must match [a-z0-9_-]+`
+    if (!/^[a-z][a-z0-9_]*$/.test(id)) {
+      throw new CriteriaValidationError(
+        `Invalid criteria ID '${id}'. Must match [a-z][a-z0-9_]*`
       );
     }
 
     // Check for duplicates
     const existing = await this.collection.findOne({ id, deletedAt: { $exists: false } });
     if (existing) {
-      throw new Error(`Criteria '${id}' already exists`);
+      throw new CriteriaDuplicateError(`Criteria '${id}' already exists`);
     }
 
     // Validate dependency references exist
@@ -82,7 +88,7 @@ export class CriteriaStore {
   ): Promise<CriteriaDocument> {
     const existing = await this.get(id);
     if (!existing) {
-      throw new Error(`Criteria '${id}' not found`);
+      throw new CriteriaNotFoundError(`Criteria '${id}' not found`);
     }
 
     // Validate dependencies if changing them
@@ -97,7 +103,11 @@ export class CriteriaStore {
     if (patch.dependsOn !== undefined || patch.gates !== undefined) {
       const effectiveDependsOn = patch.dependsOn ?? existing.dependsOn ?? [];
       const effectiveGates = patch.gates !== undefined ? patch.gates : existing.gates;
+      // As a child: every parent must be compatible with at least this node's gates.
       await this.validateGateCompatibility(id, effectiveDependsOn, effectiveGates);
+      // As a parent: every existing dependent must remain compatible with this
+      // node's (possibly narrowed) gates.
+      await this.validateDependentsRemainCompatible(id, effectiveGates);
     }
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
@@ -120,7 +130,7 @@ export class CriteriaStore {
   async delete(id: string): Promise<void> {
     const existing = await this.get(id);
     if (!existing) {
-      throw new Error(`Criteria '${id}' not found`);
+      throw new CriteriaNotFoundError(`Criteria '${id}' not found`);
     }
 
     // Check for dependents
@@ -132,9 +142,10 @@ export class CriteriaStore {
       .toArray();
 
     if (dependents.length > 0) {
-      const depIds = dependents.map((d) => d.id).join(', ');
-      throw new Error(
-        `Cannot delete '${id}': other criteria depend on it: ${depIds}`
+      const depIds = dependents.map((d) => d.id);
+      throw new CriteriaHasDependentsError(
+        `Cannot delete '${id}': other criteria depend on it: ${depIds.join(', ')}`,
+        depIds
       );
     }
 
@@ -235,7 +246,7 @@ export class CriteriaStore {
     for (const depId of dependsOn) {
       const dep = await this.get(depId);
       if (!dep) {
-        throw new Error(`Dependency '${depId}' does not exist`);
+        throw new CriteriaValidationError(`Dependency '${depId}' does not exist`);
       }
     }
   }
@@ -262,7 +273,7 @@ export class CriteriaStore {
       new DependencyGraph(configs);
     } catch (error) {
       if (error instanceof Error && error.message.includes('ycle')) {
-        throw new Error(
+        throw new CriteriaValidationError(
           `Adding dependencies [${dependsOn.join(', ')}] to '${criterionId}' would create a cycle`
         );
       }
@@ -295,9 +306,36 @@ export class CriteriaStore {
         const childGates = !gates || gates.length === 0 ? "all gates" : gates.join(", ");
         const parentGates =
           !parent.gates || parent.gates.length === 0 ? "all gates" : parent.gates.join(", ");
-        throw new Error(
+        throw new CriteriaValidationError(
           `'${criterionId}' is compatible with [${childGates}] but its dependency ` +
             `'${parentId}' is not (compatible with: ${parentGates}). A dependency must be ` +
+            `compatible with at least every gate its dependent is.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Enforce the same invariant from the parent side: every active criterion that
+   * depends on `criterionId` must remain compatible with `criterionId`'s
+   * (possibly narrowed) gates after an update (`compat(this) ⊇ compat(dependent)`).
+   */
+  private async validateDependentsRemainCompatible(
+    criterionId: string,
+    gates: GateId[] | undefined,
+  ): Promise<void> {
+    const dependents = await this.collection
+      .find({ dependsOn: criterionId, deletedAt: { $exists: false } })
+      .toArray();
+
+    for (const child of dependents) {
+      if (!gatesSatisfyInvariant(gates, child.gates)) {
+        const thisGates = !gates || gates.length === 0 ? "all gates" : gates.join(", ");
+        const childGates =
+          !child.gates || child.gates.length === 0 ? "all gates" : child.gates.join(", ");
+        throw new CriteriaValidationError(
+          `Dependent '${child.id}' is compatible with [${childGates}] but '${criterionId}' ` +
+            `would be compatible with [${thisGates}] after this change. A dependency must be ` +
             `compatible with at least every gate its dependent is.`,
         );
       }
