@@ -74,11 +74,21 @@ const DEFAULT_JUDGE_CLIENT_TIMEOUT = 10 * 60 * 1000;
 const DEFAULT_JUDGE_CLIENT_RETRIES = 2;
 
 /**
- * Returns true if the error is a timeout or transient network failure
- * that warrants a retry of the judge evaluation.
+ * Returns true if the error is a timeout, transient network failure, or a
+ * transient judge-side 5xx that warrants a retry of the judge evaluation.
+ *
+ * A `JudgeInfrastructureError` with `httpStatus >= 500` means the judge service
+ * itself blipped (e.g. a restart, a transient upstream failure) rather than the
+ * agent's output failing a criterion; the evaluate POST is effectively
+ * idempotent, so retrying is safe. We deliberately do NOT retry version
+ * mismatches: those are a deployment/version problem that won't self-heal
+ * within the retry window.
  */
-function isRetryableJudgeError(error: unknown): boolean {
+export function isRetryableJudgeError(error: unknown): boolean {
   if (!error) return false;
+  if (error instanceof JudgeInfrastructureError) {
+    return (error.httpStatus ?? 0) >= 500 && !error.isVersionMismatch;
+  }
   const msg = error instanceof Error ? error.message : String(error);
   return (
     msg.includes("The operation was aborted") ||

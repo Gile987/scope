@@ -3,8 +3,8 @@
 
 import { CopilotClient, defineTool, SessionEvent } from "@github/copilot-sdk";
 import { readFileSync, readdirSync, statSync, existsSync } from "fs";
-import { join } from "path";
-import { execSync } from "child_process";
+import { join, resolve, sep } from "path";
+import { execFileSync } from "child_process";
 import {
   CriteriaConfig,
   CriterionResult,
@@ -35,6 +35,25 @@ const DEFAULT_JUDGE_TIMEOUT = 480_000;
 /** Default number of retries for sendAndWait calls */
 const DEFAULT_JUDGE_RETRIES = 3;
 
+/**
+ * Returns true only if `target` resolves to a path inside (or equal to) the
+ * workspace `root`. A plain `startsWith` check is unsafe: `join()` normalizes
+ * `..`, so `join("/tmp/ws", "../ws2/x")` → `/tmp/ws2/x`, which shares the
+ * `/tmp/ws` prefix and would slip past `startsWith("/tmp/ws")`. We compare the
+ * fully-resolved paths and require an exact match or a separator boundary so a
+ * sibling like `/tmp/ws2` can never be mistaken for being under `/tmp/ws`.
+ * Both tools' handlers rely on this since they are `skipPermission: true` and
+ * therefore callable non-interactively by the model.
+ */
+export function isWithinWorkspace(root: string, target: string): boolean {
+  const resolvedRoot = resolve(root);
+  const resolvedTarget = resolve(target);
+  return (
+    resolvedTarget === resolvedRoot ||
+    resolvedTarget.startsWith(resolvedRoot + sep)
+  );
+}
+
 export abstract class JudgeStrategy {
   protected model: string;
   protected timeout: number;
@@ -59,6 +78,7 @@ export abstract class JudgeStrategy {
    * Create filesystem inspection tools scoped to the workspace
    */
   protected createFileTools(workspacePath: string) {
+    const workspaceRoot = resolve(workspacePath);
     const readFile = defineTool("read_file", {
       description:
         "Read the contents of a file in the workspace. Returns the full text content. Use relative paths from the workspace root.",
@@ -78,8 +98,8 @@ export abstract class JudgeStrategy {
         required: ["path"],
       },
       handler: async (args: { path: string }) => {
-        const fullPath = join(workspacePath, args.path);
-        if (!fullPath.startsWith(workspacePath)) {
+        const fullPath = join(workspaceRoot, args.path);
+        if (!isWithinWorkspace(workspaceRoot, fullPath)) {
           return { error: "Path traversal not allowed" };
         }
         if (!existsSync(fullPath)) {
@@ -123,8 +143,8 @@ export abstract class JudgeStrategy {
         required: ["path"],
       },
       handler: async (args: { path: string }) => {
-        const fullPath = join(workspacePath, args.path);
-        if (!fullPath.startsWith(workspacePath)) {
+        const fullPath = join(workspaceRoot, args.path);
+        if (!isWithinWorkspace(workspaceRoot, fullPath)) {
           return { error: "Path traversal not allowed" };
         }
         if (!existsSync(fullPath)) {
@@ -185,23 +205,49 @@ export abstract class JudgeStrategy {
         path?: string;
         filePattern?: string;
       }) => {
-        const searchPath = join(workspacePath, args.path || ".");
-        if (!searchPath.startsWith(workspacePath)) {
+        const searchPath = join(workspaceRoot, args.path || ".");
+        if (!isWithinWorkspace(workspaceRoot, searchPath)) {
           return { error: "Path traversal not allowed" };
         }
         try {
-          let cmd = `grep -rn --include='${args.filePattern || "*"}' "${args.pattern.replace(/"/g, '\\"')}" "${searchPath}" 2>/dev/null | head -50`;
-          const output = execSync(cmd, {
-            encoding: "utf-8",
-            timeout: 10000,
-          }).trim();
-          if (!output) {
+          // Run grep without a shell. Passing an argv array (and `-e` before the
+          // pattern) means user-controlled values are never interpreted by a
+          // shell, eliminating the command-injection surface (e.g. `$(...)`,
+          // backticks). This matters because the tool is skipPermission: true.
+          let output: string;
+          try {
+            output = execFileSync(
+              "grep",
+              [
+                "-rn",
+                `--include=${args.filePattern || "*"}`,
+                "-e",
+                args.pattern,
+                searchPath,
+              ],
+              {
+                encoding: "utf-8",
+                timeout: 10000,
+                stdio: ["ignore", "pipe", "ignore"],
+                maxBuffer: 10 * 1024 * 1024,
+              }
+            );
+          } catch (err) {
+            // grep exits 1 when there are no matches — that's not an error.
+            const status = (err as { status?: number }).status;
+            if (status === 1) {
+              return { matches: [], message: "No matches found" };
+            }
+            throw err;
+          }
+          const trimmed = output.trim();
+          if (!trimmed) {
             return { matches: [], message: "No matches found" };
           }
-          const matches = output.split("\n").map((line) => {
-            const relLine = line.replace(workspacePath + "/", "");
-            return relLine;
-          });
+          const matches = trimmed
+            .split("\n")
+            .slice(0, 50)
+            .map((line) => line.replace(workspaceRoot + sep, ""));
           return { matches };
         } catch {
           return { matches: [], message: "No matches found or search error" };
@@ -223,8 +269,8 @@ export abstract class JudgeStrategy {
         required: ["path"],
       },
       handler: async (args: { path: string }) => {
-        const fullPath = join(workspacePath, args.path);
-        if (!fullPath.startsWith(workspacePath)) {
+        const fullPath = join(workspaceRoot, args.path);
+        if (!isWithinWorkspace(workspaceRoot, fullPath)) {
           return { error: "Path traversal not allowed" };
         }
         const exists = existsSync(fullPath);

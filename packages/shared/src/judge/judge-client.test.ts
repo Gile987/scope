@@ -2,7 +2,11 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { JudgeClient, JudgeInfrastructureError } from "./judge-client.js";
+import {
+  JudgeClient,
+  JudgeInfrastructureError,
+  isRetryableJudgeError,
+} from "./judge-client.js";
 
 function mockFetchResponse(opts: {
   ok: boolean;
@@ -76,5 +80,41 @@ describe("JudgeClient error classification", () => {
     const result = await client.evaluate(request);
     expect(result.passed).toBe(true);
     expect(result.feedback).toBe("All requirements met.");
+  });
+});
+
+describe("isRetryableJudgeError", () => {
+  it("retries transient judge-side 5xx infrastructure errors", () => {
+    const err = new JudgeInfrastructureError("judge boom", {
+      httpStatus: 503,
+      isVersionMismatch: false,
+    });
+    expect(isRetryableJudgeError(err)).toBe(true);
+  });
+
+  it("does NOT retry a protocol version mismatch (won't self-heal)", () => {
+    const err = new JudgeInfrastructureError("protocol mismatch", {
+      httpStatus: 500,
+      isVersionMismatch: true,
+    });
+    expect(isRetryableJudgeError(err)).toBe(false);
+  });
+
+  it("does NOT retry 4xx infrastructure errors", () => {
+    const err = new JudgeInfrastructureError("bad request", {
+      httpStatus: 400,
+      isVersionMismatch: false,
+    });
+    expect(isRetryableJudgeError(err)).toBe(false);
+  });
+
+  it("retries transient network failures", () => {
+    expect(isRetryableJudgeError(new Error("ECONNRESET"))).toBe(true);
+    expect(isRetryableJudgeError(new Error("The operation was aborted"))).toBe(true);
+  });
+
+  it("does not retry unrelated errors", () => {
+    expect(isRetryableJudgeError(new Error("criteria not met"))).toBe(false);
+    expect(isRetryableJudgeError(null)).toBe(false);
   });
 });
