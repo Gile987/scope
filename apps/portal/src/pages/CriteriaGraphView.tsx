@@ -14,8 +14,8 @@ import { GATE_ORDER, GATE_METADATA, isCriterionCompatibleWithGate, type GateId }
 import { useVisibleGates } from "@/hooks/useVisibleGates";
 import { useRef, useState, useMemo } from "react";
 
-// Simple DAG layout using topological sort + layering
-function layoutGraph(graph: CriteriaGraphData) {
+// Simple DAG layout using topological sort + layering. Exported for testing.
+export function layoutGraph(graph: CriteriaGraphData) {
   const { nodes, edges } = graph;
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const inDegree = new Map<string, number>();
@@ -30,21 +30,34 @@ function layoutGraph(graph: CriteriaGraphData) {
     children.get(e.source)?.push(e.target);
   }
 
-  // Topological layering (Kahn's algorithm)
+  // Topological layering (Kahn's algorithm), made robust to cycles: if the
+  // remaining subgraph has no in-degree-0 node (i.e. a cycle), force-place the
+  // lowest in-degree node to break the deadlock so every node still gets laid
+  // out instead of the whole canvas rendering blank.
   const layers: string[][] = [];
-  let queue = nodes.filter((n) => (inDegree.get(n.id) ?? 0) === 0).map((n) => n.id);
+  const remaining = new Set(nodes.map((n) => n.id));
 
-  while (queue.length > 0) {
-    layers.push([...queue]);
-    const next: string[] = [];
-    for (const id of queue) {
+  while (remaining.size > 0) {
+    let ready = [...remaining].filter((id) => (inDegree.get(id) ?? 0) <= 0);
+    if (ready.length === 0) {
+      let forced: string | null = null;
+      let min = Infinity;
+      for (const id of remaining) {
+        const d = inDegree.get(id) ?? 0;
+        if (d < min) {
+          min = d;
+          forced = id;
+        }
+      }
+      ready = forced ? [forced] : [...remaining];
+    }
+    layers.push([...ready]);
+    for (const id of ready) {
+      remaining.delete(id);
       for (const child of children.get(id) ?? []) {
-        const deg = (inDegree.get(child) ?? 1) - 1;
-        inDegree.set(child, deg);
-        if (deg === 0) next.push(child);
+        inDegree.set(child, (inDegree.get(child) ?? 1) - 1);
       }
     }
-    queue = next;
   }
 
   // Assign positions with dynamic node widths
