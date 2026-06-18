@@ -7,12 +7,110 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { List, Plus, X } from "lucide-react";
+import { List, Plus, X, AlertTriangle } from "lucide-react";
 import type { CriteriaGraphData } from "@/types";
 import { GATE_ORDER, GATE_METADATA, isCriterionCompatibleWithGate, type GateId } from "@/lib/gates";
 import { useVisibleGates } from "@/hooks/useVisibleGates";
 import { useRef, useState, useMemo } from "react";
+
+// Find every node and edge that participates in a dependency cycle, using
+// Tarjan's strongly-connected-components algorithm. A node is "in a cycle" iff
+// it belongs to an SCC of size > 1 or has a self-edge; an edge is in a cycle iff
+// both endpoints share such an SCC. Returns the cyclic nodes/edges plus the SCC
+// groupings (each an array of node ids) for user-facing messaging. Exported for
+// testing.
+export function detectCycles(
+  nodes: CriteriaGraphData["nodes"],
+  edges: CriteriaGraphData["edges"],
+) {
+  const adj = new Map<string, string[]>();
+  const ids = new Set(nodes.map((n) => n.id));
+  for (const id of ids) adj.set(id, []);
+  for (const e of edges) {
+    if (ids.has(e.source) && ids.has(e.target)) adj.get(e.source)!.push(e.target);
+  }
+
+  const index = new Map<string, number>();
+  const lowlink = new Map<string, number>();
+  const onStack = new Set<string>();
+  const stack: string[] = [];
+  const sccOf = new Map<string, number>();
+  const sccs: string[][] = [];
+  let counter = 0;
+
+  // Iterative Tarjan to stay safe on large graphs.
+  for (const start of ids) {
+    if (index.has(start)) continue;
+    const work: Array<{ node: string; childIdx: number }> = [{ node: start, childIdx: 0 }];
+    while (work.length > 0) {
+      const frame = work[work.length - 1];
+      const v = frame.node;
+      if (frame.childIdx === 0) {
+        index.set(v, counter);
+        lowlink.set(v, counter);
+        counter++;
+        stack.push(v);
+        onStack.add(v);
+      }
+      const neighbors = adj.get(v) ?? [];
+      if (frame.childIdx < neighbors.length) {
+        const w = neighbors[frame.childIdx];
+        frame.childIdx++;
+        if (!index.has(w)) {
+          work.push({ node: w, childIdx: 0 });
+        } else if (onStack.has(w)) {
+          lowlink.set(v, Math.min(lowlink.get(v)!, index.get(w)!));
+        }
+      } else {
+        if (lowlink.get(v) === index.get(v)) {
+          const comp: string[] = [];
+          let w: string;
+          do {
+            w = stack.pop()!;
+            onStack.delete(w);
+            sccOf.set(w, sccs.length);
+            comp.push(w);
+          } while (w !== v);
+          sccs.push(comp);
+        }
+        work.pop();
+        if (work.length > 0) {
+          const parent = work[work.length - 1].node;
+          lowlink.set(parent, Math.min(lowlink.get(parent)!, lowlink.get(v)!));
+        }
+      }
+    }
+  }
+
+  const selfLoops = new Set<string>();
+  for (const e of edges) if (e.source === e.target) selfLoops.add(e.source);
+
+  const cycleNodes = new Set<string>();
+  const cycleGroups: string[][] = [];
+  for (const comp of sccs) {
+    if (comp.length > 1 || selfLoops.has(comp[0])) {
+      for (const id of comp) cycleNodes.add(id);
+      cycleGroups.push(comp);
+    }
+  }
+
+  const cycleEdges = new Set<string>();
+  for (const e of edges) {
+    if (e.source === e.target && selfLoops.has(e.source)) {
+      cycleEdges.add(`${e.source}->${e.target}`);
+      continue;
+    }
+    const a = sccOf.get(e.source);
+    const b = sccOf.get(e.target);
+    if (a !== undefined && a === b && cycleNodes.has(e.source)) {
+      cycleEdges.add(`${e.source}->${e.target}`);
+    }
+  }
+
+  return { cycleNodes, cycleEdges, cycleGroups };
+}
 
 // Simple DAG layout using topological sort + layering. Exported for testing.
 export function layoutGraph(graph: CriteriaGraphData) {
@@ -60,6 +158,13 @@ export function layoutGraph(graph: CriteriaGraphData) {
     }
   }
 
+  // Identify genuine cycles via strongly-connected components (Tarjan). Every
+  // node in an SCC of size > 1 (or with a self-edge) is part of a cycle, and so
+  // is every edge whose endpoints share that SCC. This is layout-independent —
+  // unlike a back-edge heuristic it doesn't depend on which node the layering
+  // happened to place first — so the user always sees the same, correct loop.
+  const { cycleNodes, cycleEdges, cycleGroups } = detectCycles(nodes, edges);
+
   // Assign positions with dynamic node widths
   const NODE_H = 60;
   const H_GAP = 40;
@@ -98,7 +203,7 @@ export function layoutGraph(graph: CriteriaGraphData) {
   const maxX = Math.max(...allX);
   const totalW = maxX - minX;
 
-  return { nodeMap, positions, nodeWidths, NODE_MIN_W, NODE_H, totalW, totalH, minX, edges };
+  return { nodeMap, positions, nodeWidths, NODE_MIN_W, NODE_H, totalW, totalH, minX, edges, cycleEdges, cycleNodes, cycleGroups };
 }
 
 export function CriteriaGraphView() {
@@ -217,7 +322,7 @@ export function CriteriaGraphView() {
     );
   }
 
-  const { nodeMap, positions, nodeWidths, NODE_MIN_W, NODE_H, totalW, totalH, minX, edges } = layout;
+  const { nodeMap, positions, nodeWidths, NODE_MIN_W, NODE_H, totalW, totalH, minX, edges, cycleEdges, cycleNodes, cycleGroups } = layout;
   const PADDING = 60;
   const viewBox = `${minX - PADDING} ${-PADDING} ${totalW + PADDING * 2} ${totalH + PADDING * 2 + NODE_H}`;
 
@@ -239,6 +344,37 @@ export function CriteriaGraphView() {
     <div className="space-y-6">
       {header}
       {gateFilterBar}
+
+      {cycleGroups.length > 0 && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>
+            Circular {cycleGroups.length === 1 ? "dependency" : "dependencies"} detected
+          </AlertTitle>
+          <AlertDescription>
+            <p className="mb-2">
+              {cycleGroups.length === 1 ? "This set of criteria forms" : "These sets of criteria form"}{" "}
+              a dependency loop — each criterion transitively depends on itself, so there is no valid
+              evaluation order. Remove one of the dependencies in the loop (the dashed red edges) to
+              break it.
+            </p>
+            <ul className="space-y-1">
+              {cycleGroups.map((group) => (
+                <li key={group.join("|")} className="font-mono text-xs">
+                  {group.map((id, i) => (
+                    <span key={id}>
+                      {i > 0 && <span className="opacity-60"> ↔ </span>}
+                      <Link to={`/criteria/${id}`} className="underline underline-offset-2">
+                        {id}
+                      </Link>
+                    </span>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Card>
         <CardContent className="p-2">
@@ -270,6 +406,16 @@ export function CriteriaGraphView() {
                 >
                   <polygon points="0 0, 10 3.5, 0 7" className="fill-primary" />
                 </marker>
+                <marker
+                  id="arrowhead-cycle"
+                  markerWidth="10"
+                  markerHeight="7"
+                  refX="10"
+                  refY="3.5"
+                  orient="auto"
+                >
+                  <polygon points="0 0, 10 3.5, 0 7" className="fill-destructive" />
+                </marker>
               </defs>
 
               {/* Edges */}
@@ -279,6 +425,7 @@ export function CriteriaGraphView() {
                 if (!from || !to) return null;
                 const edgeKey = `${e.source}->${e.target}`;
                 const isActive = hoveredEdges.has(edgeKey);
+                const isCycle = cycleEdges.has(edgeKey);
                 return (
                   <line
                     key={edgeKey}
@@ -286,9 +433,22 @@ export function CriteriaGraphView() {
                     y1={from.y + NODE_H}
                     x2={to.x}
                     y2={to.y}
-                    strokeWidth={isActive ? 2 : 1}
-                    className={isActive ? "stroke-primary" : "stroke-muted-foreground/30"}
-                    markerEnd={isActive ? "url(#arrowhead-active)" : "url(#arrowhead)"}
+                    strokeWidth={isCycle || isActive ? 2 : 1}
+                    strokeDasharray={isCycle ? "6 4" : undefined}
+                    className={
+                      isCycle
+                        ? "stroke-destructive"
+                        : isActive
+                          ? "stroke-primary"
+                          : "stroke-muted-foreground/30"
+                    }
+                    markerEnd={
+                      isCycle
+                        ? "url(#arrowhead-cycle)"
+                        : isActive
+                          ? "url(#arrowhead-active)"
+                          : "url(#arrowhead)"
+                    }
                   />
                 );
               })}
@@ -299,6 +459,7 @@ export function CriteriaGraphView() {
                 if (!node) return null;
                 const deps = node.dependsOn?.length ?? 0;
                 const isActive = hoveredNode ? hoveredNodes.has(id) : true;
+                const isCycleNode = cycleNodes.has(id);
                 const nodeW = nodeWidths.get(id) ?? NODE_MIN_W;
                 return (
                   <g
@@ -314,9 +475,11 @@ export function CriteriaGraphView() {
                         height={NODE_H}
                         rx={8}
                         className={
-                          isActive
-                            ? "fill-background stroke-primary stroke-2"
-                            : "fill-muted/50 stroke-muted-foreground/20 stroke-1"
+                          isCycleNode
+                            ? "fill-background stroke-destructive stroke-2"
+                            : isActive
+                              ? "fill-background stroke-primary stroke-2"
+                              : "fill-muted/50 stroke-muted-foreground/20 stroke-1"
                         }
                       />
                       <text
@@ -354,6 +517,12 @@ export function CriteriaGraphView() {
           <div className="w-6 h-0.5 bg-muted-foreground/30" />
           Dependency edge (parent → child)
         </div>
+        {cycleEdges.size > 0 && (
+          <div className="flex items-center gap-1.5">
+            <div className="w-6 border-t-2 border-dashed border-destructive" />
+            <span className="text-destructive">Circular dependency</span>
+          </div>
+        )}
         <span>Hover a node to highlight its connections</span>
       </div>
     </div>
