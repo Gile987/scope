@@ -131,3 +131,58 @@ A singleton accessor (`getCriteriaProvider()`) ensures the provider is created o
 - Judge depends on API availability during criteria resolution
 - First evaluation after cache expiry incurs one HTTP round-trip
 - If API is down, judge cannot resolve criteria (mitigated by cache TTL)
+
+## Write Path — `CriteriaStore` as the Single Source of Truth
+
+The `CriteriaProvider` abstraction above governs **reads**. All criteria **writes**
+(create, update, delete, and bulk seed) go through a single class, `CriteriaStore`
+(`packages/shared/src/criteria/criteria-store.ts`), which the API routes
+(`apps/api/src/routes/criteria.ts`) delegate to:
+
+```mermaid
+flowchart LR
+    Portal["Portal / CLI"] -->|POST/PUT/DELETE /api/v1/criteria| Routes["criteria routes"]
+    Routes -->|create/update/delete/seed| Store["CriteriaStore"]
+    Store --> Mongo[("MongoDB")]
+```
+
+`CriteriaStore` centralises every write-time invariant so the rules cannot be
+bypassed or drift between callers:
+
+- **ID format** — must match `^[a-z][a-z0-9_]*$` (aligned with the route zod schema).
+- **Uniqueness** — duplicate active ids are rejected.
+- **Dependency existence** — every `dependsOn` id must resolve to an active criterion.
+- **Acyclicity** — a proposed change is rejected if it would introduce a cycle
+  (validated by building a temporary `DependencyGraph` over the resulting set).
+  This closes a prior gap where the inline route logic skipped the transitive
+  cycle check, letting cyclic dependencies be written and only failing later at
+  judge time.
+- **Gate-compatibility invariant** — enforced from both sides: a child's gates must
+  be a subset of every parent's gates, and narrowing a parent may not strand an
+  existing dependent.
+- **Referential integrity on delete** — deleting a criterion that still has
+  dependents is rejected.
+
+### Typed errors → HTTP status
+
+`CriteriaStore` throws typed errors (`packages/shared/src/criteria/criteria-errors.ts`)
+that the routes map to HTTP responses, avoiding fragile string matching:
+
+| Error class | HTTP | Notes |
+|-------------|------|-------|
+| `CriteriaValidationError` | 400 | Bad id, missing dependency, cycle, gate-invariant violation |
+| `CriteriaNotFoundError` | 404 | Update/delete of an unknown id |
+| `CriteriaDuplicateError` | 409 | Create with an existing id |
+| `CriteriaHasDependentsError` | 409 | Delete blocked; carries `dependents: string[]` |
+
+### Bulk seed (`POST /api/v1/criteria/seed`)
+
+Seeding keeps its insert-if-missing semantics (existing ids are skipped, not
+overwritten) but first validates that the **resulting** active set is acyclic by
+constructing a `DependencyGraph` over the merge of existing criteria and the new
+batch. Edges to ids not present in the set are tolerated (partial/forward
+references), so only a genuine cycle rejects the whole batch with `400`.
+
+> Reads (`GET /api/v1/criteria`, `/graph`, `/:id`) and unrelated endpoints
+> (`/generate-prompt`, `/mdp`) remain inline — they carry no write-time
+> invariants. Only the four write paths route through `CriteriaStore`.
