@@ -33,7 +33,7 @@ const hasToken = !!process.env.GITHUB_TOKEN;
  * credential is entitled to. Allow CI to override via JUDGE_MODEL and
  * otherwise pick a broadly-available model.
  */
-const JUDGE_MODEL = process.env.JUDGE_MODEL || "claude-opus-4.6";
+const JUDGE_MODEL = process.env.JUDGE_MODEL || "gpt-5.4-mini";
 
 describe("judge end-to-end evaluation (integration)", () => {
   let workspaceDir: string;
