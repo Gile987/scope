@@ -23,6 +23,7 @@ function fakeCollection(seed: CriteriaDocument[] = []) {
       if (key === "deletedAt") {
         const hasDeleted = doc.deletedAt !== undefined;
         if ((cond as any)?.$exists === false && hasDeleted) return false;
+        if ((cond as any)?.$exists === true && !hasDeleted) return false;
         continue;
       }
       if (key === "dependsOn") {
@@ -40,12 +41,22 @@ function fakeCollection(seed: CriteriaDocument[] = []) {
       return docs.find((d) => matches(d, filter)) ?? null;
     },
     async insertOne(doc: any) {
+      // Faithfully model the full unique index on `id` (migration 002): it does
+      // NOT exclude soft-deleted docs, so inserting over a tombstone collides.
+      if (docs.some((d) => d.id === doc.id)) {
+        throw Object.assign(new Error("E11000 duplicate key error"), { code: 11000 });
+      }
       docs.push({ ...doc });
       return { insertedId: doc.id };
     },
     async updateOne(filter: any, update: any) {
       const doc = docs.find((d) => matches(d, filter));
-      if (doc && update.$set) Object.assign(doc, update.$set);
+      if (doc) {
+        if (update.$set) Object.assign(doc, update.$set);
+        if (update.$unset) {
+          for (const key of Object.keys(update.$unset)) delete (doc as any)[key];
+        }
+      }
       return { matchedCount: doc ? 1 : 0 };
     },
     find(filter: any) {
@@ -234,3 +245,69 @@ describe("CriteriaStore typed errors", () => {
     expect(await store.get("lonely")).toBeNull();
   });
 });
+
+describe("CriteriaStore revives soft-deleted ids on re-create", () => {
+  it("re-creating a soft-deleted id succeeds and returns a fresh active criterion", async () => {
+    const col = fakeCollection([
+      {
+        id: "revive_me",
+        prompt: "old",
+        dependsOn: [],
+        createdAt: new Date("2020-01-01"),
+        updatedAt: new Date("2020-02-01"),
+        deletedAt: new Date("2020-03-01"),
+      },
+    ]);
+    const store = new CriteriaStore(col);
+
+    const created = await store.create({ id: "revive_me", prompt: "new" });
+
+    expect(created.prompt).toBe("new");
+    expect((created as any).deletedAt).toBeUndefined();
+
+    // It is now visible as an active criterion with the tombstone cleared.
+    const fetched = await store.get("revive_me");
+    expect(fetched).not.toBeNull();
+    expect(fetched!.prompt).toBe("new");
+    expect((fetched as any).deletedAt).toBeUndefined();
+    expect((fetched as any).updatedAt).toBeUndefined();
+
+    // No duplicate row was created — the tombstone was overwritten in place.
+    expect(col._docs().filter((d: CriteriaDocument) => d.id === "revive_me")).toHaveLength(1);
+  });
+
+  it("still enforces validation when reviving (cycle rejected, tombstone untouched)", async () => {
+    const col = fakeCollection([
+      { id: "a", prompt: "a", dependsOn: ["b"], createdAt: new Date() },
+      {
+        id: "b",
+        prompt: "old",
+        dependsOn: [],
+        createdAt: new Date("2020-01-01"),
+        deletedAt: new Date("2020-03-01"),
+      },
+    ]);
+    const store = new CriteriaStore(col);
+
+    // Reviving "b" with a dependency on "a" would form a cycle a->b->a.
+    await expect(
+      store.create({ id: "b", prompt: "new", dependsOn: ["a"] }),
+    ).rejects.toThrow(CriteriaValidationError);
+
+    // The tombstone must remain soft-deleted and unchanged.
+    const b = col._docs().find((d: CriteriaDocument) => d.id === "b")!;
+    expect(b.deletedAt).toBeDefined();
+    expect(b.prompt).toBe("old");
+  });
+
+  it("an active duplicate still throws CriteriaDuplicateError (not revived)", async () => {
+    const col = fakeCollection([
+      { id: "active", prompt: "p", dependsOn: [], createdAt: new Date() },
+    ]);
+    const store = new CriteriaStore(col);
+    await expect(store.create({ id: "active", prompt: "q" })).rejects.toThrow(
+      CriteriaDuplicateError,
+    );
+  });
+});
+

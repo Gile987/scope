@@ -50,11 +50,17 @@ export class CriteriaStore {
       );
     }
 
-    // Check for duplicates
+    // Check for duplicates among *active* criteria.
     const existing = await this.collection.findOne({ id, deletedAt: { $exists: false } });
     if (existing) {
       throw new CriteriaDuplicateError(`Criteria '${id}' already exists`);
     }
+
+    // A soft-deleted criterion may still hold this id. The collection has a full
+    // unique index on `id` (it does not exclude soft-deleted docs), so a plain
+    // insert would collide (E11000). Detect this case and *revive* the tombstone
+    // as a fresh criterion instead of failing.
+    const softDeleted = await this.collection.findOne({ id, deletedAt: { $exists: true } });
 
     // Validate dependency references exist
     if (dependsOn.length > 0) {
@@ -77,8 +83,39 @@ export class CriteriaStore {
       createdAt: new Date(),
     };
 
-    await this.collection.insertOne(doc as any);
+    try {
+      if (softDeleted) {
+        // Overwrite the tombstone in place: install the new content and clear
+        // the soft-delete marker (and any stale updatedAt) so the revived
+        // criterion is indistinguishable from a brand-new one.
+        await this.collection.updateOne(
+          { id, deletedAt: { $exists: true } },
+          {
+            $set: { ...doc },
+            $unset: { deletedAt: '', updatedAt: '' },
+          }
+        );
+      } else {
+        await this.collection.insertOne(doc as any);
+      }
+    } catch (err) {
+      // Safety net: any residual unique-index collision (e.g. a concurrent
+      // create racing in) surfaces as a clean 409 rather than an opaque 500.
+      if (this.isDuplicateKeyError(err)) {
+        throw new CriteriaDuplicateError(`Criteria '${id}' already exists`);
+      }
+      throw err;
+    }
     return doc;
+  }
+
+  /** True for a MongoDB duplicate-key error (E11000). */
+  private isDuplicateKeyError(err: unknown): boolean {
+    return (
+      typeof err === 'object' &&
+      err !== null &&
+      (err as { code?: number }).code === 11000
+    );
   }
 
   /** Update a criterion's prompt, dependencies and/or gate compatibility */
