@@ -286,10 +286,10 @@ FEEDBACK_DESCENDANT_GUARD=false
 Azure Storage Queue name for report generation jobs. The API enqueues messages here when a report is requested; the report-generator worker polls this queue.
 
 ### REPORT_MODEL
-**Default:** `gpt-4.1`
+**Default:** `gpt-5.4-mini`
 **Type:** string
 
-The LLM model used by the report-generator worker (via the Copilot SDK) to generate run analysis reports. Examples: `gpt-4.1`, `gpt-4o`, `claude-sonnet-4`.
+The LLM model used by the report-generator worker (via the Copilot SDK) to generate run analysis reports. Examples: `gpt-5.4-mini`, `gpt-4.1`, `gpt-4o`, `claude-sonnet-4`.
 
 ### SCOPE_MT_API_URL
 **Default:** `http://localhost:3001` (local), `http://api:80` (Docker)

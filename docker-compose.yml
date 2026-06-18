@@ -625,7 +625,7 @@ services:
     environment:
       <<: *common-env
       AZURE_STORAGE_QUEUE_REPORT: report-queue
-      REPORT_MODEL: ${REPORT_MODEL:-gpt-4.1}
+      REPORT_MODEL: ${REPORT_MODEL:-gpt-5.4-mini}
       SCOPE_MT_API_URL: http://api:80
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       TOKEN_MANAGER_URL: http://token-manager:80
