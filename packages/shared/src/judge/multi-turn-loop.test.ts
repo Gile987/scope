@@ -26,6 +26,15 @@ vi.mock("./judge-client.js", () => ({
   JudgeClient: vi.fn().mockImplementation(() => ({
     evaluate: vi.fn().mockResolvedValue({ passed: true, feedback: "All good" }),
   })),
+  JudgeInfrastructureError: class JudgeInfrastructureError extends Error {
+    readonly isInfrastructure = true as const;
+    readonly isVersionMismatch: boolean;
+    constructor(message: string, opts: { isVersionMismatch?: boolean } = {}) {
+      super(message);
+      this.name = "JudgeInfrastructureError";
+      this.isVersionMismatch = opts.isVersionMismatch ?? false;
+    }
+  },
 }));
 
 // Import after mocks

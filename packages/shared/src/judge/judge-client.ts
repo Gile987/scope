@@ -31,6 +31,43 @@ export interface JudgeClientOptions {
   maxRetries?: number;
 }
 
+/**
+ * Error thrown when the judge service itself fails to run an evaluation — e.g. an
+ * HTTP 5xx, or a Copilot SDK <-> CLI protocol version mismatch inside the judge.
+ *
+ * This is deliberately distinct from a normal "criteria not met" outcome (which is
+ * returned as `{ passed: false }`, not thrown): it signals a judge infrastructure /
+ * deployment / version problem where the agent's output was never actually assessed.
+ * Callers should surface it differently from a genuine evaluation failure.
+ */
+export class JudgeInfrastructureError extends Error {
+  readonly isInfrastructure = true as const;
+  readonly httpStatus?: number;
+  readonly detail?: string;
+  /** True when the underlying cause is an SDK<->CLI ACP protocol version mismatch. */
+  readonly isVersionMismatch: boolean;
+
+  constructor(
+    message: string,
+    opts: { httpStatus?: number; detail?: string; isVersionMismatch?: boolean } = {}
+  ) {
+    super(message);
+    this.name = "JudgeInfrastructureError";
+    this.httpStatus = opts.httpStatus;
+    this.detail = opts.detail;
+    this.isVersionMismatch = opts.isVersionMismatch ?? false;
+  }
+}
+
+/**
+ * Detects the Copilot SDK<->CLI protocol version mismatch signature in a judge
+ * error body. This surfaces from inside @github/copilot-sdk (not our code) when the
+ * bundled CLI negotiates a different ACP protocol version than the SDK expects.
+ */
+function isProtocolVersionMismatch(body: string): boolean {
+  return /protocol version mismatch|SDK expects version|protocolVersion/i.test(body);
+}
+
 /** Default timeout for judge evaluate requests (10 minutes) */
 const DEFAULT_JUDGE_CLIENT_TIMEOUT = 10 * 60 * 1000;
 /** Default retry attempts for judge evaluate requests */
@@ -111,6 +148,26 @@ export class JudgeClient {
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => "unknown error");
+
+      // Distinguish judge infrastructure/version failures from a real evaluation.
+      // A non-2xx response means the judge never produced a criteria verdict.
+      if (isProtocolVersionMismatch(errorBody)) {
+        throw new JudgeInfrastructureError(
+          `Judge infrastructure error (HTTP ${response.status}): the judge service's Copilot SDK and CLI report incompatible ACP protocol versions. ` +
+            `This is a judge deployment/version problem — the agent's output was not evaluated. ` +
+            `Align @github/copilot-sdk with the bundled @github/copilot CLI in the judge image. Detail: ${errorBody}`,
+          { httpStatus: response.status, detail: errorBody, isVersionMismatch: true }
+        );
+      }
+
+      if (response.status >= 500) {
+        throw new JudgeInfrastructureError(
+          `Judge infrastructure error (HTTP ${response.status}): the judge service failed to complete the evaluation. ` +
+            `This is a judge-side problem, not a criteria failure. Detail: ${errorBody}`,
+          { httpStatus: response.status, detail: errorBody }
+        );
+      }
+
       throw new Error(
         `Judge evaluation failed (HTTP ${response.status}): ${errorBody}`
       );
