@@ -138,6 +138,23 @@ match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
 
 ## Judge Strategy Configuration
 
+### JUDGE_MODEL
+**Default:** `gpt-5.4-mini`
+**Type:** string
+
+Model used by the judge to evaluate agent output against criteria. Defaults to
+`gpt-5.4-mini` (set in code, docker-compose, and the K8s manifest). Override via
+`JUDGE_MODEL` (e.g. in `.env`) to use a different model.
+
+### FEEDBACK_MODEL
+**Default:** `gpt-5.4-mini`
+**Type:** string
+
+Model used by the feedback generator that produces actionable feedback for the
+coding agent between iterations. Defaults to `gpt-5.4-mini` (set in code,
+docker-compose, and the K8s manifest). Override via `FEEDBACK_MODEL` (e.g. in
+`.env`) to use a different model.
+
 ### JUDGE_STRATEGY
 **Default:** `bundled`
 **Options:** `bundled` | `independent`
@@ -174,6 +191,12 @@ Timeout for the HTTP request from workers to the judge service (`/api/v1/evaluat
 **Type:** integer
 
 Maximum number of retry attempts when the judge client encounters a timeout or transient network error. Uses exponential backoff (5s base, 30s max). Set to `0` to disable retries.
+
+### JUDGE_SKIP_PROTOCOL_CHECK
+**Default:** `false`
+**Type:** boolean (`true` to enable)
+
+At startup the judge service runs a self-check that spawns the bundled Copilot CLI and asserts its ACP protocol version matches the installed `@github/copilot-sdk`. On a mismatch (e.g. the `@github/copilot` override in `package.json` drifted ahead of the SDK) the judge logs a clear fatal message and exits instead of serving opaque per-evaluation HTTP 500s. Set to `true` to bypass the check (not recommended).
 
 ## Feedback Configuration
 
@@ -263,10 +286,10 @@ FEEDBACK_DESCENDANT_GUARD=false
 Azure Storage Queue name for report generation jobs. The API enqueues messages here when a report is requested; the report-generator worker polls this queue.
 
 ### REPORT_MODEL
-**Default:** `gpt-4.1`
+**Default:** `gpt-5.4-mini`
 **Type:** string
 
-The LLM model used by the report-generator worker (via the Copilot SDK) to generate run analysis reports. Examples: `gpt-4.1`, `gpt-4o`, `claude-sonnet-4`.
+The LLM model used by the report-generator worker (via the Copilot SDK) to generate run analysis reports. Examples: `gpt-5.4-mini`, `gpt-4.1`, `gpt-4o`, `claude-sonnet-4`.
 
 ### SCOPE_MT_API_URL
 **Default:** `http://localhost:3001` (local), `http://api:80` (Docker)

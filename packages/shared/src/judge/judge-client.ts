@@ -31,17 +31,64 @@ export interface JudgeClientOptions {
   maxRetries?: number;
 }
 
+/**
+ * Error thrown when the judge service itself fails to run an evaluation — e.g. an
+ * HTTP 5xx, or a Copilot SDK <-> CLI protocol version mismatch inside the judge.
+ *
+ * This is deliberately distinct from a normal "criteria not met" outcome (which is
+ * returned as `{ passed: false }`, not thrown): it signals a judge infrastructure /
+ * deployment / version problem where the agent's output was never actually assessed.
+ * Callers should surface it differently from a genuine evaluation failure.
+ */
+export class JudgeInfrastructureError extends Error {
+  readonly isInfrastructure = true as const;
+  readonly httpStatus?: number;
+  readonly detail?: string;
+  /** True when the underlying cause is an SDK<->CLI ACP protocol version mismatch. */
+  readonly isVersionMismatch: boolean;
+
+  constructor(
+    message: string,
+    opts: { httpStatus?: number; detail?: string; isVersionMismatch?: boolean } = {}
+  ) {
+    super(message);
+    this.name = "JudgeInfrastructureError";
+    this.httpStatus = opts.httpStatus;
+    this.detail = opts.detail;
+    this.isVersionMismatch = opts.isVersionMismatch ?? false;
+  }
+}
+
+/**
+ * Detects the Copilot SDK<->CLI protocol version mismatch signature in a judge
+ * error body. This surfaces from inside @github/copilot-sdk (not our code) when the
+ * bundled CLI negotiates a different ACP protocol version than the SDK expects.
+ */
+function isProtocolVersionMismatch(body: string): boolean {
+  return /protocol version mismatch|SDK expects version|protocolVersion/i.test(body);
+}
+
 /** Default timeout for judge evaluate requests (10 minutes) */
 const DEFAULT_JUDGE_CLIENT_TIMEOUT = 10 * 60 * 1000;
 /** Default retry attempts for judge evaluate requests */
 const DEFAULT_JUDGE_CLIENT_RETRIES = 2;
 
 /**
- * Returns true if the error is a timeout or transient network failure
- * that warrants a retry of the judge evaluation.
+ * Returns true if the error is a timeout, transient network failure, or a
+ * transient judge-side 5xx that warrants a retry of the judge evaluation.
+ *
+ * A `JudgeInfrastructureError` with `httpStatus >= 500` means the judge service
+ * itself blipped (e.g. a restart, a transient upstream failure) rather than the
+ * agent's output failing a criterion; the evaluate POST is effectively
+ * idempotent, so retrying is safe. We deliberately do NOT retry version
+ * mismatches: those are a deployment/version problem that won't self-heal
+ * within the retry window.
  */
-function isRetryableJudgeError(error: unknown): boolean {
+export function isRetryableJudgeError(error: unknown): boolean {
   if (!error) return false;
+  if (error instanceof JudgeInfrastructureError) {
+    return (error.httpStatus ?? 0) >= 500 && !error.isVersionMismatch;
+  }
   const msg = error instanceof Error ? error.message : String(error);
   return (
     msg.includes("The operation was aborted") ||
@@ -111,6 +158,26 @@ export class JudgeClient {
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => "unknown error");
+
+      // Distinguish judge infrastructure/version failures from a real evaluation.
+      // A non-2xx response means the judge never produced a criteria verdict.
+      if (isProtocolVersionMismatch(errorBody)) {
+        throw new JudgeInfrastructureError(
+          `Judge infrastructure error (HTTP ${response.status}): the judge service's Copilot SDK and CLI report incompatible ACP protocol versions. ` +
+            `This is a judge deployment/version problem — the agent's output was not evaluated. ` +
+            `Align @github/copilot-sdk with the bundled @github/copilot CLI in the judge image. Detail: ${errorBody}`,
+          { httpStatus: response.status, detail: errorBody, isVersionMismatch: true }
+        );
+      }
+
+      if (response.status >= 500) {
+        throw new JudgeInfrastructureError(
+          `Judge infrastructure error (HTTP ${response.status}): the judge service failed to complete the evaluation. ` +
+            `This is a judge-side problem, not a criteria failure. Detail: ${errorBody}`,
+          { httpStatus: response.status, detail: errorBody }
+        );
+      }
+
       throw new Error(
         `Judge evaluation failed (HTTP ${response.status}): ${errorBody}`
       );
