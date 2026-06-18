@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -39,7 +39,15 @@ import {
 } from "@/components/ReasoningEffortSelect";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
+import { useVisibleGates } from "@/hooks/useVisibleGates";
 import { KbdBadge } from "@/components/KbdBadge";
+import {
+  GATE_METADATA,
+  orderGates,
+  validateGateConfigs,
+  type GateConfig,
+  type GateId,
+} from "@/lib/gates";
 import { toast } from "sonner";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
@@ -61,6 +69,22 @@ type VariationDraft = {
 };
 
 type GraphSelection = { kind: "base" } | { kind: "variation"; index: number };
+
+type GateDraft = {
+  enabled: boolean;
+  promptText: string;
+  criteria: string[];
+  maxIterations: number;
+};
+
+function createGateDraft(maxIterations: number): GateDraft {
+  return {
+    enabled: false,
+    promptText: "",
+    criteria: [],
+    maxIterations,
+  };
+}
 
 const VARIATION_COLORS = [
   "#3b82f6",
@@ -160,6 +184,15 @@ export function SubmitRun() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  // Non-select gates visible in the authoring UI. Run/Deploy are hidden behind
+  // feature flags until ready; gateDrafts still holds all gates so its shape is
+  // stable, but hidden gates are never rendered, counted, validated, or submitted.
+  const visibleGates = useVisibleGates();
+  const visibleNonSelectGates = useMemo(
+    () => visibleGates.filter((gate): gate is Exclude<GateId, "select"> => gate !== "select"),
+    [visibleGates],
+  );
+
   // Form state
   const [task, setTask] = useState("");
   const [pickedCriteria, setPickedCriteria] = useState<string[]>([]);
@@ -167,6 +200,12 @@ export function SubmitRun() {
   const [model, setModel] = useState<string>("");
   const [reasoningEffort, setReasoningEffort] = useState<string>("");
   const [maxIterations, setMaxIterations] = useState<number>(10);
+  const [gateDrafts, setGateDrafts] = useState<Record<Exclude<GateId, "select">, GateDraft>>(() => ({
+    build: createGateDraft(10),
+    test: createGateDraft(10),
+    run: createGateDraft(10),
+    deploy: createGateDraft(10),
+  }));
   const [occurrences, setOccurrences] = useState<number>(5);
   const [priority, setPriority] = useState<number>(0);
 
@@ -187,6 +226,7 @@ export function SubmitRun() {
 
   // Inline criteria creation dialog
   const [createCriterionOpen, setCreateCriterionOpen] = useState(false);
+  const [gateCriterionDialog, setGateCriterionDialog] = useState<Exclude<GateId, "select"> | null>(null);
   const [createProfileOpen, setCreateProfileOpen] = useState(false);
 
   // Save as Profile
@@ -332,6 +372,13 @@ export function SubmitRun() {
     setVariationDrafts([]);
   };
 
+  const updateGateDraft = (gate: Exclude<GateId, "select">, patch: Partial<GateDraft>) => {
+    setGateDrafts((prev) => ({
+      ...prev,
+      [gate]: { ...prev[gate], ...patch },
+    }));
+  };
+
   const handleProfileCreated = (profile: ProfileWithVersion) => {
     queryClient.setQueryData<ProfileWithVersion[]>(["profiles"], (previous) => {
       const existing = previous ?? [];
@@ -413,6 +460,34 @@ export function SubmitRun() {
     if (run.model) setModel(run.model);
     if (run.agentVersion) setSelectedAgentVersion(run.agentVersion);
     if (run.maxIterations) setMaxIterations(run.maxIterations);
+    setGateDrafts(() => {
+      const next = {
+        build: createGateDraft(run.maxIterations ?? maxIterations),
+        test: createGateDraft(run.maxIterations ?? maxIterations),
+        run: createGateDraft(run.maxIterations ?? maxIterations),
+        deploy: createGateDraft(run.maxIterations ?? maxIterations),
+      };
+      for (const gateConfig of run.gates ?? []) {
+        if (gateConfig.gate === "select") continue;
+        next[gateConfig.gate] = {
+          enabled: true,
+          promptText: "",
+          criteria: gateConfig.criteria,
+          maxIterations: gateConfig.maxIterations ?? run.maxIterations ?? maxIterations,
+        };
+      }
+      return next;
+    });
+    // Gate configs only store a resolved promptId; resolve each back to its text
+    // so the editable textarea is prefilled when loading a recent run.
+    for (const gateConfig of run.gates ?? []) {
+      if (gateConfig.gate === "select" || !gateConfig.promptId) continue;
+      const gate = gateConfig.gate;
+      const promptId = gateConfig.promptId;
+      api.getTaskPrompt(promptId)
+        .then((prompt) => updateGateDraft(gate, { promptText: prompt.text }))
+        .catch(() => undefined);
+    }
     if (run.mcpServers && run.mcpServers.length > 0) {
       setSelectedMcpServers(run.mcpServers);
       setMcpOpen(true);
@@ -457,7 +532,7 @@ export function SubmitRun() {
     mutationFn: (opts: { description?: string; existingPrompt?: string }) =>
       api.generateTaskPrompt(opts),
     onSuccess: (data) => {
-      setTask(data.taskPrompt);
+      setTask(data.taskPrompt ?? data.tasks?.[0] ?? "");
       setShowGenerate(false);
       setGenerateDescription("");
     },
@@ -475,6 +550,37 @@ export function SubmitRun() {
       });
     }
   };
+
+  const configuredGateCount = visibleNonSelectGates.filter((gate) => gateDrafts[gate].enabled).length;
+  const gatesEnabled = configuredGateCount > 0;
+  const gateConfigs: GateConfig[] = gatesEnabled
+    ? orderGates([
+        {
+          gate: "select",
+          promptId: "",
+          criteria: pickedCriteria,
+          maxIterations,
+        },
+        ...visibleNonSelectGates
+          .filter((gate) => gateDrafts[gate].enabled)
+          .map((gate): GateConfig => ({
+            gate,
+            promptText: gateDrafts[gate].promptText.trim(),
+            criteria: gateDrafts[gate].criteria,
+            maxIterations: gateDrafts[gate].maxIterations,
+          })),
+      ])
+    : [];
+  const gateValidationErrors = gatesEnabled ? validateGateConfigs(gateConfigs, maxIterations) : [];
+  const promptValidationErrors = gatesEnabled
+    ? visibleNonSelectGates.flatMap((gate) => {
+        const draft = gateDrafts[gate];
+        return draft.enabled && !draft.promptText.trim()
+          ? [`${GATE_METADATA[gate].label} gate needs a ${GATE_METADATA[gate].label} prompt.`]
+          : [];
+      })
+    : [];
+  const gateErrors = [...gateValidationErrors, ...promptValidationErrors];
 
   const submitMutation = useMutation({
     mutationFn: api.submitRun,
@@ -506,6 +612,7 @@ export function SubmitRun() {
       ...(inVariationMode ? {} : { ...(model ? { model } : {}) }),
       ...(inVariationMode ? {} : { ...(reasoningEffort ? { reasoningEffort } : {}) }),
       maxIterations,
+      ...(gatesEnabled ? { gates: gateConfigs } : {}),
       ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
       ...(inVariationMode ? {} : { ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}) }),
@@ -532,7 +639,8 @@ export function SubmitRun() {
     !!task.trim() &&
     !submitMutation.isPending &&
     !(selectedAgent && selectedAgent.supportedModels.length > 0 && !model) &&
-    !(maxIterations !== 1 && pickedCriteria.length === 0);
+    !(maxIterations !== 1 && pickedCriteria.length === 0) &&
+    gateErrors.length === 0;
 
   const selectedVariationCount = variationDrafts.filter((v) => v.profileId.trim().length > 0).length;
   const compositionProfileCount = selectedProfileId ? 1 + selectedVariationCount : 0;
@@ -596,7 +704,8 @@ export function SubmitRun() {
   // ─── Render helpers ─────────────────────────────────────────────────────
   const summaryChips: string[] = [
     `${maxIterations} iteration${maxIterations === 1 ? "" : "s"}`,
-    `${pickedCriteria.length} criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
+    `${pickedCriteria.length} select criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
+    gatesEnabled ? `${gateConfigs.length} configured gates` : "single-pass Select",
     occurrences > 1 ? `×${occurrences} runs` : "",
     worker,
     model || "",
@@ -780,6 +889,7 @@ export function SubmitRun() {
               selected={pickedCriteria}
               onChange={setPickedCriteria}
               inputId="criteria"
+              gate="select"
               trailingAction={(
                 <Button
                   type="button"
@@ -795,6 +905,8 @@ export function SubmitRun() {
             <CreateCriterionDialog
               open={createCriterionOpen}
               onOpenChange={setCreateCriterionOpen}
+              defaultGates={["select"]}
+              lockedGates={["select"]}
               onCreated={(id) => setPickedCriteria((prev) => [...prev, id])}
             />
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -864,6 +976,148 @@ export function SubmitRun() {
         </CardContent>
       </Card>
 
+      {/* ─── Gates ─────────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Gate pipeline</CardTitle>
+          <CardDescription>
+            Optional phase gates after Select. Leave all disabled for the existing single-pass flow.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-md border bg-muted/30 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">Base</Badge>
+                  <p className="font-medium">{GATE_METADATA.select.label}</p>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Uses the task prompt above with {pickedCriteria.length} {pickedCriteria.length === 1 ? "criterion" : "criteria"} and {maxIterations} iteration{maxIterations === 1 ? "" : "s"}.
+                </p>
+              </div>
+              <Badge variant="outline">Always configured</Badge>
+            </div>
+          </div>
+
+          {visibleNonSelectGates.map((gate, index) => {
+            const meta = GATE_METADATA[gate];
+            const draft = gateDrafts[gate];
+            return (
+              <div key={gate} className={`rounded-md border p-4 ${draft.enabled ? "border-primary/40 bg-primary/5" : "bg-card"}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <label className="flex items-start gap-3">
+                    <Checkbox
+                      checked={draft.enabled}
+                      onCheckedChange={(checked) => updateGateDraft(gate, { enabled: Boolean(checked) })}
+                    />
+                    <span>
+                      <span className="flex items-center gap-2 font-medium">
+                        <Badge variant="outline">Gate {index + 2}</Badge>
+                        {meta.label}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">{meta.description}</span>
+                    </span>
+                  </label>
+                  <Badge variant={draft.enabled ? "default" : "secondary"}>
+                    {draft.enabled ? "Configured" : "Skipped"}
+                  </Badge>
+                </div>
+
+                {draft.enabled && (
+                  <div className="mt-4 space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor={`${gate}-prompt`}>{meta.label} prompt *</Label>
+                      <TaskPromptPicker
+                        type={gate}
+                        placeholder={`Search ${meta.label} prompts or type a new one below…`}
+                        onSelect={(text) => updateGateDraft(gate, { promptText: text })}
+                      />
+                      <Textarea
+                        id={`${gate}-prompt`}
+                        placeholder={`e.g., ${meta.description}`}
+                        value={draft.promptText}
+                        onChange={(e) => updateGateDraft(gate, { promptText: e.target.value })}
+                        rows={3}
+                      />
+                      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Info className="h-3.5 w-3.5 shrink-0" />
+                        New {meta.label} prompts are automatically added to the prompt library.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{meta.label} criteria</Label>
+                      <CriteriaPicker
+                        gate={gate}
+                        selected={draft.criteria}
+                        onChange={(criteria) => updateGateDraft(gate, { criteria })}
+                        trailingAction={(
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-9 gap-1.5 px-3"
+                            onClick={() => setGateCriterionDialog(gate)}
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            New…
+                          </Button>
+                        )}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Only criteria compatible with {meta.label} are shown. Required unless max iterations is 1.
+                      </p>
+                    </div>
+
+                    <div className="max-w-xs space-y-2">
+                      <Label htmlFor={`${gate}-maxIterations`}>Max iterations</Label>
+                      <Input
+                        id={`${gate}-maxIterations`}
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={draft.maxIterations}
+                        onChange={(e) => updateGateDraft(gate, {
+                          maxIterations: Math.max(1, Math.min(50, parseInt(e.target.value) || 1)),
+                        })}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <CreateCriterionDialog
+            key={gateCriterionDialog ?? "none"}
+            open={gateCriterionDialog !== null}
+            onOpenChange={(open) => { if (!open) setGateCriterionDialog(null); }}
+            defaultGates={gateCriterionDialog ? [gateCriterionDialog] : undefined}
+            lockedGates={gateCriterionDialog ? [gateCriterionDialog] : undefined}
+            onCreated={(id) => {
+              const gate = gateCriterionDialog;
+              if (gate) {
+                updateGateDraft(gate, {
+                  enabled: true,
+                  criteria: [...gateDrafts[gate].criteria, id],
+                });
+              }
+              setGateCriterionDialog(null);
+            }}
+          />
+
+          {gateErrors.length > 0 && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <p className="font-medium">Gate configuration needs attention</p>
+              <ul className="mt-1 list-disc pl-5">
+                {gateErrors.map((message) => <li key={message}>{message}</li>)}
+              </ul>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ─── Agent ─────────────────────────────────────────────────────── */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-1.5">

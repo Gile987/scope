@@ -4,6 +4,7 @@
 import {
   ConversationTurn,
   CriterionResult,
+  GateId,
   TokenUsage,
   WorkerProcessor,
   WorkerProcessorOptions,
@@ -58,6 +59,19 @@ export interface MultiTurnConfig {
   skillConfigs?: SkillConfig[];
   /** Resolved VS Code extension configurations for runtime installation */
   extensionConfigs?: ExtensionConfig[];
+  /**
+   * Which gate this loop is evaluating. Stamped on every turn and passed to the
+   * judge so it can scope evaluation and inspect tool outputs (build/test/run).
+   * Absent ⇒ treated as the Select gate. See docs/design/gates.md §4.4.
+   */
+  gate?: GateId;
+  /**
+   * Global iteration offset. The loop labels its iterations
+   * `iterationOffset + 1 .. iterationOffset + maxIterations` so that, when
+   * several gates run sequentially against the same run, iteration numbers (and
+   * therefore blob paths `iteration-N/...`) stay globally unique. Defaults to 0.
+   */
+  iterationOffset?: number;
 }
 
 export interface MultiTurnResult {
@@ -101,6 +115,8 @@ export async function runMultiTurnLoop(
     skillConfigs,
     extensionConfigs,
     workspacePath,
+    gate,
+    iterationOffset = 0,
   } = config;
 
   // Defensive: criteria is required when maxIterations > 1
@@ -123,16 +139,17 @@ export async function runMultiTurnLoop(
     extensions: extensionConfigs?.map((e) => e.id) ?? [],
   });
 
-  for (let iteration = 1; iteration <= maxIterations; iteration++) {
+  for (let i = 1; i <= maxIterations; i++) {
+    const iteration = iterationOffset + i;
     // Create a per-iteration logger that automatically injects the iteration number
     // into every log event's data. This ensures all downstream log calls (including
     // those from inside workers) carry iteration context for the CLI to display.
     const iterLog: typeof log = async (level, message, data) =>
-      log(level, message, { ...data, iteration });
+      log(level, message, { ...data, iteration, ...(gate && { gate }) });
 
     const iterationStartedAt = new Date();
 
-    await iterLog("info", `--- Iteration ${iteration}/${maxIterations} ---`, {
+    await iterLog("info", `--- Iteration ${i}/${maxIterations} ---`, {
       promptLength: nextPrompt.length,
       iterationHeader: true,
     });
@@ -297,6 +314,7 @@ export async function runMultiTurnLoop(
       // Persist a partial turn so HAR/video URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
+        ...(gate && { gate }),
         codingAgentResponse: `Coding agent failed: ${errorMsg}`,
         judgeFeedback: "",
         snapshotUrl: "",
@@ -342,6 +360,7 @@ export async function runMultiTurnLoop(
       // Persist a partial turn so video/HAR URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
+        ...(gate && { gate }),
         ...(codingResponse && { codingAgentResponse: codingResponse }),
         judgeFeedback: `Snapshot upload failed: ${errorMsg}`,
         snapshotUrl: "",
@@ -378,6 +397,7 @@ export async function runMultiTurnLoop(
 
       const turn: ConversationTurn = {
         iteration,
+        ...(gate && { gate }),
         ...(codingResponse && { codingAgentResponse: codingResponse }),
         judgeFeedback: "No criteria — judge evaluation skipped",
         snapshotUrl,
@@ -421,6 +441,8 @@ export async function runMultiTurnLoop(
         conversationHistory: turns,
         personaInstructions,
         requestId,
+        ...(gate && { gate }),
+        ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
       });
       judgePassed = judgeResult.passed;
       judgeFeedback = judgeResult.feedback;
@@ -442,6 +464,7 @@ export async function runMultiTurnLoop(
       // Persist a partial turn so video/snapshot URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
+        ...(gate && { gate }),
         ...(codingResponse && { codingAgentResponse: codingResponse }),
         judgeFeedback: `${label}: ${errorMsg}`,
         snapshotUrl,
@@ -493,6 +516,7 @@ export async function runMultiTurnLoop(
     // Step 4: Record the turn
     const turn: ConversationTurn = {
       iteration,
+      ...(gate && { gate }),
       ...(codingResponse && { codingAgentResponse: codingResponse }),
       judgeFeedback,
       snapshotUrl,

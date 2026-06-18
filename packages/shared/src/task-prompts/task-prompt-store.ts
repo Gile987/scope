@@ -2,15 +2,20 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import { TaskPromptDocument, PromptFeatureResult } from '../types/types.js';
-import { computeTaskPromptId } from './task-prompt-id.js';
+import { TaskPromptDocument, PromptFeatureResult, PromptType } from '../types/types.js';
+import { computePromptId } from './task-prompt-id.js';
 
 /**
  * MongoDB-backed store for task prompt entities.
  *
  * Task prompts are **immutable and content-addressed**: the `_id` is a UUIDv5
- * derived from the trimmed prompt text. The same text always resolves to the
- * same document — `findOrCreate` is idempotent.
+ * derived from the trimmed prompt text (and, for non-Select gates, the prompt
+ * `type`). The same `(type, text)` always resolves to the same document —
+ * `findOrCreate` is idempotent.
+ *
+ * Prompts carry a `type` discriminator — one literal per gate (the Select gate's
+ * prompt is the request's task prompt). `type` defaults to `"select"` so
+ * existing task-prompt call sites are unaffected.
  *
  * Documents are soft-deleted (deletedAt) rather than removed.
  */
@@ -22,29 +27,37 @@ export class TaskPromptStore {
     return this.collection.findOne({ _id: id, deletedAt: { $exists: false } });
   }
 
-  /** Get a task prompt by its text content (non-deleted) */
-  async getByText(text: string): Promise<TaskPromptDocument | null> {
-    return this.get(computeTaskPromptId(text));
+  /** Get a task prompt by its text content and type (non-deleted) */
+  async getByText(text: string, type: PromptType = 'select'): Promise<TaskPromptDocument | null> {
+    return this.get(computePromptId(type, text));
   }
 
   /**
-   * Find an existing task prompt by text, or create a new one.
-   * Idempotent — same text always returns the same document.
+   * Find an existing task prompt by `(type, text)`, or create a new one.
+   * Idempotent — the same `(type, text)` always returns the same document.
+   * `type` defaults to `"select"` (the request task prompt).
    */
-  async findOrCreate(text: string): Promise<TaskPromptDocument> {
+  async findOrCreate(text: string, type: PromptType = 'select'): Promise<TaskPromptDocument> {
     const trimmed = text.trim();
-    const id = computeTaskPromptId(trimmed);
+    const id = computePromptId(type, trimmed);
 
     // Try to find existing (including soft-deleted — revive if needed)
     const existing = await this.collection.findOne({ _id: id });
     if (existing) {
-      // If soft-deleted, revive it
-      if (existing.deletedAt) {
+      // Backfill type on legacy documents lacking it, and revive if soft-deleted.
+      const patch: Record<string, unknown> = {};
+      const unset: Record<string, unknown> = {};
+      if (existing.type === undefined) patch.type = type;
+      if (existing.deletedAt) unset.deletedAt = '';
+      if (Object.keys(patch).length > 0 || Object.keys(unset).length > 0) {
         await this.collection.updateOne(
           { _id: id },
-          { $unset: { deletedAt: '' } }
+          {
+            ...(Object.keys(patch).length > 0 ? { $set: patch } : {}),
+            ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}),
+          } as any,
         );
-        return { ...existing, deletedAt: undefined };
+        return { ...existing, ...patch, deletedAt: undefined };
       }
       return existing;
     }
@@ -52,6 +65,7 @@ export class TaskPromptStore {
     // Create new document
     const doc: TaskPromptDocument = {
       _id: id,
+      type,
       text: trimmed,
       createdAt: new Date(),
     };
@@ -62,17 +76,22 @@ export class TaskPromptStore {
 
   /**
    * List active (non-deleted) task prompts.
-   * Supports pagination and optional substring search on text.
+   * Supports pagination, optional substring search on text, and an optional
+   * `type` filter (one prompt type per gate).
    */
   async getAll(opts?: {
     limit?: number;
     offset?: number;
     search?: string;
+    type?: PromptType;
   }): Promise<{ items: TaskPromptDocument[]; total: number }> {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
 
     if (opts?.search) {
       filter.text = { $regex: opts.search, $options: 'i' };
+    }
+    if (opts?.type) {
+      filter.type = opts.type;
     }
 
     const total = await this.collection.countDocuments(filter);

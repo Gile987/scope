@@ -6,6 +6,7 @@ import {
   CreateTaskPromptInputSchema,
   PatchTaskPromptFeatureInputSchema,
   PromptFeatureResultSchema,
+  PromptTypeSchema,
   SuggestedPromptFeatureSchema,
   TaskPromptResponseSchema,
 } from "shared";
@@ -75,6 +76,7 @@ apiRoute(ctx.app, ctx.registry, {
     limit: z.coerce.number().optional(),
     offset: z.coerce.number().optional(),
     search: z.string().optional(),
+    type: PromptTypeSchema.optional(),
   }),
   response: z.object({
     items: z.array(TaskPromptResponseSchema),
@@ -86,8 +88,9 @@ apiRoute(ctx.app, ctx.registry, {
     const limit = req.query.limit ?? 50;
     const offset = req.query.offset ?? 0;
     const search = req.query.search;
+    const type = req.query.type;
 
-    const { items, total } = await ctx.taskPromptStore.getAll({ limit, offset, search });
+    const { items, total } = await ctx.taskPromptStore.getAll({ limit, offset, search, type });
     res.json({ items, total, limit, offset });
   },
 });
@@ -126,13 +129,13 @@ apiRoute(ctx.app, ctx.registry, {
     400: { description: "Empty text string" },
   },
   handler: async (req, res, next) => {
-    const { text } = req.body;
+    const { text, type } = req.body;
     if (!text || typeof text !== "string" || !text.trim()) {
       res.status(400).json({ error: "Body must contain a non-empty 'text' string" });
       return;
     }
 
-    const taskPrompt = await ctx.taskPromptStore.findOrCreate(text);
+    const taskPrompt = await ctx.taskPromptStore.findOrCreate(text, type);
     res.status(201).json(taskPrompt);
   },
 });

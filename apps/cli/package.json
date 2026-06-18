@@ -28,7 +28,7 @@
     "csv-stringify": "^6.6.0",
     "dotenv": "^16.6.1",
     "eventsource": "^2.0.2",
-
+    "shared": "workspace:*",
     "semver": "^7.8.0",
     "yaml": "^2.8.3"
   },

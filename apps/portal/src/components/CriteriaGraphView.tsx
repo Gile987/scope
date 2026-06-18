@@ -14,7 +14,7 @@ import {
 } from "@xyflow/react";
 import dagre from "dagre";
 import { api } from "@/lib/api";
-import type { LogEvent, CriterionResult } from "@/types";
+import type { LogEvent, CriterionResult, GateId } from "@/types";
 import { cn } from "@/lib/utils";
 import "@xyflow/react/dist/style.css";
 
@@ -146,11 +146,21 @@ function collectAncestors(
 
 // ─── Extract criteria results from streaming logs ───────────────────────────
 
-function extractCriteriaStatus(logs: LogEvent[]): Map<string, CriterionResult & { iteration?: number }> {
+export function extractCriteriaStatus(
+  logs: LogEvent[],
+  gate?: GateId
+): Map<string, CriterionResult & { iteration?: number }> {
   const statusMap = new Map<string, CriterionResult & { iteration?: number }>();
 
   for (const log of logs) {
     if (!log.data) continue;
+
+    // When a gate is specified, only consider events emitted for that gate.
+    // Legacy events without a gate tag are treated as belonging to the Select gate.
+    if (gate) {
+      const eventGate = (log.data.gate as GateId | undefined) ?? "select";
+      if (eventGate !== gate) continue;
+    }
 
     if (log.data.type === "criterion_result") {
       const d = log.data;
@@ -188,9 +198,14 @@ interface CriteriaGraphViewProps {
   scenarioCriteria: string[];
   /** Streaming log events — used to derive real-time criteria status */
   logs: LogEvent[];
+  /**
+   * When provided, status coloring is scoped to log events tagged with this gate
+   * (events without a gate tag are treated as the Select gate).
+   */
+  gate?: GateId;
 }
 
-export function CriteriaGraphView({ scenarioCriteria, logs }: CriteriaGraphViewProps) {
+export function CriteriaGraphView({ scenarioCriteria, logs, gate }: CriteriaGraphViewProps) {
   // Fetch the full criteria graph from the API
   const { data: graphData, isLoading } = useQuery({
     queryKey: ["criteria-graph"],
@@ -199,7 +214,7 @@ export function CriteriaGraphView({ scenarioCriteria, logs }: CriteriaGraphViewP
   });
 
   // Derive criteria status from streaming logs
-  const criteriaStatus = useMemo(() => extractCriteriaStatus(logs), [logs]);
+  const criteriaStatus = useMemo(() => extractCriteriaStatus(logs, gate), [logs, gate]);
 
   // Build the filtered React Flow graph
   const { flowNodes, flowEdges } = useMemo(() => {

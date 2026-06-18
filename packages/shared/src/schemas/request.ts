@@ -4,8 +4,34 @@
 import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 import { ScenarioSchema, PersonaSchema } from "./scenario.js";
+import { GateIdSchema } from "./criteria.js";
 
 extendZodWithOpenApi(z);
+
+export const GateConfigSchema = z
+  .object({
+    gate: GateIdSchema,
+    // Resolved prompt entity id. Optional on input: callers may instead supply
+    // `promptText` (free text), which the submit handler materializes into a
+    // typed prompt and resolves to this id. Persisted gate configs always carry
+    // the resolved `promptId`.
+    promptId: z.string().optional(),
+    // Input-only convenience: free-text gate prompt. When present at submit it is
+    // content-addressed via `findOrCreate(text, gate)` and supersedes any
+    // `promptId`. Never persisted (stripped once resolved).
+    promptText: z.string().optional(),
+    criteria: z.array(z.string()),
+    maxIterations: z.number().int().min(1).max(50).optional(),
+  })
+  .openapi("GateConfig");
+
+export const GateRunSummarySchema = z
+  .object({
+    gate: GateIdSchema,
+    status: z.enum(["passed", "failed", "skipped"]),
+    iterations: z.number().int().min(0),
+  })
+  .openapi("GateRunSummary");
 
 export const TokenUsageSchema = z
   .object({
@@ -37,6 +63,7 @@ export const CriterionResultSchema = z
 export const ConversationTurnSchema = z
   .object({
     iteration: z.number(),
+    gate: GateIdSchema.optional(),
     codingAgentResponse: z.string().optional(),
     judgeFeedback: z.string(),
     snapshotUrl: z.string(),
@@ -101,6 +128,7 @@ export const CreateRequestInputSchema = z
     profileId: z.string().optional(),
     profileVariations: z.array(z.string()).optional(),
     priority: z.number().int().optional(),
+    gates: z.array(GateConfigSchema).optional(),
   })
   .openapi("CreateRequestInput");
 
@@ -126,6 +154,8 @@ export const RequestResponseSchema = z
     profileVersionId: z.string().optional(),
     submissionId: z.string().optional(),
     priority: z.number().int().default(0),
+    gates: z.array(GateConfigSchema).optional(),
+    gateSummaries: z.array(GateRunSummarySchema).optional(),
     // Per-attempt state lives in the run sub-document.
     run: z
       .lazy(() => RunStateSchema)

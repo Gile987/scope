@@ -52,7 +52,7 @@ app.post(
     const startTime = Date.now();
 
     try {
-      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId } = req.body;
+      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl } = req.body;
 
       // Validate required fields
       if (!snapshotUrl || typeof snapshotUrl !== "string") {
@@ -89,6 +89,23 @@ app.post(
 
         console.log(`[judge] Snapshot extracted to ${workDir}`);
 
+        // Download this iteration's captured tool calls/outputs (build/test/run
+        // output), if provided. Failures are non-fatal — the judge can still
+        // evaluate the workspace files.
+        let toolCalls: import("shared").ToolCall[] = [];
+        if (toolCallsUrl && typeof toolCallsUrl === "string") {
+          try {
+            toolCalls = await blobStorage.getToolCalls(toolCallsUrl);
+            console.log(
+              `[judge] Loaded ${toolCalls.length} tool call(s) for gate '${gate ?? "select"}'`,
+            );
+          } catch (err) {
+            console.warn(
+              `[judge] Failed to load tool calls from ${toolCallsUrl}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+
         // Build onProgress callback that publishes criterion results via Redis
         const onProgress = (requestId && logPublisher)
           ? (result: import("shared").CriterionResult) => {
@@ -110,6 +127,8 @@ app.post(
           conversationHistory: conversationHistory || [],
           personaInstructions,
           onProgress,
+          gate,
+          toolCalls,
         });
 
         const elapsed = Date.now() - startTime;

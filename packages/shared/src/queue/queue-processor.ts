@@ -11,6 +11,7 @@ import {
   LogEvent,
   MULTI_TURN_DEFAULTS,
   ConversationTurn,
+  GateRunSummary,
   OsInfo,
 } from "../types/types.js";
 import type { McpServerConfig } from "../types/mcp.js";
@@ -24,7 +25,8 @@ import { BlobStorage } from "../storage/blob-storage.js";
 import { withRetry } from "../utils/retry.js";
 import { sanitizeHarFile } from "../har/har-parser.js";
 import { JudgeClient } from "../judge/judge-client.js";
-import { runMultiTurnLoop } from "../judge/multi-turn-loop.js";
+import { runGatedLoop, ResolvedGate } from "../judge/gated-loop.js";
+import { normalizeGates } from "../gates/gates.js";
 import { McpServerClient } from "../mcp/mcp-server-client.js";
 import { McpSecretClient } from "../mcp/mcp-secret-client.js";
 import { SkillClient } from "../skills/skill-client.js";
@@ -407,6 +409,36 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   }
 
   /**
+   * Resolve a typed prompt entity's text by id via the API. Used for non-Select
+   * gates whose prompt is referenced by id on the request's gate config. Throws
+   * when the prompt cannot be resolved — a misconfigured gate must fail the run
+   * rather than silently run with an empty prompt.
+   */
+  private async resolveGatePromptText(
+    promptId: string,
+    apiBaseUrl: string | undefined,
+    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
+  ): Promise<string> {
+    if (!promptId) {
+      throw new Error("Gate is missing a promptId");
+    }
+    if (!apiBaseUrl) {
+      throw new Error("apiBaseUrl is not configured but a gate references a prompt by id");
+    }
+    const url = `${apiBaseUrl.replace(/\/$/, "")}/api/v1/task-prompts/${encodeURIComponent(promptId)}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Failed to resolve gate prompt '${promptId}': HTTP ${res.status}`);
+    }
+    const doc = (await res.json()) as { text?: string };
+    if (!doc?.text || !doc.text.trim()) {
+      throw new Error(`Gate prompt '${promptId}' resolved to empty text`);
+    }
+    await log("info", `Resolved gate prompt '${promptId}'`, { promptId, length: doc.text.length });
+    return doc.text;
+  }
+
+  /**
    * Multi-turn processing with judge loop.
    */
   private async processMultiTurn(
@@ -423,7 +455,19 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     // legacy/pre-migration docs may not, in which case we fall back to the
     // requestId so the layout matches the legacy `{requestId}/...` scheme.
     const runId = requestDoc.run?._id ?? requestId;
-    const hasCriteria = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
+
+    // Normalise the request into an ordered list of gate configs. When the
+    // request carries no `gates`, this yields a single Select gate built from
+    // the legacy fields (scenario.criteria + maxIterations + taskPromptId), so
+    // existing requests behave identically. See docs/design/gates.md §4.3.
+    const requestMaxIterations = requestDoc.maxIterations || MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
+    const gateConfigs = normalizeGates({
+      gates: requestDoc.gates,
+      scenarioCriteria: requestDoc.scenario.criteria,
+      maxIterations: requestDoc.maxIterations,
+      taskPromptId: requestDoc.taskPromptId,
+    });
+    const hasCriteria = gateConfigs.some((g) => g.criteria && g.criteria.length > 0);
     const judgeServiceUrl = process.env.JUDGE_SERVICE_URL;
 
     if (hasCriteria && !judgeServiceUrl) {
@@ -450,6 +494,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
             ...(this.podName ? { podName: this.podName } : {}),
           },
           "run.turns": [],
+          gateSummaries: [],
           "run.workerVersion": versionFields.workerVersion,
           "run.os": versionFields.os,
           updatedAt: now,
@@ -489,7 +534,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       storageConnectionString: this.config.storageConnectionString,
     });
 
-    const maxIterations = requestDoc.maxIterations || MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
+    const maxIterations = requestMaxIterations;
 
     // Setup: create workspace, extract skills, upload setup videos
     if (this.processor.setup) {
@@ -529,13 +574,34 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     // Resolve workspace path after setup
     const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
 
+    // Resolve each gate's prompt text. The Select gate uses the already-resolved
+    // scenario task; other gates resolve their typed prompt entity by id via the
+    // API. See docs/design/gates.md §4.4/§4.5.
+    const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
+    const resolvedGates: ResolvedGate[] = [];
+    for (const gc of gateConfigs) {
+      let promptText: string;
+      if (gc.gate === "select") {
+        promptText = requestDoc.scenario.task;
+      } else {
+        if (!gc.promptId) {
+          throw new Error(`Gate '${gc.gate}' is missing a resolved promptId.`);
+        }
+        promptText = await this.resolveGatePromptText(gc.promptId, apiBaseUrl, log);
+      }
+      resolvedGates.push({
+        gate: gc.gate,
+        promptText,
+        criteria: gc.criteria,
+        maxIterations: gc.maxIterations ?? maxIterations,
+      });
+    }
+
     let result;
     try {
-      result = await runMultiTurnLoop({
+      result = await runGatedLoop({
         processor: this.processor,
-        task: requestDoc.scenario.task,
-        criteria: requestDoc.scenario.criteria,
-        maxIterations,
+        gates: resolvedGates,
         workspacePath,
         judgeClient,
         blobStorage,
@@ -559,6 +625,16 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
             } as any
           ));
         },
+        onGateComplete: async (summary: GateRunSummary) => {
+          // Persist per-gate summaries incrementally for cheap querying / UI.
+          await withRetry(() => this.collection.updateOne(
+            { _id: requestId },
+            {
+              $push: { gateSummaries: summary },
+              $set: { "run.updatedAt": new Date(), updatedAt: new Date() },
+            } as any
+          ));
+        },
       });
     } finally {
       // Lifecycle: always call teardown() if setup() exists, even on error
@@ -574,9 +650,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       ? "succeeded"
       : result.hadError
         ? "failed"
-        : result.turns.length >= maxIterations
-          ? "finished"
-          : "failed";
+        : "finished";
     await log("info", `Multi-turn processing ${finalOutcome}`, {
       passed: result.passed,
       totalIterations: result.turns.length,

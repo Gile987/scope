@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { ConversationTurn, CriterionResult } from "../types/types.js";
+import { ConversationTurn, CriterionResult, GateId } from "../types/types.js";
 import { withRetry } from "../utils/retry.js";
 
 /**
@@ -13,6 +13,10 @@ export interface JudgeEvaluateRequest {
   conversationHistory: ConversationTurn[];
   personaInstructions?: string;
   requestId?: string;  // Enables the judge to publish real-time progress via Redis
+  /** Which gate is being evaluated (select | build | test | run | deploy). Defaults to select. */
+  gate?: GateId;
+  /** Blob URL of this iteration's captured tool calls/outputs (build/test/run output). */
+  toolCallsUrl?: string;
 }
 
 /**

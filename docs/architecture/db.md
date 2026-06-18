@@ -133,7 +133,10 @@ MCP (Model Context Protocol) server configurations.
 
 ### `feature-flags`
 
-Runtime feature flags.
+Runtime feature flags. Seeded idempotently by the API on startup. Includes the
+portal-only gate visibility flags `gates-run` and `gates-deploy` (both default
+`enabled: false`) that hide the Run/Deploy gates from authoring surfaces until
+launch — see [gates design §4.1.1](../design/gates.md).
 
 | Index | Key | Options | Migration |
 |-------|-----|---------|-----------|

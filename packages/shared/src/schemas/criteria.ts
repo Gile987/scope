@@ -3,14 +3,18 @@
 
 import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
+import { GATES } from "../types/types.js";
 
 extendZodWithOpenApi(z);
+
+export const GateIdSchema = z.enum(GATES);
 
 export const CreateCriteriaInputSchema = z
   .object({
     id: z.string().regex(/^[a-z][a-z0-9_]*$/),
     prompt: z.string(),
     dependsOn: z.array(z.string()).optional(),
+    gates: z.array(GateIdSchema).optional(),
   })
   .openapi("CreateCriteriaInput");
 
@@ -18,6 +22,7 @@ export const UpdateCriteriaInputSchema = z
   .object({
     prompt: z.string().optional(),
     dependsOn: z.array(z.string()).optional(),
+    gates: z.array(GateIdSchema).optional(),
   })
   .openapi("UpdateCriteriaInput");
 
@@ -26,6 +31,7 @@ export const CriteriaResponseSchema = z
     id: z.string(),
     prompt: z.string(),
     dependsOn: z.array(z.string()).optional(),
+    gates: z.array(GateIdSchema).optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     deletedAt: z.coerce.date().optional(),
@@ -37,6 +43,7 @@ export const CriteriaGraphNodeSchema = z
     id: z.string(),
     prompt: z.string(),
     dependsOn: z.array(z.string()).optional(),
+    gates: z.array(GateIdSchema).optional(),
   })
   .openapi("CriteriaGraphNode");
 
