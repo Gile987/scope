@@ -96,7 +96,8 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
 
   // Generate prompt mutation
   const generateMutation = useMutation({
-    mutationFn: (behaviorText: string) => api.generateCriteriaPrompt(behaviorText),
+    mutationFn: ({ behavior: behaviorText, gates: targetGates }: { behavior: string; gates?: GateId[] }) =>
+      api.generateCriteriaPrompt(behaviorText, undefined, targetGates),
     onSuccess: (data) => {
       setPrompt(data.prompt);
       setAiGenerated(true);
@@ -165,8 +166,8 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
   // Step 1 → Step 2
   const handleContinue = useCallback(() => {
     setStep(2);
-    generateMutation.mutate(behavior.trim());
-  }, [behavior, generateMutation]);
+    generateMutation.mutate({ behavior: behavior.trim(), gates });
+  }, [behavior, gates, generateMutation]);
 
   // Step 2 → Submit
   const handleCreate = useCallback(() => {
@@ -184,8 +185,8 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
     setSuggestedParents([]);
     setSuggestedChildren([]);
     setAcceptedChildren([]);
-    generateMutation.mutate(behavior.trim());
-  }, [behavior, generateMutation]);
+    generateMutation.mutate({ behavior: behavior.trim(), gates });
+  }, [behavior, gates, generateMutation]);
 
   // Reset all state to initial values
   const reset = useCallback(() => {

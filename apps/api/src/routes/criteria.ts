@@ -30,6 +30,7 @@ apiRoute(ctx.app, ctx.registry, {
   body: z.object({
     behavior: z.string(),
     currentId: z.string().optional(),
+    gates: z.array(z.string()).optional(),
   }),
   response: z.object({ prompt: z.string() }),
   errorResponses: {
@@ -37,7 +38,7 @@ apiRoute(ctx.app, ctx.registry, {
     503: { description: "LLM not configured" },
   },
   handler: async (req, res, next) => {
-    const { behavior, currentId } = req.body;
+    const { behavior, currentId, gates } = req.body;
     if (!behavior.trim()) {
       res.status(400).json({ error: "Body must contain a non-empty 'behavior' string" });
       return;
@@ -50,7 +51,7 @@ apiRoute(ctx.app, ctx.registry, {
 
     const allCriteria = await ctx.criteriaCollection
       .find({ deletedAt: { $exists: false } })
-      .project({ id: 1, prompt: 1, dependsOn: 1, _id: 0 })
+      .project({ id: 1, prompt: 1, dependsOn: 1, gates: 1, _id: 0 })
       .toArray();
 
     const existingCriteria = currentId
@@ -60,7 +61,8 @@ apiRoute(ctx.app, ctx.registry, {
     try {
       const result = await generateCriteriaPrompt(
         behavior.trim(),
-        existingCriteria as { id: string; prompt: string; dependsOn?: string[] }[],
+        existingCriteria as { id: string; prompt: string; dependsOn?: string[]; gates?: GateId[] }[],
+        gates as GateId[] | undefined,
       );
       console.log("[generate-prompt] LLM result:", JSON.stringify(result));
       res.json(result);

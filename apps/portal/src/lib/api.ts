@@ -338,10 +338,10 @@ export const api = {
   },
 
   /** Generate a criteria prompt from a behavior description using AI */
-  generateCriteriaPrompt: (behavior: string, currentId?: string): Promise<GeneratePromptResponse> => {
+  generateCriteriaPrompt: (behavior: string, currentId?: string, gates?: string[]): Promise<GeneratePromptResponse> => {
     return request("/criteria/generate-prompt", {
       method: "POST",
-      body: JSON.stringify({ behavior, ...(currentId && { currentId }) }),
+      body: JSON.stringify({ behavior, ...(currentId && { currentId }), ...(gates && gates.length > 0 && { gates }) }),
     });
   },
 

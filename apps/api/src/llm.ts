@@ -2,9 +2,17 @@
 // Licensed under the MIT License.
 
 import { isUnexpected } from "@azure-rest/ai-inference";
+import { gatesSatisfyInvariant, type GateId } from "shared";
 import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
 
-const SYSTEM_PROMPT = `You are an expert at writing evaluation criteria for AI coding agent benchmarks.
+export type SuggestDirection = "parents" | "children";
+
+/**
+ * Authoring call: writes the evaluation prompt + suggests an id. This is the
+ * orthogonal "write the criterion" concern — it never sees other criteria and
+ * never suggests dependencies.
+ */
+const SYSTEM_PROMPT_AUTHOR = `You are an expert at writing evaluation criteria for AI coding agent benchmarks.
 
 Given a natural-language description of a behavior or pattern to detect in a codebase, you must:
 
@@ -15,24 +23,56 @@ Given a natural-language description of a behavior or pattern to detect in a cod
    - Contain only lowercase letters, digits, and underscores
    - Be concise but descriptive (e.g., has_unit_tests, uses_typescript, has_docker_config)
 
-3. Suggest **parent dependencies** — existing criteria that should logically pass BEFORE this one can be evaluated. For example, if the new criterion checks for "Azure Functions", it likely depends on "has_azure" and "has_node" passing first. Only suggest IDs from the provided existing criteria list.
-
-4. Suggest **children dependents** — existing criteria that should logically depend on this new criterion (i.e., this criterion should be a parent of those). For example, if the new criterion checks for "has_node", then "has_react" and "has_typescript" should depend on it. Only suggest IDs from the provided existing criteria list.
-
 Here are examples of good criteria prompts:
 - "The project uses Azure Bicep for infrastructure as code. Look for *.bicep files, bicepconfig.json, or main.bicep entry points."
 - "The project uses React framework. Look for react dependency in package.json, .jsx or .tsx files with React components."
 - "The project uses Node.js as its runtime environment. Look for package.json file or Node.js-specific configuration files."
 
 Respond with ONLY a JSON object in this exact format (no markdown, no code fences):
-{"prompt": "your evaluation prompt here", "suggestedId": "your_suggested_id", "suggestedParents": ["existing_id_1"], "suggestedChildren": ["existing_id_2"]}
+{"prompt": "your evaluation prompt here", "suggestedId": "your_suggested_id"}`;
 
-If no parents or children are appropriate, use empty arrays.`;
+interface SuggestDirectionCopy {
+  /** Human description of the relationship for the system prompt. */
+  relationship: string;
+  /** Heading used to label the candidate list in the user message. */
+  candidatesHeading: string;
+}
+
+const DIRECTION_COPY: Record<SuggestDirection, SuggestDirectionCopy> = {
+  parents: {
+    relationship:
+      'existing criteria that should logically pass BEFORE this one can be evaluated (i.e. this criterion depends ON them). For example, if the new criterion checks for "Azure Functions", it likely depends on "has_azure" and "has_node" passing first.',
+    candidatesHeading: "CANDIDATE CRITERIA (use only these IDs):",
+  },
+  children: {
+    relationship:
+      'existing criteria that should logically depend ON this new criterion (i.e. this criterion should be a parent of those). For example, if the new criterion checks for "has_node", then "has_react" and "has_typescript" should depend on it.',
+    candidatesHeading: "CANDIDATE CRITERIA (use only these IDs):",
+  },
+};
+
+/**
+ * Suggestion call (used symmetrically for parents and children): given the new
+ * behavior and a pre-filtered candidate pool, returns the subset of candidates
+ * that should be related to the new criterion in the given direction.
+ */
+function suggestSystemPrompt(direction: SuggestDirection): string {
+  const { relationship } = DIRECTION_COPY[direction];
+  return `You are an expert at organising evaluation criteria for AI coding agent benchmarks into a dependency graph.
+
+Given a natural-language description of a NEW criterion and a list of EXISTING criteria, suggest ${relationship}
+
+Only suggest IDs from the provided candidate list. If none are appropriate, return an empty array.
+
+Respond with ONLY a JSON object in this exact format (no markdown, no code fences):
+{"suggestions": ["existing_id_1", "existing_id_2"]}`;
+}
 
 export interface ExistingCriterion {
   id: string;
   prompt: string;
   dependsOn?: string[];
+  gates?: GateId[];
 }
 
 export interface GenerateResult {
@@ -46,40 +86,41 @@ export function isLlmAvailable(): boolean {
   return inferenceAvailable();
 }
 
-function buildUserMessage(behavior: string, existingCriteria: ExistingCriterion[]): string {
-  const parts: string[] = [];
+type ChatClient = Awaited<ReturnType<typeof acquireInferenceClient>>["client"];
 
-  if (existingCriteria.length > 0) {
-    parts.push("EXISTING CRITERIA (use only these IDs for parent/children suggestions):");
-    for (const c of existingCriteria) {
-      const deps = c.dependsOn?.length ? ` [parents: ${c.dependsOn.join(", ")}]` : "";
-      parts.push(`- ${c.id}: ${c.prompt}${deps}`);
-    }
-    parts.push("");
-  }
-
-  parts.push(`NEW CRITERION TO CREATE:\n${behavior}`);
-  return parts.join("\n");
+function sanitizeId(suggestedId: unknown): string {
+  if (typeof suggestedId !== "string") return "new_criterion";
+  const sanitized = suggestedId
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_")
+    .replace(/^[^a-z]+/, "")
+    .replace(/_+/g, "_")
+    .replace(/_$/, "");
+  return sanitized || "new_criterion";
 }
 
-export async function generateCriteriaPrompt(
-  behavior: string,
-  existingCriteria: ExistingCriterion[] = [],
-  model?: string,
-): Promise<GenerateResult> {
-  const { client: llm, model: foundryModel } = await acquireInferenceClient();
+function parseJson(content: string): any {
+  const cleaned = content.replace(/```json\s*|```\s*/g, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    throw new Error(`Failed to parse LLM response as JSON: ${cleaned}`);
+  }
+}
 
-  // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
-  const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
-  const userMessage = buildUserMessage(behavior, existingCriteria);
-
+async function chat(
+  llm: ChatClient,
+  model: string,
+  systemPrompt: string,
+  userMessage: string,
+): Promise<string> {
   const response = await llm.path("/chat/completions").post({
     body: {
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ],
-      model: modelName,
+      model,
       temperature: 0.3,
       max_tokens: 512,
     },
@@ -87,47 +128,128 @@ export async function generateCriteriaPrompt(
 
   if (isUnexpected(response)) {
     const errBody = response.body as any;
-    throw new Error(
-      `LLM request failed: ${errBody?.error?.message || response.status}`,
-    );
+    throw new Error(`LLM request failed: ${errBody?.error?.message || response.status}`);
   }
 
   const content = response.body.choices?.[0]?.message?.content;
   if (!content) {
     throw new Error("LLM returned empty response");
   }
+  return content;
+}
 
-  // Parse the JSON response, stripping any accidental markdown fences
-  const cleaned = content.replace(/```json\s*|```\s*/g, "").trim();
-  try {
-    const parsed = JSON.parse(cleaned);
-    if (!parsed.prompt || !parsed.suggestedId) {
-      throw new Error("Missing required fields");
-    }
-    // Sanitize the suggested ID
-    const sanitizedId = parsed.suggestedId
-      .toLowerCase()
-      .replace(/[^a-z0-9_]/g, "_")
-      .replace(/^[^a-z]+/, "")
-      .replace(/_+/g, "_")
-      .replace(/_$/, "");
-
-    // Validate suggested deps against existing criteria IDs
-    const existingIds = new Set(existingCriteria.map((c) => c.id));
-    const suggestedParents = Array.isArray(parsed.suggestedParents)
-      ? parsed.suggestedParents.filter((pid: string) => existingIds.has(pid))
-      : [];
-    const suggestedChildren = Array.isArray(parsed.suggestedChildren)
-      ? parsed.suggestedChildren.filter((cid: string) => existingIds.has(cid))
-      : [];
-
-    return {
-      prompt: parsed.prompt.trim(),
-      suggestedId: sanitizedId || "new_criterion",
-      suggestedParents,
-      suggestedChildren,
-    };
-  } catch {
-    throw new Error(`Failed to parse LLM response as JSON: ${cleaned}`);
+/**
+ * The "write the criterion" call: prompt + id only. Failure throws — the prompt
+ * is the one indispensable result of generation.
+ */
+async function author(
+  llm: ChatClient,
+  model: string,
+  behavior: string,
+): Promise<{ prompt: string; suggestedId: string }> {
+  const content = await chat(llm, model, SYSTEM_PROMPT_AUTHOR, `NEW CRITERION TO CREATE:\n${behavior}`);
+  const parsed = parseJson(content);
+  if (!parsed.prompt) {
+    throw new Error("Missing required field: prompt");
   }
+  return {
+    prompt: String(parsed.prompt).trim(),
+    suggestedId: sanitizeId(parsed.suggestedId),
+  };
+}
+
+function buildSuggestMessage(
+  direction: SuggestDirection,
+  behavior: string,
+  pool: ExistingCriterion[],
+): string {
+  const parts: string[] = [];
+  if (pool.length > 0) {
+    parts.push(DIRECTION_COPY[direction].candidatesHeading);
+    for (const c of pool) {
+      const deps = c.dependsOn?.length ? ` [parents: ${c.dependsOn.join(", ")}]` : "";
+      parts.push(`- ${c.id}: ${c.prompt}${deps}`);
+    }
+    parts.push("");
+  }
+  parts.push(`NEW CRITERION:\n${behavior}`);
+  return parts.join("\n");
+}
+
+/**
+ * Symmetric dependency-suggestion call. `parents` and `children` use this exact
+ * path — only the pre-filtered `pool` and the directional wording differ. The
+ * result is post-filtered against the pool's IDs so the model can never return a
+ * candidate outside the gate-compatible set. Failure degrades to `[]` so a
+ * suggestion hiccup never blocks criterion creation.
+ */
+async function suggestDeps(
+  direction: SuggestDirection,
+  llm: ChatClient,
+  model: string,
+  behavior: string,
+  pool: ExistingCriterion[],
+): Promise<string[]> {
+  if (pool.length === 0) return [];
+  const poolIds = new Set(pool.map((c) => c.id));
+  try {
+    const content = await chat(
+      llm,
+      model,
+      suggestSystemPrompt(direction),
+      buildSuggestMessage(direction, behavior, pool),
+    );
+    const parsed = parseJson(content);
+    const suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
+    return suggestions.filter((sid: unknown): sid is string => typeof sid === "string" && poolIds.has(sid));
+  } catch (err) {
+    console.warn(`[generate-prompt] ${direction} suggestion call failed, degrading to []:`, err);
+    return [];
+  }
+}
+
+/**
+ * Generate a criterion's prompt and gate-aware parent/child suggestions.
+ *
+ * Issues three single-responsibility calls in parallel:
+ *  - author      → {prompt, suggestedId}
+ *  - suggestDeps("parents", parentPool)   → suggestedParents
+ *  - suggestDeps("children", childPool)   → suggestedChildren
+ *
+ * The candidate pools are pre-filtered by the gate-compatibility invariant so no
+ * gate wording is ever sent to the model: a parent must satisfy the invariant
+ * over the new criterion's gates, and a child must have the new criterion as a
+ * compatible parent. When `newGates` is omitted both pools are the full list
+ * (backward compatible).
+ */
+export async function generateCriteriaPrompt(
+  behavior: string,
+  existingCriteria: ExistingCriterion[] = [],
+  newGates?: GateId[],
+  model?: string,
+): Promise<GenerateResult> {
+  const { client: llm, model: foundryModel } = await acquireInferenceClient();
+
+  // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
+  const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
+
+  const parentPool = newGates
+    ? existingCriteria.filter((c) => gatesSatisfyInvariant(c.gates, newGates))
+    : existingCriteria;
+  const childPool = newGates
+    ? existingCriteria.filter((c) => gatesSatisfyInvariant(newGates, c.gates))
+    : existingCriteria;
+
+  const [authored, suggestedParents, suggestedChildren] = await Promise.all([
+    author(llm, modelName, behavior),
+    suggestDeps("parents", llm, modelName, behavior, parentPool),
+    suggestDeps("children", llm, modelName, behavior, childPool),
+  ]);
+
+  return {
+    prompt: authored.prompt,
+    suggestedId: authored.suggestedId,
+    suggestedParents,
+    suggestedChildren,
+  };
 }

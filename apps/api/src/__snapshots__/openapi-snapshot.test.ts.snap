@@ -3744,6 +3744,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   "currentId": {
                     "type": "string",
                   },
+                  "gates": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
                 },
                 "required": [
                   "behavior",

@@ -12,10 +12,17 @@ import { api } from "@/lib/api";
 vi.mock("@/lib/api", () => ({
   api: {
     listCriteria: vi.fn().mockResolvedValue([]),
+    generateCriteriaPrompt: vi.fn().mockResolvedValue({
+      prompt: "generated",
+      suggestedId: "",
+      suggestedParents: [],
+      suggestedChildren: [],
+    }),
   },
 }));
 
 const listCriteria = vi.mocked(api.listCriteria);
+const generateCriteriaPrompt = vi.mocked(api.generateCriteriaPrompt);
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({
@@ -61,6 +68,50 @@ describe("useCriteriaWizard initial gates", () => {
       { wrapper },
     );
     expect(result.current.lockedGates).toBeUndefined();
+  });
+});
+
+describe("useCriteriaWizard generation passes target gates", () => {
+  afterEach(() => {
+    generateCriteriaPrompt.mockResolvedValue({
+      prompt: "generated",
+      suggestedId: "",
+      suggestedParents: [],
+      suggestedChildren: [],
+    });
+  });
+
+  it("sends the current gates on initial generation (handleContinue)", async () => {
+    const { result } = renderHook(
+      () => useCriteriaWizard({ initialGates: ["build"], onSuccess: () => {} }),
+      { wrapper },
+    );
+
+    act(() => result.current.handleBehaviorChange("detect docker"));
+    act(() => result.current.handleContinue());
+
+    await waitFor(() =>
+      expect(generateCriteriaPrompt).toHaveBeenCalledWith("detect docker", undefined, ["build"]),
+    );
+  });
+
+  it("sends the Step-2 gate choices on regenerate (handleRegenerate)", async () => {
+    const { result } = renderHook(
+      () => useCriteriaWizard({ onSuccess: () => {} }),
+      { wrapper },
+    );
+
+    act(() => result.current.handleBehaviorChange("detect docker"));
+    act(() => result.current.setGates(["select", "build", "test"]));
+    act(() => result.current.handleRegenerate());
+
+    await waitFor(() =>
+      expect(generateCriteriaPrompt).toHaveBeenCalledWith("detect docker", undefined, [
+        "select",
+        "build",
+        "test",
+      ]),
+    );
   });
 });
 
