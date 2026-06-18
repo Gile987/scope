@@ -62,6 +62,11 @@ export abstract class JudgeStrategy {
     const readFile = defineTool("read_file", {
       description:
         "Read the contents of a file in the workspace. Returns the full text content. Use relative paths from the workspace root.",
+      // Read-only, workspace-scoped, traversal-guarded tools must run without a
+      // permission prompt: the judge is headless (no TUI), so the v3 runtime
+      // would otherwise deny every call with "could not request permission from
+      // user", silently breaking all workspace inspection. See scope-doc#64.
+      skipPermission: true,
       parameters: {
         type: "object",
         properties: {
@@ -105,6 +110,7 @@ export abstract class JudgeStrategy {
     const listDirectory = defineTool("list_directory", {
       description:
         "List the contents of a directory in the workspace. Returns file and directory names with their types and sizes.",
+      skipPermission: true,
       parameters: {
         type: "object",
         properties: {
@@ -153,6 +159,7 @@ export abstract class JudgeStrategy {
     const searchFiles = defineTool("search_files", {
       description:
         "Search for text patterns in files within the workspace using grep. Returns matching lines with file paths and line numbers.",
+      skipPermission: true,
       parameters: {
         type: "object",
         properties: {
@@ -204,6 +211,7 @@ export abstract class JudgeStrategy {
 
     const fileExists = defineTool("file_exists", {
       description: "Check if a file or directory exists in the workspace.",
+      skipPermission: true,
       parameters: {
         type: "object",
         properties: {
