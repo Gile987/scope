@@ -48,7 +48,7 @@ const DIRECTION_COPY: Record<SuggestDirection, SuggestDirectionCopy> = {
       "existing criteria that are genuine PREREQUISITES of the new criterion — i.e. the new criterion cannot be meaningfully evaluated unless that criterion already passes.",
     test: "Include a candidate ONLY if the new criterion is impossible or meaningless when that candidate fails.",
     positiveExample:
-      'A new criterion checking for "Azure Functions" depends on "has_azure" and "has_node" — without Azure and Node there can be no Azure Functions, so both are prerequisites.',
+      'A new criterion "uses_express" (the Express web framework) genuinely depends on "has_node": Express is a Node.js library and cannot exist without Node, so has_node is a true prerequisite.',
     candidatesHeading: "CANDIDATE CRITERIA (use only these IDs):",
   },
   children: {
@@ -56,7 +56,7 @@ const DIRECTION_COPY: Record<SuggestDirection, SuggestDirectionCopy> = {
       "existing criteria for which the new criterion is a genuine PREREQUISITE — i.e. that criterion cannot be meaningfully evaluated unless the new criterion already passes.",
     test: "Include a candidate ONLY if that candidate is impossible or meaningless when the new criterion fails.",
     positiveExample:
-      'A new criterion "has_node" is a prerequisite of "has_react" and "has_typescript" — neither React nor TypeScript can be present without Node, so both should depend on it.',
+      'A new criterion "has_node" is a genuine prerequisite of "uses_express": Express is a Node.js library and cannot exist without Node, so uses_express should depend on it.',
     candidatesHeading: "CANDIDATE CRITERIA (use only these IDs):",
   },
 };
