@@ -30,7 +30,7 @@ function kindOf(body: any): "author" | "parents" | "children" {
   const system: string = body.messages[0].content;
   if (system.includes("writing evaluation criteria")) return "author";
   // Suggestion prompts embed the directional relationship wording.
-  if (system.includes("pass BEFORE this one")) return "parents";
+  if (system.includes("PREREQUISITES of the new criterion")) return "parents";
   return "children";
 }
 

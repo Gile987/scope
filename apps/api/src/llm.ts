@@ -32,8 +32,12 @@ Respond with ONLY a JSON object in this exact format (no markdown, no code fence
 {"prompt": "your evaluation prompt here", "suggestedId": "your_suggested_id"}`;
 
 interface SuggestDirectionCopy {
-  /** Human description of the relationship for the system prompt. */
+  /** One-line definition of the relationship being asked for. */
   relationship: string;
+  /** Concrete test the model must apply to each candidate before including it. */
+  test: string;
+  /** A positive example (a candidate that SHOULD be suggested) for this direction. */
+  positiveExample: string;
   /** Heading used to label the candidate list in the user message. */
   candidatesHeading: string;
 }
@@ -41,12 +45,18 @@ interface SuggestDirectionCopy {
 const DIRECTION_COPY: Record<SuggestDirection, SuggestDirectionCopy> = {
   parents: {
     relationship:
-      'existing criteria that should logically pass BEFORE this one can be evaluated (i.e. this criterion depends ON them). For example, if the new criterion checks for "Azure Functions", it likely depends on "has_azure" and "has_node" passing first.',
+      "existing criteria that are genuine PREREQUISITES of the new criterion — i.e. the new criterion cannot be meaningfully evaluated unless that criterion already passes.",
+    test: "Include a candidate ONLY if the new criterion is impossible or meaningless when that candidate fails.",
+    positiveExample:
+      'A new criterion checking for "Azure Functions" depends on "has_azure" and "has_node" — without Azure and Node there can be no Azure Functions, so both are prerequisites.',
     candidatesHeading: "CANDIDATE CRITERIA (use only these IDs):",
   },
   children: {
     relationship:
-      'existing criteria that should logically depend ON this new criterion (i.e. this criterion should be a parent of those). For example, if the new criterion checks for "has_node", then "has_react" and "has_typescript" should depend on it.',
+      "existing criteria for which the new criterion is a genuine PREREQUISITE — i.e. that criterion cannot be meaningfully evaluated unless the new criterion already passes.",
+    test: "Include a candidate ONLY if that candidate is impossible or meaningless when the new criterion fails.",
+    positiveExample:
+      'A new criterion "has_node" is a prerequisite of "has_react" and "has_typescript" — neither React nor TypeScript can be present without Node, so both should depend on it.',
     candidatesHeading: "CANDIDATE CRITERIA (use only these IDs):",
   },
 };
@@ -57,10 +67,21 @@ const DIRECTION_COPY: Record<SuggestDirection, SuggestDirectionCopy> = {
  * that should be related to the new criterion in the given direction.
  */
 function suggestSystemPrompt(direction: SuggestDirection): string {
-  const { relationship } = DIRECTION_COPY[direction];
+  const { relationship, test, positiveExample } = DIRECTION_COPY[direction];
   return `You are an expert at organising evaluation criteria for AI coding agent benchmarks into a dependency graph.
 
+A dependency edge A → B means "B cannot be meaningfully evaluated unless A passes first". Only TRUE prerequisite relationships are edges. Two criteria that merely belong to the same topic or family are SIBLINGS, not a parent/child pair.
+
 Given a natural-language description of a NEW criterion and a list of EXISTING criteria, suggest ${relationship}
+
+${test}
+
+STRICT RULES:
+- Do NOT suggest a candidate just because it is topically related, in the same family, or commonly seen together. Relatedness is not a dependency.
+- Reject siblings. Example: "has_unit_tests" and "has_integration_tests" are both about testing, but neither is a prerequisite of the other — they are siblings, so NEITHER should ever be suggested as a parent or child of the other.
+- A real prerequisite is a hard requirement: if it fails, the dependent criterion is impossible or meaningless to assess.
+- ${positiveExample}
+- When in doubt, leave it out: prefer an empty array over a weak or speculative edge.
 
 Only suggest IDs from the provided candidate list. If none are appropriate, return an empty array.
 
