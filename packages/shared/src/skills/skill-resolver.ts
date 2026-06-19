@@ -188,7 +188,7 @@ export class SkillResolver {
       skillPath,
       commitHash: commitInfo.sha,
       commitTimestamp: commitInfo.date,
-      name: parsed.frontmatter.name,
+      name: parsed.frontmatter.name || dirName,
       description: parsed.frontmatter.description,
       license: parsed.frontmatter.license,
       compatibility: parsed.frontmatter.compatibility,
