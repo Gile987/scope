@@ -37,7 +37,7 @@
 #   CODEBASE_NAME="pamelafox-site"
 #   CODEBASE_SOURCE="pamelafox/pamelafox-site"
 #   DEFAULT_BRANCH="main"
-#   WORKER="copilot"
+#   WORKER="coder-acp-copilot"
 #   TASK="Migrate this site to the Astro framework."
 #   MODEL=""                       # optional model override
 #   MAX_LOOP=10                    # Ralph-loop iteration cap
@@ -51,7 +51,7 @@ API="${SCOPE_API_URL:-http://localhost:5108}"
 CODEBASE_NAME="${CODEBASE_NAME:-pamelafox-site}"
 CODEBASE_SOURCE="${CODEBASE_SOURCE:-pamelafox/pamelafox-site}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
-WORKER="${WORKER:-copilot}"
+WORKER="${WORKER:-coder-acp-copilot}"
 TASK="${TASK:-Migrate this site to the Astro framework.}"
 MODEL="${MODEL:-}"
 MAX_LOOP="${MAX_LOOP:-10}"
