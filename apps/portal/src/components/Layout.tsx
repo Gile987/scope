@@ -21,6 +21,7 @@ import {
   Settings,
   Menu,
   BookOpen,
+  FolderGit2,
   GitBranch,
   Plug,
   Puzzle,
@@ -89,6 +90,7 @@ const navGroups: NavGroup[] = [
       { to: "/prompt-features", label: "Features", icon: Tags },
       { to: "/profiles", label: "Profiles", icon: SlidersHorizontal, featureKey: "profiles" },
       { to: "/skills", label: "Skills", icon: BookOpen, featureKey: "skills" },
+      { to: "/codebases", label: "Codebases", icon: FolderGit2 },
     ],
   },
   {

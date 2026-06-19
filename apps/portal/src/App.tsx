@@ -36,6 +36,8 @@ import { McpServerDetail } from "@/pages/McpServerDetail";
 import { McpServerPreviewPanel } from "@/pages/McpServerPreviewPanel";
 import { SkillList } from "@/pages/SkillList";
 import { SkillDetail } from "@/pages/SkillDetail";
+import { CodebaseList } from "@/pages/CodebaseList";
+import { CodebaseDetail } from "@/pages/CodebaseDetail";
 import { ExtensionList } from "@/pages/ExtensionList";
 import { ExtensionDetail } from "@/pages/ExtensionDetail";
 import { ExtensionPreviewPanel } from "@/pages/ExtensionPreviewPanel";
@@ -122,6 +124,8 @@ export function App() {
         <Route path="/mcp-servers/:slug" element={<FeatureRoute featureKey="mcp"><McpServerDetail /></FeatureRoute>} />
         <Route path="/skills" element={<FeatureRoute featureKey="skills"><SkillList /></FeatureRoute>} />
         <Route path="/skills/*" element={<FeatureRoute featureKey="skills"><SkillDetail /></FeatureRoute>} />
+        <Route path="/codebases" element={<CodebaseList />} />
+        <Route path="/codebases/:id" element={<CodebaseDetail />} />
         <Route path="/extensions" element={<FeatureRoute featureKey="extensions"><ExtensionList /></FeatureRoute>}>
           <Route path=":id/preview" element={<FeatureRoute featureKey="extensions"><ExtensionPreviewPanel /></FeatureRoute>} />
         </Route>
