@@ -164,14 +164,16 @@ export class SkillResolver {
 
     const parsed = parseSkillMd(skillMdFile.content);
 
-    // 6. Validate per spec (use actual directory name from discovered path)
+    // 6. Validate per spec (use actual directory name from discovered path).
+    //    Validation is non-blocking: spec-constraint violations (and any other
+    //    issues) are surfaced as warnings on the revision rather than failing
+    //    the import, so off-spec skills can still be imported.
     const dirName = skillPath.split('/').pop()!;
     const validation = validateSkillFrontmatter(parsed.frontmatter, dirName);
-    if (!validation.valid) {
-      const errorMessages = validation.errors.map(e => `${e.field}: ${e.message}`).join('; ');
-      throw new Error(`Invalid SKILL.md in ${source}/${skillPath}: ${errorMessages}`);
-    }
-    const validationWarnings = validation.warnings.map(w => `${w.field}: ${w.message}`);
+    const validationWarnings = [
+      ...validation.errors.map(e => `${e.field}: ${e.message}`),
+      ...validation.warnings.map(w => `${w.field}: ${w.message}`),
+    ];
 
     // 7. Create tar.gz archive and upload
     const archiveData = await this.createArchive(skillName, files);

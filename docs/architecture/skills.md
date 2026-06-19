@@ -76,6 +76,12 @@ erDiagram
 
 Skills are registered via the API by providing a GitHub source (`owner/repo`) and skill name. The API stores the skill record and immediately attempts to auto-resolve it: it fetches `SKILL.md` from GitHub at the latest commit, parses its YAML frontmatter (name, description, license, compatibility, etc.), uploads a tar.gz archive of the skill directory to Blob Storage, and creates the first `SkillRevision`. If auto-resolution fails (e.g., GitHub 404, network error), the skill record is still saved and the user can retry via `POST /api/v1/skills/:id/resolve`.
 
+#### Lenient spec validation
+
+Frontmatter is validated against the [Agent Skills spec](https://agentskills.io/specification), but validation is **non-blocking**. Spec *constraint* violations — `name` longer than 64 chars or not matching the lowercase/hyphen format, `description` longer than 1024 chars, `compatibility` longer than 500 chars, or `name` not matching its parent directory — do **not** fail the import. They are collected into the revision's `validationWarnings` array, which is surfaced in the Portal (`SkillDetail.tsx` banner + resolve toasts) and the CLI. This lets off-spec skills (e.g. an upstream skill with a 1057-char description) be imported while still flagging the deviation.
+
+The only hard requirements are structural: `name` and `description` must be present and string-typed (enforced at parse time in `skill-parser.ts`), since the data model cannot build a revision without them. `validateSkillFrontmatter` (`skill-validator.ts`) returns `errors` only for these missing-required cases and `warnings` for every spec-constraint violation; `SkillResolver.resolve` never throws on validation and merges any errors and warnings into the stored `validationWarnings`.
+
 #### Discovery
 
 `GET /api/v1/skills/discover?source=owner/repo` lists every `SKILL.md` found under well-known directories (`skills/`, `.agents/skills/`, `.github/skills/`, `.claude/skills/`, `.copilot/skills/`, `.roo/skills/`, `.cursor/skills/`, and the repo root). Implementation: a single recursive Trees API call to enumerate the repo, then per-skill best-effort frontmatter parsing via `raw.githubusercontent.com` (which doesn't count against the API rate limit). The portal exposes this as a multi-step import wizard: the user enters a repository, picks one or more discovered skills, and the wizard fires parallel `POST /api/v1/skills` requests with per-skill progress feedback. Returns `404` if the repository does not exist, `400` for malformed sources, and `502` for upstream GitHub errors (including rate limits — set `GITHUB_TOKEN` on the API to raise the limit).
@@ -179,6 +185,9 @@ When runs are resubmitted:
 | `packages/shared/src/skills/skill-extractor.ts` | Download + extract skill archives to workspace |
 | `packages/shared/src/skills/skill-prompt.ts` | Discovery prompt generation (`<available_skills>` XML) |
 | `packages/shared/src/skills/skill-resolver.ts` | Resolve skill slugs → revision refs via GitHub |
+| `packages/shared/src/skills/skill-parser.ts` | Parse SKILL.md frontmatter (hard-requires `name`/`description`) |
+| `packages/shared/src/skills/skill-validator.ts` | Lenient spec validation → non-blocking `validationWarnings` |
 | `packages/shared/src/queue/queue-processor.ts` | Orchestrates skill extraction before agent processing |
 | `apps/api/src/index.ts` | REST endpoints for skills, revisions, archives |
 | `apps/portal/src/pages/RunsList.tsx` | Skills column + resubmit override UI |
+| `apps/portal/src/pages/SkillDetail.tsx` | Skill detail view + `validationWarnings` banner/toasts |

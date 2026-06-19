@@ -6,6 +6,11 @@
  *
  * Validates parsed frontmatter fields according to the Agent Skills Specification:
  * https://agentskills.io/specification
+ *
+ * Validation is intentionally lenient: spec *constraint* violations (length and
+ * format limits) are reported as non-blocking warnings so that skills which do
+ * not strictly meet the spec can still be imported. Only genuinely-missing
+ * required fields (`name`, `description`) are reported as blocking errors.
  */
 
 import type { SkillFrontmatter } from './skill-parser.js';
@@ -52,34 +57,36 @@ export function validateSkillFrontmatter(
   const errors: SkillValidationError[] = [];
   const warnings: SkillValidationWarning[] = [];
 
-  // name: required, 1-64 chars, lowercase + hyphens, no leading/trailing/consecutive hyphens
+  // name: required (presence is a hard error); length/format limits are
+  // non-blocking warnings so off-spec skills can still be imported.
   if (!frontmatter.name) {
     errors.push({ field: 'name', message: 'name is required' });
   } else {
     if (frontmatter.name.length > 64) {
-      errors.push({ field: 'name', message: `name must be at most 64 characters (got ${frontmatter.name.length})` });
+      warnings.push({ field: 'name', message: `name must be at most 64 characters (got ${frontmatter.name.length})` });
     }
     if (!NAME_REGEX.test(frontmatter.name)) {
-      errors.push({ field: 'name', message: 'name must contain only lowercase alphanumeric characters and hyphens, must not start or end with a hyphen' });
+      warnings.push({ field: 'name', message: 'name must contain only lowercase alphanumeric characters and hyphens, must not start or end with a hyphen' });
     }
     if (frontmatter.name.includes('--')) {
-      errors.push({ field: 'name', message: 'name must not contain consecutive hyphens (--)' });
+      warnings.push({ field: 'name', message: 'name must not contain consecutive hyphens (--)' });
     }
     if (dirName && frontmatter.name !== dirName) {
       warnings.push({ field: 'name', message: `name "${frontmatter.name}" does not match parent directory name "${dirName}" (spec recommends they match)` });
     }
   }
 
-  // description: required, 1-1024 chars
+  // description: required (presence is a hard error); the 1024-char limit is a
+  // non-blocking warning.
   if (!frontmatter.description) {
     errors.push({ field: 'description', message: 'description is required' });
   } else if (frontmatter.description.length > 1024) {
-    errors.push({ field: 'description', message: `description must be at most 1024 characters (got ${frontmatter.description.length})` });
+    warnings.push({ field: 'description', message: `description must be at most 1024 characters (got ${frontmatter.description.length})` });
   }
 
-  // compatibility: optional, 1-500 chars
+  // compatibility: optional; the 500-char limit is a non-blocking warning.
   if (frontmatter.compatibility !== undefined && frontmatter.compatibility.length > 500) {
-    errors.push({ field: 'compatibility', message: `compatibility must be at most 500 characters (got ${frontmatter.compatibility.length})` });
+    warnings.push({ field: 'compatibility', message: `compatibility must be at most 500 characters (got ${frontmatter.compatibility.length})` });
   }
 
   return {

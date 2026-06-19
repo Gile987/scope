@@ -51,36 +51,43 @@ describe('validateSkillFrontmatter', () => {
     );
   });
 
-  it('should fail for name with uppercase', () => {
+  it('should warn (not fail) for name with uppercase', () => {
     const result = validateSkillFrontmatter({ ...validFrontmatter, name: 'My-Skill' });
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContainEqual(
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+    expect(result.warnings).toContainEqual(
       expect.objectContaining({ field: 'name', message: expect.stringContaining('lowercase') })
     );
   });
 
-  it('should fail for name starting with hyphen', () => {
+  it('should warn (not fail) for name starting with hyphen', () => {
     const result = validateSkillFrontmatter({ ...validFrontmatter, name: '-my-skill' });
-    expect(result.valid).toBe(false);
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({ field: 'name' })
+    );
   });
 
-  it('should fail for name ending with hyphen', () => {
+  it('should warn (not fail) for name ending with hyphen', () => {
     const result = validateSkillFrontmatter({ ...validFrontmatter, name: 'my-skill-' });
-    expect(result.valid).toBe(false);
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({ field: 'name' })
+    );
   });
 
-  it('should fail for name with consecutive hyphens', () => {
+  it('should warn (not fail) for name with consecutive hyphens', () => {
     const result = validateSkillFrontmatter({ ...validFrontmatter, name: 'my--skill' });
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContainEqual(
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toContainEqual(
       expect.objectContaining({ field: 'name', message: expect.stringContaining('consecutive hyphens') })
     );
   });
 
-  it('should fail for name longer than 64 characters', () => {
+  it('should warn (not fail) for name longer than 64 characters', () => {
     const result = validateSkillFrontmatter({ ...validFrontmatter, name: 'a'.repeat(65) });
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContainEqual(
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toContainEqual(
       expect.objectContaining({ field: 'name', message: expect.stringContaining('at most 64') })
     );
   });
@@ -98,18 +105,20 @@ describe('validateSkillFrontmatter', () => {
     );
   });
 
-  it('should fail for description longer than 1024 characters', () => {
+  it('should warn (not fail) for description longer than 1024 characters', () => {
     const result = validateSkillFrontmatter({ ...validFrontmatter, description: 'x'.repeat(1025) });
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContainEqual(
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+    expect(result.warnings).toContainEqual(
       expect.objectContaining({ field: 'description', message: expect.stringContaining('at most 1024') })
     );
   });
 
-  it('should fail for compatibility longer than 500 characters', () => {
+  it('should warn (not fail) for compatibility longer than 500 characters', () => {
     const result = validateSkillFrontmatter({ ...validFrontmatter, compatibility: 'x'.repeat(501) });
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContainEqual(
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+    expect(result.warnings).toContainEqual(
       expect.objectContaining({ field: 'compatibility', message: expect.stringContaining('at most 500') })
     );
   });
