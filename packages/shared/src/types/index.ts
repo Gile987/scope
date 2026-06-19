@@ -4,5 +4,6 @@
 export * from "./types.js";
 export * from "./mcp.js";
 export * from "./skill.js";
+export * from "./codebase.js";
 export * from "./extension.js";
 export * from "./profile.js";
