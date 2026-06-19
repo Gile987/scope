@@ -78,9 +78,23 @@ Skills are registered via the API by providing a GitHub source (`owner/repo`) an
 
 #### Lenient spec validation
 
-Frontmatter is validated against the [Agent Skills spec](https://agentskills.io/specification), but validation is **non-blocking**. Spec *constraint* violations — `name` longer than 64 chars or not matching the lowercase/hyphen format, `description` longer than 1024 chars, `compatibility` longer than 500 chars, or `name` not matching its parent directory — do **not** fail the import. They are collected into the revision's `validationWarnings` array, which is surfaced in the Portal (`SkillDetail.tsx` banner + resolve toasts) and the CLI. This lets off-spec skills (e.g. an upstream skill with a 1057-char description) be imported while still flagging the deviation.
+Frontmatter is validated against the [Agent Skills spec](https://agentskills.io/specification), but validation is **non-blocking** for everything except a usable `description`. Spec *constraint* violations (length/format) do **not** fail the import — they are collected into the revision's `validationWarnings` array, which is surfaced in the Portal (`SkillDetail.tsx` banner + resolve toasts) and the CLI. This lets off-spec skills (e.g. an upstream skill with a 1057-char description) be imported while still flagging the deviation.
 
-The only hard requirement is a present, non-empty `description`. The `description` is the metadata an agent loads at startup to decide *when* to activate a skill (per the spec's progressive-disclosure model), and it has no fallback — a skill without one can never be invoked, so it is rejected at parse time (`skill-parser.ts`) rather than imported as a dead entry. A missing `name`, by contrast, is recoverable: the spec requires `name` to match the parent directory, so `SkillResolver.resolve` falls back to the directory name and the validator records a warning. `validateSkillFrontmatter` (`skill-validator.ts`) returns `errors` only for a missing `name`/`description` and `warnings` for every spec-constraint violation; `SkillResolver.resolve` never throws on validation and merges any errors and warnings into the stored `validationWarnings`.
+The one hard requirement is a present, non-empty `description`. The `description` is the metadata an agent loads at startup to decide *when* to activate a skill (per the spec's progressive-disclosure model), and it has no fallback — a skill without one can never be invoked, so it is rejected at parse time (`skill-parser.ts`) rather than imported as a dead entry. A missing `name`, by contrast, is recoverable: the spec requires `name` to match the parent directory, so the parser tolerates an absent name and `SkillResolver.resolve` falls back to the directory name.
+
+| Frontmatter issue | Behavior |
+|-------------------|----------|
+| `name` longer than 64 characters | Warning, imports |
+| `name` not lowercase alphanumeric + hyphens (bad format) | Warning, imports |
+| `name` starts/ends with a hyphen or has consecutive hyphens | Warning, imports |
+| `name` does not match the parent directory | Warning, imports |
+| `name` missing | Recovered from the directory name, warning, imports |
+| `description` longer than 1024 characters | Warning, imports |
+| `compatibility` longer than 500 characters | Warning, imports |
+| **`description` missing or empty** | **Hard error — rejected** (skill would be unusable) |
+| **Unparseable YAML frontmatter** | **Hard error — rejected** |
+
+`validateSkillFrontmatter` (`skill-validator.ts`) returns `errors` only for a missing `name`/`description` and `warnings` for every spec-constraint violation. `SkillResolver.resolve` never throws on validation; it merges any errors and warnings into the stored `validationWarnings`. (The empty-`description` case never reaches the validator because `skill-parser.ts` rejects it first.)
 
 #### Discovery
 
