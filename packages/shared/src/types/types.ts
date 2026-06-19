@@ -228,10 +228,6 @@ export interface RunState {
   attemptNumber: number;                    // 1, 2, 3…
   status: "pending" | "queued" | "processing" | "paused" | "done";
   outcome?: "succeeded" | "failed" | "finished";
-  /** Classifies the reason for failure when outcome is "failed". Enables
-   *  distinguishing agent errors from judge infrastructure errors and
-   *  rate-limit throttling in dashboards, alerting, and re-run eligibility. */
-  failureReason?: "agent_error" | "judge_error" | "judge_rate_limited" | "timeout" | "cancelled" | "snapshot_error";
   result?: string;
   error?: string;
   /** Full blob URL pointing to this attempt's JSONL log blob in the `logs`

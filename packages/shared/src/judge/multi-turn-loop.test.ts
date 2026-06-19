@@ -26,11 +26,6 @@ vi.mock("./judge-client.js", () => ({
   JudgeClient: vi.fn().mockImplementation(() => ({
     evaluate: vi.fn().mockResolvedValue({ passed: true, feedback: "All good" }),
   })),
-  isRateLimitError: (error: unknown) => {
-    if (!error) return false;
-    const msg = error instanceof Error ? error.message : String(error);
-    return msg.includes("rate limit") || msg.includes("rate-limit") || msg.includes("Too Many Requests");
-  },
 }));
 
 // Import after mocks

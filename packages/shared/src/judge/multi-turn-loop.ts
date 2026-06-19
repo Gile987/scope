@@ -15,7 +15,7 @@ import type { SkillConfig } from "../types/skill.js";
 import type { ExtensionConfig } from "../types/extension.js";
 import { BlobStorage, BlobStorageConfig } from "../storage/blob-storage.js";
 import { sanitizeHarFile, extractToolCalls } from "../har/har-parser.js";
-import { JudgeClient, isRateLimitError } from "./judge-client.js";
+import { JudgeClient } from "./judge-client.js";
 
 export interface MultiTurnConfig {
   /** The coding worker processor (unchanged interface, called per iteration) */
@@ -66,8 +66,6 @@ export interface MultiTurnResult {
   finalResult: string;
   /** True when the loop exited because of an unrecoverable error (agent crash, snapshot failure, judge failure), not because iterations were exhausted. */
   hadError: boolean;
-  /** Classifies the type of failure for status reporting. Only set when hadError is true. */
-  failureReason?: "agent_error" | "judge_error" | "judge_rate_limited" | "timeout" | "snapshot_error";
 }
 
 /**
@@ -319,7 +317,6 @@ export async function runMultiTurnLoop(
         turns,
         passed: false,
         hadError: true,
-        failureReason: "agent_error",
         finalResult: `Coding agent failed on iteration ${iteration}: ${errorMsg}`,
       };
     }
@@ -368,7 +365,6 @@ export async function runMultiTurnLoop(
         turns,
         passed: false,
         hadError: true,
-        failureReason: "snapshot_error",
         finalResult: `Snapshot upload failed on iteration ${iteration}: ${errorMsg}`,
       };
     }
@@ -463,7 +459,6 @@ export async function runMultiTurnLoop(
         turns,
         passed: false,
         hadError: true,
-        failureReason: isRateLimitError(error) ? "judge_rate_limited" : "judge_error",
         finalResult: `Judge evaluation failed on iteration ${iteration}: ${errorMsg}`,
       };
     }
@@ -550,7 +545,6 @@ export async function runMultiTurnLoop(
         turns,
         passed: false,
         hadError: true,
-        failureReason: "timeout",
         finalResult: `Iteration ${iteration} exceeded timeout (${elapsedSec}s > ${budgetSec}s)`,
       };
     }
