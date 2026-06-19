@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import {
   Send, Loader2, Server, Info, BookOpen, Sparkles, Puzzle, SlidersHorizontal,
-  X, Save, Plus, ChevronDown, FilePlus2, History, ArrowLeft, Check,
+  X, Save, Plus, ChevronDown, FilePlus2, History, ArrowLeft, Check, FolderGit2,
 } from "lucide-react";
 import {
   WORKER_TYPES, type CodingAgent, type McpServerDocument,
@@ -24,6 +24,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { CreateCriterionDialog } from "@/components/CreateCriterionDialog";
 import { SkillPicker } from "@/components/SkillPicker";
+import { CodebasePicker } from "@/components/CodebasePicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { ProfileCreateForm } from "@/components/ProfileCreateForm";
 import { ProfilePicker } from "@/components/ProfilePicker";
@@ -212,6 +213,7 @@ export function SubmitRun() {
   // Optional add-ons
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [selectedCodebaseSpec, setSelectedCodebaseSpec] = useState<string | null>(null);
   const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
 
   // Profile
@@ -238,6 +240,7 @@ export function SubmitRun() {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [codebaseOpen, setCodebaseOpen] = useState(false);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
   const [graphSelection, setGraphSelection] = useState<GraphSelection>({ kind: "base" });
 
@@ -497,6 +500,10 @@ export function SubmitRun() {
       setSelectedSkills(skills);
       setSkillsOpen(true);
     }
+    if (run.codebaseRevisionId) {
+      setSelectedCodebaseSpec(run.codebaseRevisionId);
+      setCodebaseOpen(true);
+    }
     if (run.extensions && run.extensions.length > 0) {
       setSelectedExtensions(run.extensions);
       setExtensionsOpen(true);
@@ -618,6 +625,7 @@ export function SubmitRun() {
       ...(inVariationMode ? {} : { ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}) }),
       ...(inVariationMode ? {} : { ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}) }),
       ...(inVariationMode ? {} : { ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}) }),
+      ...(selectedCodebaseSpec ? { codebase: selectedCodebaseSpec } : {}),
       ...(inVariationMode ? {} : { ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}) }),
       ...(inVariationMode
         ? {
@@ -715,6 +723,7 @@ export function SubmitRun() {
     advanced && priority !== 0 ? `priority ${priority}` : "",
     selectedMcpServers.length > 0 ? `${selectedMcpServers.length} MCP` : "",
     selectedSkills.length > 0 ? `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"}` : "",
+    selectedCodebaseSpec ? `codebase ${selectedCodebaseSpec}` : "",
     selectedExtensions.length > 0 ? `${selectedExtensions.length} ext` : "",
   ].filter(Boolean);
 
@@ -1576,6 +1585,24 @@ export function SubmitRun() {
           </div>
         </CollapsibleCard>
       )}
+
+
+      {/* ─── Codebase (collapsible) ─────────────────────────────────────── */}
+      <CollapsibleCard
+        icon={FolderGit2}
+        title="Codebase"
+        help={
+          <HelpTooltip
+            text="Optional workspace seed. Pick a git codebase to resolve at submit time or a specific archive/git revision."
+           
+          />
+        }
+        summary={selectedCodebaseSpec ? selectedCodebaseSpec : "None — empty workspace"}
+        open={codebaseOpen}
+        onOpenChange={setCodebaseOpen}
+      >
+        <CodebasePicker selected={selectedCodebaseSpec} onChange={setSelectedCodebaseSpec} />
+      </CollapsibleCard>
 
       {/* ─── Skills (collapsible) ──────────────────────────────────────── */}
       <CollapsibleCard
