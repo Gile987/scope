@@ -453,6 +453,19 @@ The judge agent's available tools therefore become workspace-scoped
 for non-Select gates instructs the judge to consult tool outputs (e.g. "to
 decide whether the build succeeded, inspect the build command's output").
 
+> **Tool isolation (scope #1117).** The judge session is restricted to its own
+> custom tools only — `createSession` is called with `availableTools: ["custom:*"]`
+> and `excludedTools: ["builtin:*", "mcp:*"]` (see `JUDGE_AVAILABLE_TOOLS` /
+> `JUDGE_EXCLUDED_TOOLS` in `judge-strategies.ts`). The Copilot SDK defaults to
+> `mode: "copilot-cli"`, which would otherwise inject the built-in CLI tools
+> (`bash`, `edit`, ...). Those built-ins are not `skipPermission`, so when the
+> headless judge model tries to *run* a build/test command itself instead of
+> reading the captured output, the runtime denies it with "could not request
+> permission from user" and the judge mis-reports that as the coder's result
+> (a bogus, non-deterministic "permission denied" failure even when the coder's
+> command actually succeeded). Locking the session to `custom:*` removes that
+> escape hatch and forces the judge to evaluate from `read_tool_outputs`.
+
 ```mermaid
 flowchart LR
     subgraph Iteration

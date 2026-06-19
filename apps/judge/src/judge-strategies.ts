@@ -42,6 +42,30 @@ const DEFAULT_JUDGE_TIMEOUT = 480_000;
 const DEFAULT_JUDGE_RETRIES = 3;
 
 /**
+ * Tool filter applied to every judge session.
+ *
+ * The Copilot SDK's `CopilotClient` defaults to `mode: "copilot-cli"`, which
+ * injects the full set of built-in CLI tools (bash, edit, view, ...) into the
+ * session alongside the read-only `custom:*` tools we register in
+ * `createFileTools`/`createToolOutputTools`. Those built-ins are NOT
+ * `skipPermission`, and the judge runs headless (no TUI to answer prompts).
+ *
+ * The failure mode this guards against: instead of reading the coder's captured
+ * output via `read_tool_outputs`/`get_tool_output`, the judge model decides to
+ * "verify" a build/test by running the command itself through the built-in
+ * `bash` tool. Headless, that call is denied with "could not request permission
+ * from user". The judge then mis-reports this as the coder's result ("execution
+ * is blocked by a permission error"), producing a bogus, non-deterministic
+ * failure even when the coder's command actually succeeded. See scope #1117.
+ *
+ * Restricting `availableTools` to `custom:*` (and explicitly excluding
+ * `builtin:*`/`mcp:*` as defense in depth, since `excludedTools` always wins)
+ * guarantees the model can only ever call our injected, skipPermission tools.
+ */
+export const JUDGE_AVAILABLE_TOOLS = ["custom:*"] as const;
+export const JUDGE_EXCLUDED_TOOLS = ["builtin:*", "mcp:*"] as const;
+
+/**
  * Returns true only if `target` resolves to a path inside (or equal to) the
  * workspace `root`. A plain `startsWith` check is unsafe: `join()` normalizes
  * `..`, so `join("/tmp/ws", "../ws2/x")` → `/tmp/ws2/x`, which shares the
@@ -408,6 +432,22 @@ export abstract class JudgeStrategy {
     );
   }
 
+  /**
+   * Builds the `createSession` config for a judge session. Extracted so the
+   * tool-restriction policy (availableTools/excludedTools) is unit-testable
+   * without spinning up a real Copilot runtime. See {@link JUDGE_AVAILABLE_TOOLS}.
+   */
+  protected buildSessionConfig(tools: any[], systemPrompt: string) {
+    return {
+      model: this.model,
+      streaming: true as const,
+      tools,
+      availableTools: [...JUDGE_AVAILABLE_TOOLS],
+      excludedTools: [...JUDGE_EXCLUDED_TOOLS],
+      systemMessage: { mode: "replace" as const, content: systemPrompt },
+    };
+  }
+
   private async doRunCopilotSession(
     tools: any[],
     systemPrompt: string,
@@ -418,12 +458,9 @@ export abstract class JudgeStrategy {
     let fullResponse = "";
 
     try {
-      const session = await client.createSession({
-        model: this.model,
-        streaming: true,
-        tools: tools as any,
-        systemMessage: { mode: "replace", content: systemPrompt },
-      });
+      const session = await client.createSession(
+        this.buildSessionConfig(tools, systemPrompt) as any
+      );
 
       session.on((event: SessionEvent) => {
         if (event.type === "assistant.message_delta") {

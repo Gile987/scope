@@ -5,7 +5,12 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { IndependentStrategy, isWithinWorkspace } from "./judge-strategies.js";
+import {
+  IndependentStrategy,
+  isWithinWorkspace,
+  JUDGE_AVAILABLE_TOOLS,
+  JUDGE_EXCLUDED_TOOLS,
+} from "./judge-strategies.js";
 
 /**
  * Test subclass that exposes the protected `createFileTools` so we can assert
@@ -15,6 +20,9 @@ import { IndependentStrategy, isWithinWorkspace } from "./judge-strategies.js";
 class TestableStrategy extends IndependentStrategy {
   publicCreateFileTools(workspacePath: string) {
     return this.createFileTools(workspacePath);
+  }
+  publicBuildSessionConfig(tools: any[], systemPrompt: string) {
+    return this.buildSessionConfig(tools, systemPrompt);
   }
 }
 
@@ -145,5 +153,41 @@ describe("judge file tool handlers (workspace scoping)", () => {
       pattern: "in-workspace",
     })) as { matches: string[] };
     expect(result.matches.some((m) => m.includes("inside.txt"))).toBe(true);
+  });
+});
+
+describe("judge session tool restriction (scope #1117)", () => {
+  const strategy = new TestableStrategy("test-model");
+  const config = strategy.publicBuildSessionConfig([], "system prompt");
+
+  // The headless judge must never be handed the SDK's built-in execute tools
+  // (bash/edit/...). Under mode:"copilot-cli" (the SDK default) those are
+  // injected and are NOT skipPermission, so the model trying to run a command
+  // itself gets denied with "could not request permission from user" and then
+  // mis-reports it as the coder's result. Restricting to custom:* prevents this.
+  it("restricts availableTools to custom tools only", () => {
+    expect(config.availableTools).toEqual(["custom:*"]);
+  });
+
+  it("explicitly excludes built-in and MCP tools", () => {
+    expect(config.excludedTools).toEqual(["builtin:*", "mcp:*"]);
+  });
+
+  it("never exposes the built-in bash tool to the judge", () => {
+    const available = config.availableTools as string[];
+    const excluded = config.excludedTools as string[];
+    expect(available).not.toContain("builtin:*");
+    expect(available).not.toContain("bash");
+    // excludedTools wins over availableTools, so builtin:* is hard-disabled.
+    expect(excluded).toContain("builtin:*");
+  });
+
+  it("uses a replace-mode system message with the provided prompt", () => {
+    expect(config.systemMessage).toEqual({ mode: "replace", content: "system prompt" });
+  });
+
+  it("exports the filter constants used to build the config", () => {
+    expect([...JUDGE_AVAILABLE_TOOLS]).toEqual(["custom:*"]);
+    expect([...JUDGE_EXCLUDED_TOOLS]).toEqual(["builtin:*", "mcp:*"]);
   });
 });
