@@ -1,4 +1,4 @@
-# Proposal: Ephemeral Azure Deploy Targets for Coding Agents
+# Proposal: Ephemeral Azure Deploy Environments for Coding Agents
 
 **Status:** Draft / for team review
 **Author:** (SCOPE team)
@@ -16,9 +16,21 @@ This document evaluates the options, recommends **per-run ephemeral resource
 groups inside a single dedicated sandbox subscription**, and sketches how it
 maps onto SCOPE's existing run/worker lifecycle.
 
+It also defines a provider-agnostic **`EphemeralEnvironment` abstraction** — the
+general notion of *something that must be provisioned before a run and torn down
+after it*. That isn't limited to clouds: it could be an Azure resource group, but
+equally a database, a PaaS app, or any other disposable resource. Azure resource
+groups are simply the first implementation; other kinds plug in behind the same
+interface.
+
 ## Goals
 
-- Give each agent run a clean Azure environment to deploy into.
+- Give each agent run clean, disposable environment(s) to use during the run.
+- **Generic ephemeral-environment abstraction** — the run/worker lifecycle
+  depends on an `EphemeralEnvironment` interface (provision before / tear down
+  after), not on any specific resource type or cloud. An environment can be an
+  Azure resource group, a database, a PaaS app, etc. (Azure resource groups are
+  the only implementation delivered here.)
 - **Functional isolation** between concurrent runs (a run cannot see or touch
   another run's resources).
 - **Guaranteed teardown** — one operation nukes everything a run created, plus a
@@ -38,35 +50,37 @@ maps onto SCOPE's existing run/worker lifecycle.
 
 ### Functional
 
-- **FR1 — On-demand provisioning.** Each agent run can be given a dedicated,
-  empty Azure environment to deploy into at run start.
-- **FR2 — Isolation.** A run's identity can only see and modify resources in its
-  own environment; it cannot enumerate or touch other runs' resources.
-- **FR3 — Credential delivery.** The run's deploy credential is injected into the
-  agent's environment through the same mechanism used for other worker secrets.
-- **FR4 — Guaranteed teardown.** Everything a run created can be destroyed by a
+- **On-demand provisioning** — each agent run can be given a dedicated, empty
+  Azure environment to deploy into at run start.
+- **Isolation (including non-visibility)** — the agent can only see and modify
+  resources in its own environment. It must **not even be able to enumerate or
+  see** other runs' resource groups or resources — listing returns only its own
+  environment. Achieved by scoping the run's credential to just its RG (an
+  RG-scoped role cannot list resources outside that scope).
+- **Credential delivery** — the run receives a credential scoped to its own
+  environment so the agent can deploy into it. **How** that credential is
+  delivered to the agent is an open question (see Open questions).
+- **Guaranteed teardown** — everything a run created can be destroyed by a
   single, reliable operation at run end.
-- **FR5 — Orphan cleanup.** Environments left behind by crashed or abandoned runs
-  are automatically reclaimed without manual intervention.
-- **FR6 — Cost attribution.** Spend can be attributed per run, scenario, and
-  agent.
-- **FR7 — Opt-in.** Only scenarios that declare a need for a deploy environment
+- **Orphan cleanup** — environments left behind by crashed or abandoned runs are
+  automatically reclaimed without manual intervention.
+- **Cost attribution** — spend can be attributed per run, scenario, and agent.
+- **Opt-in** — only scenarios that declare a need for a deploy environment
   receive one; other scenarios are unaffected.
 
 ### Non-functional
 
-- **NFR1 — Guardrails.** Allowed regions, resource types/SKUs, and spend are
-  bounded so a run cannot provision outside an approved envelope.
-- **NFR2 — Low latency.** Provisioning adds negligible time to run startup.
-- **NFR3 — Concurrency.** Supports the platform's target number of simultaneous
-  deploying runs without collisions or quota exhaustion (target TBD — see Open
-  questions).
-- **NFR4 — Least privilege.** The control-plane identity and per-run credentials
-  hold the minimum rights required, scoped to the sandbox subscription / RG.
-- **NFR5 — Auditability.** Provision and teardown events are logged and traceable
-  to a run.
-- **NFR6 — Self-cleaning by default.** The system trends toward an empty sandbox;
-  no run can leave indefinitely-billed resources behind.
+- **Guardrails** — allowed regions, resource types/SKUs, and spend are bounded so
+  a run cannot provision outside an approved envelope.
+- **Low latency** — provisioning adds negligible time to run startup.
+- **Concurrency** — supports the target number of simultaneous deploying runs
+  without collisions or quota exhaustion (target TBD — see Open questions).
+- **Least privilege** — the control-plane identity and per-run credentials hold
+  the minimum rights required, scoped to the sandbox subscription / RG.
+- **Auditability** — provision and teardown events are logged and traceable to a
+  run.
+- **Self-cleaning by default** — the system trends toward an empty sandbox; no
+  run can leave indefinitely-billed resources behind.
 
 ## Background: Azure's hierarchy (why not "sub-subscriptions")
 
@@ -142,7 +156,83 @@ Management Group: scope-agents
 Adopt **Option 1**. Keep Alternative B documented as the upgrade path if the
 isolation requirement hardens.
 
-## Recommended design (Option 1)
+## Ephemeral environment abstraction
+
+The core notion is an **ephemeral environment**: anything a run needs that must be
+**provisioned before the run and torn down after it completes**. This is *not*
+inherently a cloud concept — it could be an Azure resource group, but equally a
+PaaS app, a database instance, a namespace, a sandbox account, or any other
+provisionable, disposable resource. The run/worker lifecycle depends only on this
+abstraction; concrete kinds (starting with Azure resource groups) implement it.
+
+### Core interface
+
+```ts
+/** A provisioned, disposable environment leased to a single run.
+ *  Not cloud-specific — could be a resource group, a database, a PaaS app, etc. */
+interface EphemeralEnvironment {
+  /** Stable id for this lease (e.g. the runId). */
+  id: string;
+  /** What kind of environment this is, e.g. "azure-resource-group",
+   *  "postgres-database", "paas-app". */
+  kind: string;
+  /** Opaque, kind-specific handles (e.g. Azure RG: { subscriptionId, resourceGroup };
+   *  database: { host, dbName }). */
+  handles: Record<string, string>;
+  /** How the agent authenticates/connects into this environment
+   *  (see Credential delivery). */
+  credential: EnvironmentCredential;
+  /** Tags/labels applied for cost attribution and orphan cleanup. */
+  tags: Record<string, string>;
+  /** When this lease should be reclaimed if not torn down sooner. */
+  expiresAt: Date;
+}
+
+/** Provisions and reclaims ephemeral environments of one kind. */
+interface EphemeralEnvironmentProvider {
+  /** The kind of environment this provider manages. */
+  readonly kind: string;
+  /** Create an isolated, empty environment for a run. */
+  provision(req: ProvisionRequest): Promise<EphemeralEnvironment>;
+  /** Destroy everything created in the environment. Idempotent. */
+  teardown(env: EphemeralEnvironment): Promise<void>;
+  /** Reclaim expired/orphaned environments (the janitor calls this). */
+  reclaimExpired(now: Date): Promise<{ reclaimed: string[] }>;
+}
+
+interface ProvisionRequest {
+  runId: string;
+  scenario: string;
+  agent: string;
+  ttl: string;               // e.g. "2h"
+  tags?: Record<string, string>;
+  /** Kind-specific options (e.g. region/SKU for Azure). */
+  options?: Record<string, unknown>;
+}
+```
+
+A run may need **more than one** ephemeral environment (e.g. an Azure RG *and* a
+database); the orchestrator provisions each via its provider and tears all of
+them down at run end.
+
+`EnvironmentCredential` is deliberately open (its concrete shape and delivery
+mechanism are an [open question](#open-questions)) — e.g. a pre-authenticated CLI
+context, env vars, a mounted file, a connection string, or a federated identity.
+
+### First implementation: Azure resource group
+
+This document specifies the **`azure-resource-group`** provider. The sandbox
+boundary is the `SCOPE-deploy` subscription, the per-run environment is a resource
+group, teardown is `az group delete`, and orphan cleanup is a TTL tag sweep.
+Other kinds (databases, PaaS apps, non-Azure clouds) implement the same interface
+and are out of scope here.
+
+Workers depend only on `EphemeralEnvironmentProvider`; concrete providers are
+selected by config / scenario need.
+
+## Recommended design (Option 1 — `azure-resource-group` provider)
+
+
 
 ### One-time setup (sandbox subscription `SCOPE-deploy`)
 
@@ -166,9 +256,12 @@ Mapped onto the existing `WorkerProcessor` hooks
 
 | Phase | Hook | Action |
 |-------|------|--------|
-| Provision | `setup()` | Create `rg-scope-<runId>`, mint a short-lived RG-scoped credential, expose creds to the agent's environment. |
-| Run | `processMessage()` | Agent deploys into its RG using the injected credential. |
-| Teardown | `teardown()` | Delete the RG (`--no-wait`) and the per-run credential. Always runs if `setup()` ran, even on error. |
+| Provision | `setup()` | `provider.provision({ runId, scenario, agent, ttl })` → Azure provider creates `rg-scope-<runId>`, mints an RG-scoped credential, returns an `EphemeralEnvironment`. |
+| Run | `processMessage()` | Agent deploys into its environment using the returned credential. |
+| Teardown | `teardown()` | `provider.teardown(env)` → deletes the RG (`--no-wait`) and the per-run credential. Always runs if `setup()` ran, even on error. |
+
+The hooks call the provider interface, not Azure directly. The Azure provider
+implements `provision`/`teardown` as below.
 
 Provision:
 
@@ -209,10 +302,22 @@ flowchart LR
 
 ### Credential delivery
 
-Inject the per-run credential into the agent the same way other secrets reach
-workers today (env vars sourced from the workload identity / secret store).
-Prefer **federated credentials / managed identity** over long-lived SP secrets
-where the agent runtime supports it, to avoid handing out standing secrets.
+**Open question — not yet decided.** The run needs a credential scoped to its
+own RG, but *how* that credential is delivered to the coding agent is undecided
+and likely varies per agent runtime. Candidate mechanisms:
+
+- **Pre-authenticated `az` CLI** — the agent's environment ships with `az`
+  already logged in and the default subscription set, so the agent just runs
+  `az ...` (and tools that honor `AZURE_*` / the CLI token cache) with no
+  credential handling of its own. Likely the lowest-friction option for agents.
+- environment variables sourced from the workload identity / secret store (how
+  other worker secrets reach workers today),
+- a mounted credential/config file the agent's tooling picks up,
+- a federated credential / managed identity the agent assumes directly.
+
+Where the agent runtime supports it, prefer **federated credentials / managed
+identity** over long-lived SP secrets to avoid handing out standing secrets.
+Resolving this is tracked in [Open questions](#open-questions).
 
 ## Why this fits SCOPE
 
@@ -231,8 +336,10 @@ where the agent runtime supports it, to avoid handing out standing secrets.
 - **Concurrency ceiling:** how many simultaneous runs must the subscription
   support? This drives subscription-level quota requests and whether we ever
   need Alternative B.
-- **Credential model:** SP secret vs. federated/managed identity — depends on
-  what each agent runtime can consume.
+- **Credential delivery to the agent:** *how* is the per-run credential handed
+  to the coding agent (env vars, mounted file, federated/managed identity)? Likely
+  varies per agent runtime. And in what **form** — short-lived SP secret vs.
+  federated/managed identity?
 - **Default region(s) and SKU allow-list** for the policy guardrails.
 - **TTL default** and janitor cadence.
 
