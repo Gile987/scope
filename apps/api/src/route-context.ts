@@ -15,6 +15,11 @@ import type {
   SkillResolver,
   SkillDocument,
   SkillRevisionDocument,
+  CodebaseStore,
+  CodebaseRevisionStore,
+  CodebaseResolver,
+  CodebaseDocument,
+  CodebaseRevisionDocument,
   McpSecretClient,
   ProfileDocument,
   ProfileVersionDocument,
@@ -98,11 +103,16 @@ export interface RouteContext {
   skillRevisionCollection: Collection<SkillRevisionDocument>;
   profileCollection: Collection<ProfileDocument>;
   profileVersionCollection: Collection<ProfileVersionDocument>;
+  codebaseCollection: Collection<CodebaseDocument>;
+  codebaseRevisionCollection: Collection<CodebaseRevisionDocument>;
 
   // Services
   taskPromptStore: TaskPromptStore;
   skillRevisionStore: SkillRevisionStore;
   skillResolver: SkillResolver;
+  codebaseStore: CodebaseStore;
+  codebaseRevisionStore: CodebaseRevisionStore;
+  codebaseResolver: CodebaseResolver;
 
   // Token Manager client (null when TOKEN_MANAGER_URL not set)
   mcpSecretClient: McpSecretClient | null;
