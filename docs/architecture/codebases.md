@@ -227,3 +227,25 @@ The CLI exposes `codebase` commands for managing codebases and revisions. The Po
 | `apps/api/src/routes/requests/index.ts` | Run submission integration and `codebase` spec handling |
 | `packages/shared/src/queue/queue-processor.ts` | Worker seeding hook before skills extraction |
 | `packages/db-migrations/src/migrations/020-create-codebase-indexes.ts` | MongoDB indexes for codebases and revisions |
+
+## Acceptance Scenario (end-to-end proof)
+
+The headline proof exercises every layer through one real run: a **git** codebase
+for `pamelafox/pamelafox-site` is imported, its latest revision resolved, and a
+"migrate this site to Astro" run submitted with that revision selected. The worker
+seeds the fresh workspace with the snapshot **before** the agent starts, the agent
+migrates the real files, and the run is considered successful only when the Judge
+passes a criterion asserting the result uses the Astro framework.
+
+`scripts/acceptance-codebase-astro.sh` drives this as a **Ralph loop** — it
+re-runs import → resolve → submit → wait → judge until the "uses Astro" criterion
+is green (or a max-iteration cap is hit), printing diagnosis hints for the new
+code paths (seeding, archive normalization, revision resolution, submit wiring) on
+each failed iteration. It requires a live stack (`pnpm docker:up:infra` +
+`pnpm docker:dev:copilot`), `jq`/`curl`, and an `ASTRO_CRITERION_ID` for the
+"uses Astro" criterion:
+
+```bash
+ASTRO_CRITERION_ID=<criterion-id> SCOPE_API_URL=http://localhost:5108 \
+  scripts/acceptance-codebase-astro.sh
+```
