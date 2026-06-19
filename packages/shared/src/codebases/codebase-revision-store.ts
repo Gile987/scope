@@ -84,10 +84,15 @@ export class CodebaseRevisionStore {
    * `revisionNumber` from the parent codebase, builds the `{slug}@r{N}` ref,
    * inserts the document, and advances the codebase's `latestRevisionId`.
    *
+   * @param input - revision content (provenance, archive URL, metadata).
+   * @param opts.id - optional pre-assigned `_id`. Callers that name the blob
+   *   after the revision id (the standard convention) generate the UUID up
+   *   front and pass it here so the stored `_id` matches the blob key.
    * @throws if the parent codebase does not exist (or was deleted).
    */
   async createRevision(
-    input: CreateCodebaseRevisionInput
+    input: CreateCodebaseRevisionInput,
+    opts?: { id?: string }
   ): Promise<CodebaseRevisionDocument> {
     const revisionNumber = await this.codebaseStore.allocateRevisionNumber(
       input.codebaseId
@@ -98,7 +103,7 @@ export class CodebaseRevisionStore {
 
     const doc: CodebaseRevisionDocument = {
       ...input,
-      _id: randomUUID(),
+      _id: opts?.id ?? randomUUID(),
       revisionNumber,
       ref: buildCodebaseRevisionRef(input.slug, revisionNumber),
       createdAt: new Date(),
