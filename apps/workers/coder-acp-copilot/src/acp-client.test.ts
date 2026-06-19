@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi } from "vitest";
-import { runACPSession, selectModel, selectReasoningEffort, selectPermissionMode, AUTOPILOT_MODE_ID } from "./acp-client.js";
+import { runACPSession, selectModel, selectReasoningEffort, selectPermissionMode, formatModeError, AUTOPILOT_MODE_ID } from "./acp-client.js";
 import type * as acp from "@agentclientprotocol/sdk";
 import os from "node:os";
 
@@ -356,7 +356,7 @@ describe("selectPermissionMode", () => {
     expect(logs.some((l) => l.includes("autopilot mode not available"))).toBe(true);
   });
 
-  it("warns and continues when setSessionMode throws", async () => {
+  it("warns and continues when setSessionMode throws on every attempt", async () => {
     const connection = makeConnection({
       setSessionMode: vi.fn().mockRejectedValue(new Error("mode not writable")),
     });
@@ -365,6 +365,54 @@ describe("selectPermissionMode", () => {
 
     await selectPermissionMode(connection, session, (msg) => logs.push(msg));
 
-    expect(logs.some((l) => l.includes("failed to set autopilot session mode"))).toBe(true);
+    expect(connection.setSessionMode).toHaveBeenCalledTimes(2);
+    expect(logs.some((l) => l.includes("failed to set autopilot session mode after 2 attempts"))).toBe(true);
+  });
+
+  it("retries once and succeeds when the first set_mode call fails (cold start)", async () => {
+    const setSessionMode = vi
+      .fn()
+      .mockRejectedValueOnce({ code: -32000, message: "session not ready" })
+      .mockResolvedValueOnce({});
+    const connection = makeConnection({ setSessionMode });
+    const session = makeSession({ modes: modesWithAutopilot } as Partial<acp.NewSessionResponse>);
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(setSessionMode).toHaveBeenCalledTimes(2);
+    expect(logs.some((l) => l.includes("retrying"))).toBe(true);
+    expect(logs.some((l) => l.includes("Set session mode to autopilot"))).toBe(true);
+  });
+
+  it("serializes a non-Error JSON-RPC rejection instead of logging [object Object]", async () => {
+    const connection = makeConnection({
+      setSessionMode: vi.fn().mockRejectedValue({ code: -32601, message: "method not found" }),
+    });
+    const session = makeSession({ modes: modesWithAutopilot } as Partial<acp.NewSessionResponse>);
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(logs.some((l) => l.includes("[object Object]"))).toBe(false);
+    expect(logs.some((l) => l.includes("method not found") && l.includes("code -32601"))).toBe(true);
+  });
+});
+
+describe("formatModeError", () => {
+  it("uses the message of an Error instance", () => {
+    expect(formatModeError(new Error("boom"))).toBe("boom");
+  });
+
+  it("uses message and code for JSON-RPC-style objects", () => {
+    expect(formatModeError({ code: -32000, message: "not ready" })).toBe("not ready (code -32000)");
+  });
+
+  it("JSON-stringifies objects without a message", () => {
+    expect(formatModeError({ foo: "bar" })).toBe('{"foo":"bar"}');
+  });
+
+  it("falls back to String for primitives", () => {
+    expect(formatModeError("plain string")).toBe("plain string");
   });
 });

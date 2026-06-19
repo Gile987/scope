@@ -261,15 +261,52 @@ export async function selectPermissionMode(
     return;
   }
 
-  try {
-    await connection.setSessionMode({
-      sessionId: sessionResult.sessionId,
-      modeId: autopilotMode.id,
-    });
-    onLog(`Set session mode to autopilot (${autopilotMode.id})`);
-  } catch (err) {
-    onLog(`Warning: failed to set autopilot session mode: ${err instanceof Error ? err.message : String(err)}`);
+  // The very first set_mode immediately after session creation can fail with a
+  // transient error (cold start: the CLI process is not yet ready to accept the
+  // request). Retry once before giving up so a single race does not silently
+  // leave the session in `agent` mode where commands are denied.
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await connection.setSessionMode({
+        sessionId: sessionResult.sessionId,
+        modeId: autopilotMode.id,
+      });
+      onLog(`Set session mode to autopilot (${autopilotMode.id})`);
+      return;
+    } catch (err) {
+      const detail = formatModeError(err);
+      if (attempt < maxAttempts) {
+        onLog(`Warning: failed to set autopilot session mode (attempt ${attempt}/${maxAttempts}): ${detail} — retrying`);
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
+      }
+      onLog(`Warning: failed to set autopilot session mode after ${maxAttempts} attempts: ${detail}`);
+    }
   }
+}
+
+/**
+ * Serialize an unknown rejection into a human-readable string. ACP/JSON-RPC
+ * rejections are plain objects (e.g. `{ code, message, data }`), not `Error`
+ * instances, so `String(err)` yields an unhelpful `[object Object]`. Prefer the
+ * `message`, then a JSON dump, and fall back to `String` only as a last resort.
+ */
+export function formatModeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object") {
+    const maybeMessage = (err as { message?: unknown }).message;
+    if (typeof maybeMessage === "string" && maybeMessage.length > 0) {
+      const code = (err as { code?: unknown }).code;
+      return code !== undefined ? `${maybeMessage} (code ${String(code)})` : maybeMessage;
+    }
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  }
+  return String(err);
 }
 
 /**
