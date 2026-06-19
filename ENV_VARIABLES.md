@@ -416,6 +416,18 @@ How often the Token Manager's scheduler validates all active tokens against thei
 
 Host port mapping for the token-manager service in Docker Compose.
 
+## Kubedock Configuration (Container Access)
+
+### DOCKER_HOST
+**Default:** (none)
+**Type:** URI string
+
+Points to the kubedock Docker-compatible socket. When set, workers can create containers (translated to K8s pods by kubedock) during Build/Test gates. The value is passed through to agent subprocesses so they can use standard Docker commands.
+
+- **Kubernetes:** Set in deployment manifest to `unix:///var/run/kubedock/kubedock.sock` (auto-configured when kubedock sidecar is present)
+- **Docker Compose:** Not applicable (use native Docker socket)
+- **Used by:** `coder-acp-copilot`, `coder-acp-claude-code` (setup/teardown cleanup + subprocess passthrough)
+
 ## DevProxy Configuration (HAR Capture)
 
 ### DEV_PROXY_ENABLED

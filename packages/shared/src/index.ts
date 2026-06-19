@@ -6,6 +6,7 @@ export * from "./queue/index.js";
 export * from "./logging/index.js";
 export * from "./storage/index.js";
 export * from "./judge/index.js";
+export * from "./kubedock/index.js";
 export * from "./graph/index.js";
 export * from "./criteria/index.js";
 export * from "./gates/index.js";
