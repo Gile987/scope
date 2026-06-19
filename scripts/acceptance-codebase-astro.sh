@@ -139,7 +139,7 @@ while [ "$iteration" -lt "$MAX_LOOP" ]; do
     DOC="$(api GET "/api/v1/requests/$REQ_ID" || true)"
     status="$(echo "$DOC" | jq -r '.run.status // "pending"')"
     case "$status" in
-      completed|succeeded|failed|error|cancelled|canceled)
+      done|paused|failed|error|cancelled|canceled)
         break ;;
     esac
     printf '\r  waiting… status=%s (%ss)        ' "$status" "$elapsed"
