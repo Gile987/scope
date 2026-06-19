@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi } from "vitest";
-import { runACPSession, selectModel, selectReasoningEffort } from "./acp-client.js";
+import { runACPSession, selectModel, selectReasoningEffort, selectPermissionMode, AUTOPILOT_MODE_ID } from "./acp-client.js";
 import type * as acp from "@agentclientprotocol/sdk";
 import os from "node:os";
 
@@ -264,5 +264,107 @@ describe("selectReasoningEffort", () => {
 
     expect(result).toBeUndefined();
     expect(logs.some((l) => l.includes("session/set_config_option failed"))).toBe(true);
+  });
+});
+
+describe("selectPermissionMode", () => {
+  function makeConnection(overrides?: Partial<acp.ClientSideConnection>): acp.ClientSideConnection {
+    return {
+      setSessionMode: vi.fn().mockResolvedValue({}),
+      ...overrides,
+    } as unknown as acp.ClientSideConnection;
+  }
+
+  function makeSession(overrides?: Partial<acp.NewSessionResponse>): acp.NewSessionResponse {
+    return {
+      sessionId: "session-1",
+      ...overrides,
+    } as acp.NewSessionResponse;
+  }
+
+  const modesWithAutopilot = {
+    currentModeId: "https://agentclientprotocol.com/protocol/session-modes#agent",
+    availableModes: [
+      { id: "https://agentclientprotocol.com/protocol/session-modes#agent", name: "Agent" },
+      { id: "https://agentclientprotocol.com/protocol/session-modes#plan", name: "Plan" },
+      { id: AUTOPILOT_MODE_ID, name: "Autopilot" },
+    ],
+  };
+
+  it("sets autopilot mode by its canonical URL id", async () => {
+    const connection = makeConnection();
+    const session = makeSession({ modes: modesWithAutopilot } as Partial<acp.NewSessionResponse>);
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(connection.setSessionMode).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      modeId: AUTOPILOT_MODE_ID,
+    });
+    expect(logs.some((l) => l.includes("Set session mode to autopilot"))).toBe(true);
+  });
+
+  it("matches a bare '#autopilot' id via the endsWith safety net", async () => {
+    const connection = makeConnection();
+    const session = makeSession({
+      modes: {
+        currentModeId: "agent",
+        availableModes: [
+          { id: "agent", name: "Agent" },
+          { id: "x#autopilot", name: "Autopilot" },
+        ],
+      },
+    } as Partial<acp.NewSessionResponse>);
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(connection.setSessionMode).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      modeId: "x#autopilot",
+    });
+  });
+
+  it("warns and no-ops when no autopilot mode is advertised", async () => {
+    const connection = makeConnection();
+    const session = makeSession({
+      modes: {
+        currentModeId: "https://agentclientprotocol.com/protocol/session-modes#agent",
+        availableModes: [
+          { id: "https://agentclientprotocol.com/protocol/session-modes#agent", name: "Agent" },
+          { id: "https://agentclientprotocol.com/protocol/session-modes#plan", name: "Plan" },
+        ],
+      },
+    } as Partial<acp.NewSessionResponse>);
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(connection.setSessionMode).not.toHaveBeenCalled();
+    expect(logs.some((l) => l.includes("autopilot mode not available"))).toBe(true);
+  });
+
+  it("warns and no-ops when no modes field is present", async () => {
+    const connection = makeConnection();
+    const session = makeSession();
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(connection.setSessionMode).not.toHaveBeenCalled();
+    expect(logs.some((l) => l.includes("autopilot mode not available"))).toBe(true);
+  });
+
+  it("warns and continues when setSessionMode throws", async () => {
+    const connection = makeConnection({
+      setSessionMode: vi.fn().mockRejectedValue(new Error("mode not writable")),
+    });
+    const session = makeSession({ modes: modesWithAutopilot } as Partial<acp.NewSessionResponse>);
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(logs.some((l) => l.includes("failed to set autopilot session mode"))).toBe(true);
   });
 });
