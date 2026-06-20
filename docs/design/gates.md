@@ -449,9 +449,24 @@ alongside `createFileTools`):
   (`writeToolCalls` / `toolCallsUrl`), downloaded next to the snapshot.
 
 The judge agent's available tools therefore become workspace-scoped
-(`read_file`, `list_directory`) **plus** `read_tool_outputs`. The system prompt
-for non-Select gates instructs the judge to consult tool outputs (e.g. "to
-decide whether the build succeeded, inspect the build command's output").
+(`read_file`, `list_directory`) **plus** `read_tool_outputs`. When tool outputs
+are present, the system prompt injects a generic guidance block
+(`TOOL_OUTPUTS_GUIDANCE` in `judge-strategies.ts`, shared by both the bundled and
+independent strategies).
+
+> **Gate-judge contract (issue #1125).** The guidance is deliberately generic —
+> it is not specific to the build, test, or any single gate. It tells the judge:
+> it **cannot run any commands itself**; it must decide from the **actual
+> evidence** — the state of the codebase **and** the captured tool outputs
+> (`read_tool_outputs` / `get_tool_output`), cross-checked against each other.
+> When a criterion concerns something the agent did or ran, the captured output
+> and its exit status are the **authoritative** record of what happened, so the
+> judge must rely on them rather than guessing from files alone or asking the
+> agent to **redo or separately re-prove** work the captured evidence already
+> shows (e.g. it must not demand on-disk proof files like `build.log` when the
+> command's captured output already shows it succeeded). This prevents the
+> failure mode where the judge withheld a passing verdict for several iterations
+> despite an exit-code-0 build being present in the captured outputs.
 
 > **Tool isolation (scope #1117).** The judge session is restricted to its own
 > custom tools only — `createSession` is called with `availableTools: ["custom:*"]`

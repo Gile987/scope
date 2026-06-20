@@ -7,6 +7,8 @@ import { tmpdir } from "os";
 import { join } from "path";
 import {
   IndependentStrategy,
+  BundledStrategy,
+  TOOL_OUTPUTS_GUIDANCE,
   isWithinWorkspace,
   JUDGE_AVAILABLE_TOOLS,
   JUDGE_EXCLUDED_TOOLS,
@@ -189,5 +191,58 @@ describe("judge session tool restriction (scope #1117)", () => {
   it("exports the filter constants used to build the config", () => {
     expect([...JUDGE_AVAILABLE_TOOLS]).toEqual(["custom:*"]);
     expect([...JUDGE_EXCLUDED_TOOLS]).toEqual(["builtin:*", "mcp:*"]);
+  });
+});
+
+/**
+ * Exposes the protected `buildSystemPrompt` so we can assert how captured tool
+ * outputs are surfaced to the judge without running a real Copilot session.
+ */
+class TestableBundledStrategy extends BundledStrategy {
+  publicBuildSystemPrompt(hasToolOutputs: boolean) {
+    return (this as any).buildSystemPrompt(
+      [{ id: "c1", prompt: "does the code work" }],
+      [],
+      undefined,
+      "build",
+      hasToolOutputs
+    );
+  }
+}
+
+describe("judge tool-outputs guidance (issue #1125)", () => {
+  // The headless judge cannot run commands; it must decide from the codebase
+  // plus the coding agent's captured tool outputs. The guidance must be generic
+  // (not build/test specific) and must tell the judge to treat captured output
+  // as authoritative instead of demanding the agent redo or re-prove the work.
+  it("is generic, not tied to any one command type", () => {
+    const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
+    expect(g).not.toMatch(/build\.log|build_proof|\bnpm run build\b/);
+  });
+
+  it("tells the judge it cannot run commands itself", () => {
+    expect(TOOL_OUTPUTS_GUIDANCE.toLowerCase()).toContain("cannot run any commands");
+  });
+
+  it("directs the judge to the codebase and captured outputs", () => {
+    expect(TOOL_OUTPUTS_GUIDANCE).toContain("read_tool_outputs");
+    expect(TOOL_OUTPUTS_GUIDANCE).toContain("get_tool_output");
+    expect(TOOL_OUTPUTS_GUIDANCE.toLowerCase()).toContain("codebase");
+  });
+
+  it("treats captured output as authoritative and forbids redundant re-proving", () => {
+    const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
+    expect(g).toContain("authoritative");
+    expect(g).toMatch(/redo|re-prove/);
+  });
+
+  it("includes the guidance in the system prompt when tool outputs are present", () => {
+    const prompt = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(true);
+    expect(prompt).toContain(TOOL_OUTPUTS_GUIDANCE);
+  });
+
+  it("omits the guidance when no tool outputs were captured", () => {
+    const prompt = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(false);
+    expect(prompt).not.toContain(TOOL_OUTPUTS_GUIDANCE);
   });
 });

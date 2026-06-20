@@ -42,6 +42,18 @@ const DEFAULT_JUDGE_TIMEOUT = 480_000;
 const DEFAULT_JUDGE_RETRIES = 3;
 
 /**
+ * Guidance injected into the judge system prompt when the coding agent's tool
+ * calls/outputs were captured for this iteration.
+ *
+ * The judge runs headless and cannot run any commands itself — it can only
+ * inspect the workspace and read what the coding agent already did. This text
+ * makes the judge base its decision on actual evidence (the codebase plus the
+ * captured tool outputs) instead of guessing or demanding the agent re-prove
+ * work it has already done. It is intentionally generic across all criteria.
+ */
+export const TOOL_OUTPUTS_GUIDANCE = `The coding agent's tool calls from this iteration were captured for you. You cannot run any commands yourself — base your judgement on the actual evidence: the state of the codebase and these captured outputs. Use read_tool_outputs to list the calls and get_tool_output(index) to read full output, then cross-check against the files in the workspace. When a criterion concerns something the agent did or ran, the captured output and its exit status are the authoritative record of what happened — rely on them rather than guessing from the files alone or asking the agent to redo or separately re-prove work that the captured evidence already shows.`;
+
+/**
  * Tool filter applied to every judge session.
  *
  * The Copilot SDK's `CopilotClient` defaults to `mode: "copilot-cli"`, which
@@ -550,7 +562,7 @@ export class BundledStrategy extends JudgeStrategy {
       gate && gate !== "select" ? `\nYou are evaluating the **${gate}** gate.\n` : "";
 
     const toolOutputsSection = hasToolOutputs
-      ? `\n## Tool outputs\nThe coding agent ran commands during this iteration. Use read_tool_outputs to list those calls and get_tool_output(index) to read full output. To decide whether a command (e.g. build, test, run) succeeded, inspect its output and exit status rather than guessing from the files alone.\n`
+      ? `\n## Tool outputs\n${TOOL_OUTPUTS_GUIDANCE}\n`
       : "";
 
     return `You are an expert code reviewer evaluating whether generated code meets requirements.
@@ -819,7 +831,7 @@ export class IndependentStrategy extends JudgeStrategy {
 
     const toolOutputsSection =
       toolCalls && toolCalls.length > 0
-        ? `\n## Tool outputs\nThe coding agent ran commands during this iteration. Use read_tool_outputs to list those calls and get_tool_output(index) to read full output. To decide whether a command (e.g. build, test, run) succeeded, inspect its output and exit status rather than guessing from the files alone.\n`
+        ? `\n## Tool outputs\n${TOOL_OUTPUTS_GUIDANCE}\n`
         : "";
 
     const systemPrompt = `You are an expert code reviewer evaluating ONE specific criterion.
