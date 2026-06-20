@@ -236,6 +236,13 @@ describe("judge tool-outputs guidance (issue #1125)", () => {
     expect(g).toMatch(/redo|re-prove/);
   });
 
+  it("overrides criteria wording that asks the judge to run commands", () => {
+    const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
+    expect(g).toContain("criterion");
+    expect(g).toMatch(/run, execute, or re-run/);
+    expect(g).toContain("do not attempt");
+  });
+
   it("includes the guidance in the system prompt when tool outputs are present", () => {
     const prompt = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(true);
     expect(prompt).toContain(TOOL_OUTPUTS_GUIDANCE);

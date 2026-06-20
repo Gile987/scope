@@ -464,7 +464,10 @@ independent strategies).
 > judge must rely on them rather than guessing from files alone or asking the
 > agent to **redo or separately re-prove** work the captured evidence already
 > shows (e.g. it must not demand on-disk proof files like `build.log` when the
-> command's captured output already shows it succeeded). This prevents the
+> command's captured output already shows it succeeded). **If a criterion's own
+> wording tells the judge to run/execute/re-run a command, the judge must ignore
+> that instruction** — it has no command-running ability — and instead verify the
+> outcome from the captured outputs and codebase. This prevents the
 > failure mode where the judge withheld a passing verdict for several iterations
 > despite an exit-code-0 build being present in the captured outputs.
 
