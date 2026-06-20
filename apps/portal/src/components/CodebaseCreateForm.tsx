@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { CodebaseDocument, CodebaseSourceType } from "@/types";
@@ -9,8 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Plus } from "lucide-react";
+import { GitBranch, Loader2, Package, Plus, UploadCloud, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -26,18 +25,59 @@ export function CodebaseCreateForm({ onCreated, onCancel, className, compact = f
   const [sourceType, setSourceType] = useState<CodebaseSourceType>("git");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
+  const [nameEdited, setNameEdited] = useState(false);
+  const [slugEdited, setSlugEdited] = useState(false);
   const [source, setSource] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("");
   const [description, setDescription] = useState("");
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Slug/name are mutually auto-generated: typing in one populates the other
+  // until that other field has been manually edited, at which point they
+  // decouple. slugify("My Repo") -> "my-repo"; humanize("my-repo") -> "My Repo".
+  const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const humanize = (s: string) =>
+    s.replace(/-+/g, " ").replace(/\s+/g, " ").trim().replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const handleNameChange = (value: string) => {
+    setName(value);
+    setNameEdited(value.trim().length > 0);
+    if (!slugEdited) setSlug(slugify(value));
+  };
+
+  const handleSlugChange = (value: string) => {
+    // Keep slug input within the allowed charset but permit a trailing dash
+    // while the user is still typing.
+    const normalized = value.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-{2,}/g, "-");
+    setSlug(normalized);
+    setSlugEdited(normalized.trim().length > 0);
+    if (!nameEdited) setName(humanize(normalized));
+  };
+
+  const ARCHIVE_EXT = [".tar.gz", ".tgz", ".tar", ".zip"];
+  const isArchiveName = (name: string) => ARCHIVE_EXT.some((ext) => name.toLowerCase().endsWith(ext));
+
+  const acceptFile = (file: File | null | undefined) => {
+    if (!file) return;
+    if (!isArchiveName(file.name)) {
+      toast.error("Unsupported file. Use a .tar.gz, .tgz, .tar, or .zip archive.");
+      return;
+    }
+    setArchiveFile(file);
+  };
 
   const resetFields = () => {
     setName("");
     setSlug("");
+    setNameEdited(false);
+    setSlugEdited(false);
     setSource("");
     setDefaultBranch("");
     setDescription("");
     setArchiveFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const createMutation = useMutation({
@@ -77,60 +117,137 @@ export function CodebaseCreateForm({ onCreated, onCancel, className, compact = f
 
   return (
     <div className={cn("space-y-4", className)}>
-      <div className={cn("grid gap-4", compact ? "grid-cols-1" : "sm:grid-cols-2")}>
-        <div className="space-y-2">
-          <Label htmlFor="codebase-source-type">Source type</Label>
-          <Select value={sourceType} onValueChange={(value) => setSourceType(value as CodebaseSourceType)}>
-            <SelectTrigger id="codebase-source-type">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="git">Git repository</SelectItem>
-              <SelectItem value="archive">Uploaded archive</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="codebase-name">Name *</Label>
-          <Input id="codebase-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="scope-core" />
+      <div className="space-y-2">
+        <Label>Source type</Label>
+        <div className="grid grid-cols-2 gap-2">
+          {([
+            { value: "git" as const, label: "Git repository", icon: GitBranch, hint: "Snapshot a GitHub repo" },
+            { value: "archive" as const, label: "Uploaded archive", icon: Package, hint: "Upload a tar/zip" },
+          ]).map((opt) => {
+            const Icon = opt.icon;
+            const active = sourceType === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setSourceType(opt.value)}
+                aria-pressed={active}
+                className={cn(
+                  "flex items-start gap-2 rounded-md border p-3 text-left transition-colors",
+                  active
+                    ? "border-primary bg-primary/5 ring-1 ring-primary"
+                    : "border-input hover:border-foreground/30 hover:bg-muted/50",
+                )}
+              >
+                <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", active ? "text-primary" : "text-muted-foreground")} />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium leading-tight">{opt.label}</span>
+                  <span className="block text-xs text-muted-foreground">{opt.hint}</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
       <div className={cn("grid gap-4", compact ? "grid-cols-1" : "sm:grid-cols-2")}>
         <div className="space-y-2">
-          <Label htmlFor="codebase-slug">Slug</Label>
-          <Input id="codebase-slug" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="Auto-generated" className="font-mono" />
+          <Label htmlFor="codebase-name">Name *</Label>
+          <Input id="codebase-name" value={name} onChange={(e) => handleNameChange(e.target.value)} placeholder="scope-core" />
         </div>
-        {sourceType === "git" && (
+        <div className="space-y-2">
+          <Label htmlFor="codebase-slug">Slug</Label>
+          <Input id="codebase-slug" value={slug} onChange={(e) => handleSlugChange(e.target.value)} placeholder="auto-generated" className="font-mono" />
+        </div>
+      </div>
+
+      {sourceType === "git" && (
+        <div className={cn("grid gap-4", compact ? "grid-cols-1" : "sm:grid-cols-2")}>
+          <div className="space-y-2">
+            <Label htmlFor="codebase-source">GitHub repository *</Label>
+            <Input id="codebase-source" value={source} onChange={(e) => setSource(e.target.value)} placeholder="owner/repo" className="font-mono" />
+            {!sourceValid && source.trim() && <p className="text-xs text-destructive">Use owner/repo format.</p>}
+          </div>
           <div className="space-y-2">
             <Label htmlFor="codebase-default-branch">Default branch</Label>
             <Input id="codebase-default-branch" value={defaultBranch} onChange={(e) => setDefaultBranch(e.target.value)} placeholder="main" className="font-mono" />
           </div>
-        )}
-      </div>
-
-      {sourceType === "git" && (
-        <div className="space-y-2">
-          <Label htmlFor="codebase-source">GitHub repository *</Label>
-          <Input id="codebase-source" value={source} onChange={(e) => setSource(e.target.value)} placeholder="owner/repo" className="font-mono" />
-          {!sourceValid && source.trim() && <p className="text-xs text-destructive">Use owner/repo format.</p>}
         </div>
       )}
 
       {sourceType === "archive" && (
         <div className="space-y-2">
           <Label htmlFor="codebase-archive">Archive *</Label>
-          <Input
+          <input
+            ref={fileInputRef}
             id="codebase-archive"
             type="file"
+            className="sr-only"
             accept=".tar.gz,.tgz,.tar,.zip,application/gzip,application/x-gzip,application/zip,application/x-tar"
-            onChange={(e) => setArchiveFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => acceptFile(e.target.files?.[0])}
           />
-          <p className="text-xs text-muted-foreground">
-            {archiveFile
-              ? `Selected: ${archiveFile.name}`
-              : "An archive (.tar.gz, .tgz, .tar, or .zip) is required to create an archive codebase. It becomes the first revision."}
-          </p>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                fileInputRef.current?.click();
+              }
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragActive(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setDragActive(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragActive(false);
+              acceptFile(e.dataTransfer.files?.[0]);
+            }}
+            className={cn(
+              "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-4 py-6 text-center transition-colors",
+              dragActive
+                ? "border-primary bg-primary/10"
+                : archiveFile
+                  ? "border-primary/40 bg-primary/5"
+                  : "border-input hover:border-foreground/40 hover:bg-muted/50",
+            )}
+          >
+            {archiveFile ? (
+              <>
+                <Package className="h-6 w-6 text-primary" />
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{archiveFile.name}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setArchiveFile(null);
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                    }}
+                    className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    aria-label="Remove file"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <span className="text-xs text-muted-foreground">{(archiveFile.size / 1024).toFixed(1)} KB · click or drop to replace</span>
+              </>
+            ) : (
+              <>
+                <UploadCloud className={cn("h-6 w-6", dragActive ? "text-primary" : "text-muted-foreground")} />
+                <span className="text-sm font-medium">
+                  Drag &amp; drop an archive here, or <span className="text-primary underline">browse</span>
+                </span>
+                <span className="text-xs text-muted-foreground">.tar.gz, .tgz, .tar, or .zip — becomes the first revision</span>
+              </>
+            )}
+          </div>
         </div>
       )}
 
