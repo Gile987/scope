@@ -218,7 +218,11 @@ export function CodebaseDetail() {
                 <Detail label="Resolved"><span className="text-xs text-muted-foreground">{formatDate(selectedRevision.resolvedAt)}</span></Detail>
                 {selectedRevision.creator && <Detail label="Creator"><span className="text-xs">{selectedRevision.creator}</span></Detail>}
                 {selectedRevision.contentSha256 && <Detail className="sm:col-span-2" label="Content SHA-256"><span className="break-all font-mono text-xs">{selectedRevision.contentSha256}</span></Detail>}
-                <Detail className="sm:col-span-2" label="Archive"><span className="break-all font-mono text-xs text-muted-foreground">{selectedRevision.archiveUrl}</span></Detail>
+                <Detail className="sm:col-span-2" label="Archive">
+                  <a href={`/api/v1/codebase-revisions/${selectedRevision._id}/archive`} className="inline-flex items-center gap-1 break-all font-mono text-xs text-primary hover:underline">
+                    {`${window.location.origin}/api/v1/codebase-revisions/${selectedRevision._id}/archive`} <Download className="h-3 w-3 shrink-0" />
+                  </a>
+                </Detail>
                 <Detail className="sm:col-span-2" label="Revision ID"><span className="break-all font-mono text-xs text-muted-foreground">{selectedRevision._id}</span></Detail>
               </dl>
             )}
