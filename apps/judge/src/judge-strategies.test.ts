@@ -23,6 +23,9 @@ class TestableStrategy extends IndependentStrategy {
   publicCreateFileTools(workspacePath: string) {
     return this.createFileTools(workspacePath);
   }
+  publicCreateToolOutputTools(toolCalls: any[]) {
+    return this.createToolOutputTools(toolCalls);
+  }
   publicBuildSessionConfig(tools: any[], systemPrompt: string) {
     return this.buildSessionConfig(tools, systemPrompt);
   }
@@ -76,6 +79,37 @@ describe("judge file tools", () => {
   // skipPermission is denied at execution time ("could not request permission
   // from user"), silently breaking all workspace inspection.
   it("marks every tool to skip the permission prompt", () => {
+    expect(tools.length).toBeGreaterThan(0);
+    for (const tool of tools) {
+      expect(tool.skipPermission, `${tool.name} must skip the permission prompt`).toBe(true);
+    }
+  });
+});
+
+describe("judge tool-output tools (issue #1125)", () => {
+  const strategy = new TestableStrategy("test-model");
+  const toolCalls = [
+    {
+      id: "1",
+      name: "bash",
+      arguments: { command: "npm run build" },
+      response: "build ok",
+      timestamp: "",
+    },
+  ];
+  const tools = strategy.publicCreateToolOutputTools(toolCalls);
+
+  it("exposes read_tool_outputs and get_tool_output", () => {
+    const names = tools.map((t) => t.name).sort();
+    expect(names).toEqual(["get_tool_output", "read_tool_outputs"]);
+  });
+
+  // Regression guard for scope #1125: headless, any tool without skipPermission
+  // is denied at execution time ("could not request permission from user"). When
+  // this affected read_tool_outputs/get_tool_output, the judge could never see
+  // the coding agent's captured build/test output and wrongly demanded on-disk
+  // proof files, forcing the build gate to loop for many iterations.
+  it("marks every tool-output tool to skip the permission prompt", () => {
     expect(tools.length).toBeGreaterThan(0);
     for (const tool of tools) {
       expect(tool.skipPermission, `${tool.name} must skip the permission prompt`).toBe(true);

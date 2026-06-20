@@ -348,6 +348,13 @@ export abstract class JudgeStrategy {
     const readToolOutputs = defineTool("read_tool_outputs", {
       description:
         "List the tool calls the coding agent made during this iteration (e.g. shell/bash commands and their output). Returns each call's index, name, arguments and a truncated response preview. Use get_tool_output(index) to fetch the full output of a specific call. Consult these to decide whether a command (build, test, run) actually succeeded.",
+      // Read-only in-memory inspection of already-captured tool calls. Like the
+      // file tools above, this MUST run without a permission prompt: the judge is
+      // headless (no TUI), so the v3 runtime would otherwise deny every call with
+      // "could not request permission from user" — which silently blocks the judge
+      // from ever seeing the coding agent's build/test output and forces it to
+      // demand on-disk proof files instead. See scope #1125.
+      skipPermission: true,
       parameters: {
         type: "object",
         properties: {},
@@ -378,6 +385,8 @@ export abstract class JudgeStrategy {
     const getToolOutput = defineTool("get_tool_output", {
       description:
         "Return the full captured output (response) of a single tool call by its index, as listed by read_tool_outputs.",
+      // Read-only; same headless permission rationale as read_tool_outputs. See scope #1125.
+      skipPermission: true,
       parameters: {
         type: "object",
         properties: {

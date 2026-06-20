@@ -528,6 +528,22 @@ The system prompt is organized into balanced, single-purpose sections:
 > command actually succeeded). Locking the session to `custom:*` removes that
 > escape hatch and forces the judge to evaluate from `read_tool_outputs`.
 
+> **All judge tools must be `skipPermission` (scope #1125).** The same headless
+> permission rule that applies to the built-ins above applies to the judge's *own*
+> custom tools: under the v3 runtime, any tool the model calls that is not marked
+> `skipPermission: true` is denied non-interactively with "Permission denied and
+> could not request permission from user". The file-inspection tools
+> (`read_file`, `list_directory`, `search_files`, `file_exists`) set this flag,
+> but `read_tool_outputs` / `get_tool_output` originally did not — so every judge
+> attempt to read the coder's captured build/test output was silently denied. The
+> judge then fell back to demanding on-disk proof (a `dist/` directory, a
+> `build-output.log`, a README), which forced the coding agent to *fabricate*
+> build-evidence files and made the build/test gates loop for many iterations.
+> Both tool-output tools are now `skipPermission: true`, so the judge can read the
+> captured command output (and trust an exit-code-0 build) on the first iteration.
+> A regression test in `judge-strategies.test.ts` asserts every tool returned by
+> `createToolOutputTools` skips the permission prompt.
+
 ```mermaid
 flowchart LR
     subgraph Iteration
