@@ -216,8 +216,18 @@ export function CodebasePicker({ selected, onChange, disabled = false }: Codebas
                 compact
                 onCreated={(created) => {
                   setCreateOpen(false);
+                  // Seed the cache so the new codebase resolves on the next
+                  // render, before the refetch lands — otherwise the selection
+                  // briefly falls back to a raw-spec chip (and may flicker).
+                  queryClient.setQueryData<CodebaseDocument[]>(["codebases"], (old) => {
+                    if (!old) return [created];
+                    return old.some((c) => c._id === created._id) ? old : [created, ...old];
+                  });
                   queryClient.invalidateQueries({ queryKey: ["codebases"] });
-                  onChange(created.slug);
+                  // Archive codebases come with their first revision; select it
+                  // directly so the picker has a concrete, valid revision spec
+                  // instead of waiting on the revisions query.
+                  onChange(created.firstRevision?.ref ?? created.slug);
                 }}
               />
             </div>

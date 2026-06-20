@@ -982,7 +982,7 @@ export const api = {
   createArchiveCodebase: async (
     meta: { name: string; description?: string; slug?: string },
     file: File,
-  ): Promise<CodebaseDocument> => {
+  ): Promise<CodebaseDocument & { firstRevision?: CodebaseRevisionDocument }> => {
     const form = new FormData();
     form.append("sourceType", "archive");
     form.append("name", meta.name);
