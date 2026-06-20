@@ -16,13 +16,10 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   ArrowLeft, Trash2, RefreshCw, Loader2, FolderGit2, GitCommit, Upload,
-  FileArchive, ExternalLink, Download, ChevronRight, ChevronDown,
+  FileArchive, ExternalLink, Download,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
@@ -35,7 +32,6 @@ export function CodebaseDetail() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [refDialogOpen, setRefDialogOpen] = useState(false);
   const [requestedRef, setRequestedRef] = useState("");
-  const [historyOpen, setHistoryOpen] = useState(false);
 
   const { data: codebase, isLoading, error } = useQuery({
     queryKey: ["codebase", id],
@@ -115,12 +111,13 @@ export function CodebaseDetail() {
     );
   }
 
-  const isLatestSelected = !!selectedRevision && selectedRevision._id === latestRevision?._id;
+  const isGit = codebase.sourceType === "git";
 
   return (
     <div className="space-y-4">
       <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/codebases")}><ArrowLeft className="h-4 w-4" /> Back to Codebases</Button>
 
+      {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -138,7 +135,7 @@ export function CodebaseDetail() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {codebase.sourceType === "git" ? (
+          {isGit ? (
             <>
               <Button onClick={() => resolveMutation.mutate(undefined)} disabled={resolveMutation.isPending} variant="outline" className="gap-1.5">
                 {resolveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -170,128 +167,117 @@ export function CodebaseDetail() {
         </div>
       </div>
 
-      {/* Revision switcher */}
-      <div className="flex flex-wrap items-end justify-between gap-3 rounded-lg border bg-card p-3">
-        <div className="flex items-end gap-3">
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Revision</Label>
+      {/* Main layout: selected revision + sidebar */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_20rem]">
+        {/* Selected revision */}
+        <Card className="min-w-0">
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  {isGit ? <GitCommit className="h-4 w-4 shrink-0" /> : <FileArchive className="h-4 w-4 shrink-0" />}
+                  <span className="truncate font-mono">{selectedRevision?.ref ?? "No revision"}</span>
+                  {selectedRevision && selectedRevision._id === latestRevision?._id && <Badge variant="secondary" className="text-[10px]">latest</Badge>}
+                </CardTitle>
+                <CardDescription>Immutable snapshot seeded into a run workspace.</CardDescription>
+              </div>
+              {selectedRevision && (
+                <Button asChild variant="outline" size="sm" className="gap-1.5">
+                  <a href={`/api/v1/codebase-revisions/${selectedRevision._id}/archive`} download={`${selectedRevision.ref.replace(/[^a-zA-Z0-9_.@-]/g, "_")}.tar.gz`}>
+                    <Download className="h-4 w-4" /> Download
+                  </a>
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
             {loadingRevisions ? (
-              <Skeleton className="h-10 w-72" />
-            ) : revisions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No revisions yet.</p>
+              <div className="space-y-2"><Skeleton className="h-4 w-3/4" /><Skeleton className="h-4 w-1/2" /><Skeleton className="h-4 w-2/3" /></div>
+            ) : !selectedRevision ? (
+              <div className="py-12 text-center text-sm text-muted-foreground">
+                {isGit ? "No revisions yet. Resolve latest to snapshot the repository." : "No revisions yet. Upload an archive to create the first snapshot."}
+              </div>
             ) : (
-              <Select
-                value={selectedRevision?._id ?? latestRevision?._id ?? ""}
-                onValueChange={(value) => {
-                  const next = revisions.find((r) => r._id === value);
-                  if (next) selectRevision(next);
-                }}
-              >
-                <SelectTrigger className="w-72 font-mono"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {revisions.map((revision) => (
-                    <SelectItem key={revision._id} value={revision._id} className="font-mono">
-                      <span className="inline-flex items-center gap-2">
-                        {revision.ref}
-                        {revision._id === latestRevision?._id && <Badge variant="secondary" className="text-[10px]">latest</Badge>}
-                        <span className="text-xs text-muted-foreground">{formatDate(revision.resolvedAt)}</span>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                {selectedRevision.requestedRef && <Detail label="Requested ref"><span className="font-mono text-xs">{selectedRevision.requestedRef}</span></Detail>}
+                {selectedRevision.resolvedCommitSha && (
+                  <Detail label="Commit">
+                    {selectedRevision.source ? (
+                      <a href={`https://github.com/${selectedRevision.source}/commit/${selectedRevision.resolvedCommitSha}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-mono text-xs text-primary hover:underline">
+                        {shortSha(selectedRevision.resolvedCommitSha)} <ExternalLink className="h-3 w-3" />
+                      </a>
+                    ) : (
+                      <span className="font-mono text-xs">{shortSha(selectedRevision.resolvedCommitSha)}</span>
+                    )}
+                  </Detail>
+                )}
+                {selectedRevision.commitTimestamp && <Detail label="Commit time"><span className="text-xs text-muted-foreground">{formatDate(selectedRevision.commitTimestamp)}</span></Detail>}
+                {selectedRevision.originalFilename && <Detail label="Original filename"><span className="font-mono text-xs">{selectedRevision.originalFilename}</span></Detail>}
+                <Detail label="Files"><span className="text-xs">{selectedRevision.fileCount?.toLocaleString() ?? "—"}</span></Detail>
+                <Detail label="Size"><span className="text-xs">{formatBytes(selectedRevision.sizeBytes)}</span></Detail>
+                <Detail label="Resolved"><span className="text-xs text-muted-foreground">{formatDate(selectedRevision.resolvedAt)}</span></Detail>
+                {selectedRevision.creator && <Detail label="Creator"><span className="text-xs">{selectedRevision.creator}</span></Detail>}
+                {selectedRevision.contentSha256 && <Detail className="sm:col-span-2" label="Content SHA-256"><span className="break-all font-mono text-xs">{selectedRevision.contentSha256}</span></Detail>}
+                <Detail className="sm:col-span-2" label="Archive"><span className="break-all font-mono text-xs text-muted-foreground">{selectedRevision.archiveUrl}</span></Detail>
+                <Detail className="sm:col-span-2" label="Revision ID"><span className="break-all font-mono text-xs text-muted-foreground">{selectedRevision._id}</span></Detail>
+              </dl>
             )}
-          </div>
-          {selectedRevision && !isLatestSelected && (
-            <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={() => navigate(`/codebases/${id}`)}>
-              <RefreshCw className="h-3.5 w-3.5" /> Jump to latest
-            </Button>
-          )}
-        </div>
-        {selectedRevision && (
-          <Button asChild variant="outline" className="gap-1.5">
-            <a href={`/api/v1/codebase-revisions/${selectedRevision._id}/archive`} download={`${selectedRevision.ref.replace(/[^a-zA-Z0-9_.@-]/g, "_")}.tar.gz`}>
-              <Download className="h-4 w-4" /> Download archive
-            </a>
-          </Button>
-        )}
-      </div>
-
-      {revisions.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            {codebase.sourceType === "git" ? "No revisions yet. Resolve latest to snapshot the repository." : "No revisions yet. Upload an archive to create the first snapshot."}
           </CardContent>
         </Card>
-      ) : !selectedRevision ? (
-        <div className="space-y-2"><Skeleton className="h-48 w-full" /></div>
-      ) : (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_20rem]">
-          <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-2">
-            <RevisionProvenanceCard revision={selectedRevision} />
-            <RevisionSnapshotCard revision={selectedRevision} />
-          </div>
 
+        {/* Sidebar: details + revisions */}
+        <div className="space-y-4">
           <Card>
-            <CardHeader className="pb-3"><CardTitle className="text-sm">Codebase</CardTitle></CardHeader>
+            <CardHeader className="pb-3"><CardTitle className="text-sm">Details</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">
               <Detail label="Source type"><Badge variant="outline" className="text-xs">{codebase.sourceType}</Badge></Detail>
-              {codebase.source && <Detail label="Source"><span className="font-mono text-xs">{codebase.source}</span></Detail>}
+              {codebase.source && (
+                <Detail label="Source">
+                  <a href={`https://github.com/${codebase.source}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-mono text-xs text-primary hover:underline">
+                    {codebase.source} <ExternalLink className="h-3 w-3" />
+                  </a>
+                </Detail>
+              )}
               {codebase.defaultBranch && <Detail label="Default branch"><span className="font-mono text-xs">{codebase.defaultBranch}</span></Detail>}
               {codebase.description && <Detail label="Description"><span className="text-xs">{codebase.description}</span></Detail>}
-              <Detail label="Latest revision"><span className="font-mono text-xs">{latestRevision?.ref ?? "None"}</span></Detail>
-              <Detail label="Revisions"><span className="text-xs">{revisions.length}</span></Detail>
               <Detail label="Created"><span className="text-xs text-muted-foreground">{formatDate(codebase.createdAt)}</span></Detail>
             </CardContent>
           </Card>
-        </div>
-      )}
 
-      {/* Collapsible full history */}
-      {revisions.length > 0 && (
-        <Card>
-          <button
-            type="button"
-            onClick={() => setHistoryOpen((open) => !open)}
-            className="flex w-full items-center gap-2 px-6 py-4 text-left"
-          >
-            {historyOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
-            <div>
-              <CardTitle className="text-base">Revision history</CardTitle>
-              <CardDescription>{revisions.length} immutable snapshot{revisions.length === 1 ? "" : "s"} available to seed a run workspace.</CardDescription>
-            </div>
-          </button>
-          {historyOpen && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Revisions</CardTitle>
+              <CardDescription className="text-xs">Immutable snapshots. Select one to inspect.</CardDescription>
+            </CardHeader>
             <CardContent>
-              <div className="overflow-hidden rounded-md border">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 text-xs text-muted-foreground">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium">Revision</th>
-                      <th className="px-3 py-2 text-left font-medium">Requested</th>
-                      <th className="px-3 py-2 text-left font-medium">Commit / content</th>
-                      <th className="px-3 py-2 text-right font-medium">Files</th>
-                      <th className="px-3 py-2 text-right font-medium">Size</th>
-                      <th className="px-3 py-2 text-left font-medium">Resolved</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {revisions.map((revision) => (
-                      <RevisionRow
-                        key={revision._id}
-                        revision={revision}
-                        latest={revision._id === latestRevision?._id}
-                        selected={revision._id === selectedRevision?._id}
-                        onSelect={() => selectRevision(revision)}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {loadingRevisions ? (
+                <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}</div>
+              ) : revisions.length === 0 ? (
+                <p className="py-4 text-center text-xs text-muted-foreground">No revisions yet.</p>
+              ) : (
+                <div className="space-y-1">
+                  {revisions.map((revision) => (
+                    <button
+                      key={revision._id}
+                      type="button"
+                      onClick={() => selectRevision(revision)}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
+                        revision._id === selectedRevision?._id ? "border border-primary/20 bg-primary/10" : "hover:bg-muted",
+                      )}
+                    >
+                      {isGit ? <GitCommit className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <FileArchive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+                      <span className="font-mono">{revision.ref}</span>
+                      {revision._id === latestRevision?._id && <Badge variant="secondary" className="text-[10px]">latest</Badge>}
+                      <span className="ml-auto whitespace-nowrap text-muted-foreground">{formatDate(revision.resolvedAt)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </CardContent>
-          )}
-        </Card>
-      )}
+          </Card>
+        </div>
+      </div>
 
       <Dialog open={refDialogOpen} onOpenChange={setRefDialogOpen}>
         <DialogContent>
@@ -312,82 +298,8 @@ export function CodebaseDetail() {
   );
 }
 
-function RevisionRow({ revision, latest, selected, onSelect }: { revision: CodebaseRevisionDocument; latest: boolean; selected: boolean; onSelect: () => void }) {
-  return (
-    <tr
-      className={cn("cursor-pointer hover:bg-muted/50", selected && "bg-primary/5")}
-      onClick={onSelect}
-    >
-      <td className="px-3 py-2"><span className="font-mono text-xs text-primary hover:underline">{revision.ref}</span>{latest && <Badge variant="secondary" className="ml-2 text-[10px]">latest</Badge>}</td>
-      <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{revision.requestedRef ?? revision.ref}</td>
-      <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{shortSha(revision.resolvedCommitSha) ?? shortSha(revision.contentSha256) ?? "—"}</td>
-      <td className="px-3 py-2 text-right text-xs text-muted-foreground">{revision.fileCount?.toLocaleString() ?? "—"}</td>
-      <td className="px-3 py-2 text-right text-xs text-muted-foreground">{formatBytes(revision.sizeBytes)}</td>
-      <td className="px-3 py-2 text-xs text-muted-foreground">{formatDate(revision.resolvedAt)}</td>
-    </tr>
-  );
-}
-
-function RevisionProvenanceCard({ revision }: { revision: CodebaseRevisionDocument }) {
-  return (
-    <Card className="min-w-0">
-      <CardHeader>
-        <CardTitle className="text-base">Provenance</CardTitle>
-        <CardDescription>Where this snapshot came from.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-2 text-sm">
-        <Detail label="Revision"><span className="font-mono text-xs">{revision.ref}</span></Detail>
-        <Detail label="Revision number"><span className="font-mono text-xs">r{revision.revisionNumber}</span></Detail>
-        <Detail label="Source type"><Badge variant="outline" className="text-xs">{revision.sourceType}</Badge></Detail>
-        {revision.source && (
-          <Detail label="Source">
-            <a href={`https://github.com/${revision.source}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-mono text-xs text-primary hover:underline">
-              <FolderGit2 className="h-3 w-3" /> {revision.source} <ExternalLink className="h-3 w-3" />
-            </a>
-          </Detail>
-        )}
-        {revision.requestedRef && <Detail label="Requested ref"><span className="font-mono text-xs">{revision.requestedRef}</span></Detail>}
-        {revision.resolvedCommitSha && (
-          <Detail label="Commit">
-            {revision.source ? (
-              <a href={`https://github.com/${revision.source}/commit/${revision.resolvedCommitSha}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-mono text-xs text-primary hover:underline">
-                {shortSha(revision.resolvedCommitSha)} <ExternalLink className="h-3 w-3" />
-              </a>
-            ) : (
-              <span className="font-mono text-xs">{shortSha(revision.resolvedCommitSha)}</span>
-            )}
-          </Detail>
-        )}
-        {revision.commitTimestamp && <Detail label="Commit time"><span className="text-xs text-muted-foreground">{formatDate(revision.commitTimestamp)}</span></Detail>}
-        {revision.originalFilename && <Detail label="Original filename"><span className="inline-flex items-center gap-1 font-mono text-xs"><FileArchive className="h-3 w-3" />{revision.originalFilename}</span></Detail>}
-        {revision.contentSha256 && <Detail label="Content SHA-256"><span className="break-all font-mono text-xs">{revision.contentSha256}</span></Detail>}
-      </CardContent>
-    </Card>
-  );
-}
-
-function RevisionSnapshotCard({ revision }: { revision: CodebaseRevisionDocument }) {
-  return (
-    <Card className="min-w-0">
-      <CardHeader>
-        <CardTitle className="text-base">Snapshot</CardTitle>
-        <CardDescription>The archive seeded into a run workspace.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-2 text-sm">
-        <Detail label="Files"><span className="text-xs">{revision.fileCount?.toLocaleString() ?? "—"}</span></Detail>
-        <Detail label="Size"><span className="text-xs">{formatBytes(revision.sizeBytes)}</span></Detail>
-        <Detail label="Archive"><span className="break-all font-mono text-xs">{revision.archiveUrl}</span></Detail>
-        <Detail label="Resolved"><span className="text-xs text-muted-foreground">{formatDate(revision.resolvedAt)}</span></Detail>
-        <Detail label="Created"><span className="text-xs text-muted-foreground">{formatDate(revision.createdAt)}</span></Detail>
-        {revision.creator && <Detail label="Creator"><span className="text-xs">{revision.creator}</span></Detail>}
-        <Detail label="Revision ID"><span className="break-all font-mono text-xs text-muted-foreground">{revision._id}</span></Detail>
-      </CardContent>
-    </Card>
-  );
-}
-
-function Detail({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div><span className="text-xs text-muted-foreground">{label}</span><div className="break-all">{children}</div></div>;
+function Detail({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+  return <div className={className}><span className="text-xs text-muted-foreground">{label}</span><div className="break-all">{children}</div></div>;
 }
 
 function shortSha(value?: string): string | undefined {
