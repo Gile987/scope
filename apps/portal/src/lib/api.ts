@@ -960,7 +960,8 @@ export const api = {
     return request(`/codebases/${id}`);
   },
 
-  /** Create a git codebase (JSON metadata only) */
+  /** Create a git codebase (JSON metadata only). The API best-effort resolves
+   *  the latest revision on creation, so the response may include firstRevision. */
   createCodebase: (body: {
     name: string;
     sourceType: CodebaseSourceType;
@@ -968,7 +969,7 @@ export const api = {
     description?: string;
     defaultBranch?: string;
     slug?: string;
-  }): Promise<CodebaseDocument> => {
+  }): Promise<CodebaseDocument & { firstRevision?: CodebaseRevisionDocument }> => {
     return request("/codebases", {
       method: "POST",
       body: JSON.stringify(body),

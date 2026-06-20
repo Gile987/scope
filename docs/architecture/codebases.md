@@ -102,7 +102,7 @@ Codebase revisions can be addressed in three forms:
 
 ### 1. Registration
 
-Codebases are created through `POST /api/v1/codebases`. Git codebases are created from JSON metadata: they require a `source` in `owner/repo` form and may include a `defaultBranch` hint. Archive codebases are created **atomically with their first revision**: the create request must be `multipart/form-data` and include the `archive` file alongside the metadata fields. The API creates the codebase and then its first revision in the same request; if the archive is missing or fails to materialize into a revision, the just-created codebase is hard-deleted (rollback) and a `400` is returned. This guarantees an archive codebase never exists without at least one revision. Subsequent revisions are added through `POST /api/v1/codebases/:id/upload`.
+Codebases are created through `POST /api/v1/codebases`. Git codebases are created from JSON metadata: they require a `source` in `owner/repo` form and may include a `defaultBranch` hint. After persisting the codebase, the API **best-effort resolves the latest revision** in the same request, so a new git codebase starts with a usable snapshot (`firstRevision` is included in the response). Unlike the archive path, a resolve failure (bad repo, network, GitHub rate limit) does **not** fail creation — a git codebase is valid with zero revisions, so the API logs a warning and returns the created codebase without a revision; the user can resolve manually later. Archive codebases are created **atomically with their first revision**: the create request must be `multipart/form-data` and include the `archive` file alongside the metadata fields. The API creates the codebase and then its first revision in the same request; if the archive is missing or fails to materialize into a revision, the just-created codebase is hard-deleted (rollback) and a `400` is returned. This guarantees an archive codebase never exists without at least one revision. Subsequent revisions are added through `POST /api/v1/codebases/:id/upload`.
 
 The codebase store derives a URL-safe slug from `slug` or `name`, ensures uniqueness by appending `-2`, `-3`, and so on, and initializes `revisionCounter` to `0`. Soft-deleted codebases still reserve their slugs so historical refs remain stable. The rollback path uses `CodebaseStore.hardDelete()` instead of a soft delete, so a codebase that failed its atomic create leaves no reserved slug behind.
 
@@ -169,7 +169,7 @@ Codebase routes are registered in `apps/api/src/routes/codebases.ts`.
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/api/v1/codebases` | List non-deleted codebases, newest first |
-| `POST` | `/api/v1/codebases` | Create a codebase. Git: JSON metadata. Archive: `multipart` with the `archive` file, creating the codebase plus its first revision atomically (rolls back on failure) |
+| `POST` | `/api/v1/codebases` | Create a codebase. Git: JSON metadata; the API best-effort resolves the latest revision on creation (returns `firstRevision`, does not fail creation on resolve error). Archive: `multipart` with the `archive` file, creating the codebase plus its first revision atomically (rolls back on failure) |
 | `GET` | `/api/v1/codebases/:id` | Fetch one codebase by `_id` |
 | `PATCH` | `/api/v1/codebases/:id` | Update mutable metadata (`name`, `description`, `defaultBranch`) |
 | `DELETE` | `/api/v1/codebases/:id` | Soft-delete a codebase and delete its revisions |

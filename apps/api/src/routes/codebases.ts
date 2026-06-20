@@ -132,6 +132,30 @@ export function registerCodebasesRoutes(ctx: RouteContext): void {
           }
         }
 
+        // For git codebases, best-effort resolve of the latest revision so the
+        // new codebase starts with a usable snapshot. Unlike archive codebases,
+        // a resolve failure (bad repo, network, GitHub rate limit) does NOT fail
+        // creation — a git codebase is valid with zero revisions and the user can
+        // resolve manually later.
+        if (sourceType === "git") {
+          try {
+            const result = await ctx.codebaseResolver.resolveGit(
+              codebase,
+              undefined,
+              ctx.codebaseRevisionStore,
+              uploadArchive,
+              creator ? { creator } : undefined
+            );
+            const fresh = (await ctx.codebaseStore.get(codebase._id)) ?? codebase;
+            res.status(201).json({ ...fresh, id: fresh._id, firstRevision: result.revision });
+            return;
+          } catch (resolveError) {
+            const message = resolveError instanceof Error ? resolveError.message : String(resolveError);
+            console.warn(`Auto-resolve of latest revision failed for git codebase ${codebase.slug}: ${message}`);
+            // Fall through: return the created codebase without a first revision.
+          }
+        }
+
         res.status(201).json({ ...codebase, id: codebase._id });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
