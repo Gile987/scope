@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { GitBranch, Loader2, Package, Plus, UploadCloud, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { MAX_ARCHIVE_UPLOAD_LABEL, formatBytes, validateArchiveFile } from "@/lib/codebaseUpload";
 
 /** A created codebase, optionally bundled with its first revision (archive). */
 export type CreatedCodebase = CodebaseDocument & { firstRevision?: CodebaseRevisionDocument };
@@ -59,13 +60,11 @@ export function CodebaseCreateForm({ onCreated, onCancel, className, compact = f
     if (!nameEdited) setName(humanize(normalized));
   };
 
-  const ARCHIVE_EXT = [".tar.gz", ".tgz", ".tar", ".zip"];
-  const isArchiveName = (name: string) => ARCHIVE_EXT.some((ext) => name.toLowerCase().endsWith(ext));
-
   const acceptFile = (file: File | null | undefined) => {
     if (!file) return;
-    if (!isArchiveName(file.name)) {
-      toast.error("Unsupported file. Use a .tar.gz, .tgz, .tar, or .zip archive.");
+    const error = validateArchiveFile(file);
+    if (error) {
+      toast.error(error);
       return;
     }
     setArchiveFile(file);
@@ -239,7 +238,7 @@ export function CodebaseCreateForm({ onCreated, onCancel, className, compact = f
                     <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
-                <span className="text-xs text-muted-foreground">{(archiveFile.size / 1024).toFixed(1)} KB · click or drop to replace</span>
+                <span className="text-xs text-muted-foreground">{formatBytes(archiveFile.size)} · click or drop to replace</span>
               </>
             ) : (
               <>
@@ -247,7 +246,7 @@ export function CodebaseCreateForm({ onCreated, onCancel, className, compact = f
                 <span className="text-sm font-medium">
                   Drag &amp; drop an archive here, or <span className="text-primary underline">browse</span>
                 </span>
-                <span className="text-xs text-muted-foreground">.tar.gz, .tgz, .tar, or .zip — becomes the first revision</span>
+                <span className="text-xs text-muted-foreground">.tar.gz, .tgz, .tar, or .zip · up to {MAX_ARCHIVE_UPLOAD_LABEL} — becomes the first revision</span>
               </>
             )}
           </div>

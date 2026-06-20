@@ -24,6 +24,7 @@ import {
 import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { MAX_ARCHIVE_UPLOAD_LABEL, validateArchiveFile } from "@/lib/codebaseUpload";
 
 export function CodebaseDetail() {
   const { id, revisionId } = useParams();
@@ -155,11 +156,30 @@ export function CodebaseDetail() {
             </>
           ) : (
             <>
-              <input ref={fileInputRef} type="file" className="hidden" accept=".zip,.tar,.tgz,.tar.gz,.gz" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadMutation.mutate(file); }} />
-              <Button onClick={() => fileInputRef.current?.click()} disabled={uploadMutation.isPending} variant="outline" className="gap-1.5">
-                {uploadMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                Upload archive
-              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept=".zip,.tar,.tgz,.tar.gz,.gz"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (!file) return;
+                  const error = validateArchiveFile(file);
+                  if (error) {
+                    toast.error(error);
+                    return;
+                  }
+                  uploadMutation.mutate(file);
+                }}
+              />
+              <div className="flex flex-col items-end gap-0.5">
+                <Button onClick={() => fileInputRef.current?.click()} disabled={uploadMutation.isPending} variant="outline" className="gap-1.5">
+                  {uploadMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  Upload archive
+                </Button>
+                <span className="text-[11px] text-muted-foreground">Max {MAX_ARCHIVE_UPLOAD_LABEL}</span>
+              </div>
             </>
           )}
           <AlertDialog>

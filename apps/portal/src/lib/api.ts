@@ -5,6 +5,7 @@ import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePrompt
 
 import { qs } from "./url";
 import { recordServerDate } from "./serverClock";
+import { MAX_ARCHIVE_UPLOAD_LABEL } from "./codebaseUpload";
 
 const BASE = "/api/v1";
 
@@ -994,6 +995,9 @@ export const api = {
       body: form,
     });
     recordServerDate(res.headers.get("Date"));
+    if (res.status === 413) {
+      throw new Error(`Archive exceeds the ${MAX_ARCHIVE_UPLOAD_LABEL} upload limit.`);
+    }
     if (!res.ok) {
       const body = await res.json().catch(() => ({ error: res.statusText }));
       throw new Error(body.error || `HTTP ${res.status}`);
@@ -1042,6 +1046,9 @@ export const api = {
       body: form,
     });
     recordServerDate(res.headers.get("Date"));
+    if (res.status === 413) {
+      throw new Error(`Archive exceeds the ${MAX_ARCHIVE_UPLOAD_LABEL} upload limit.`);
+    }
     if (!res.ok) {
       const body = await res.json().catch(() => ({ error: res.statusText }));
       throw new Error(body.error || `HTTP ${res.status}`);
