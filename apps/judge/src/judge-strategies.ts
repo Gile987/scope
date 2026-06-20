@@ -517,50 +517,37 @@ export class BundledStrategy extends JudgeStrategy {
       criteria,
       conversationHistory,
       personaInstructions,
-      gate,
       toolCalls,
     } = context;
 
     const systemPrompt = this.buildSystemPrompt(
-      criteria,
-      conversationHistory,
       personaInstructions,
-      gate,
       toolCalls && toolCalls.length > 0
     );
+
+    const userPrompt = this.buildUserPrompt(criteria, conversationHistory);
 
     const response = await this.runCopilotSession(
       workspacePath,
       systemPrompt,
-      "Evaluate the workspace against ALL criteria. Use the file tools to inspect the code, then provide your verdict in JSON format.",
+      userPrompt,
       toolCalls
     );
 
     return this.parseJsonResponse(response, criteria, context.onProgress);
   }
 
+  /**
+   * Builds the invariant system prompt (role, persona, tools, judging method,
+   * instructions, output format). It does NOT contain the criteria or the
+   * previous-iteration history — those are per-request data carried by the user
+   * prompt (see {@link buildUserPrompt}) so the system prompt stays identical
+   * across every criterion and iteration in a run.
+   */
   private buildSystemPrompt(
-    criteria: CriteriaConfig[],
-    conversationHistory: ConversationTurn[],
     personaInstructions?: string,
-    gate?: GateId,
     hasToolOutputs?: boolean
   ): string {
-    const criteriaList = criteria
-      .map((c) => `  - ${c.id}: ${c.prompt}`)
-      .join("\n");
-
-    const historySection =
-      conversationHistory.length > 0
-        ? `\n## Previous Iterations\n${conversationHistory
-            .map((t) => {
-              const car = t.codingAgentResponse ?? "(no response captured)";
-              const fb = t.judgeFeedback;
-              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 500)}${car.length > 500 ? "..." : ""}\n- **Your previous feedback**: ${fb.substring(0, 500)}${fb.length > 500 ? "..." : ""}\n- **Passed**: ${t.passed}`;
-            })
-            .join("\n\n")}`
-        : "";
-
     const personaSection = personaInstructions
       ? `\n## Persona\n${personaInstructions}\n`
       : "";
@@ -572,12 +559,8 @@ export class BundledStrategy extends JudgeStrategy {
     return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent.
 ${personaSection}
 ## What to Evaluate
-Evaluate whether the coding agent's work — its generated code together with the captured outputs of the tools it ran — meets each criterion in the Criteria section below.
+Evaluate whether the coding agent's work — its generated code together with the captured outputs of the tools it ran — meets each criterion provided in the user message.
 ${toolOutputsSection}
-## Criteria
-${criteriaList}
-${historySection}
-
 ## Instructions
 1. Gather evidence from both the workspace and the coding agent's captured tool outputs.
 2. Evaluate EACH criterion individually.
@@ -596,6 +579,36 @@ Your response MUST be valid JSON with this structure:
 \`\`\`
 
 IMPORTANT: Return ONLY the JSON, no additional text before or after.`;
+  }
+
+  /**
+   * Builds the per-request user prompt: the criteria to evaluate plus any
+   * previous-iteration context. This is the data the (invariant) system prompt
+   * refers to.
+   */
+  private buildUserPrompt(
+    criteria: CriteriaConfig[],
+    conversationHistory: ConversationTurn[]
+  ): string {
+    const criteriaList = criteria
+      .map((c) => `  - ${c.id}: ${c.prompt}`)
+      .join("\n");
+
+    const historySection =
+      conversationHistory.length > 0
+        ? `\n\n## Previous Iterations\n${conversationHistory
+            .map((t) => {
+              const car = t.codingAgentResponse ?? "(no response captured)";
+              const fb = t.judgeFeedback;
+              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 500)}${car.length > 500 ? "..." : ""}\n- **Your previous feedback**: ${fb.substring(0, 500)}${fb.length > 500 ? "..." : ""}\n- **Passed**: ${t.passed}`;
+            })
+            .join("\n\n")}`
+        : "";
+
+    return `Evaluate the workspace against ALL criteria below. Use the file tools to inspect the code, then provide your verdict in JSON format.
+
+## Criteria
+${criteriaList}${historySection}`;
   }
 
   private parseJsonResponse(
@@ -816,56 +829,18 @@ export class IndependentStrategy extends JudgeStrategy {
     gate?: GateId,
     toolCalls?: ToolCall[]
   ): Promise<CriterionResult> {
-    const historySection =
-      conversationHistory.length > 0
-        ? `\n## Previous Iterations (for context)\n${conversationHistory
-            .map((t) => {
-              const car = t.codingAgentResponse ?? "(no response captured)";
-              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 300)}${car.length > 300 ? "..." : ""}\n- **Passed**: ${t.passed}`;
-            })
-            .join("\n\n")}`
-        : "";
-
-    const personaSection = personaInstructions
-      ? `\n## Persona\n${personaInstructions}\n`
-      : "";
-
-    const toolOutputsSection =
+    const systemPrompt = this.buildSystemPrompt(
+      personaInstructions,
       toolCalls && toolCalls.length > 0
-        ? `\n${TOOL_OUTPUTS_GUIDANCE}\n`
-        : "";
+    );
 
-    const systemPrompt = `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent against ONE specific criterion.
-${personaSection}
-## What to Evaluate
-Evaluate the coding agent's work — its generated code together with the captured outputs of the tools it ran — against ONLY this criterion:
-
-**Criterion**: ${criterion.prompt}
-${toolOutputsSection}
-${historySection}
-
-## Instructions
-1. Gather evidence from both the workspace and the coding agent's captured tool outputs.
-2. Determine if this specific criterion is met (PASS) or not met (FAIL).
-3. Provide specific feedback about what you found.
-
-## Output Format
-**CRITICAL**: The FIRST LINE of your response MUST be exactly "PASS:" or "FAIL:" (nothing else on that line).
-Then provide your explanation on subsequent lines.
-
-Example:
-PASS:
-The workspace contains a package.json file with express listed as a dependency (version 4.18.0).
-
-Or:
-FAIL:
-No package.json file was found in the workspace root.`;
+    const userPrompt = this.buildUserPrompt(criterion, conversationHistory);
 
     try {
       const response = await this.runCopilotSession(
         workspacePath,
         systemPrompt,
-        `Evaluate criterion "${criterion.id}": ${criterion.prompt}`,
+        userPrompt,
         toolCalls
       );
 
@@ -889,6 +864,70 @@ No package.json file was found in the workspace root.`;
         evaluated: false,
       };
     }
+  }
+
+  /**
+   * Builds the invariant system prompt (role, persona, tools, judging method,
+   * instructions, output format). It does NOT contain the criterion or the
+   * previous-iteration history — those are per-request data carried by the user
+   * prompt (see {@link buildUserPrompt}) so the system prompt stays identical
+   * across every criterion and iteration in a run.
+   */
+  protected buildSystemPrompt(
+    personaInstructions?: string,
+    hasToolOutputs?: boolean
+  ): string {
+    const personaSection = personaInstructions
+      ? `\n## Persona\n${personaInstructions}\n`
+      : "";
+
+    const toolOutputsSection = hasToolOutputs
+      ? `\n${TOOL_OUTPUTS_GUIDANCE}\n`
+      : "";
+
+    return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent against ONE specific criterion.
+${personaSection}
+## What to Evaluate
+Evaluate the coding agent's work — its generated code together with the captured outputs of the tools it ran — against the criterion provided in the user message.
+${toolOutputsSection}
+## Instructions
+1. Gather evidence from both the workspace and the coding agent's captured tool outputs.
+2. Determine if the criterion is met (PASS) or not met (FAIL).
+3. Provide specific feedback about what you found.
+
+## Output Format
+**CRITICAL**: The FIRST LINE of your response MUST be exactly "PASS:" or "FAIL:" (nothing else on that line).
+Then provide your explanation on subsequent lines.
+
+Example:
+PASS:
+The workspace contains a package.json file with express listed as a dependency (version 4.18.0).
+
+Or:
+FAIL:
+No package.json file was found in the workspace root.`;
+  }
+
+  /**
+   * Builds the per-request user prompt: the single criterion to evaluate plus
+   * any previous-iteration context. This is the data the (invariant) system
+   * prompt refers to.
+   */
+  protected buildUserPrompt(
+    criterion: CriteriaConfig,
+    conversationHistory: ConversationTurn[]
+  ): string {
+    const historySection =
+      conversationHistory.length > 0
+        ? `\n\n## Previous Iterations (for context)\n${conversationHistory
+            .map((t) => {
+              const car = t.codingAgentResponse ?? "(no response captured)";
+              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 300)}${car.length > 300 ? "..." : ""}\n- **Passed**: ${t.passed}`;
+            })
+            .join("\n\n")}`
+        : "";
+
+    return `Evaluate criterion "${criterion.id}": ${criterion.prompt}${historySection}`;
   }
 
   private detectPassFail(response: string): boolean {

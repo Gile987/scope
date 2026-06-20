@@ -26,6 +26,15 @@ class TestableStrategy extends IndependentStrategy {
   publicBuildSessionConfig(tools: any[], systemPrompt: string) {
     return this.buildSessionConfig(tools, systemPrompt);
   }
+  publicBuildSystemPrompt(hasToolOutputs: boolean) {
+    return (this as any).buildSystemPrompt(undefined, hasToolOutputs);
+  }
+  publicBuildUserPrompt(
+    criterion: { id: string; prompt: string },
+    history: any[] = []
+  ) {
+    return (this as any).buildUserPrompt(criterion, history);
+  }
 }
 
 function toolMap(workspacePath: string) {
@@ -195,18 +204,21 @@ describe("judge session tool restriction (scope #1117)", () => {
 });
 
 /**
- * Exposes the protected `buildSystemPrompt` so we can assert how captured tool
- * outputs are surfaced to the judge without running a real Copilot session.
+ * Exposes the protected `buildSystemPrompt` / `buildUserPrompt` so we can assert
+ * how captured tool outputs, criteria, and history are surfaced to the judge
+ * without running a real Copilot session.
  */
 class TestableBundledStrategy extends BundledStrategy {
   publicBuildSystemPrompt(hasToolOutputs: boolean) {
-    return (this as any).buildSystemPrompt(
-      [{ id: "c1", prompt: "does the code work" }],
-      [],
-      undefined,
-      "build",
-      hasToolOutputs
-    );
+    return (this as any).buildSystemPrompt(undefined, hasToolOutputs);
+  }
+  publicBuildUserPrompt(
+    criteria: { id: string; prompt: string }[] = [
+      { id: "c1", prompt: "does the code work" },
+    ],
+    history: any[] = []
+  ) {
+    return (this as any).buildUserPrompt(criteria, history);
   }
 }
 
@@ -257,14 +269,94 @@ describe("judge tool-outputs guidance (issue #1125)", () => {
     expect(prompt).toContain(TOOL_OUTPUTS_GUIDANCE);
   });
 
-  it("frames What to Evaluate around both the generated code and the captured tool outputs", () => {
+  it("frames What to Evaluate around the agent's work and points at the user message", () => {
     const prompt = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(true);
     expect(prompt).toContain("## What to Evaluate");
     expect(prompt).toMatch(/generated code together with the captured outputs of the tools it ran/);
+    expect(prompt).toMatch(/each criterion provided in the user message/);
   });
 
   it("omits the guidance when no tool outputs were captured", () => {
     const prompt = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(false);
     expect(prompt).not.toContain(TOOL_OUTPUTS_GUIDANCE);
+  });
+});
+
+describe("judge system/user prompt split (criteria + history are user data)", () => {
+  // The system prompt must stay invariant across criteria/iterations: it carries
+  // only the role, tools, judging method, instructions, and output format. The
+  // per-request data — the criterion/criteria and previous-iteration history —
+  // belongs in the user prompt.
+
+  describe("BundledStrategy", () => {
+    const sys = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(true);
+
+    it("keeps the criteria out of the system prompt", () => {
+      expect(sys).not.toContain("## Criteria");
+      expect(sys).not.toContain("does the code work");
+    });
+
+    it("keeps the previous-iteration history out of the system prompt", () => {
+      const sysWithHistoryPath = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(false);
+      expect(sys).not.toContain("## Previous Iterations");
+      expect(sysWithHistoryPath).not.toContain("## Previous Iterations");
+    });
+
+    it("puts the criteria in the user prompt", () => {
+      const user = new TestableBundledStrategy("test-model").publicBuildUserPrompt();
+      expect(user).toContain("## Criteria");
+      expect(user).toContain("c1: does the code work");
+    });
+
+    it("appends previous-iteration history to the user prompt only when present", () => {
+      const strat = new TestableBundledStrategy("test-model");
+      const noHistory = strat.publicBuildUserPrompt();
+      expect(noHistory).not.toContain("## Previous Iterations");
+
+      const withHistory = strat.publicBuildUserPrompt(
+        [{ id: "c1", prompt: "does the code work" }],
+        [
+          {
+            iteration: 1,
+            codingAgentResponse: "did some work",
+            judgeFeedback: "needs more",
+            passed: false,
+          },
+        ]
+      );
+      expect(withHistory).toContain("## Previous Iterations");
+      expect(withHistory).toContain("### Iteration 1");
+    });
+  });
+
+  describe("IndependentStrategy", () => {
+    const strat = new TestableStrategy("test-model");
+    const sys = strat.publicBuildSystemPrompt(true);
+
+    it("keeps the criterion out of the system prompt", () => {
+      expect(sys).not.toContain("**Criterion**");
+      expect(sys).toMatch(/the criterion provided in the user message/);
+    });
+
+    it("keeps the previous-iteration history out of the system prompt", () => {
+      expect(sys).not.toContain("## Previous Iterations");
+    });
+
+    it("puts the criterion id and prompt in the user prompt", () => {
+      const user = strat.publicBuildUserPrompt({ id: "build-ok", prompt: "it builds" });
+      expect(user).toContain('Evaluate criterion "build-ok": it builds');
+    });
+
+    it("appends previous-iteration history to the user prompt only when present", () => {
+      const noHistory = strat.publicBuildUserPrompt({ id: "build-ok", prompt: "it builds" });
+      expect(noHistory).not.toContain("## Previous Iterations");
+
+      const withHistory = strat.publicBuildUserPrompt(
+        { id: "build-ok", prompt: "it builds" },
+        [{ iteration: 1, codingAgentResponse: "tried", passed: false }]
+      );
+      expect(withHistory).toContain("## Previous Iterations (for context)");
+      expect(withHistory).toContain("### Iteration 1");
+    });
   });
 });

@@ -465,14 +465,36 @@ The system prompt is organized into balanced, single-purpose sections:
 
 - **`## What to Evaluate`** — names the subject under review as the coding
   agent's work: *its generated code together with the captured outputs of the
-  tools it ran*, against the criterion/criteria. It does not list tools, so it no
-  longer back-couples to the tooling section.
+  tools it ran*, and points at the criterion/criteria **provided in the user
+  message** (see the system/user split below). It does not list tools or inline
+  the criteria, so it stays invariant and does not back-couple to the tooling
+  section.
 - **`## Your Tools`** — names the judge's own read-only tools once (`read_file`,
   `list_directory`, `search_files`, `file_exists`, plus `read_tool_outputs` /
   `get_tool_output`) and states the hard limit: the judge cannot run any commands
   or coding-agent tools. This keeps the judge's tools unambiguous from the
   *coding agent's* tools/commands (whose output the judge only reads).
 - **`## How to Judge`** — the evidence philosophy (below).
+
+> **System / user prompt split.** The judge SDK session receives two distinct
+> messages, and the division of content matters:
+>
+> - The **system prompt** carries only the invariant *method/role*: the opening
+>   framing, `## Persona` (when set), `## Your Tools` + `## How to Judge` (when
+>   tool outputs were captured), `## Instructions`, and `## Output Format`. It is
+>   identical for every criterion and iteration in a run.
+> - The **user prompt** carries the per-request *data*: the criterion (independent
+>   strategy: `Evaluate criterion "<id>": <prompt>`) or the `## Criteria` list
+>   (bundled strategy), followed by the `## Previous Iterations` context when this
+>   is not the first iteration.
+>
+> Both strategies build these via `buildSystemPrompt(persona, hasToolOutputs)` and
+> `buildUserPrompt(criteria, history)` in `judge-strategies.ts`. Keeping the
+> criterion in the user message (not the system prompt) gives a clean trust
+> boundary: the system prompt is the sole authority — including the override
+> clause below — while the criterion is *data being evaluated* rather than an
+> instruction that competes with the judge's rules. It also keeps the system
+> prompt stable across criteria/iterations.
 
 > **Gate-judge contract (issue #1125).** The guidance is deliberately generic —
 > it is not specific to the build, test, or any single gate. It frames the
