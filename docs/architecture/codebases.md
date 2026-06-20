@@ -218,7 +218,7 @@ The migration's `down()` intentionally skips dropping indexes; indexes should be
 
 ## CLI and Portal
 
-The CLI exposes `codebase` commands for managing codebases and revisions. The Portal provides `CodebaseList`, `CodebaseDetail`, `CodebaseRevisionDetail`, and `CodebasePicker` UX for browsing codebases, resolving/uploading revisions, inspecting a specific revision, and selecting a codebase for run submission. Revision rows in `CodebaseDetail` link to `/codebases/:id/revisions/:revisionId`, which shows full provenance and a snapshot archive download (via the `/codebase-revisions/:id/archive` proxy). These management surfaces mirror the skills workflow at a high level: register an entity, create immutable revisions, and attach a resolved revision to a run.
+The CLI exposes `codebase` commands for managing codebases and revisions. The Portal provides `CodebaseList`, `CodebaseDetail`, and `CodebasePicker` UX for browsing codebases, resolving/uploading revisions, inspecting revisions, and selecting a codebase for run submission. `CodebaseDetail` is revision-centric: it shows the latest revision's full provenance and snapshot inline and provides a dropdown switcher to view any previous revision. The selected revision is reflected in the URL (`/codebases/:id` for latest, `/codebases/:id/revisions/:revisionId` for a specific one), so individual revisions stay deep-linkable. A "Download archive" button targets the selected revision via the `/codebase-revisions/:id/archive` proxy, and a collapsible "Revision history" table lists every snapshot for scanning. These management surfaces mirror the skills workflow at a high level: register an entity, create immutable revisions, and attach a resolved revision to a run.
 
 ## Key Files
 
@@ -234,7 +234,7 @@ The CLI exposes `codebase` commands for managing codebases and revisions. The Po
 | `packages/shared/src/codebases/codebase-seeder.ts` | Worker workspace seeding |
 | `apps/api/src/routes/codebases.ts` | REST endpoints for codebases, revisions, uploads, and archive proxying |
 | `apps/api/src/archive-har.ts` | Run archive packing, including `codebase.tar.gz` bundling and `run.yaml` codebase block |
-| `apps/portal/src/pages/CodebaseRevisionDetail.tsx` | Portal page for a single revision's provenance and snapshot download |
+| `apps/portal/src/pages/CodebaseDetail.tsx` | Revision-centric codebase page: latest revision inline, dropdown switcher, deep-linkable revisions, collapsible history, archive download |
 | `apps/api/src/utils/codebase-helpers.ts` | Blob container naming and submit-time codebase spec resolution |
 | `apps/api/src/routes/requests/index.ts` | Run submission integration and `codebase` spec handling |
 | `packages/shared/src/queue/queue-processor.ts` | Worker seeding hook before skills extraction |
