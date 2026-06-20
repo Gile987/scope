@@ -60,6 +60,18 @@ export function CodebaseCreateForm({ onCreated, onCancel, className, compact = f
     if (!nameEdited) setName(humanize(normalized));
   };
 
+  // For git codebases the repository is entered first, so seed the not-yet-edited
+  // name/slug from the repo name (the part after "owner/"): "pamelafox/pamelafox-site"
+  // -> name "pamelafox-site", slug "pamelafox-site".
+  const handleSourceChange = (value: string) => {
+    setSource(value);
+    const repoName = value.split("/").pop()?.trim() ?? "";
+    if (repoName) {
+      if (!nameEdited) setName(repoName);
+      if (!slugEdited) setSlug(slugify(repoName));
+    }
+  };
+
   const acceptFile = (file: File | null | undefined) => {
     if (!file) return;
     const error = validateArchiveFile(file);
@@ -152,6 +164,20 @@ export function CodebaseCreateForm({ onCreated, onCancel, className, compact = f
         </div>
       </div>
 
+      {sourceType === "git" && (
+        <div className={cn("grid gap-4", compact ? "grid-cols-1" : "sm:grid-cols-2")}>
+          <div className="space-y-2">
+            <Label htmlFor="codebase-source">GitHub repository *</Label>
+            <Input id="codebase-source" value={source} onChange={(e) => handleSourceChange(e.target.value)} placeholder="owner/repo" className="font-mono" />
+            {!sourceValid && source.trim() && <p className="text-xs text-destructive">Use owner/repo format.</p>}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="codebase-default-branch">Default branch</Label>
+            <Input id="codebase-default-branch" value={defaultBranch} onChange={(e) => setDefaultBranch(e.target.value)} placeholder="main" className="font-mono" />
+          </div>
+        </div>
+      )}
+
       <div className={cn("grid gap-4", compact ? "grid-cols-1" : "sm:grid-cols-2")}>
         <div className="space-y-2">
           <Label htmlFor="codebase-name">Name *</Label>
@@ -162,20 +188,6 @@ export function CodebaseCreateForm({ onCreated, onCancel, className, compact = f
           <Input id="codebase-slug" value={slug} onChange={(e) => handleSlugChange(e.target.value)} placeholder="auto-generated" className="font-mono" />
         </div>
       </div>
-
-      {sourceType === "git" && (
-        <div className={cn("grid gap-4", compact ? "grid-cols-1" : "sm:grid-cols-2")}>
-          <div className="space-y-2">
-            <Label htmlFor="codebase-source">GitHub repository *</Label>
-            <Input id="codebase-source" value={source} onChange={(e) => setSource(e.target.value)} placeholder="owner/repo" className="font-mono" />
-            {!sourceValid && source.trim() && <p className="text-xs text-destructive">Use owner/repo format.</p>}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="codebase-default-branch">Default branch</Label>
-            <Input id="codebase-default-branch" value={defaultBranch} onChange={(e) => setDefaultBranch(e.target.value)} placeholder="main" className="font-mono" />
-          </div>
-        </div>
-      )}
 
       {sourceType === "archive" && (
         <div className="space-y-2">
