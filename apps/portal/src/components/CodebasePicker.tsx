@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CodebaseCreateForm } from "@/components/CodebaseCreateForm";
 import { ChevronDown, ChevronUp, FileArchive, FolderGit2, Loader2, Search, Upload, X } from "lucide-react";
 import { toast } from "sonner";
+import { MAX_ARCHIVE_UPLOAD_LABEL, validateArchiveFile } from "@/lib/codebaseUpload";
 
 interface CodebasePickerProps {
   selected: string | null;
@@ -143,12 +144,31 @@ export function CodebasePicker({ selected, onChange, disabled = false }: Codebas
                   </SelectContent>
                 </Select>
                 {!disabled && (
-                  <div>
-                    <input ref={uploadInputRef} type="file" className="hidden" accept=".zip,.tar,.tgz,.tar.gz,.gz" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadMutation.mutate(file); }} />
+                  <div className="space-y-1">
+                    <input
+                      ref={uploadInputRef}
+                      type="file"
+                      className="hidden"
+                      accept=".zip,.tar,.tgz,.tar.gz,.gz"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        event.target.value = "";
+                        if (!file) return;
+                        const error = validateArchiveFile(file);
+                        if (error) {
+                          toast.error(error);
+                          return;
+                        }
+                        uploadMutation.mutate(file);
+                      }}
+                    />
                     <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 text-xs" disabled={uploadMutation.isPending} onClick={() => uploadInputRef.current?.click()}>
                       {uploadMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-                      Upload archive
+                      Upload new revision
                     </Button>
+                    <p className="text-[11px] text-muted-foreground">
+                      Adds a new revision to <span className="font-mono">{selectedCodebase.slug}</span> · max {MAX_ARCHIVE_UPLOAD_LABEL}
+                    </p>
                   </div>
                 )}
               </div>

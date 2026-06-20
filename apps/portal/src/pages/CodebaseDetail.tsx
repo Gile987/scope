@@ -176,9 +176,9 @@ export function CodebaseDetail() {
               <div className="flex flex-col items-end gap-0.5">
                 <Button onClick={() => fileInputRef.current?.click()} disabled={uploadMutation.isPending} variant="outline" className="gap-1.5">
                   {uploadMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                  Upload archive
+                  Upload new revision
                 </Button>
-                <span className="text-[11px] text-muted-foreground">Max {MAX_ARCHIVE_UPLOAD_LABEL}</span>
+                <span className="text-[11px] text-muted-foreground">Creates a new revision · max {MAX_ARCHIVE_UPLOAD_LABEL}</span>
               </div>
             </>
           )}
