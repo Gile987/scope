@@ -2,9 +2,46 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi } from "vitest";
-import { runACPSession, selectModel, selectReasoningEffort, selectPermissionMode, formatModeError, AUTOPILOT_MODE_ID } from "./acp-client.js";
+import { runACPSession, selectModel, selectReasoningEffort, selectPermissionMode, formatModeError, formatToolArgs, AUTOPILOT_MODE_ID } from "./acp-client.js";
 import type * as acp from "@agentclientprotocol/sdk";
 import os from "node:os";
+
+describe("formatToolArgs", () => {
+  it("returns an empty string for non-object input", () => {
+    expect(formatToolArgs(undefined)).toBe("");
+    expect(formatToolArgs(null)).toBe("");
+    expect(formatToolArgs("hello")).toBe("");
+    expect(formatToolArgs(42)).toBe("");
+  });
+
+  it("returns an empty string for an empty object", () => {
+    expect(formatToolArgs({})).toBe("");
+  });
+
+  it("formats string arguments as key=value pairs", () => {
+    expect(formatToolArgs({ command: "ls -la", cwd: "/tmp" })).toBe(
+      "command=ls -la, cwd=/tmp"
+    );
+  });
+
+  it("collapses whitespace in values", () => {
+    expect(formatToolArgs({ content: "line1\n  line2\t line3" })).toBe(
+      "content=line1 line2 line3"
+    );
+  });
+
+  it("JSON-stringifies non-string values", () => {
+    expect(formatToolArgs({ count: 3, flag: true })).toBe(
+      "count=3, flag=true"
+    );
+  });
+
+  it("truncates long previews with an ellipsis", () => {
+    const result = formatToolArgs({ path: "a".repeat(300) }, 20);
+    expect(result.length).toBe(20);
+    expect(result.endsWith("…")).toBe(true);
+  });
+});
 
 describe("runACPSession", () => {
   const cwd = os.tmpdir();

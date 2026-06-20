@@ -5,7 +5,103 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ACPClientHandler, selectReasoningEffort } from "./acp-client.js";
+import { ACPClientHandler, selectReasoningEffort, formatToolArgs } from "./acp-client.js";
+
+describe("formatToolArgs", () => {
+  it("returns an empty string for non-object input", () => {
+    expect(formatToolArgs(undefined)).toBe("");
+    expect(formatToolArgs(null)).toBe("");
+    expect(formatToolArgs("hello")).toBe("");
+  });
+
+  it("returns an empty string for an empty object", () => {
+    expect(formatToolArgs({})).toBe("");
+  });
+
+  it("formats arguments as key=value pairs with collapsed whitespace", () => {
+    expect(formatToolArgs({ command: "npm   install", path: "src" })).toBe(
+      "command=npm install, path=src"
+    );
+  });
+
+  it("truncates long previews with an ellipsis", () => {
+    const result = formatToolArgs({ path: "a".repeat(300) }, 20);
+    expect(result.length).toBe(20);
+    expect(result.endsWith("…")).toBe(true);
+  });
+});
+
+describe("ACPClientHandler tool call logging", () => {
+  let workspace: string;
+  let logs: string[];
+  let handler: ACPClientHandler;
+
+  beforeEach(() => {
+    workspace = mkdtempSync(join(tmpdir(), "acp-tool-log-"));
+    logs = [];
+    handler = new ACPClientHandler((msg) => logs.push(msg), workspace);
+  });
+
+  afterEach(() => {
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it("logs a tool call with an argument preview", async () => {
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "toolu_bdrk_123",
+        title: "Create Astro project",
+        status: "pending",
+        kind: "execute",
+        rawInput: { command: "npm create astro@latest" },
+      },
+    } as never);
+
+    expect(logs).toEqual([
+      "Tool call: [execute] Create Astro project command=npm create astro@latest (pending)",
+    ]);
+  });
+
+  it("shows the title (not the opaque id) and carries kind forward on updates", async () => {
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "toolu_bdrk_123",
+        title: "Create Astro project",
+        status: "pending",
+        kind: "execute",
+      },
+    } as never);
+    logs.length = 0;
+
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "toolu_bdrk_123",
+        status: "completed",
+      },
+    } as never);
+
+    expect(logs).toEqual(["Tool update: [execute] Create Astro project - completed"]);
+  });
+
+  it("falls back to the tool call id when no title was seen", async () => {
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "toolu_bdrk_unknown",
+        status: "completed",
+      },
+    } as never);
+
+    expect(logs).toEqual(["Tool update: toolu_bdrk_unknown - completed"]);
+  });
+});
 
 describe("ACPClientHandler", () => {
   let workspace: string;

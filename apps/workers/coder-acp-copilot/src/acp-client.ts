@@ -15,6 +15,41 @@ import type { McpServerConfig } from "shared";
 /** Default ACP session timeout: 60 minutes */
 const DEFAULT_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
 
+/**
+ * Build a short, human-readable preview of a tool call's raw input arguments
+ * for logging (e.g. `command=npm create astro, path=src`). Whitespace is
+ * collapsed and the result is truncated. Returns an empty string when there is
+ * nothing useful to show.
+ */
+export function formatToolArgs(rawInput: unknown, maxLength = 160): string {
+  if (rawInput === null || typeof rawInput !== "object") {
+    return "";
+  }
+  const entries = Object.entries(rawInput as Record<string, unknown>);
+  if (entries.length === 0) {
+    return "";
+  }
+  const formatted = entries
+    .map(([key, value]) => {
+      let rendered: string;
+      if (typeof value === "string") {
+        rendered = value;
+      } else {
+        try {
+          rendered = JSON.stringify(value) ?? String(value);
+        } catch {
+          rendered = String(value);
+        }
+      }
+      rendered = rendered.replace(/\s+/g, " ").trim();
+      return `${key}=${rendered}`;
+    })
+    .join(", ");
+  return formatted.length > maxLength
+    ? `${formatted.slice(0, maxLength - 1)}…`
+    : formatted;
+}
+
 export interface ACPClientOptions {
   command: string;
   args?: string[];
@@ -45,6 +80,10 @@ export interface ACPSessionResult {
 class ACPClientHandler implements acp.Client {
   private responseChunks: string[] = [];
   private onLog: (message: string) => void;
+  /** Maps a tool call id to its title and kind so updates can show the
+   * human-readable title (instead of the opaque upstream id, e.g.
+   * `toolu_bdrk_...`) and carry the kind forward when an update omits it. */
+  private toolCalls = new Map<string, { title?: string; kind?: string }>();
 
   constructor(onLog: (message: string) => void) {
     this.onLog = onLog;
@@ -92,12 +131,33 @@ class ACPClientHandler implements acp.Client {
           this.onLog(`[Thinking] ${update.content.text.substring(0, 100)}...`);
         }
         break;
-      case "tool_call":
-        this.onLog(`Tool call: ${update.title} (${update.status})${update.kind ? ` [${update.kind}]` : ""}`);
+      case "tool_call": {
+        this.toolCalls.set(update.toolCallId, {
+          title: update.title,
+          kind: update.kind,
+        });
+        const args = formatToolArgs(update.rawInput);
+        const parts = ["Tool call:"];
+        if (update.kind) parts.push(`[${update.kind}]`);
+        parts.push(update.title);
+        if (args) parts.push(args);
+        if (update.status) parts.push(`(${update.status})`);
+        this.onLog(parts.join(" "));
         break;
-      case "tool_call_update":
-        this.onLog(`Tool update: ${update.toolCallId} - ${update.status}${update.kind ? ` [${update.kind}]` : ""}`);
+      }
+      case "tool_call_update": {
+        const cached = this.toolCalls.get(update.toolCallId);
+        const kind = update.kind ?? cached?.kind;
+        const label = cached?.title ?? update.toolCallId;
+        const args = formatToolArgs(update.rawInput);
+        const parts = ["Tool update:"];
+        if (kind) parts.push(`[${kind}]`);
+        parts.push(label);
+        if (args) parts.push(args);
+        if (update.status) parts.push(`- ${update.status}`);
+        this.onLog(parts.join(" "));
         break;
+      }
       default:
         break;
     }
