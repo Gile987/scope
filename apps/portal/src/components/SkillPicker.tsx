@@ -266,7 +266,7 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
   const showDropdown = open && (items.length > 0 || (query && debouncedQuery.length >= 2 && fetchingExternal));
 
   return (
-    <div ref={containerRef} className="relative space-y-2">
+    <div ref={containerRef} className="relative space-y-2 min-w-0">
       {/* Selected skills with revision selectors */}
       {!importOnly && selected.length > 0 && (
         <div className="space-y-1.5">
