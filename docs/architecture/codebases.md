@@ -114,6 +114,8 @@ For `requestedRef` values that are empty or `"latest"`, the resolver uses the co
 
 Archive revisions are created by `CodebaseResolver.createArchiveRevision()`. The resolver hashes the uploaded bytes into `contentSha256` for provenance, then compares it with the codebase's latest revision: if they match, the existing revision is returned unchanged (no normalization, no upload, no new revision). Otherwise it normalizes the archive, uploads the normalized tar.gz, and creates a new incremental revision.
 
+Both methods return a `{ revision, deduplicated }` result. The resolve (`POST /codebases/:id/revisions`) and upload (`POST /codebases/:id/upload`) endpoints surface this to clients: a newly created revision responds `201` and a reused one responds `200`, and the JSON body carries a `deduplicated` boolean. The Portal and CLI use it to show a distinct "no changes — reused existing revision" message instead of implying a new revision was created.
+
 ### 3. Archiving
 
 All codebase revision content is stored as a normalized root-level tar.gz in the shared `snapshots` container:

@@ -81,5 +81,11 @@ export const CodebaseRevisionResponseSchema = z
     creator: z.string().optional(),
     resolvedAt: z.coerce.date(),
     createdAt: z.coerce.date(),
+    /**
+     * True when this revision was reused (deduplicated) because the resolved
+     * commit/content was unchanged, rather than newly created. Only set on
+     * resolve/upload responses; absent when listing/fetching revisions.
+     */
+    deduplicated: z.boolean().optional(),
   })
   .openapi("CodebaseRevisionResponse");

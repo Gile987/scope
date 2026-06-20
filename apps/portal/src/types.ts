@@ -915,6 +915,11 @@ export interface CodebaseRevisionDocument {
   creator?: string;
   resolvedAt: string;
   createdAt: string;
+  /**
+   * Present only on resolve/upload responses: true when the revision was reused
+   * (deduplicated) because nothing changed, false when newly created.
+   */
+  deduplicated?: boolean;
 }
 
 // =============================================================================

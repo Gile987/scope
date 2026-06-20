@@ -26,6 +26,16 @@ import { normalizeToRootTarGz } from "./codebase-archive.js";
 /** Function that uploads archive bytes to blob storage and returns its URL. */
 export type UploadArchiveFn = (blobName: string, data: Buffer) => Promise<string>;
 
+/**
+ * Result of a resolve/upload: the revision plus whether it was deduplicated
+ * (i.e. reused the codebase's latest revision because nothing changed) rather
+ * than newly created.
+ */
+export interface ResolveRevisionResult {
+  revision: CodebaseRevisionDocument;
+  deduplicated: boolean;
+}
+
 /** Options for the codebase resolver (GitHub auth). */
 export interface CodebaseResolverOptions {
   githubApiUrl?: string;
@@ -80,6 +90,7 @@ export class CodebaseResolver {
    * @param store - revision store for persistence.
    * @param uploadArchive - uploads the normalized tar.gz and returns its URL.
    * @param opts.creator - provenance for who triggered the resolution.
+   * @returns the revision and whether it was deduplicated (reused) vs newly created.
    */
   async resolveGit(
     codebase: CodebaseDocument,
@@ -87,7 +98,7 @@ export class CodebaseResolver {
     store: CodebaseRevisionStore,
     uploadArchive: UploadArchiveFn,
     opts?: { creator?: string }
-  ): Promise<CodebaseRevisionDocument> {
+  ): Promise<ResolveRevisionResult> {
     const source = codebase.source;
     if (!source) {
       throw new Error(`Codebase '${codebase.slug}' has no git source`);
@@ -105,7 +116,7 @@ export class CodebaseResolver {
     // it instead of creating a redundant revision (and re-downloading the tree).
     const latest = await store.getLatest(codebase._id);
     if (latest && latest.sourceType === "git" && latest.resolvedCommitSha === commit.sha) {
-      return latest;
+      return { revision: latest, deduplicated: true };
     }
 
     // Download the repo tarball at the resolved commit and normalize it.
@@ -116,7 +127,7 @@ export class CodebaseResolver {
     const blobName = buildCodebaseArchiveBlobName(codebase._id, revisionId);
     const archiveUrl = await uploadArchive(blobName, normalized.data);
 
-    return store.createRevision(
+    const revision = await store.createRevision(
       {
         codebaseId: codebase._id,
         slug: codebase.slug,
@@ -133,6 +144,7 @@ export class CodebaseResolver {
       },
       { id: revisionId }
     );
+    return { revision, deduplicated: false };
   }
 
   /**
@@ -142,20 +154,21 @@ export class CodebaseResolver {
    * @param upload - the uploaded bytes + original filename.
    * @param store - revision store for persistence.
    * @param uploadArchive - uploads the normalized tar.gz and returns its URL.
+   * @returns the revision and whether it was deduplicated (reused) vs newly created.
    */
   async createArchiveRevision(
     codebase: CodebaseDocument,
     upload: { buffer: Buffer; originalFilename?: string; creator?: string },
     store: CodebaseRevisionStore,
     uploadArchive: UploadArchiveFn
-  ): Promise<CodebaseRevisionDocument> {
+  ): Promise<ResolveRevisionResult> {
     const contentSha256 = createHash("sha256").update(upload.buffer).digest("hex");
 
     // Dedup: if the latest revision already has this exact content hash, reuse
     // it instead of creating a redundant revision (and re-uploading the bytes).
     const latest = await store.getLatest(codebase._id);
     if (latest && latest.sourceType === "archive" && latest.contentSha256 === contentSha256) {
-      return latest;
+      return { revision: latest, deduplicated: true };
     }
 
     const normalized = await normalizeToRootTarGz(upload.buffer);
@@ -164,7 +177,7 @@ export class CodebaseResolver {
     const blobName = buildCodebaseArchiveBlobName(codebase._id, revisionId);
     const archiveUrl = await uploadArchive(blobName, normalized.data);
 
-    return store.createRevision(
+    const revision = await store.createRevision(
       {
         codebaseId: codebase._id,
         slug: codebase.slug,
@@ -179,6 +192,7 @@ export class CodebaseResolver {
       },
       { id: revisionId }
     );
+    return { revision, deduplicated: false };
   }
 
   /** Get the default branch of a GitHub repo. */

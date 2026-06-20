@@ -211,14 +211,16 @@ export function registerCodebasesRoutes(ctx: RouteContext): void {
         }
         const { requestedRef, creator } = req.body;
         try {
-          const revision = await ctx.codebaseResolver.resolveGit(
+          const result = await ctx.codebaseResolver.resolveGit(
             codebase,
             requestedRef,
             ctx.codebaseRevisionStore,
             uploadArchive,
             creator ? { creator } : undefined
           );
-          res.status(201).json(revision);
+          res
+            .status(result.deduplicated ? 200 : 201)
+            .json({ ...result.revision, deduplicated: result.deduplicated });
         } catch (resolveError) {
           const message = resolveError instanceof Error ? resolveError.message : String(resolveError);
           if (/not found/i.test(message)) {
@@ -265,7 +267,7 @@ export function registerCodebasesRoutes(ctx: RouteContext): void {
         }
         const buffer = readFileSync(file.path);
         const creator = ((req.body as Record<string, unknown> | undefined)?.creator as string | undefined) ?? undefined;
-        const revision = await ctx.codebaseResolver.createArchiveRevision(
+        const result = await ctx.codebaseResolver.createArchiveRevision(
           codebase,
           {
             buffer,
@@ -275,7 +277,9 @@ export function registerCodebasesRoutes(ctx: RouteContext): void {
           ctx.codebaseRevisionStore,
           uploadArchive
         );
-        res.status(201).json(revision);
+        res
+          .status(result.deduplicated ? 200 : 201)
+          .json({ ...result.revision, deduplicated: result.deduplicated });
       } catch (error) {
         next(error);
       } finally {

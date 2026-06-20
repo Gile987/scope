@@ -219,7 +219,11 @@ export function registerCodebaseCommands(program: Command): void {
         console.log(formatData([revision], revisionFields(), format));
         return;
       }
-      console.log(successText("Codebase resolved to revision:"));
+      if (revision.deduplicated) {
+        console.log(successText("No changes — reused existing revision (commit unchanged):"));
+      } else {
+        console.log(successText("Codebase resolved to revision:"));
+      }
       console.log(`${label("Ref:")} ${value(revision.ref)}`);
       if (revision.resolvedCommitSha) console.log(`${label("Commit:")} ${value(revision.resolvedCommitSha)}`);
       if (revision.archiveUrl) console.log(`${label("Archive:")} ${value(revision.archiveUrl)}`);
@@ -264,7 +268,11 @@ export function registerCodebaseCommands(program: Command): void {
         console.log(formatData([revision], revisionFields(), format));
         return;
       }
-      console.log(successText("Codebase archive uploaded:"));
+      if (revision.deduplicated) {
+        console.log(successText("Identical archive — reused existing revision, no new revision created:"));
+      } else {
+        console.log(successText("Codebase archive uploaded:"));
+      }
       console.log(`${label("Ref:")} ${value(revision.ref)}`);
       if (revision.contentSha256) console.log(`${label("Content SHA:")} ${value(revision.contentSha256)}`);
       if (revision.archiveUrl) console.log(`${label("Archive:")} ${value(revision.archiveUrl)}`);

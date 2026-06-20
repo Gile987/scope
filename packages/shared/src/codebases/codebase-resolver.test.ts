@@ -202,8 +202,10 @@ describe("CodebaseResolver", () => {
 
     expect(createRevision).toHaveBeenCalledTimes(1);
     expect(uploadArchive).toHaveBeenCalledTimes(1);
-    expect(second._id).toBe(first._id);
-    expect(second.revisionNumber).toBe(first.revisionNumber);
+    expect(first.deduplicated).toBe(false);
+    expect(second.deduplicated).toBe(true);
+    expect(second.revision._id).toBe(first.revision._id);
+    expect(second.revision.revisionNumber).toBe(first.revision.revisionNumber);
   });
 
   it("creates a new archive revision when content hashes differ", async () => {
@@ -227,8 +229,10 @@ describe("CodebaseResolver", () => {
 
     expect(createRevision).toHaveBeenCalledTimes(2);
     expect(uploadArchive).toHaveBeenCalledTimes(2);
-    expect(second._id).not.toBe(first._id);
-    expect(second.revisionNumber).toBe(first.revisionNumber + 1);
+    expect(first.deduplicated).toBe(false);
+    expect(second.deduplicated).toBe(false);
+    expect(second.revision._id).not.toBe(first.revision._id);
+    expect(second.revision.revisionNumber).toBe(first.revision.revisionNumber + 1);
   });
 
   it("deduplicates when resolving the same commit SHA twice", async () => {
@@ -258,8 +262,10 @@ describe("CodebaseResolver", () => {
     // Second resolution reuses the existing revision: no new revision, no re-upload.
     expect(createRevision).toHaveBeenCalledTimes(1);
     expect(uploadArchive).toHaveBeenCalledTimes(1);
-    expect(second._id).toBe(first._id);
-    expect(second.revisionNumber).toBe(first.revisionNumber);
+    expect(first.deduplicated).toBe(false);
+    expect(second.deduplicated).toBe(true);
+    expect(second.revision._id).toBe(first.revision._id);
+    expect(second.revision.revisionNumber).toBe(first.revision.revisionNumber);
   });
 
   it("creates a new revision when the resolved commit SHA changes", async () => {
@@ -287,7 +293,9 @@ describe("CodebaseResolver", () => {
 
     expect(createRevision).toHaveBeenCalledTimes(2);
     expect(uploadArchive).toHaveBeenCalledTimes(2);
-    expect(second._id).not.toBe(first._id);
-    expect(second.revisionNumber).toBe(first.revisionNumber + 1);
+    expect(first.deduplicated).toBe(false);
+    expect(second.deduplicated).toBe(false);
+    expect(second.revision._id).not.toBe(first.revision._id);
+    expect(second.revision.revisionNumber).toBe(first.revision.revisionNumber + 1);
   });
 });

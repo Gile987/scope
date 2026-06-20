@@ -73,7 +73,11 @@ export function CodebaseDetail() {
     onSuccess: (revision) => {
       queryClient.invalidateQueries({ queryKey: ["codebase", id] });
       queryClient.invalidateQueries({ queryKey: ["codebase-revisions", id] });
-      toast.success(`Resolved ${revision.ref}`);
+      if (revision.deduplicated) {
+        toast.info(`No changes — reused existing revision ${revision.ref}`);
+      } else {
+        toast.success(`Resolved ${revision.ref}`);
+      }
       setRefDialogOpen(false);
       setRequestedRef("");
       navigate(`/codebases/${id}`);
@@ -86,7 +90,11 @@ export function CodebaseDetail() {
     onSuccess: (revision) => {
       queryClient.invalidateQueries({ queryKey: ["codebase", id] });
       queryClient.invalidateQueries({ queryKey: ["codebase-revisions", id] });
-      toast.success(`Uploaded ${revision.ref}`);
+      if (revision.deduplicated) {
+        toast.info(`Identical archive — reused existing revision ${revision.ref}, no new revision created`);
+      } else {
+        toast.success(`Uploaded ${revision.ref}`);
+      }
       if (fileInputRef.current) fileInputRef.current.value = "";
       navigate(`/codebases/${id}`);
     },

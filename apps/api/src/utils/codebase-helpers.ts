@@ -118,7 +118,7 @@ export async function resolveCodebaseSpec(
 
   if (codebase.sourceType === "git") {
     try {
-      const revision = await ctx.codebaseResolver.resolveGit(
+      const { revision } = await ctx.codebaseResolver.resolveGit(
         codebase,
         codebase.defaultBranch,
         ctx.codebaseRevisionStore,
