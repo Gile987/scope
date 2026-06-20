@@ -454,6 +454,12 @@ are present, the system prompt injects a generic guidance block
 (`TOOL_OUTPUTS_GUIDANCE` in `judge-strategies.ts`, shared by both the bundled and
 independent strategies).
 
+The judge's opening framing is also gate-agnostic — it presents the judge as
+"evaluating the tool calls, logs and generated code produced by a coding agent"
+(against one specific criterion, in the independent strategy). The prompt no
+longer announces which gate is being evaluated; gate scoping is handled entirely
+by *which* criteria are passed in, so the wording stays identical across gates.
+
 > **Gate-judge contract (issue #1125).** The guidance is deliberately generic —
 > it is not specific to the build, test, or any single gate. It tells the judge:
 > it **cannot run any commands itself**; it must decide from the **actual

@@ -558,15 +558,12 @@ export class BundledStrategy extends JudgeStrategy {
       ? `\n## Persona\n${personaInstructions}\n`
       : "";
 
-    const gateLine =
-      gate && gate !== "select" ? `\nYou are evaluating the **${gate}** gate.\n` : "";
-
     const toolOutputsSection = hasToolOutputs
       ? `\n## Tool outputs\n${TOOL_OUTPUTS_GUIDANCE}\n`
       : "";
 
-    return `You are an expert code reviewer evaluating whether generated code meets requirements.
-${personaSection}${gateLine}
+    return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent.
+${personaSection}
 ## Your Task
 Inspect the workspace using the provided tools (read_file, list_directory, search_files, file_exists) and evaluate whether the code meets each criterion.
 ${toolOutputsSection}
@@ -826,16 +823,13 @@ export class IndependentStrategy extends JudgeStrategy {
       ? `\n## Persona\n${personaInstructions}\n`
       : "";
 
-    const gateLine =
-      gate && gate !== "select" ? `\nYou are evaluating the **${gate}** gate.\n` : "";
-
     const toolOutputsSection =
       toolCalls && toolCalls.length > 0
         ? `\n## Tool outputs\n${TOOL_OUTPUTS_GUIDANCE}\n`
         : "";
 
-    const systemPrompt = `You are an expert code reviewer evaluating ONE specific criterion.
-${personaSection}${gateLine}
+    const systemPrompt = `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent against ONE specific criterion.
+${personaSection}
 ## Your Task
 Inspect the workspace using the provided tools and evaluate ONLY this criterion:
 
