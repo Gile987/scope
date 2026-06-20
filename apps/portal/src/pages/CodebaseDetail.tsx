@@ -169,7 +169,7 @@ export function CodebaseDetail() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {revisions.map((revision) => <RevisionRow key={revision._id} revision={revision} latest={revision._id === latestRevision?._id} />)}
+                    {revisions.map((revision) => <RevisionRow key={revision._id} codebaseId={id!} revision={revision} latest={revision._id === latestRevision?._id} />)}
                   </tbody>
                 </table>
               </div>
@@ -221,10 +221,14 @@ export function CodebaseDetail() {
   );
 }
 
-function RevisionRow({ revision, latest }: { revision: CodebaseRevisionDocument; latest: boolean }) {
+function RevisionRow({ codebaseId, revision, latest }: { codebaseId: string; revision: CodebaseRevisionDocument; latest: boolean }) {
+  const navigate = useNavigate();
   return (
-    <tr className={cn(latest && "bg-primary/5")}>
-      <td className="px-3 py-2"><span className="font-mono text-xs">{revision.ref}</span>{latest && <Badge variant="secondary" className="ml-2 text-[10px]">latest</Badge>}</td>
+    <tr
+      className={cn("cursor-pointer hover:bg-muted/50", latest && "bg-primary/5")}
+      onClick={() => navigate(`/codebases/${codebaseId}/revisions/${revision._id}`)}
+    >
+      <td className="px-3 py-2"><span className="font-mono text-xs text-primary hover:underline">{revision.ref}</span>{latest && <Badge variant="secondary" className="ml-2 text-[10px]">latest</Badge>}</td>
       <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{revision.requestedRef ?? revision.ref}</td>
       <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{shortSha(revision.resolvedCommitSha) ?? shortSha(revision.contentSha256) ?? "—"}</td>
       <td className="px-3 py-2 text-right text-xs text-muted-foreground">{revision.fileCount?.toLocaleString() ?? "—"}</td>

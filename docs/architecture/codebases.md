@@ -191,6 +191,16 @@ Run submission accepts either an already-resolved `codebaseRevisionId` or a `cod
 
 The resolved `_id` is persisted as `RequestDocument.codebaseRevisionId` and included in `CreateRequestInputSchema` / `RequestResponseSchema`.
 
+### Run archive bundling
+
+When a run is downloaded (`GET /api/v1/requests/:id/archive` or the per-attempt variant), the seeding codebase is included so the archive is a self-contained record of the exact starting point the agent worked from:
+
+- The revision document is fetched via `codebaseRevisionStore` and embedded in `run.yaml` under a `codebase:` block (ref, source, `resolvedCommitSha`, file count, size, and provenance).
+- The revision's normalized snapshot is bundled as `{runId}/codebase.tar.gz`.
+- In `run.yaml`, the `codebase.archiveUrl` is rewritten to the relative bundled path (`codebase.tar.gz`), mirroring how HAR/chat URLs are rewritten; the original blob URL is preserved under `codebase.archiveBlobUrl`.
+
+This is implemented in `packRunIntoTar()` (`apps/api/src/archive-har.ts`); `apps/api/src/routes/requests/archive.ts` attaches the revision before packing.
+
 ## Migration and Indexes
 
 Migration `020-create-codebase-indexes.ts` creates the indexes used by codebase lookup and revision listing:
@@ -208,7 +218,7 @@ The migration's `down()` intentionally skips dropping indexes; indexes should be
 
 ## CLI and Portal
 
-The CLI exposes `codebase` commands for managing codebases and revisions. The Portal provides `CodebaseList`, `CodebaseDetail`, and `CodebasePicker` UX for browsing codebases, resolving/uploading revisions, and selecting a codebase for run submission. These management surfaces mirror the skills workflow at a high level: register an entity, create immutable revisions, and attach a resolved revision to a run.
+The CLI exposes `codebase` commands for managing codebases and revisions. The Portal provides `CodebaseList`, `CodebaseDetail`, `CodebaseRevisionDetail`, and `CodebasePicker` UX for browsing codebases, resolving/uploading revisions, inspecting a specific revision, and selecting a codebase for run submission. Revision rows in `CodebaseDetail` link to `/codebases/:id/revisions/:revisionId`, which shows full provenance and a snapshot archive download (via the `/codebase-revisions/:id/archive` proxy). These management surfaces mirror the skills workflow at a high level: register an entity, create immutable revisions, and attach a resolved revision to a run.
 
 ## Key Files
 
@@ -223,6 +233,8 @@ The CLI exposes `codebase` commands for managing codebases and revisions. The Po
 | `packages/shared/src/codebases/codebase-client.ts` | Worker-side API client for revision resolution and archive download |
 | `packages/shared/src/codebases/codebase-seeder.ts` | Worker workspace seeding |
 | `apps/api/src/routes/codebases.ts` | REST endpoints for codebases, revisions, uploads, and archive proxying |
+| `apps/api/src/archive-har.ts` | Run archive packing, including `codebase.tar.gz` bundling and `run.yaml` codebase block |
+| `apps/portal/src/pages/CodebaseRevisionDetail.tsx` | Portal page for a single revision's provenance and snapshot download |
 | `apps/api/src/utils/codebase-helpers.ts` | Blob container naming and submit-time codebase spec resolution |
 | `apps/api/src/routes/requests/index.ts` | Run submission integration and `codebase` spec handling |
 | `packages/shared/src/queue/queue-processor.ts` | Worker seeding hook before skills extraction |
