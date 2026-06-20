@@ -449,10 +449,11 @@ alongside `createFileTools`):
   (`writeToolCalls` / `toolCallsUrl`), downloaded next to the snapshot.
 
 The judge agent's available tools therefore become workspace-scoped
-(`read_file`, `list_directory`) **plus** `read_tool_outputs`. When tool outputs
-are present, the system prompt injects a generic guidance block
-(`TOOL_OUTPUTS_GUIDANCE` in `judge-strategies.ts`, shared by both the bundled and
-independent strategies).
+(`read_file`, `list_directory`, `search_files`, `file_exists`) **plus**
+`read_tool_outputs` / `get_tool_output`. When tool outputs are present, the
+system prompt injects a generic guidance block (`TOOL_OUTPUTS_GUIDANCE` in
+`judge-strategies.ts`, shared by both the bundled and independent strategies),
+which renders as two sections: **`## Your Tools`** and **`## How to Judge`**.
 
 The judge's opening framing is also gate-agnostic — it presents the judge as
 "evaluating the tool calls, logs and generated code produced by a coding agent"
@@ -460,22 +461,37 @@ The judge's opening framing is also gate-agnostic — it presents the judge as
 longer announces which gate is being evaluated; gate scoping is handled entirely
 by *which* criteria are passed in, so the wording stays identical across gates.
 
+The system prompt is organized into balanced, single-purpose sections:
+
+- **`## What to Evaluate`** — names the subject under review as the coding
+  agent's work: *its generated code together with the captured outputs of the
+  tools it ran*, against the criterion/criteria. It does not list tools, so it no
+  longer back-couples to the tooling section.
+- **`## Your Tools`** — names the judge's own read-only tools once (`read_file`,
+  `list_directory`, `search_files`, `file_exists`, plus `read_tool_outputs` /
+  `get_tool_output`) and states the hard limit: the judge cannot run any commands
+  or coding-agent tools. This keeps the judge's tools unambiguous from the
+  *coding agent's* tools/commands (whose output the judge only reads).
+- **`## How to Judge`** — the evidence philosophy (below).
+
 > **Gate-judge contract (issue #1125).** The guidance is deliberately generic —
-> it is not specific to the build, test, or any single gate. It tells the judge:
-> it **cannot run any commands itself**; it must decide from the **actual
-> evidence** — the state of the codebase **and** the captured tool outputs
-> (`read_tool_outputs` / `get_tool_output`), cross-checked against each other.
-> When a criterion concerns something the agent did or ran, the captured output
-> and its exit status are the **authoritative** record of what happened, so the
-> judge must rely on them rather than guessing from files alone or asking the
-> agent to **redo or separately re-prove** work the captured evidence already
-> shows (e.g. it must not demand on-disk proof files like `build.log` when the
-> command's captured output already shows it succeeded). **If a criterion's own
-> wording tells the judge to run/execute/re-run a command, the judge must ignore
-> that instruction** — it has no command-running ability — and instead verify the
-> outcome from the captured outputs and codebase. This prevents the
-> failure mode where the judge withheld a passing verdict for several iterations
-> despite an exit-code-0 build being present in the captured outputs.
+> it is not specific to the build, test, or any single gate. It frames the
+> **codebase** and the agent's **captured tool outputs** as two complementary,
+> **equally authoritative** sources of evidence that must both be examined —
+> neither is prioritized over the other, and they are not mutually exclusive. The
+> files show the resulting state of the code; the captured outputs (logs,
+> results, exit status) show what actually happened when the agent ran a command,
+> which the files alone may not reveal. When a criterion concerns something the
+> agent did or ran, the judge takes the captured output and exit status as the
+> **record of what happened**, rather than asking the agent to **redo or
+> re-prove** work the evidence already shows (e.g. it must not demand on-disk
+> proof files like `build.log` when the command's captured output already shows
+> it succeeded). **If a criterion's own wording tells the judge to
+> run/execute/re-run a command, the judge must ignore that instruction** — it has
+> no command-running ability — and judge the outcome from the captured outputs
+> together with the codebase. This prevents the failure mode where the judge
+> withheld a passing verdict for several iterations despite an exit-code-0 build
+> being present in the captured outputs.
 
 > **Tool isolation (scope #1117).** The judge session is restricted to its own
 > custom tools only — `createSession` is called with `availableTools: ["custom:*"]`

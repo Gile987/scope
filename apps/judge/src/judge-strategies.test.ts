@@ -224,28 +224,43 @@ describe("judge tool-outputs guidance (issue #1125)", () => {
     expect(TOOL_OUTPUTS_GUIDANCE.toLowerCase()).toContain("cannot run any commands");
   });
 
-  it("directs the judge to the codebase and captured outputs", () => {
+  it("names the judge's own read-only tools and disambiguates them from the agent's", () => {
+    expect(TOOL_OUTPUTS_GUIDANCE).toContain("## Your Tools");
+    expect(TOOL_OUTPUTS_GUIDANCE).toContain("read_file");
     expect(TOOL_OUTPUTS_GUIDANCE).toContain("read_tool_outputs");
     expect(TOOL_OUTPUTS_GUIDANCE).toContain("get_tool_output");
     expect(TOOL_OUTPUTS_GUIDANCE.toLowerCase()).toContain("codebase");
   });
 
-  it("treats captured output as authoritative and forbids redundant re-proving", () => {
+  it("frames the codebase and captured outputs as equally authoritative and to be examined together", () => {
+    expect(TOOL_OUTPUTS_GUIDANCE).toContain("## How to Judge");
     const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
-    expect(g).toContain("authoritative");
-    expect(g).toMatch(/redo|re-prove/);
+    expect(g).toContain("equally authoritative");
+    expect(g).toContain("examine both");
+  });
+
+  it("treats captured output as the record of what happened and forbids redundant re-proving", () => {
+    const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
+    expect(g).toContain("record of what happened");
+    expect(g).toMatch(/redo or re-prove/);
   });
 
   it("overrides criteria wording that asks the judge to run commands", () => {
     const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
     expect(g).toContain("criterion");
     expect(g).toMatch(/run, execute, or re-run/);
-    expect(g).toContain("do not attempt");
+    expect(g).toContain("ignore that instruction");
   });
 
   it("includes the guidance in the system prompt when tool outputs are present", () => {
     const prompt = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(true);
     expect(prompt).toContain(TOOL_OUTPUTS_GUIDANCE);
+  });
+
+  it("frames What to Evaluate around both the generated code and the captured tool outputs", () => {
+    const prompt = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(true);
+    expect(prompt).toContain("## What to Evaluate");
+    expect(prompt).toMatch(/generated code together with the captured outputs of the tools it ran/);
   });
 
   it("omits the guidance when no tool outputs were captured", () => {

@@ -42,16 +42,23 @@ const DEFAULT_JUDGE_TIMEOUT = 480_000;
 const DEFAULT_JUDGE_RETRIES = 3;
 
 /**
- * Guidance injected into the judge system prompt when the coding agent's tool
- * calls/outputs were captured for this iteration.
+ * The `## Your Tools` + `## How to Judge` guidance injected into the judge
+ * system prompt when the coding agent's tool calls/outputs were captured for
+ * this iteration.
  *
  * The judge runs headless and cannot run any commands itself — it can only
  * inspect the workspace and read what the coding agent already did. This text
- * makes the judge base its decision on actual evidence (the codebase plus the
- * captured tool outputs) instead of guessing or demanding the agent re-prove
- * work it has already done. It is intentionally generic across all criteria.
+ * keeps the judge's own read-only tools unambiguous from the coding agent's
+ * tools/commands, and frames the codebase and captured tool outputs as two
+ * complementary, equally authoritative sources of evidence so the judge bases
+ * its decision on actual evidence instead of demanding the agent re-prove work
+ * it has already done. It is intentionally generic across all criteria.
  */
-export const TOOL_OUTPUTS_GUIDANCE = `The coding agent's tool calls from this iteration were captured for you. You cannot run any commands yourself — base your judgement on the actual evidence: the state of the codebase and these captured outputs. Use read_tool_outputs to list the calls and get_tool_output(index) to read full output, then cross-check against the files in the workspace. When a criterion concerns something the agent did or ran, the captured output and its exit status are the authoritative record of what happened — rely on them rather than guessing from the files alone or asking the agent to redo or separately re-prove work that the captured evidence already shows. If a criterion's wording asks you to run, execute, or re-run a command, do NOT attempt to do so — you have no command-running ability; instead verify that outcome from the captured tool outputs and the codebase.`;
+export const TOOL_OUTPUTS_GUIDANCE = `## Your Tools
+You have read-only tools to gather evidence: read_file, list_directory, search_files and file_exists to inspect the workspace, and read_tool_outputs / get_tool_output to review the tool calls the coding agent ran while doing the task. You yourself cannot run any commands or coding-agent tools — you can only read what the agent already did.
+
+## How to Judge
+The codebase and the agent's captured tool outputs are two complementary, equally authoritative sources of evidence — examine both. The files show the resulting state of the code; the captured outputs (logs, results, exit status) show what actually happened when the agent ran a command, which the files alone may not reveal. When a criterion concerns something the agent did or ran, take the agent's captured output and exit status as the record of what happened, rather than asking the agent to redo or re-prove work the evidence already shows. If a criterion's wording tells you to run, execute, or re-run a command, ignore that instruction and judge the outcome from the captured outputs together with the codebase.`;
 
 /**
  * Tool filter applied to every judge session.
@@ -559,20 +566,20 @@ export class BundledStrategy extends JudgeStrategy {
       : "";
 
     const toolOutputsSection = hasToolOutputs
-      ? `\n## Tool outputs\n${TOOL_OUTPUTS_GUIDANCE}\n`
+      ? `\n${TOOL_OUTPUTS_GUIDANCE}\n`
       : "";
 
     return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent.
 ${personaSection}
-## Your Task
-Inspect the workspace using the provided tools (read_file, list_directory, search_files, file_exists) and evaluate whether the code meets each criterion.
+## What to Evaluate
+Evaluate whether the coding agent's work — its generated code together with the captured outputs of the tools it ran — meets each criterion in the Criteria section below.
 ${toolOutputsSection}
 ## Criteria
 ${criteriaList}
 ${historySection}
 
 ## Instructions
-1. Use the tools to thoroughly inspect the workspace.
+1. Gather evidence from both the workspace and the coding agent's captured tool outputs.
 2. Evaluate EACH criterion individually.
 3. For each criterion, provide specific feedback about what you found.
 4. Be constructive and actionable in your feedback.
@@ -825,20 +832,20 @@ export class IndependentStrategy extends JudgeStrategy {
 
     const toolOutputsSection =
       toolCalls && toolCalls.length > 0
-        ? `\n## Tool outputs\n${TOOL_OUTPUTS_GUIDANCE}\n`
+        ? `\n${TOOL_OUTPUTS_GUIDANCE}\n`
         : "";
 
     const systemPrompt = `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent against ONE specific criterion.
 ${personaSection}
-## Your Task
-Inspect the workspace using the provided tools and evaluate ONLY this criterion:
+## What to Evaluate
+Evaluate the coding agent's work — its generated code together with the captured outputs of the tools it ran — against ONLY this criterion:
 
 **Criterion**: ${criterion.prompt}
 ${toolOutputsSection}
 ${historySection}
 
 ## Instructions
-1. Use the file tools to thoroughly inspect the workspace.
+1. Gather evidence from both the workspace and the coding agent's captured tool outputs.
 2. Determine if this specific criterion is met (PASS) or not met (FAIL).
 3. Provide specific feedback about what you found.
 
