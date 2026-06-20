@@ -4,17 +4,18 @@
 /**
  * Codebase Resolver — captures immutable snapshots of a codebase.
  *
- * Two entry points, both producing a new incremental revision:
+ * Two entry points, each producing a new incremental revision unless it
+ * deduplicates against the latest revision:
  * - `resolveGit`: resolve a GitHub ref (branch/tag/sha or "latest") to a commit,
  *   download that tree as a tarball, normalize it, and store a revision.
  * - `createArchiveRevision`: accept an uploaded archive, normalize it, and store
  *   a revision.
  *
  * Mirrors the SkillResolver's GitHub auth model (static token or round-robin
- * token provider). Archive uploads are purely incremental — every upload always
- * creates a brand-new revision. Git resolutions are deduped: if the latest
- * revision already points at the resolved commit sha, that revision is reused
- * instead of creating a redundant one.
+ * token provider). Revisions are deduped against the codebase's latest revision:
+ * a Git resolution whose commit SHA is unchanged, or an archive upload whose
+ * content hash matches, reuses the existing revision instead of creating a
+ * redundant one. Any change produces a new incremental revision.
  */
 
 import { randomUUID, createHash } from "crypto";
@@ -149,6 +150,14 @@ export class CodebaseResolver {
     uploadArchive: UploadArchiveFn
   ): Promise<CodebaseRevisionDocument> {
     const contentSha256 = createHash("sha256").update(upload.buffer).digest("hex");
+
+    // Dedup: if the latest revision already has this exact content hash, reuse
+    // it instead of creating a redundant revision (and re-uploading the bytes).
+    const latest = await store.getLatest(codebase._id);
+    if (latest && latest.sourceType === "archive" && latest.contentSha256 === contentSha256) {
+      return latest;
+    }
+
     const normalized = await normalizeToRootTarGz(upload.buffer);
 
     const revisionId = randomUUID();

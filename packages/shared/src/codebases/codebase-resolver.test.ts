@@ -190,6 +190,47 @@ describe("CodebaseResolver", () => {
     expect(input.sizeBytes).toBeGreaterThan(0);
   });
 
+  it("deduplicates archive uploads with identical content hashes", async () => {
+    const archive = await makeTarGz({ "README.md": "same-bytes" });
+    const { createRevision, store } = makeStoreSpy();
+    const uploadArchive = vi.fn(async (blobName: string) => `https://blob.test/${blobName}`);
+    const resolver = new CodebaseResolver();
+    const codebase = makeCodebase({ sourceType: "archive", source: undefined });
+
+    const first = await resolver.createArchiveRevision(codebase, { buffer: archive }, store, uploadArchive);
+    const second = await resolver.createArchiveRevision(codebase, { buffer: archive }, store, uploadArchive);
+
+    expect(createRevision).toHaveBeenCalledTimes(1);
+    expect(uploadArchive).toHaveBeenCalledTimes(1);
+    expect(second._id).toBe(first._id);
+    expect(second.revisionNumber).toBe(first.revisionNumber);
+  });
+
+  it("creates a new archive revision when content hashes differ", async () => {
+    const { createRevision, store } = makeStoreSpy();
+    const uploadArchive = vi.fn(async (blobName: string) => `https://blob.test/${blobName}`);
+    const resolver = new CodebaseResolver();
+    const codebase = makeCodebase({ sourceType: "archive", source: undefined });
+
+    const first = await resolver.createArchiveRevision(
+      codebase,
+      { buffer: await makeTarGz({ "README.md": "one" }) },
+      store,
+      uploadArchive
+    );
+    const second = await resolver.createArchiveRevision(
+      codebase,
+      { buffer: await makeTarGz({ "README.md": "two" }) },
+      store,
+      uploadArchive
+    );
+
+    expect(createRevision).toHaveBeenCalledTimes(2);
+    expect(uploadArchive).toHaveBeenCalledTimes(2);
+    expect(second._id).not.toBe(first._id);
+    expect(second.revisionNumber).toBe(first.revisionNumber + 1);
+  });
+
   it("deduplicates when resolving the same commit SHA twice", async () => {
     const tarball = await makeTarGz({ "README.md": "same" }, { wrapperDir: "repo-abc123" });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

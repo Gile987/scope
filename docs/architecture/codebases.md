@@ -2,7 +2,7 @@
 
 > **Status:** Current as of June 2026.
 
-Codebases are first-class source snapshots that let benchmark runs start from a real project tree instead of an empty workspace. They support GitHub repositories and user-uploaded archives, and both source types share the same immutable, sequentially numbered revision model (archive uploads are always incremental; Git resolutions reuse the latest revision when the resolved commit SHA is unchanged).
+Codebases are first-class source snapshots that let benchmark runs start from a real project tree instead of an empty workspace. They support GitHub repositories and user-uploaded archives, and both source types share the same immutable, sequentially numbered revision model. Revisions are deduped against the codebase's latest revision: a Git resolution whose commit SHA is unchanged, or an archive upload whose content hash matches, reuses the existing revision.
 
 ## Overview
 
@@ -47,7 +47,7 @@ flowchart TB
     Skills --> Agent
 ```
 
-Codebase revisions are **not content-addressed**. Every archive upload creates a new revision with the next sequential `revisionNumber`; identical archive bytes still produce a new immutable revision. Git resolution is the one exception: if the resolved commit SHA matches the codebase's latest revision, that revision is reused instead of creating a redundant one — otherwise a new incremental revision is created. Existing revisions are never mutated.
+Codebase revisions are **not content-addressed**, but uploads/resolutions that produce no change are deduped against the codebase's latest revision. A Git resolution whose resolved commit SHA matches the latest revision, or an archive upload whose `contentSha256` matches the latest revision, reuses that revision instead of creating a redundant one. Any actual change creates a new revision with the next sequential `revisionNumber`. Existing revisions are never mutated.
 
 ## Data Model
 
@@ -84,7 +84,7 @@ erDiagram
 
 Revision numbers are assigned by atomically `$inc`-ing `codebases.revisionCounter` in `CodebaseStore.allocateRevisionNumber()`. The store then builds the uniform `ref` as `{slug}@r{revisionNumber}` for both Git and archive revisions and advances `latestRevisionId`.
 
-`resolvedCommitSha` (Git) and `contentSha256` (archive) are provenance only — they are not part of the revision `_id` and not part of the `ref`. `contentSha256` never deduplicates archive uploads. `resolvedCommitSha` is compared against the latest revision during Git resolution so an unchanged HEAD reuses the existing revision, but it is not otherwise an identity key.
+`resolvedCommitSha` (Git) and `contentSha256` (archive) are provenance only — they are not part of the revision `_id` and not part of the `ref`. Each is compared against the latest revision during resolution/upload so an unchanged commit or identical archive reuses the existing revision, but neither is otherwise an identity key.
 
 ## Revision Addressing
 
@@ -112,7 +112,7 @@ Git revisions are resolved by `CodebaseResolver.resolveGit()`. The resolver mirr
 
 For `requestedRef` values that are empty or `"latest"`, the resolver uses the codebase's `defaultBranch` or fetches the repository default branch through the GitHub API. It resolves the ref to an exact commit, then compares that commit SHA with the codebase's latest revision: if they match, the existing revision is returned unchanged (no tarball download, no upload, no new revision). Otherwise it downloads the GitHub tarball at that commit, normalizes it, uploads the archive, and creates a new incremental revision.
 
-Archive revisions are created by `CodebaseResolver.createArchiveRevision()`. The resolver hashes the uploaded bytes into `contentSha256` for provenance, normalizes the archive, uploads the normalized tar.gz, and creates a new incremental revision.
+Archive revisions are created by `CodebaseResolver.createArchiveRevision()`. The resolver hashes the uploaded bytes into `contentSha256` for provenance, then compares it with the codebase's latest revision: if they match, the existing revision is returned unchanged (no normalization, no upload, no new revision). Otherwise it normalizes the archive, uploads the normalized tar.gz, and creates a new incremental revision.
 
 ### 3. Archiving
 
