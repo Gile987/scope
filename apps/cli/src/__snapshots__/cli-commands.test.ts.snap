@@ -77,6 +77,53 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       },
     },
   },
+  "codebase": {
+    "subcommands": {
+      "create": {
+        "options": [
+          "--archive",
+          "--default-branch",
+          "--description",
+          "--name",
+          "--output",
+          "--source",
+          "--source-type",
+          "--url",
+        ],
+      },
+      "delete": {
+        "options": [
+          "--url",
+        ],
+      },
+      "list": {
+        "options": [
+          "--output",
+          "--url",
+        ],
+      },
+      "resolve": {
+        "options": [
+          "--output",
+          "--ref",
+          "--url",
+        ],
+      },
+      "revisions": {
+        "options": [
+          "--limit",
+          "--output",
+          "--url",
+        ],
+      },
+      "upload": {
+        "options": [
+          "--output",
+          "--url",
+        ],
+      },
+    },
+  },
   "criteria": {
     "subcommands": {
       "create": {
@@ -598,6 +645,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         "options": [
           "--agent-version",
           "--base-profile",
+          "--codebase",
           "--criteria",
           "--extensions",
           "--gates",
