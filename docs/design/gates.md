@@ -449,9 +449,71 @@ alongside `createFileTools`):
   (`writeToolCalls` / `toolCallsUrl`), downloaded next to the snapshot.
 
 The judge agent's available tools therefore become workspace-scoped
-(`read_file`, `list_directory`) **plus** `read_tool_outputs`. The system prompt
-for non-Select gates instructs the judge to consult tool outputs (e.g. "to
-decide whether the build succeeded, inspect the build command's output").
+(`read_file`, `list_directory`, `search_files`, `file_exists`) **plus**
+`read_tool_outputs` / `get_tool_output`. When tool outputs are present, the
+system prompt injects a generic guidance block (`TOOL_OUTPUTS_GUIDANCE` in
+`judge-strategies.ts`, shared by both the bundled and independent strategies),
+which renders as two sections: **`## Your Tools`** and **`## How to Judge`**.
+
+The judge's opening framing is also gate-agnostic — it presents the judge as
+"evaluating the tool calls, logs and generated code produced by a coding agent"
+(against one specific criterion, in the independent strategy). The prompt no
+longer announces which gate is being evaluated; gate scoping is handled entirely
+by *which* criteria are passed in, so the wording stays identical across gates.
+
+The system prompt is organized into balanced, single-purpose sections:
+
+- **`## What to Evaluate`** — names the subject under review as the coding
+  agent's work: *its generated code together with the captured outputs of the
+  tools it ran*, and points at the criterion/criteria **provided in the user
+  message** (see the system/user split below). It does not list tools or inline
+  the criteria, so it stays invariant and does not back-couple to the tooling
+  section.
+- **`## Your Tools`** — names the judge's own read-only tools once (`read_file`,
+  `list_directory`, `search_files`, `file_exists`, plus `read_tool_outputs` /
+  `get_tool_output`) and states the hard limit: the judge cannot run any commands
+  or coding-agent tools. This keeps the judge's tools unambiguous from the
+  *coding agent's* tools/commands (whose output the judge only reads).
+- **`## How to Judge`** — the evidence philosophy (below).
+
+> **System / user prompt split.** The judge SDK session receives two distinct
+> messages, and the division of content matters:
+>
+> - The **system prompt** carries only the invariant *method/role*: the opening
+>   framing, `## Persona` (when set), `## Your Tools` + `## How to Judge` (when
+>   tool outputs were captured), `## Instructions`, and `## Output Format`. It is
+>   identical for every criterion and iteration in a run.
+> - The **user prompt** carries the per-request *data*: the criterion (independent
+>   strategy: `Evaluate criterion "<id>": <prompt>`) or the `## Criteria` list
+>   (bundled strategy), followed by the `## Previous Iterations` context when this
+>   is not the first iteration.
+>
+> Both strategies build these via `buildSystemPrompt(persona, hasToolOutputs)` and
+> `buildUserPrompt(criteria, history)` in `judge-strategies.ts`. Keeping the
+> criterion in the user message (not the system prompt) gives a clean trust
+> boundary: the system prompt is the sole authority — including the override
+> clause below — while the criterion is *data being evaluated* rather than an
+> instruction that competes with the judge's rules. It also keeps the system
+> prompt stable across criteria/iterations.
+
+> **Gate-judge contract (issue #1125).** The guidance is deliberately generic —
+> it is not specific to the build, test, or any single gate. It frames the
+> **codebase** and the agent's **captured tool outputs** as two complementary,
+> **equally authoritative** sources of evidence that must both be examined —
+> neither is prioritized over the other, and they are not mutually exclusive. The
+> files show the resulting state of the code; the captured outputs (logs,
+> results, exit status) show what actually happened when the agent ran a command,
+> which the files alone may not reveal. When a criterion concerns something the
+> agent did or ran, the judge takes the captured output and exit status as the
+> **record of what happened**, rather than asking the agent to **redo or
+> re-prove** work the evidence already shows (e.g. it must not demand on-disk
+> proof files like `build.log` when the command's captured output already shows
+> it succeeded). **If a criterion's own wording tells the judge to
+> run/execute/re-run a command, the judge must ignore that instruction** — it has
+> no command-running ability — and judge the outcome from the captured outputs
+> together with the codebase. This prevents the failure mode where the judge
+> withheld a passing verdict for several iterations despite an exit-code-0 build
+> being present in the captured outputs.
 
 > **Tool isolation (scope #1117).** The judge session is restricted to its own
 > custom tools only — `createSession` is called with `availableTools: ["custom:*"]`
@@ -465,6 +527,22 @@ decide whether the build succeeded, inspect the build command's output").
 > (a bogus, non-deterministic "permission denied" failure even when the coder's
 > command actually succeeded). Locking the session to `custom:*` removes that
 > escape hatch and forces the judge to evaluate from `read_tool_outputs`.
+
+> **All judge tools must be `skipPermission` (scope #1125).** The same headless
+> permission rule that applies to the built-ins above applies to the judge's *own*
+> custom tools: under the v3 runtime, any tool the model calls that is not marked
+> `skipPermission: true` is denied non-interactively with "Permission denied and
+> could not request permission from user". The file-inspection tools
+> (`read_file`, `list_directory`, `search_files`, `file_exists`) set this flag,
+> but `read_tool_outputs` / `get_tool_output` originally did not — so every judge
+> attempt to read the coder's captured build/test output was silently denied. The
+> judge then fell back to demanding on-disk proof (a `dist/` directory, a
+> `build-output.log`, a README), which forced the coding agent to *fabricate*
+> build-evidence files and made the build/test gates loop for many iterations.
+> Both tool-output tools are now `skipPermission: true`, so the judge can read the
+> captured command output (and trust an exit-code-0 build) on the first iteration.
+> A regression test in `judge-strategies.test.ts` asserts every tool returned by
+> `createToolOutputTools` skips the permission prompt.
 
 ```mermaid
 flowchart LR
