@@ -80,21 +80,29 @@ function makeCodebase(overrides: Partial<CodebaseDocument> = {}): CodebaseDocume
 
 function makeStoreSpy() {
   let revisionNumber = 0;
+  const revisions: CodebaseRevisionDocument[] = [];
   const createRevision = vi.fn(
     async (input: CreateCodebaseRevisionInput, opts?: { id?: string }): Promise<CodebaseRevisionDocument> => {
       revisionNumber += 1;
-      return {
+      const doc: CodebaseRevisionDocument = {
         ...input,
         _id: opts?.id ?? randomUUID(),
         revisionNumber,
         ref: buildCodebaseRevisionRef(input.slug, revisionNumber),
         createdAt: new Date(),
       };
+      revisions.push(doc);
+      return doc;
     }
   );
+  const getLatest = vi.fn(async (codebaseId: string): Promise<CodebaseRevisionDocument | null> => {
+    const matching = revisions.filter((r) => r.codebaseId === codebaseId);
+    return matching.length ? matching[matching.length - 1] : null;
+  });
   return {
     createRevision,
-    store: { createRevision } as unknown as CodebaseRevisionStore,
+    getLatest,
+    store: { createRevision, getLatest } as unknown as CodebaseRevisionStore,
   };
 }
 
@@ -182,7 +190,7 @@ describe("CodebaseResolver", () => {
     expect(input.sizeBytes).toBeGreaterThan(0);
   });
 
-  it("does not deduplicate when resolving the same commit SHA twice", async () => {
+  it("deduplicates when resolving the same commit SHA twice", async () => {
     const tarball = await makeTarGz({ "README.md": "same" }, { wrapperDir: "repo-abc123" });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -203,11 +211,42 @@ describe("CodebaseResolver", () => {
     const resolver = new CodebaseResolver({ githubApiUrl: "https://api.github.test" });
     const codebase = makeCodebase();
 
-    await resolver.resolveGit(codebase, "abc123", store, uploadArchive);
-    await resolver.resolveGit(codebase, "abc123", store, uploadArchive);
+    const first = await resolver.resolveGit(codebase, "abc123", store, uploadArchive);
+    const second = await resolver.resolveGit(codebase, "abc123", store, uploadArchive);
+
+    // Second resolution reuses the existing revision: no new revision, no re-upload.
+    expect(createRevision).toHaveBeenCalledTimes(1);
+    expect(uploadArchive).toHaveBeenCalledTimes(1);
+    expect(second._id).toBe(first._id);
+    expect(second.revisionNumber).toBe(first.revisionNumber);
+  });
+
+  it("creates a new revision when the resolved commit SHA changes", async () => {
+    const tarball = await makeTarGz({ "README.md": "v" }, { wrapperDir: "repo-x" });
+    let sha = "sha-one";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/commits/")) {
+        return jsonResponse(200, { sha, commit: { committer: { date: "2024-01-01T00:00:00Z" } } });
+      }
+      if (url.includes("/tarball/")) {
+        return arrayBufferResponse(tarball);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { createRevision, store } = makeStoreSpy();
+    const uploadArchive = vi.fn(async (blobName: string) => `https://blob.test/${blobName}`);
+    const resolver = new CodebaseResolver({ githubApiUrl: "https://api.github.test" });
+    const codebase = makeCodebase();
+
+    const first = await resolver.resolveGit(codebase, "main", store, uploadArchive);
+    sha = "sha-two";
+    const second = await resolver.resolveGit(codebase, "main", store, uploadArchive);
 
     expect(createRevision).toHaveBeenCalledTimes(2);
     expect(uploadArchive).toHaveBeenCalledTimes(2);
-    expect(createRevision.mock.results).toHaveLength(2);
+    expect(second._id).not.toBe(first._id);
+    expect(second.revisionNumber).toBe(first.revisionNumber + 1);
   });
 });

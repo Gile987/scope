@@ -11,8 +11,10 @@
  *   a revision.
  *
  * Mirrors the SkillResolver's GitHub auth model (static token or round-robin
- * token provider). Codebase revisions are purely incremental — every call
- * always creates a brand-new revision (no content-addressing/dedup).
+ * token provider). Archive uploads are purely incremental — every upload always
+ * creates a brand-new revision. Git resolutions are deduped: if the latest
+ * revision already points at the resolved commit sha, that revision is reused
+ * instead of creating a redundant one.
  */
 
 import { randomUUID, createHash } from "crypto";
@@ -97,6 +99,13 @@ export class CodebaseResolver {
     }
 
     const commit = await this.getCommit(source, effectiveRef);
+
+    // Dedup: if the latest revision already points at this exact commit, reuse
+    // it instead of creating a redundant revision (and re-downloading the tree).
+    const latest = await store.getLatest(codebase._id);
+    if (latest && latest.sourceType === "git" && latest.resolvedCommitSha === commit.sha) {
+      return latest;
+    }
 
     // Download the repo tarball at the resolved commit and normalize it.
     const tarball = await this.downloadTarball(source, commit.sha);

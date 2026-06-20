@@ -2,7 +2,7 @@
 
 > **Status:** Current as of June 2026.
 
-Codebases are first-class source snapshots that let benchmark runs start from a real project tree instead of an empty workspace. They support GitHub repositories and user-uploaded archives, and both source types share the same immutable, purely incremental revision model.
+Codebases are first-class source snapshots that let benchmark runs start from a real project tree instead of an empty workspace. They support GitHub repositories and user-uploaded archives, and both source types share the same immutable, sequentially numbered revision model (archive uploads are always incremental; Git resolutions reuse the latest revision when the resolved commit SHA is unchanged).
 
 ## Overview
 
@@ -47,7 +47,7 @@ flowchart TB
     Skills --> Agent
 ```
 
-Codebase revisions are **not content-addressed**. Every Git resolution and every archive upload creates a new revision with the next sequential `revisionNumber`; identical archive bytes or the same resolved commit SHA still produce a new immutable revision. Existing revisions are never mutated.
+Codebase revisions are **not content-addressed**. Every archive upload creates a new revision with the next sequential `revisionNumber`; identical archive bytes still produce a new immutable revision. Git resolution is the one exception: if the resolved commit SHA matches the codebase's latest revision, that revision is reused instead of creating a redundant one — otherwise a new incremental revision is created. Existing revisions are never mutated.
 
 ## Data Model
 
@@ -84,7 +84,7 @@ erDiagram
 
 Revision numbers are assigned by atomically `$inc`-ing `codebases.revisionCounter` in `CodebaseStore.allocateRevisionNumber()`. The store then builds the uniform `ref` as `{slug}@r{revisionNumber}` for both Git and archive revisions and advances `latestRevisionId`.
 
-`resolvedCommitSha` (Git) and `contentSha256` (archive) are provenance only. They are not part of the revision `_id`, not part of the `ref`, and do not deduplicate revisions.
+`resolvedCommitSha` (Git) and `contentSha256` (archive) are provenance only — they are not part of the revision `_id` and not part of the `ref`. `contentSha256` never deduplicates archive uploads. `resolvedCommitSha` is compared against the latest revision during Git resolution so an unchanged HEAD reuses the existing revision, but it is not otherwise an identity key.
 
 ## Revision Addressing
 
@@ -110,7 +110,7 @@ The codebase store derives a URL-safe slug from `slug` or `name`, ensures unique
 
 Git revisions are resolved by `CodebaseResolver.resolveGit()`. The resolver mirrors `SkillResolver`'s GitHub auth model: it uses the configured static token or the same round-robin token provider, and it currently targets GitHub repositories only.
 
-For `requestedRef` values that are empty or `"latest"`, the resolver uses the codebase's `defaultBranch` or fetches the repository default branch through the GitHub API. It resolves the ref to an exact commit, downloads the GitHub tarball at that commit, normalizes it, uploads the archive, and creates a new incremental revision.
+For `requestedRef` values that are empty or `"latest"`, the resolver uses the codebase's `defaultBranch` or fetches the repository default branch through the GitHub API. It resolves the ref to an exact commit, then compares that commit SHA with the codebase's latest revision: if they match, the existing revision is returned unchanged (no tarball download, no upload, no new revision). Otherwise it downloads the GitHub tarball at that commit, normalizes it, uploads the archive, and creates a new incremental revision.
 
 Archive revisions are created by `CodebaseResolver.createArchiveRevision()`. The resolver hashes the uploaded bytes into `contentSha256` for provenance, normalizes the archive, uploads the normalized tar.gz, and creates a new incremental revision.
 
@@ -187,7 +187,7 @@ Run submission accepts either an already-resolved `codebaseRevisionId` or a `cod
 - `{slug}@r{N}`
 - Bare `{slug}`
 
-`resolveCodebaseSpec()` resolves the selection before enqueueing. Raw revision ids and `{slug}@r{N}` refs are validated as existing revisions. Bare archive slugs resolve to the latest existing revision and fail if no archive has been uploaded. Bare Git slugs resolve the default branch at submit time and create a new incremental revision, so repeated submissions intentionally produce distinct revisions even if the branch still points at the same commit.
+`resolveCodebaseSpec()` resolves the selection before enqueueing. Raw revision ids and `{slug}@r{N}` refs are validated as existing revisions. Bare archive slugs resolve to the latest existing revision and fail if no archive has been uploaded. Bare Git slugs resolve the default branch at submit time; if the resolved commit SHA still matches the latest revision the existing revision is reused, so repeated submissions against an unchanged branch share one revision and only advance when the branch moves.
 
 The resolved `_id` is persisted as `RequestDocument.codebaseRevisionId` and included in `CreateRequestInputSchema` / `RequestResponseSchema`.
 
