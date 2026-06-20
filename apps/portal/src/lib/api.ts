@@ -959,7 +959,7 @@ export const api = {
     return request(`/codebases/${id}`);
   },
 
-  /** Create a codebase (git or archive) */
+  /** Create a git codebase (JSON metadata only) */
   createCodebase: (body: {
     name: string;
     sourceType: CodebaseSourceType;
@@ -972,6 +972,33 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     });
+  },
+
+  /**
+   * Create an archive codebase together with its first revision (multipart).
+   * The archive file is required; the server rolls back the codebase if the
+   * revision fails to materialize.
+   */
+  createArchiveCodebase: async (
+    meta: { name: string; description?: string; slug?: string },
+    file: File,
+  ): Promise<CodebaseDocument> => {
+    const form = new FormData();
+    form.append("sourceType", "archive");
+    form.append("name", meta.name);
+    if (meta.description) form.append("description", meta.description);
+    if (meta.slug) form.append("slug", meta.slug);
+    form.append("archive", file);
+    const res = await fetch(`${BASE}/codebases`, {
+      method: "POST",
+      body: form,
+    });
+    recordServerDate(res.headers.get("Date"));
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
+    return res.json();
   },
 
   /** Update a codebase */

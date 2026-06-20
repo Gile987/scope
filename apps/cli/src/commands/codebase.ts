@@ -124,6 +124,7 @@ export function registerCodebaseCommands(program: Command): void {
       .requiredOption("--name <name>", "Display name")
       .requiredOption("--source-type <git|archive>", "Source type")
       .option("--source <owner/repo>", "GitHub repository for git codebases")
+      .option("--archive <path>", "Path to archive file (required for archive codebases)")
       .option("--description <description>", "Description")
       .option("--default-branch <branch>", "Default branch for git codebases")
       .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
@@ -139,19 +140,46 @@ export function registerCodebaseCommands(program: Command): void {
         console.error(errorText("Error: --source is required for git codebases"));
         process.exit(1);
       }
+      if (sourceType === "archive" && !options.archive) {
+        console.error(errorText("Error: --archive is required for archive codebases"));
+        process.exit(1);
+      }
 
-      const body: CreateCodebaseInput = {
-        name: options.name,
-        sourceType,
-        ...(options.source ? { source: options.source } : {}),
-        ...(options.description ? { description: options.description } : {}),
-        ...(options.defaultBranch ? { defaultBranch: options.defaultBranch } : {}),
-      };
-      const created = await fetchJson<CodebaseApiDocument>(`${normalizeUrl(options.url)}/api/v1/codebases`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const baseUrl = normalizeUrl(options.url);
+      let created: CodebaseApiDocument;
+
+      if (sourceType === "archive") {
+        const resolvedPath = resolve(options.archive as string);
+        if (!existsSync(resolvedPath)) {
+          console.error(errorText(`Path not found: ${resolvedPath}`));
+          process.exit(1);
+        }
+        const archiveBuffer = readFileSync(resolvedPath);
+        const formData = new FormData();
+        formData.append("sourceType", "archive");
+        formData.append("name", options.name);
+        if (options.description) formData.append("description", options.description);
+        const blob = new Blob([archiveBuffer], { type: "application/octet-stream" });
+        formData.append("archive", blob, basename(resolvedPath));
+        const response = await fetch(`${baseUrl}/api/v1/codebases`, { method: "POST", body: formData });
+        if (!response.ok) {
+          throw new Error(await readError(response));
+        }
+        created = await response.json() as CodebaseApiDocument;
+      } else {
+        const body: CreateCodebaseInput = {
+          name: options.name,
+          sourceType,
+          ...(options.source ? { source: options.source } : {}),
+          ...(options.description ? { description: options.description } : {}),
+          ...(options.defaultBranch ? { defaultBranch: options.defaultBranch } : {}),
+        };
+        created = await fetchJson<CodebaseApiDocument>(`${baseUrl}/api/v1/codebases`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      }
 
       if (isMachineReadable(format)) {
         console.log(formatData([created], codebaseFields(), format));

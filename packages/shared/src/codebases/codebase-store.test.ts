@@ -55,6 +55,12 @@ function makeCodebaseCollection(seed: CodebaseDocument[] = []) {
       if (update.$set) Object.assign(doc, update.$set);
       return { matchedCount: 1, modifiedCount: 1 };
     },
+    async deleteOne(filter: UnknownRecord) {
+      const index = docs.findIndex((candidate) => matches(candidate, filter));
+      if (index === -1) return { deletedCount: 0 };
+      docs.splice(index, 1);
+      return { deletedCount: 1 };
+    },
     async findOneAndUpdate(
       filter: UnknownRecord,
       update: { $set?: Partial<CodebaseDocument>; $inc?: { revisionCounter?: number } }
@@ -112,6 +118,21 @@ describe("CodebaseStore", () => {
     expect(await store.getBySlug(first.slug)).toBeNull();
     expect(await store.list()).toEqual([second]);
     expect((await store.get(first._id, { includeDeleted: true }))?.deletedAt).toBeInstanceOf(Date);
+  });
+
+  it("hard-deletes a codebase, removing it entirely and freeing its slug", async () => {
+    const collection = makeCodebaseCollection();
+    const store = new CodebaseStore(collection as unknown as Collection<CodebaseDocument>);
+    const created = await store.create({ name: "Orphan", slug: "orphan", sourceType: "archive" });
+
+    expect(await store.hardDelete(created._id)).toBe(true);
+    // Fully removed (not just soft-deleted): not retrievable even with includeDeleted.
+    expect(await store.get(created._id, { includeDeleted: true })).toBeNull();
+    // Slug is freed, so a new codebase can reuse it without suffixing.
+    const reused = await store.create({ name: "Reused", slug: "orphan", sourceType: "archive" });
+    expect(reused.slug).toBe("orphan");
+    // Deleting a missing codebase reports no deletion.
+    expect(await store.hardDelete("missing-codebase")).toBe(false);
   });
 
   it("allocates revision numbers sequentially and returns null for missing codebases", async () => {

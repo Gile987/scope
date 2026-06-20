@@ -48,25 +48,47 @@ export function registerCodebasesRoutes(ctx: RouteContext): void {
     },
   });
 
-  // Create a codebase
+  // Create a codebase.
+  //
+  // Git codebases are created from JSON metadata. Archive codebases are created
+  // atomically with their first revision: the request MUST be multipart and
+  // include the `archive` file. If the archive is missing or the revision fails
+  // to materialize, the just-created codebase is hard-deleted (rollback) so no
+  // empty/unusable archive codebase is ever persisted.
   apiRoute(ctx.app, ctx.registry, {
     method: "post",
     path: "/api/v1/codebases",
     tags: ["Codebases"],
-    summary: "Create a codebase",
-    body: CreateCodebaseInputSchema,
+    summary: "Create a codebase (archive codebases require the archive file)",
+    middleware: [upload.single("archive")],
     response: CodebaseResponseSchema,
+    rawResponse: true,
     successStatus: 201,
     errorResponses: {
-      400: { description: "Invalid input" },
+      400: { description: "Invalid input or missing archive" },
     },
     handler: async (req, res, next) => {
+      const file = (req as unknown as { file?: { path: string; originalname?: string } }).file;
       try {
-        const { name, slug, description, sourceType, source, defaultBranch, creator } = req.body;
+        const parsed = CreateCodebaseInputSchema.safeParse(req.body);
+        if (!parsed.success) {
+          res.status(400).json({
+            error: "Invalid input",
+            details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+          });
+          return;
+        }
+        const { name, slug, description, sourceType, source, defaultBranch, creator } = parsed.data;
+
         if (sourceType === "git" && (!source || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source))) {
           res.status(400).json({ error: "Git codebases require a 'source' in the form 'owner/repo'" });
           return;
         }
+        if (sourceType === "archive" && !file?.path) {
+          res.status(400).json({ error: "Archive codebases require an archive file (multipart field 'archive') at creation." });
+          return;
+        }
+
         const codebase = await ctx.codebaseStore.create({
           name,
           ...(slug ? { slug } : {}),
@@ -76,6 +98,40 @@ export function registerCodebasesRoutes(ctx: RouteContext): void {
           ...(defaultBranch ? { defaultBranch } : {}),
           ...(creator ? { creator } : {}),
         });
+
+        // For archive codebases, create the first revision in the same request.
+        // Roll back (hard-delete) the codebase if revision creation fails so we
+        // never leave behind an archive codebase with zero revisions.
+        if (sourceType === "archive" && file?.path) {
+          try {
+            const buffer = readFileSync(file.path);
+            const result = await ctx.codebaseResolver.createArchiveRevision(
+              codebase,
+              {
+                buffer,
+                ...(file.originalname ? { originalFilename: file.originalname } : {}),
+                ...(creator ? { creator } : {}),
+              },
+              ctx.codebaseRevisionStore,
+              uploadArchive
+            );
+            // Re-fetch so the response reflects the updated latestRevisionId /
+            // revisionCounter set while creating the first revision.
+            const fresh = (await ctx.codebaseStore.get(codebase._id)) ?? codebase;
+            res.status(201).json({
+              ...fresh,
+              id: fresh._id,
+              firstRevision: result.revision,
+            });
+            return;
+          } catch (revisionError) {
+            await ctx.codebaseStore.hardDelete(codebase._id);
+            const message = revisionError instanceof Error ? revisionError.message : String(revisionError);
+            res.status(400).json({ error: `Failed to create the first archive revision: ${message}` });
+            return;
+          }
+        }
+
         res.status(201).json({ ...codebase, id: codebase._id });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -84,6 +140,8 @@ export function registerCodebasesRoutes(ctx: RouteContext): void {
           return;
         }
         next(error);
+      } finally {
+        if (file?.path && existsSync(file.path)) rmSync(file.path, { force: true });
       }
     },
   });

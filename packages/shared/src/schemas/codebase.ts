@@ -9,8 +9,10 @@ extendZodWithOpenApi(z);
 export const CodebaseSourceTypeSchema = z.enum(["git", "archive"]);
 
 /**
- * Create a new codebase entity. Git codebases require `source` ("owner/repo");
- * archive codebases are created empty and get their first revision via upload.
+ * Create a new codebase entity. Git codebases require `source` ("owner/repo").
+ * Archive codebases are created atomically with their first revision: the create
+ * request must include the archive file (multipart), and the codebase is rolled
+ * back if the archive is missing or invalid.
  */
 export const CreateCodebaseInputSchema = z
   .object({

@@ -29,31 +29,51 @@ export function CodebaseCreateForm({ onCreated, onCancel, className, compact = f
   const [source, setSource] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("");
   const [description, setDescription] = useState("");
+  const [archiveFile, setArchiveFile] = useState<File | null>(null);
+
+  const resetFields = () => {
+    setName("");
+    setSlug("");
+    setSource("");
+    setDefaultBranch("");
+    setDescription("");
+    setArchiveFile(null);
+  };
 
   const createMutation = useMutation({
-    mutationFn: () => api.createCodebase({
-      name: name.trim(),
-      sourceType,
-      ...(slug.trim() ? { slug: slug.trim() } : {}),
-      ...(sourceType === "git" && source.trim() ? { source: source.trim() } : {}),
-      ...(sourceType === "git" && defaultBranch.trim() ? { defaultBranch: defaultBranch.trim() } : {}),
-      ...(description.trim() ? { description: description.trim() } : {}),
-    }),
+    mutationFn: () => {
+      if (sourceType === "archive") {
+        if (!archiveFile) throw new Error("An archive file is required for archive codebases");
+        return api.createArchiveCodebase(
+          {
+            name: name.trim(),
+            ...(slug.trim() ? { slug: slug.trim() } : {}),
+            ...(description.trim() ? { description: description.trim() } : {}),
+          },
+          archiveFile,
+        );
+      }
+      return api.createCodebase({
+        name: name.trim(),
+        sourceType,
+        ...(slug.trim() ? { slug: slug.trim() } : {}),
+        ...(source.trim() ? { source: source.trim() } : {}),
+        ...(defaultBranch.trim() ? { defaultBranch: defaultBranch.trim() } : {}),
+        ...(description.trim() ? { description: description.trim() } : {}),
+      });
+    },
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ["codebases"] });
       toast.success(`Codebase "${created.slug}" created`);
       onCreated?.(created);
-      setName("");
-      setSlug("");
-      setSource("");
-      setDefaultBranch("");
-      setDescription("");
+      resetFields();
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to create codebase"),
   });
 
   const sourceValid = sourceType === "archive" || /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source.trim());
-  const canCreate = name.trim().length > 0 && sourceValid && !createMutation.isPending;
+  const archiveValid = sourceType !== "archive" || archiveFile !== null;
+  const canCreate = name.trim().length > 0 && sourceValid && archiveValid && !createMutation.isPending;
 
   return (
     <div className={cn("space-y-4", className)}>
@@ -97,12 +117,26 @@ export function CodebaseCreateForm({ onCreated, onCancel, className, compact = f
         </div>
       )}
 
+      {sourceType === "archive" && (
+        <div className="space-y-2">
+          <Label htmlFor="codebase-archive">Archive *</Label>
+          <Input
+            id="codebase-archive"
+            type="file"
+            accept=".tar.gz,.tgz,.tar,.zip,application/gzip,application/x-gzip,application/zip,application/x-tar"
+            onChange={(e) => setArchiveFile(e.target.files?.[0] ?? null)}
+          />
+          <p className="text-xs text-muted-foreground">
+            {archiveFile
+              ? `Selected: ${archiveFile.name}`
+              : "An archive (.tar.gz, .tgz, .tar, or .zip) is required to create an archive codebase. It becomes the first revision."}
+          </p>
+        </div>
+      )}
+
       <div className="space-y-2">
         <Label htmlFor="codebase-description">Description</Label>
         <Textarea id="codebase-description" value={description} onChange={(e) => setDescription(e.target.value)} rows={compact ? 2 : 3} placeholder="What this workspace seed contains" />
-        {sourceType === "archive" && (
-          <p className="text-xs text-muted-foreground">After creating the archive codebase, upload its first archive from the detail page or picker.</p>
-        )}
       </div>
 
       <div className="flex justify-end gap-2">

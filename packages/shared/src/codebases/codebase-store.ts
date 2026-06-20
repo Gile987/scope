@@ -115,6 +115,20 @@ export class CodebaseStore {
   }
 
   /**
+   * Hard-delete a codebase, permanently removing the document (and freeing its
+   * slug). Unlike {@link softDelete}, this does not reserve the slug, so it is
+   * intended only for rollback of a just-created codebase that has no revisions
+   * or runs referencing it (e.g. when an atomic archive-create fails after the
+   * codebase row was inserted).
+   *
+   * @returns true if a document was deleted.
+   */
+  async hardDelete(id: string): Promise<boolean> {
+    const result = await this.collection.deleteOne({ _id: id } as object);
+    return result.deletedCount > 0;
+  }
+
+  /**
    * Atomically allocate the next revision number for a codebase by `$inc`-ing
    * its `revisionCounter`. Concurrent callers receive distinct, gap-free numbers.
    *
