@@ -2,9 +2,52 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi } from "vitest";
-import { runACPSession, selectModel, selectReasoningEffort, selectPermissionMode, formatModeError, formatToolArgs, AUTOPILOT_MODE_ID } from "./acp-client.js";
+import { runACPSession, selectModel, selectReasoningEffort, selectPermissionMode, formatModeError, formatToolArgs, formatToolContent, AUTOPILOT_MODE_ID } from "./acp-client.js";
 import type * as acp from "@agentclientprotocol/sdk";
 import os from "node:os";
+
+describe("formatToolContent", () => {
+  it("returns an empty string for non-array or empty input", () => {
+    expect(formatToolContent(undefined)).toBe("");
+    expect(formatToolContent([])).toBe("");
+  });
+
+  it("formats a diff variant as `diff <path> <newText>`", () => {
+    expect(
+      formatToolContent([
+        { type: "diff", path: "/tmp/app.js", newText: "const x = 1", oldText: null },
+      ])
+    ).toBe("diff /tmp/app.js const x = 1");
+  });
+
+  it("formats a terminal variant as `terminal <terminalId>`", () => {
+    expect(
+      formatToolContent([{ type: "terminal", terminalId: "term-123" }])
+    ).toBe("terminal term-123");
+  });
+
+  it("formats a text content block as its text and others as a bracketed type", () => {
+    expect(
+      formatToolContent([
+        { type: "content", content: { type: "text", text: "hello world" } },
+      ])
+    ).toBe("hello world");
+    expect(
+      formatToolContent([
+        { type: "content", content: { type: "image", data: "..." } },
+      ])
+    ).toBe("[image]");
+  });
+
+  it("truncates long previews with an ellipsis", () => {
+    const result = formatToolContent(
+      [{ type: "diff", path: "f", newText: "a".repeat(300) }],
+      20
+    );
+    expect(result.length).toBe(20);
+    expect(result.endsWith("…")).toBe(true);
+  });
+});
 
 describe("formatToolArgs", () => {
   it("returns an empty string for non-object input", () => {

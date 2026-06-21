@@ -50,6 +50,48 @@ export function formatToolArgs(rawInput: unknown, maxLength = 160): string {
     : formatted;
 }
 
+/**
+ * Build a short, human-readable preview of a tool call's `content` array for
+ * logging. Handles the three ACP `ToolCallContent` variants:
+ * - `diff`    -> `diff <path> <newText preview>`
+ * - `terminal`-> `terminal <terminalId>`
+ * - `content` -> the text block, or `[image]`/`[audio]`/`[resource]` for non-text
+ * Whitespace is collapsed and the result is truncated. Returns an empty string
+ * when there is nothing useful to show.
+ */
+export function formatToolContent(content: unknown, maxLength = 160): string {
+  if (!Array.isArray(content) || content.length === 0) {
+    return "";
+  }
+  const parts: string[] = [];
+  for (const item of content) {
+    if (!item || typeof item !== "object") continue;
+    const c = item as Record<string, unknown>;
+    if (c.type === "diff") {
+      const path = typeof c.path === "string" ? c.path : "";
+      const newText = typeof c.newText === "string" ? c.newText : "";
+      parts.push(["diff", path, newText].filter(Boolean).join(" "));
+    } else if (c.type === "terminal") {
+      const terminalId = typeof c.terminalId === "string" ? c.terminalId : "";
+      parts.push(["terminal", terminalId].filter(Boolean).join(" "));
+    } else if (c.type === "content") {
+      const block = c.content as Record<string, unknown> | undefined;
+      if (block?.type === "text" && typeof block.text === "string") {
+        parts.push(block.text);
+      } else if (typeof block?.type === "string") {
+        parts.push(`[${block.type}]`);
+      }
+    }
+  }
+  const formatted = parts.join(" ").replace(/\s+/g, " ").trim();
+  if (!formatted) {
+    return "";
+  }
+  return formatted.length > maxLength
+    ? `${formatted.slice(0, maxLength - 1)}…`
+    : formatted;
+}
+
 export interface ACPClientOptions {
   command: string;
   args?: string[];
@@ -136,7 +178,8 @@ class ACPClientHandler implements acp.Client {
           title: update.title,
           kind: update.kind,
         });
-        const args = formatToolArgs(update.rawInput);
+        const args =
+          formatToolArgs(update.rawInput) || formatToolContent(update.content);
         const parts = ["Tool call:"];
         if (update.kind) parts.push(`[${update.kind}]`);
         parts.push(update.title);
@@ -149,7 +192,8 @@ class ACPClientHandler implements acp.Client {
         const cached = this.toolCalls.get(update.toolCallId);
         const kind = update.kind ?? cached?.kind;
         const label = cached?.title ?? update.toolCallId;
-        const args = formatToolArgs(update.rawInput);
+        const args =
+          formatToolArgs(update.rawInput) || formatToolContent(update.content);
         const parts = ["Tool update:"];
         if (kind) parts.push(`[${kind}]`);
         parts.push(label);

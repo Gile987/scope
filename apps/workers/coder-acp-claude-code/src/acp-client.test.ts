@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ACPClientHandler, selectReasoningEffort, formatToolArgs } from "./acp-client.js";
+import { ACPClientHandler, selectReasoningEffort, formatToolArgs, formatToolContent } from "./acp-client.js";
 
 describe("formatToolArgs", () => {
   it("returns an empty string for non-object input", () => {
@@ -26,6 +26,53 @@ describe("formatToolArgs", () => {
 
   it("truncates long previews with an ellipsis", () => {
     const result = formatToolArgs({ path: "a".repeat(300) }, 20);
+    expect(result.length).toBe(20);
+    expect(result.endsWith("…")).toBe(true);
+  });
+});
+
+describe("formatToolContent", () => {
+  it("returns an empty string for non-array or empty input", () => {
+    expect(formatToolContent(undefined)).toBe("");
+    expect(formatToolContent(null)).toBe("");
+    expect(formatToolContent([])).toBe("");
+  });
+
+  it("formats a diff variant as `diff <path> <newText>`", () => {
+    expect(
+      formatToolContent([
+        { type: "diff", path: "/tmp/app.js", newText: "const x = 1", oldText: null },
+      ])
+    ).toBe("diff /tmp/app.js const x = 1");
+  });
+
+  it("formats a terminal variant as `terminal <terminalId>`", () => {
+    expect(
+      formatToolContent([{ type: "terminal", terminalId: "term-123" }])
+    ).toBe("terminal term-123");
+  });
+
+  it("formats a text content block as its text", () => {
+    expect(
+      formatToolContent([
+        { type: "content", content: { type: "text", text: "hello world" } },
+      ])
+    ).toBe("hello world");
+  });
+
+  it("formats non-text content blocks as a bracketed type", () => {
+    expect(
+      formatToolContent([
+        { type: "content", content: { type: "image", data: "..." } },
+      ])
+    ).toBe("[image]");
+  });
+
+  it("truncates long previews with an ellipsis", () => {
+    const result = formatToolContent(
+      [{ type: "diff", path: "f", newText: "a".repeat(300) }],
+      20
+    );
     expect(result.length).toBe(20);
     expect(result.endsWith("…")).toBe(true);
   });
@@ -87,6 +134,35 @@ describe("ACPClientHandler tool call logging", () => {
     } as never);
 
     expect(logs).toEqual(["Tool update: [execute] Create Astro project - completed"]);
+  });
+
+  it("falls back to content (diff) preview when an update has no rawInput", async () => {
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "toolu_bdrk_123",
+        title: "Write",
+        status: "pending",
+        kind: "edit",
+      },
+    } as never);
+    logs.length = 0;
+
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "toolu_bdrk_123",
+        content: [
+          { type: "diff", path: "/tmp/app.js", newText: "const x = 1", oldText: null },
+        ],
+      },
+    } as never);
+
+    expect(logs).toEqual([
+      "Tool update: [edit] Write diff /tmp/app.js const x = 1",
+    ]);
   });
 
   it("falls back to the tool call id when no title was seen", async () => {
