@@ -9,8 +9,11 @@ import { useLogStream } from "@/hooks/use-log-stream";
 import { formatLogsAsText } from "@/lib/format-logs";
 import { GATE_METADATA, isGateId, type GateId } from "@/lib/gates";
 import type { LogEvent } from "@/types";
-import { Check, Circle, Copy, Wifi, WifiOff } from "lucide-react";
+import { ArrowDown, Check, Circle, Copy, Wifi, WifiOff } from "lucide-react";
 import { toast } from "sonner";
+
+/** Distance (px) from the bottom within which the view counts as "snapped to bottom". */
+const BOTTOM_THRESHOLD_PX = 24;
 
 /** Reads a GateId from a log entry's structured data, if present. */
 function gateOf(log: LogEvent): GateId | undefined {
@@ -56,7 +59,36 @@ export function LogViewer({
   const error = externalError !== undefined ? externalError : ownStream.error;
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  // Whether the log viewport is scrolled to (near) the bottom. When true and the
+  // stream is live, new logs auto-follow the tail; when the user scrolls up it
+  // flips false and auto-follow pauses until they return to the bottom.
+  const [atBottom, setAtBottom] = useState(true);
+
+  // Streaming is "live" while connected to the SSE stream.
+  const isStreaming = isConnected;
+
+  const recomputeAtBottom = useCallback(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setAtBottom(distanceFromBottom <= BOTTOM_THRESHOLD_PX);
+  }, []);
+
+  // Track the user's vertical scroll position to know whether to auto-follow.
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", recomputeAtBottom, { passive: true });
+    return () => el.removeEventListener("scroll", recomputeAtBottom);
+  }, [recomputeAtBottom]);
+
+  const jumpToLatest = useCallback(() => {
+    const el = viewportRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    setAtBottom(true);
+  }, []);
 
   const handleCopy = useCallback(async () => {
     if (logs.length === 0) return;
@@ -80,10 +112,15 @@ export function LogViewer({
     setTimeout(() => setCopied(false), 2000);
   }, [logs]);
 
-  // Auto-scroll to bottom on new logs
+  // Auto-scroll to bottom on new logs, but only while snapped to the bottom so
+  // the user can scroll up to read earlier output without being yanked back.
+  // Uses an instant jump (not smooth) to avoid mid-animation jitter that would
+  // otherwise momentarily flip `atBottom`.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs.length]);
+    if (!atBottom) return;
+    const el = viewportRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [logs.length, atBottom]);
 
   return (
     <div className="flex flex-col gap-2">
@@ -110,7 +147,16 @@ export function LogViewer({
             <span>Connecting…</span>
           </>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {isStreaming && atBottom && (
+            <span className="flex items-center gap-1.5 text-xs text-emerald-500">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              </span>
+              Auto-scrolling
+            </span>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -134,11 +180,17 @@ export function LogViewer({
       </div>
 
       {/* Log area */}
-      <ScrollArea className="h-[500px] rounded-md border bg-slate-950 p-4">
-        <div className="font-mono text-xs leading-relaxed">
-          {logs.length === 0 && (
-            <div className="text-slate-500 italic">No log events yet…</div>
-          )}
+      <div className="relative">
+        <ScrollArea
+          className="h-[500px] rounded-md border bg-slate-950 p-4"
+          orientation="both"
+          fitContent
+          viewportRef={viewportRef}
+        >
+          <div className="w-max min-w-full font-mono text-xs leading-relaxed">
+            {logs.length === 0 && (
+              <div className="text-slate-500 italic">No log events yet…</div>
+            )}
           {logs.map((log, i) => {
             const iteration = log.data?.iteration as number | undefined;
             const prevIteration = i > 0 ? (logs[i - 1].data?.iteration as number | undefined) : undefined;
@@ -196,9 +248,9 @@ export function LogViewer({
                   {log.source && (
                     <span className="text-purple-400 shrink-0">[{log.source}]</span>
                   )}
-                  <span className="text-slate-200 break-all">{log.message}</span>
+                  <span className="text-slate-200 whitespace-nowrap">{log.message}</span>
                   {log.data && Object.keys(log.data).filter(k => k !== "iteration" && k !== "gate" && k !== "final" && k !== "phase" && k !== "iterationHeader").length > 0 && (
-                    <span className="text-slate-500 shrink-0 truncate max-w-[40%]" title={JSON.stringify(log.data, null, 2)}>
+                    <span className="text-slate-500 shrink-0 whitespace-nowrap" title={JSON.stringify(log.data, null, 2)}>
                       {Object.entries(log.data)
                         .filter(([k]) => k !== "iteration" && k !== "gate" && k !== "final" && k !== "phase" && k !== "iterationHeader")
                         .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`)
@@ -210,9 +262,21 @@ export function LogViewer({
               </div>
             );
           })}
-          <div ref={bottomRef} />
-        </div>
-      </ScrollArea>
+            <div ref={bottomRef} />
+          </div>
+        </ScrollArea>
+        {isStreaming && !atBottom && (
+          <Button
+            type="button"
+            size="sm"
+            onClick={jumpToLatest}
+            className="absolute bottom-3 right-3 h-7 gap-1 rounded-full px-3 text-xs shadow-md"
+          >
+            <ArrowDown className="h-3 w-3" />
+            Jump to latest
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
