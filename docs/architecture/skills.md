@@ -70,6 +70,65 @@ erDiagram
 - **SkillRevision** — An immutable, content-addressed snapshot of a skill at a specific commit. The `ref` format is `owner/repo/skillName@commitHash`.
 - **Run.skillRevisions** — Array of skill revision refs attached to a run. These are resolved at submit time and remain immutable throughout the run lifecycle.
 
+## Import Paths
+
+Skills can be added to Scope's internal library through two distinct flows. In both cases, **GitHub is always the source of skill content** — the actual SKILL.md files live in GitHub repositories. Skills.sh is a separate search/discovery registry that indexes publicly available skills.
+
+```mermaid
+flowchart LR
+    subgraph External["External Systems"]
+        GitHub["GitHub Repositories<br/>(skill content lives here)"]
+        SkillsSh["skills.sh Registry<br/>(search index only)"]
+    end
+
+    subgraph Scope["Scope"]
+        API["API"]
+        DB["MongoDB<br/>(skills + revisions)"]
+        Blob["Blob Storage<br/>(skill archives)"]
+    end
+
+    %% Path 1: GitHub Discovery
+    GitHub -->|"1. Discover (Trees API)"| API
+    API -->|"2. Fetch SKILL.md content"| GitHub
+    API -->|"3. Store"| DB
+    API -->|"4. Archive tar.gz"| Blob
+
+    %% Path 2: skills.sh Search
+    SkillsSh -->|"search results<br/>(id + metadata)"| API
+    API -->|"resolve from GitHub"| GitHub
+```
+
+### Path 1: GitHub Discovery (primary)
+
+Used when the user knows which GitHub repository contains skills.
+
+1. User provides a GitHub repo (`owner/repo`) via Portal wizard or CLI
+2. API calls `GET /api/v1/skills/discover?source=owner/repo` — scans the repo's well-known directories using the Trees API
+3. User selects one or more discovered skills
+4. API registers each skill (`POST /api/v1/skills`) and auto-resolves: fetches content from GitHub, archives it, and creates a `SkillRevision`
+
+This is the **Portal Import Wizard** flow and the **CLI `skill import`** flow. The skill's `origin` is set to `"manual"`.
+
+### Path 2: Skills.sh Search (discovery aid)
+
+Used when the user doesn't know which repo contains the skill they want.
+
+1. User searches via Portal or CLI (`skill search -q "react"`)
+2. API queries both the internal DB and the [skills.sh](https://skills.sh) external registry
+3. User selects a result from skills.sh
+4. API imports it the same way as Path 1 — registers the skill and resolves content from GitHub
+
+The skill's `origin` is set to `"skills-sh"` to indicate it was discovered through that registry.
+
+### Key distinction
+
+| Aspect | GitHub (Path 1) | Skills.sh (Path 2) |
+|--------|-----------------|---------------------|
+| What it provides | Actual skill content (SKILL.md files) | Search index / metadata |
+| When to use | Know the repo containing skills | Browsing/searching for skills |
+| Content source | Direct from GitHub | Still fetched from GitHub |
+| Origin value | `"manual"` | `"skills-sh"` |
+
 ## Lifecycle
 
 ### 1. Registration

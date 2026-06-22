@@ -902,7 +902,7 @@ export const api = {
     return request(`/skills/${slug}`);
   },
 
-  /** Search skills (internal + skills.sh) */
+  /** Search skills in the internal library and the external skills.sh registry */
   searchSkills: (query: string, limit?: number): Promise<SkillSearchResult[]> => {
     const params = new URLSearchParams({ q: query });
     if (limit) params.set("limit", String(limit));

@@ -342,7 +342,7 @@ export function SkillList() {
             emptyState={
               state.hasActiveFilters
                 ? "No skills match your filters"
-                : "No skills imported yet. Click Import Skill to add one from a GitHub repository."
+                : "No skills imported yet. Click Import Skill to add one."
             }
           />
           <Pagination
@@ -384,7 +384,7 @@ export function SkillList() {
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Import Skill</DialogTitle>
+            <DialogTitle>Import from GitHub</DialogTitle>
           </DialogHeader>
           <SkillPicker selected={[]} onChange={() => {}} importOnly />
         </DialogContent>
