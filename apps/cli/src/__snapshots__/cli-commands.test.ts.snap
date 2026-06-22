@@ -82,6 +82,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "create": {
         "options": [
           "--depends-on",
+          "--gates",
           "--id",
           "--prompt",
           "--url",
@@ -129,6 +130,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "update": {
         "options": [
           "--depends-on",
+          "--gates",
           "--id",
           "--prompt",
           "--url",
@@ -605,6 +607,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--base-profile",
           "--criteria",
           "--extensions",
+          "--gates",
           "--max-iterations",
           "--mcp-servers",
           "--message",
@@ -697,6 +700,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         "options": [
           "--file",
           "--text",
+          "--type",
           "--url",
         ],
       },
@@ -728,6 +732,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--offset",
           "--output",
           "--search",
+          "--type",
           "--url",
         ],
       },

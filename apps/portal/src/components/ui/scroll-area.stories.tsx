@@ -30,3 +30,23 @@ export const Default: Story = {
     </ScrollArea>
   ),
 };
+
+export const TruncatedRows: Story = {
+  render: () => (
+    <ScrollArea className="h-48 w-72 rounded-md border">
+      <ul className="divide-y">
+        {Array.from({ length: 12 }).map((_, i) => (
+          <li key={i} className="flex items-start gap-2 p-2">
+            <div className="flex-1 min-w-0">
+              <div className="font-mono text-xs font-medium">skill-{i + 1}</div>
+              <p className="text-xs text-muted-foreground truncate">
+                A very long single-line description that must truncate with an
+                ellipsis instead of forcing the ScrollArea to grow horizontally.
+              </p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </ScrollArea>
+  ),
+};

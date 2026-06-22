@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi } from "vitest";
-import { runACPSession, selectModel, selectReasoningEffort } from "./acp-client.js";
+import { runACPSession, selectModel, selectReasoningEffort, selectPermissionMode, formatModeError, AUTOPILOT_MODE_ID } from "./acp-client.js";
 import type * as acp from "@agentclientprotocol/sdk";
 import os from "node:os";
 
@@ -264,5 +264,155 @@ describe("selectReasoningEffort", () => {
 
     expect(result).toBeUndefined();
     expect(logs.some((l) => l.includes("session/set_config_option failed"))).toBe(true);
+  });
+});
+
+describe("selectPermissionMode", () => {
+  function makeConnection(overrides?: Partial<acp.ClientSideConnection>): acp.ClientSideConnection {
+    return {
+      setSessionMode: vi.fn().mockResolvedValue({}),
+      ...overrides,
+    } as unknown as acp.ClientSideConnection;
+  }
+
+  function makeSession(overrides?: Partial<acp.NewSessionResponse>): acp.NewSessionResponse {
+    return {
+      sessionId: "session-1",
+      ...overrides,
+    } as acp.NewSessionResponse;
+  }
+
+  const modesWithAutopilot = {
+    currentModeId: "https://agentclientprotocol.com/protocol/session-modes#agent",
+    availableModes: [
+      { id: "https://agentclientprotocol.com/protocol/session-modes#agent", name: "Agent" },
+      { id: "https://agentclientprotocol.com/protocol/session-modes#plan", name: "Plan" },
+      { id: AUTOPILOT_MODE_ID, name: "Autopilot" },
+    ],
+  };
+
+  it("sets autopilot mode by its canonical URL id", async () => {
+    const connection = makeConnection();
+    const session = makeSession({ modes: modesWithAutopilot } as Partial<acp.NewSessionResponse>);
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(connection.setSessionMode).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      modeId: AUTOPILOT_MODE_ID,
+    });
+    expect(logs.some((l) => l.includes("Set session mode to autopilot"))).toBe(true);
+  });
+
+  it("matches a bare '#autopilot' id via the endsWith safety net", async () => {
+    const connection = makeConnection();
+    const session = makeSession({
+      modes: {
+        currentModeId: "agent",
+        availableModes: [
+          { id: "agent", name: "Agent" },
+          { id: "x#autopilot", name: "Autopilot" },
+        ],
+      },
+    } as Partial<acp.NewSessionResponse>);
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(connection.setSessionMode).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      modeId: "x#autopilot",
+    });
+  });
+
+  it("warns and no-ops when no autopilot mode is advertised", async () => {
+    const connection = makeConnection();
+    const session = makeSession({
+      modes: {
+        currentModeId: "https://agentclientprotocol.com/protocol/session-modes#agent",
+        availableModes: [
+          { id: "https://agentclientprotocol.com/protocol/session-modes#agent", name: "Agent" },
+          { id: "https://agentclientprotocol.com/protocol/session-modes#plan", name: "Plan" },
+        ],
+      },
+    } as Partial<acp.NewSessionResponse>);
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(connection.setSessionMode).not.toHaveBeenCalled();
+    expect(logs.some((l) => l.includes("autopilot mode not available"))).toBe(true);
+  });
+
+  it("warns and no-ops when no modes field is present", async () => {
+    const connection = makeConnection();
+    const session = makeSession();
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(connection.setSessionMode).not.toHaveBeenCalled();
+    expect(logs.some((l) => l.includes("autopilot mode not available"))).toBe(true);
+  });
+
+  it("warns and continues when setSessionMode throws on every attempt", async () => {
+    const connection = makeConnection({
+      setSessionMode: vi.fn().mockRejectedValue(new Error("mode not writable")),
+    });
+    const session = makeSession({ modes: modesWithAutopilot } as Partial<acp.NewSessionResponse>);
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(connection.setSessionMode).toHaveBeenCalledTimes(2);
+    expect(logs.some((l) => l.includes("failed to set autopilot session mode after 2 attempts"))).toBe(true);
+  });
+
+  it("retries once and succeeds when the first set_mode call fails (cold start)", async () => {
+    const setSessionMode = vi
+      .fn()
+      .mockRejectedValueOnce({ code: -32000, message: "session not ready" })
+      .mockResolvedValueOnce({});
+    const connection = makeConnection({ setSessionMode });
+    const session = makeSession({ modes: modesWithAutopilot } as Partial<acp.NewSessionResponse>);
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(setSessionMode).toHaveBeenCalledTimes(2);
+    expect(logs.some((l) => l.includes("retrying"))).toBe(true);
+    expect(logs.some((l) => l.includes("Set session mode to autopilot"))).toBe(true);
+  });
+
+  it("serializes a non-Error JSON-RPC rejection instead of logging [object Object]", async () => {
+    const connection = makeConnection({
+      setSessionMode: vi.fn().mockRejectedValue({ code: -32601, message: "method not found" }),
+    });
+    const session = makeSession({ modes: modesWithAutopilot } as Partial<acp.NewSessionResponse>);
+    const logs: string[] = [];
+
+    await selectPermissionMode(connection, session, (msg) => logs.push(msg));
+
+    expect(logs.some((l) => l.includes("[object Object]"))).toBe(false);
+    expect(logs.some((l) => l.includes("method not found") && l.includes("code -32601"))).toBe(true);
+  });
+});
+
+describe("formatModeError", () => {
+  it("uses the message of an Error instance", () => {
+    expect(formatModeError(new Error("boom"))).toBe("boom");
+  });
+
+  it("uses message and code for JSON-RPC-style objects", () => {
+    expect(formatModeError({ code: -32000, message: "not ready" })).toBe("not ready (code -32000)");
+  });
+
+  it("JSON-stringifies objects without a message", () => {
+    expect(formatModeError({ foo: "bar" })).toBe('{"foo":"bar"}');
+  });
+
+  it("falls back to String for primitives", () => {
+    expect(formatModeError("plain string")).toBe("plain string");
   });
 });

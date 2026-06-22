@@ -4,15 +4,28 @@
   Designed to run inside the worker container where env vars are baked in at build time.
 
 .DESCRIPTION
-  1. Waits for the API to become healthy.
-  2. Upserts the agent document from agent.json (idempotent).
-  3. Registers the current version using baked-in env vars (COPILOT_CLI_VERSION, BUILD_TIME, GIT_COMMIT).
+  1. Waits for DNS to resolve the API hostname (handles cold Windows nodes).
+  2. Waits for the API to become healthy.
+  3. Upserts the agent document from agent.json (idempotent).
+  4. Registers the current version using baked-in env vars (COPILOT_CLI_VERSION, BUILD_TIME, GIT_COMMIT).
 
 .PARAMETER ApiUrl
   Base URL of the Scope API. Defaults to the in-cluster service address.
+
+.PARAMETER MaxHealthRetries
+  Maximum number of health check attempts before giving up. Default 60 (~5 minutes).
+
+.PARAMETER MaxDnsRetries
+  Maximum number of DNS resolution attempts before giving up. Default 24 (~2 minutes).
+
+.PARAMETER VersionRetries
+  Number of retry attempts for version registration. Default 3.
 #>
 param(
-  [string]$ApiUrl = "http://api.scoped.svc.cluster.local:80"
+  [string]$ApiUrl = "http://api.scoped.svc.cluster.local:80",
+  [int]$MaxHealthRetries = 60,
+  [int]$MaxDnsRetries = 24,
+  [int]$VersionRetries = 3
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,14 +45,42 @@ Write-Host "Registering version for $AgentId"
 Write-Host "  agentVersion:  $AgentVersion"
 Write-Host "  workerVersion: $WorkerVersion"
 
+# Extract hostname from API URL for DNS check
+$apiHost = ([System.Uri]$ApiUrl).Host
+
+# Wait for DNS resolution (handles cold Windows nodes where DNS isn't ready yet)
+Write-Host "Checking DNS resolution for $apiHost..."
+$dnsAttempt = 0
+while ($true) {
+  $dnsAttempt++
+  try {
+    $null = [System.Net.Dns]::GetHostAddresses($apiHost)
+    Write-Host "DNS resolved successfully."
+    break
+  } catch {
+    if ($dnsAttempt -ge $MaxDnsRetries) {
+      Write-Error "DNS resolution failed after $MaxDnsRetries attempts: $_"
+      exit 1
+    }
+    Write-Host "DNS not ready (attempt $dnsAttempt/$MaxDnsRetries), retrying in 5s..."
+    Start-Sleep -Seconds 5
+  }
+}
+
 # Wait for API health
 Write-Host "Waiting for API at $ApiUrl..."
+$healthAttempt = 0
 while ($true) {
+  $healthAttempt++
   try {
     $null = Invoke-RestMethod -Uri "$ApiUrl/health" -TimeoutSec 5
     break
   } catch {
-    Write-Host "API not ready, retrying in 5s..."
+    if ($healthAttempt -ge $MaxHealthRetries) {
+      Write-Error "API health check failed after $MaxHealthRetries attempts: $_"
+      exit 1
+    }
+    Write-Host "API not ready (attempt $healthAttempt/$MaxHealthRetries), retrying in 5s..."
     Start-Sleep -Seconds 5
   }
 }
@@ -58,14 +99,15 @@ try {
   $null = Invoke-RestMethod -Uri "$ApiUrl/api/v1/agents" `
     -Method Post `
     -ContentType "application/json" `
-    -Body $agentJson
+    -Body $agentJson `
+    -TimeoutSec 30
   Write-Host "Agent upsert successful."
 } catch {
   Write-Warning "Agent upsert failed: $_"
   Write-Warning "Continuing anyway (agent may already exist)..."
 }
 
-# Register version
+# Register version with retries
 Write-Host "Registering version..."
 $versionBody = @{
   agentVersion = $AgentVersion
@@ -77,14 +119,29 @@ $versionBody = @{
   queueName = $QueueName
 } | ConvertTo-Json -Compress
 
-try {
-  $null = Invoke-RestMethod -Uri "$ApiUrl/api/v1/agents/$AgentId/versions" `
-    -Method Post `
-    -ContentType "application/json" `
-    -Body $versionBody
-  Write-Host "Version registration successful."
-} catch {
-  Write-Error "Version registration failed: $_"
+$registered = $false
+for ($attempt = 1; $attempt -le $VersionRetries; $attempt++) {
+  try {
+    $null = Invoke-RestMethod -Uri "$ApiUrl/api/v1/agents/$AgentId/versions" `
+      -Method Post `
+      -ContentType "application/json" `
+      -Body $versionBody `
+      -TimeoutSec 30
+    Write-Host "Version registration successful."
+    $registered = $true
+    break
+  } catch {
+    Write-Warning "Version registration attempt $attempt/$VersionRetries failed: $_"
+    if ($attempt -lt $VersionRetries) {
+      $backoff = $attempt * 5
+      Write-Host "Retrying in ${backoff}s..."
+      Start-Sleep -Seconds $backoff
+    }
+  }
+}
+
+if (-not $registered) {
+  Write-Error "Version registration failed after $VersionRetries attempts."
   exit 1
 }
 

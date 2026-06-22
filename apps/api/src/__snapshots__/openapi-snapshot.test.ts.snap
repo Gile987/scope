@@ -336,6 +336,16 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "durationMs": {
             "type": "number",
           },
+          "gate": {
+            "enum": [
+              "select",
+              "build",
+              "test",
+              "run",
+              "deploy",
+            ],
+            "type": "string",
+          },
           "harUrl": {
             "type": "string",
           },
@@ -465,6 +475,19 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "properties": {
           "dependsOn": {
             "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "gates": {
+            "items": {
+              "enum": [
+                "select",
+                "build",
+                "test",
+                "run",
+                "deploy",
+              ],
               "type": "string",
             },
             "type": "array",
@@ -670,6 +693,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/GateConfig",
+            },
+            "type": "array",
+          },
           "maxIterations": {
             "maximum": 50,
             "minimum": 1,
@@ -755,6 +784,16 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "text": {
             "type": "string",
           },
+          "type": {
+            "enum": [
+              "select",
+              "build",
+              "test",
+              "run",
+              "deploy",
+            ],
+            "type": "string",
+          },
         },
         "required": [
           "text",
@@ -805,6 +844,19 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "gates": {
+            "items": {
+              "enum": [
+                "select",
+                "build",
+                "test",
+                "run",
+                "deploy",
+              ],
+              "type": "string",
+            },
+            "type": "array",
+          },
           "id": {
             "type": "string",
           },
@@ -836,6 +888,19 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "dependsOn": {
             "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "gates": {
+            "items": {
+              "enum": [
+                "select",
+                "build",
+                "test",
+                "run",
+                "deploy",
+              ],
               "type": "string",
             },
             "type": "array",
@@ -1029,6 +1094,74 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "label",
           "enabled",
           "updatedAt",
+        ],
+        "type": "object",
+      },
+      "GateConfig": {
+        "properties": {
+          "criteria": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "gate": {
+            "enum": [
+              "select",
+              "build",
+              "test",
+              "run",
+              "deploy",
+            ],
+            "type": "string",
+          },
+          "maxIterations": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer",
+          },
+          "promptId": {
+            "type": "string",
+          },
+          "promptText": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "gate",
+          "criteria",
+        ],
+        "type": "object",
+      },
+      "GateRunSummary": {
+        "properties": {
+          "gate": {
+            "enum": [
+              "select",
+              "build",
+              "test",
+              "run",
+              "deploy",
+            ],
+            "type": "string",
+          },
+          "iterations": {
+            "minimum": 0,
+            "type": "integer",
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "skipped",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "gate",
+          "status",
+          "iterations",
         ],
         "type": "object",
       },
@@ -2107,6 +2240,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "gateSummaries": {
+            "items": {
+              "$ref": "#/components/schemas/GateRunSummary",
+            },
+            "type": "array",
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/GateConfig",
+            },
+            "type": "array",
+          },
           "maxIterations": {
             "type": "number",
           },
@@ -2652,6 +2797,16 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "text": {
             "type": "string",
           },
+          "type": {
+            "enum": [
+              "select",
+              "build",
+              "test",
+              "run",
+              "deploy",
+            ],
+            "type": "string",
+          },
         },
         "required": [
           "_id",
@@ -2723,6 +2878,19 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "properties": {
           "dependsOn": {
             "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "gates": {
+            "items": {
+              "enum": [
+                "select",
+                "build",
+                "test",
+                "run",
+                "deploy",
+              ],
               "type": "string",
             },
             "type": "array",
@@ -3600,6 +3768,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   "currentId": {
                     "type": "string",
                   },
+                  "gates": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
                 },
                 "required": [
                   "behavior",
@@ -3772,6 +3946,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               },
             },
             "description": "Success",
+          },
+          "400": {
+            "description": "Seed batch would introduce a dependency cycle",
           },
         },
         "summary": "Seed criteria in bulk",
@@ -5043,6 +5220,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "provider",
             "required": false,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "disappeared",
+              ],
               "type": "string",
             },
           },
@@ -8562,6 +8751,21 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "search",
             "required": false,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "enum": [
+                "select",
+                "build",
+                "test",
+                "run",
+                "deploy",
+              ],
               "type": "string",
             },
           },

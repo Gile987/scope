@@ -10,7 +10,7 @@ The entire stack — application code, Azure infrastructure, and Kubernetes GitO
 flowchart TB
     subgraph App["scope-mt-app"]
         CLI["CLI"]
-        Portal["Portal (Vue.js)"]
+        Portal["Portal (React)"]
         API["API (Express)"]
         Judge["Judge"]
         GW["AI Gateway<br/><i>Rust TLS proxy</i>"]
@@ -74,7 +74,7 @@ flowchart TB
 |---------|-------------|
 | `api` | Express.js REST API — routes requests to workers, streams logs via SSE |
 | `cli` | CLI tool for submitting tasks, streaming logs, and running benchmarks |
-| `portal` | Vue.js web UI for managing runs, viewing insights, and configuring criteria |
+| `portal` | React web UI for managing runs, viewing insights, and configuring criteria |
 | `judge` | Evaluates coding agent output against scenario criteria |
 | `shared` | Shared types and utilities |
 | `workers/coder-acp-claude-code` | Claude Code agent via Agent Client Protocol (ACP) |
@@ -88,6 +88,13 @@ flowchart TB
 3. **Stream** — Workers publish real-time log events to Redis Pub/Sub. The API relays these as SSE streams to the CLI/Portal.
 4. **Judge** — After the agent completes, the worker invokes the Judge to evaluate output against criteria. Results (pass/fail per criterion, scores) are persisted to CosmosDB.
 5. **Snapshot** — Each iteration's workspace is snapshotted to Blob Storage for later inspection.
+
+> A run may execute as a sequence of **gates** (`Select → Build → Test → Run →
+> Deploy`), each with its own prompt, criteria subset, and iteration budget,
+> running stop-on-failure against the same workspace. Requests without an explicit
+> gate configuration run as a single Select gate (identical to before). See the
+> [gates design doc](../design/gates.md) and
+> [app-design.md](app-design.md#gates--multi-phase-evaluation-pipeline).
 
 ## Benchmarking Configuration
 

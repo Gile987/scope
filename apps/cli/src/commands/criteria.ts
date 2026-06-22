@@ -11,6 +11,7 @@ import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 import { mapYamlCriterion } from "../utils/yaml-mappers.js";
+import { formatGateList, parseGateListOption, type GateId } from "../utils/gates.js";
 
 export function registerCriteriaCommands(program: Command): void {
 // ─── Criteria management ─────────────────────────────────────────────────────
@@ -45,7 +46,7 @@ criteria
         process.exit(1);
       }
 
-      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
+      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[]; gates?: GateId[] }>;
       if (items.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner("No criteria found."));
         return;
@@ -60,6 +61,7 @@ criteria
           tableFormatter: (c: any) => value(c.id),
         },
         { key: 'dependsOn', label: 'Deps', formatter: (c: any) => String((c.dependsOn ?? []).length) },
+        { key: 'gates', label: 'Gates', formatter: (c: any) => formatGateList(c.gates) },
         { key: 'prompt', label: 'Prompt', tableFormatter: (c: any) => {
           const prompt = c.prompt.replace(/\n/g, ' ');
           const truncated = prompt.length > 60 ? prompt.substring(0, 60) + '…' : prompt;
@@ -93,7 +95,7 @@ criteria
       }
 
       const c = await response.json() as {
-        id: string; prompt: string; dependsOn?: string[];
+        id: string; prompt: string; dependsOn?: string[]; gates?: GateId[];
         dependents: string[]; createdAt: string; updatedAt?: string;
       };
 
@@ -102,6 +104,7 @@ criteria
           { key: 'id', label: 'ID' },
           { key: 'prompt', label: 'Prompt' },
           { key: 'dependsOn', label: 'Depends On', formatter: (item: any) => (item.dependsOn ?? []).join(', ') || '(none)' },
+          { key: 'gates', label: 'Gates', formatter: (item: any) => formatGateList(item.gates) },
           { key: 'dependents', label: 'Dependents', formatter: (item: any) => (item.dependents ?? []).join(', ') || '(none)' },
           { key: 'createdAt', label: 'Created' },
           { key: 'updatedAt', label: 'Updated' },
@@ -120,6 +123,7 @@ criteria
       } else {
         console.log(`${label('Depends on:')} ${dimTimestamp('(none — root criterion)')}`);
       }
+      console.log(`${label('Gates:')}      ${value(formatGateList(c.gates))}`);
       if (c.dependents.length > 0) {
         console.log(`${label('Dependents:')} ${c.dependents.map(d => value(d)).join(', ')}`);
       }
@@ -137,6 +141,7 @@ criteria
   .requiredOption("--id <id>", "Criterion ID (lowercase snake_case)")
   .requiredOption("--prompt <prompt>", "Evaluation prompt for the judge")
   .option("-d, --depends-on <ids...>", "IDs of parent criteria")
+  .option("--gates <gates...>", "Compatible gates (space/comma separated), or all/* for unrestricted")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
@@ -147,6 +152,8 @@ criteria
       if (options.dependsOn && options.dependsOn.length > 0) {
         body.dependsOn = options.dependsOn;
       }
+      const gates = parseGateListOption(options.gates);
+      if (gates !== undefined) body.gates = gates;
 
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria`, {
         method: "POST",
@@ -174,15 +181,18 @@ criteria
   .requiredOption("-i, --id <id>", "Criterion ID")
   .option("--prompt <prompt>", "New evaluation prompt")
   .option("-d, --depends-on <ids...>", "New parent criteria IDs (replaces all)")
+  .option("--gates <gates...>", "New compatible gates (space/comma separated), or all/* for unrestricted")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
       if (options.prompt !== undefined) body.prompt = options.prompt;
       if (options.dependsOn !== undefined) body.dependsOn = options.dependsOn;
+      const gates = parseGateListOption(options.gates);
+      if (gates !== undefined) body.gates = gates;
 
       if (Object.keys(body).length === 0) {
-        console.error(errorText("Error: provide --prompt and/or --depends-on"));
+        console.error(errorText("Error: provide --prompt, --depends-on, and/or --gates"));
         process.exit(1);
       }
 
@@ -425,7 +435,7 @@ criteria
       }
 
       // Parse all criteria from files (supports multi-document YAML)
-      const allCriteria: Array<{ id: string; prompt: string; dependsOn?: string[] }> = [];
+      const allCriteria: Array<{ id: string; prompt: string; dependsOn?: string[]; gates?: GateId[] }> = [];
       const parseErrors: string[] = [];
 
       for (const file of yamlFiles) {
@@ -439,7 +449,7 @@ criteria
             const doc = docs[docIdx].toJSON();
             if (!doc || typeof doc !== 'object') continue;
 
-            const criterion = mapYamlCriterion(doc, fname, docIdx);
+            const criterion = mapYamlCriterion(doc, fname, docIdx, { includeGates: true });
             if (criterion) {
               allCriteria.push(criterion);
             } else {
@@ -469,7 +479,8 @@ criteria
       for (const c of allCriteria) {
         const deps = (c.dependsOn ?? []).length;
         const depsStr = deps > 0 ? ` ${dimTimestamp(`(${deps} dep${deps > 1 ? 's' : ''})`)}` : '';
-        console.log(`  ${value(c.id)}${depsStr}`);
+        const gatesStr = c.gates ? ` ${dimTimestamp(`[${formatGateList(c.gates)}]`)}` : '';
+        console.log(`  ${value(c.id)}${depsStr}${gatesStr}`);
       }
 
       if (options.dryRun) {

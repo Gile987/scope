@@ -12,8 +12,8 @@ import { spawn, ChildProcess } from "node:child_process";
 import * as acp from "@agentclientprotocol/sdk";
 import type { McpServerConfig } from "shared";
 
-/** Default ACP session timeout: 30 minutes */
-const DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+/** Default ACP session timeout: 60 minutes */
+const DEFAULT_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
 
 export interface ACPClientOptions {
   command: string;
@@ -224,6 +224,92 @@ export async function selectReasoningEffort(
 }
 
 /**
+ * Canonical ACP session-mode id for the Copilot CLI's autopilot mode.
+ *
+ * The CLI advertises session modes by their well-known ACP URL ids (e.g.
+ * `https://agentclientprotocol.com/protocol/session-modes#agent`), not bare
+ * names. Autopilot is the only mode that enables allow-all and runs commands
+ * (build/test) without interactive permission prompts.
+ */
+export const AUTOPILOT_MODE_ID =
+  "https://agentclientprotocol.com/protocol/session-modes#autopilot";
+
+/**
+ * Switch the ACP session into autopilot mode so the agent can execute commands
+ * (e.g. `npm run build`) headlessly without interactive permission prompts.
+ *
+ * The default session mode is `agent`, in which execute/bash tool calls are
+ * denied non-interactively — the `--yolo` CLI flag does not change the ACP
+ * session mode. We therefore explicitly set the mode to autopilot, matching by
+ * its canonical URL id (with an `endsWith("#autopilot")` safety net). If no
+ * autopilot mode is advertised, we log a warning and continue.
+ */
+export async function selectPermissionMode(
+  connection: acp.ClientSideConnection,
+  sessionResult: acp.NewSessionResponse,
+  onLog: (message: string) => void
+): Promise<void> {
+  const availableModes = sessionResult.modes?.availableModes ?? [];
+  const availableIds = availableModes.map((m: { id: string }) => m.id);
+
+  const autopilotMode =
+    availableModes.find((m: { id: string }) => m.id === AUTOPILOT_MODE_ID) ??
+    availableModes.find((m: { id: string }) => m.id.endsWith("#autopilot"));
+
+  if (!autopilotMode) {
+    onLog(`Warning: autopilot mode not available (available: [${availableIds.join(", ")}]) — commands may be denied`);
+    return;
+  }
+
+  // The very first set_mode immediately after session creation can fail with a
+  // transient error (cold start: the CLI process is not yet ready to accept the
+  // request). Retry once before giving up so a single race does not silently
+  // leave the session in `agent` mode where commands are denied.
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await connection.setSessionMode({
+        sessionId: sessionResult.sessionId,
+        modeId: autopilotMode.id,
+      });
+      onLog(`Set session mode to autopilot (${autopilotMode.id})`);
+      return;
+    } catch (err) {
+      const detail = formatModeError(err);
+      if (attempt < maxAttempts) {
+        onLog(`Warning: failed to set autopilot session mode (attempt ${attempt}/${maxAttempts}): ${detail} — retrying`);
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
+      }
+      onLog(`Warning: failed to set autopilot session mode after ${maxAttempts} attempts: ${detail}`);
+    }
+  }
+}
+
+/**
+ * Serialize an unknown rejection into a human-readable string. ACP/JSON-RPC
+ * rejections are plain objects (e.g. `{ code, message, data }`), not `Error`
+ * instances, so `String(err)` yields an unhelpful `[object Object]`. Prefer the
+ * `message`, then a JSON dump, and fall back to `String` only as a last resort.
+ */
+export function formatModeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object") {
+    const maybeMessage = (err as { message?: unknown }).message;
+    if (typeof maybeMessage === "string" && maybeMessage.length > 0) {
+      const code = (err as { code?: unknown }).code;
+      return code !== undefined ? `${maybeMessage} (code ${String(code)})` : maybeMessage;
+    }
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  }
+  return String(err);
+}
+
+/**
  * Run an ACP session with the Copilot CLI (or any ACP-compatible agent).
  */
 export async function runACPSession(
@@ -361,19 +447,12 @@ export async function runACPSession(
       await selectReasoningEffort(connection, sessionResult, reasoningEffort, onLog);
     }
 
-    // Set permission mode to bypass all permission checks (yolo mode).
-    // The ACP client already auto-approves everything, so this eliminates
-    // the unnecessary permission request roundtrips.
-    const availableModes = sessionResult.modes?.availableModes?.map((m: { id: string }) => m.id) ?? [];
-    if (availableModes.includes("bypassPermissions")) {
-      await connection.setSessionMode({
-        sessionId: sessionResult.sessionId,
-        modeId: "bypassPermissions",
-      });
-      onLog(`Set session mode to bypassPermissions`);
-    } else {
-      onLog(`bypassPermissions mode not available (available: ${availableModes.join(", ")})`);
-    }
+    // Set the session into autopilot mode so the agent can execute commands
+    // (build/test) headlessly. The default `agent` mode denies execute/bash
+    // tool calls non-interactively, and the `--yolo` CLI flag does not change
+    // the ACP session mode. The ACP client also auto-approves any residual
+    // permission requests.
+    await selectPermissionMode(connection, sessionResult, onLog);
 
     // Send prompt
     onLog(`Sending prompt...`);

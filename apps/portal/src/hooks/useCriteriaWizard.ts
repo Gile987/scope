@@ -1,20 +1,25 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { slugify } from "@/lib/utils";
 import { toast } from "sonner";
+import { gatesSatisfyInvariant, type GateId } from "@/lib/gates";
 
 export interface UseCriteriaWizardOptions {
   /** Pre-populated parent dependency IDs */
   initialDependsOn?: string[];
+  /** Pre-populated gate compatibility (defaults to ["select"]) */
+  initialGates?: GateId[];
+  /** Gates that cannot be unselected in the gate picker (e.g. inline creation) */
+  lockedGates?: GateId[];
   /** Called with the new criterion ID after successful creation */
   onSuccess: (id: string) => void;
 }
 
-export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCriteriaWizardOptions) {
+export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedGates, onSuccess }: UseCriteriaWizardOptions) {
   const queryClient = useQueryClient();
 
   // Wizard step (1 or 2)
@@ -25,6 +30,7 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
   const [id, setId] = useState("");
   const [idManuallyEdited, setIdManuallyEdited] = useState(false);
   const [dependsOn, setDependsOn] = useState<string[]>(initialDependsOn);
+  const [gates, setGates] = useState<GateId[] | undefined>(initialGates ?? ["select"]);
 
   // Step 2 fields
   const [prompt, setPrompt] = useState("");
@@ -49,6 +55,34 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
   );
   const canContinue = behavior.trim().length > 0 && id.trim().length > 0 && idValid && !idExists && !criteriaLoading;
 
+  // Gate compatibility lookup for parent/child suggestion filtering.
+  const criterionGatesById = useMemo(() => {
+    const map = new Map<string, GateId[] | undefined>();
+    for (const c of existingCriteria) map.set(c.id, c.gates);
+    return map;
+  }, [existingCriteria]);
+
+  // Keep parent/child selections consistent with the chosen gates. A parent must
+  // be compatible with every gate this criterion applies to; a child may only be
+  // compatible with a subset of them. Incompatible entries (e.g. AI suggestions
+  // generated before the gates were narrowed) are pruned so the DAG invariant the
+  // API enforces can never be violated from the wizard. Unknown ids (criteria not
+  // yet loaded) are retained until their gates are known.
+  useEffect(() => {
+    setDependsOn((prev) => {
+      const next = prev.filter(
+        (pid) => !criterionGatesById.has(pid) || gatesSatisfyInvariant(criterionGatesById.get(pid), gates),
+      );
+      return next.length === prev.length ? prev : next;
+    });
+    setAcceptedChildren((prev) => {
+      const next = prev.filter(
+        (cid) => !criterionGatesById.has(cid) || gatesSatisfyInvariant(gates, criterionGatesById.get(cid)),
+      );
+      return next.length === prev.length ? prev : next;
+    });
+  }, [gates, criterionGatesById, suggestedParents, suggestedChildren]);
+
   // Auto-suggest ID from behavior (unless manually edited)
   const handleBehaviorChange = useCallback(
     (value: string) => {
@@ -62,7 +96,8 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
 
   // Generate prompt mutation
   const generateMutation = useMutation({
-    mutationFn: (behaviorText: string) => api.generateCriteriaPrompt(behaviorText),
+    mutationFn: ({ behavior: behaviorText, gates: targetGates }: { behavior: string; gates?: GateId[] }) =>
+      api.generateCriteriaPrompt(behaviorText, undefined, targetGates),
     onSuccess: (data) => {
       setPrompt(data.prompt);
       setAiGenerated(true);
@@ -131,8 +166,8 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
   // Step 1 → Step 2
   const handleContinue = useCallback(() => {
     setStep(2);
-    generateMutation.mutate(behavior.trim());
-  }, [behavior, generateMutation]);
+    generateMutation.mutate({ behavior: behavior.trim(), gates });
+  }, [behavior, gates, generateMutation]);
 
   // Step 2 → Submit
   const handleCreate = useCallback(() => {
@@ -141,16 +176,17 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
       id: id.trim(),
       prompt: prompt.trim(),
       dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
+      gates,
     });
-  }, [id, prompt, dependsOn, createMutation]);
+  }, [id, prompt, dependsOn, gates, createMutation]);
 
   // Regenerate prompt
   const handleRegenerate = useCallback(() => {
     setSuggestedParents([]);
     setSuggestedChildren([]);
     setAcceptedChildren([]);
-    generateMutation.mutate(behavior.trim());
-  }, [behavior, generateMutation]);
+    generateMutation.mutate({ behavior: behavior.trim(), gates });
+  }, [behavior, gates, generateMutation]);
 
   // Reset all state to initial values
   const reset = useCallback(() => {
@@ -159,12 +195,13 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
     setId("");
     setIdManuallyEdited(false);
     setDependsOn(initialDependsOn);
+    setGates(initialGates ?? ["select"]);
     setPrompt("");
     setAiGenerated(false);
     setSuggestedParents([]);
     setSuggestedChildren([]);
     setAcceptedChildren([]);
-  }, [initialDependsOn]);
+  }, [initialDependsOn, initialGates]);
 
   return {
     // State
@@ -177,6 +214,9 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
     setIdManuallyEdited,
     dependsOn,
     setDependsOn,
+    gates,
+    setGates,
+    lockedGates,
     prompt,
     setPrompt,
     aiGenerated,

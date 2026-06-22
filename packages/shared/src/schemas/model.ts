@@ -50,5 +50,6 @@ export const ListModelsQuerySchema = z
   .object({
     agentId: z.string().optional(),
     provider: z.string().optional(),
+    status: z.enum(["active", "disappeared"]).optional(),
   })
   .openapi("ListModelsQuery");

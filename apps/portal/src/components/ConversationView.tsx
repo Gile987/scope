@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Bot, Scale, CheckCircle2, AlertCircle, Brain, Wrench, ChevronRight, ChevronDown, Loader2 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
+import { GATE_METADATA } from "@/lib/gates";
 import type { ConversationTurn, ToolCall } from "@/types";
 import { useHarExtraction, type ConversationSegment } from "@/hooks/useHarExtraction";
 
@@ -62,7 +63,13 @@ export function ConversationView({ turns, task, runId, attemptRunId }: Conversat
 
       {/* Turn messages */}
       {turns.map((turn) => (
-        <TurnMessages key={turn.iteration} turn={turn} runId={runId} attemptRunId={attemptRunId} />
+        <TurnMessages
+          key={turn.iteration}
+          turn={turn}
+          scopedIteration={turn.iteration}
+          runId={runId}
+          attemptRunId={attemptRunId}
+        />
       ))}
     </div>
   );
@@ -174,12 +181,13 @@ function ToolCallInline({ tc }: { tc: ToolCall }) {
   );
 }
 
-function TurnMessages({ turn, runId, attemptRunId }: { turn: ConversationTurn; runId: string; attemptRunId?: string }) {
+function TurnMessages({ turn, scopedIteration, runId, attemptRunId }: { turn: ConversationTurn; scopedIteration: number; runId: string; attemptRunId?: string }) {
   const hasHar = !!turn.harUrl;
   const { data: harData, isLoading: harLoading } = useHarExtraction(runId, turn.iteration, hasHar, attemptRunId);
 
   const segments = harData?.segments ?? [];
   const hasContentSegment = segments.some((s) => s.type === "content");
+  const gateLabel = turn.gate ? GATE_METADATA[turn.gate].label : undefined;
 
   return (
     <>
@@ -187,7 +195,7 @@ function TurnMessages({ turn, runId, attemptRunId }: { turn: ConversationTurn; r
       <div className="flex items-center gap-3 my-2">
         <div className="flex-1 h-px bg-border" />
         <span className="text-xs text-muted-foreground font-medium">
-          Iteration {turn.iteration}
+          {gateLabel ? `${gateLabel} · ` : ""}Iteration {scopedIteration}
           {turn.passed && (
             <CheckCircle2 className="inline h-3 w-3 ml-1 text-emerald-600" />
           )}

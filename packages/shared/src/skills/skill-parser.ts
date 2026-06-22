@@ -7,6 +7,13 @@
  * Parses a SKILL.md file according to the Agent Skills Specification:
  * https://agentskills.io/specification
  *
+ * Parsing is intentionally lenient so that off-spec skills can still be
+ * imported: the spec-required `name` and `description` fields are coerced to
+ * strings and default to empty when missing rather than throwing. Spec
+ * violations (including absent required fields) are surfaced downstream by the
+ * validator as non-blocking warnings. The only unrecoverable failure is YAML
+ * frontmatter that cannot be parsed at all.
+ *
  * Uses `gray-matter` to extract YAML frontmatter and markdown body.
  */
 
@@ -34,21 +41,25 @@ export interface ParsedSkill {
  *
  * @param rawContent - The full text of the SKILL.md file
  * @returns ParsedSkill with frontmatter fields and markdown body
- * @throws Error if required frontmatter fields are missing or invalid types
+ * @throws Error if the YAML frontmatter cannot be parsed, or if the required
+ *   `description` field is missing/empty (a skill with no description cannot be
+ *   activated by an agent, so it is rejected rather than imported as a dead
+ *   entry)
  */
 export function parseSkillMd(rawContent: string): ParsedSkill {
   const { data, content } = matter(rawContent);
 
-  if (!data.name || typeof data.name !== 'string') {
-    throw new Error('SKILL.md missing required frontmatter field: name');
-  }
-
+  // description is the agent's activation trigger and has no fallback — a skill
+  // without one can never be invoked, so we reject it (rather than importing a
+  // dead entry). name, by contrast, is recoverable from the parent directory
+  // per spec, so a missing/non-string name is coerced to empty and the resolver
+  // fills it in; the validator reports the resulting spec violation as a warning.
   if (!data.description || typeof data.description !== 'string') {
     throw new Error('SKILL.md missing required frontmatter field: description');
   }
 
   const frontmatter: SkillFrontmatter = {
-    name: data.name,
+    name: data.name != null ? String(data.name) : '',
     description: data.description,
   };
 

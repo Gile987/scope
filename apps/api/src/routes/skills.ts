@@ -69,7 +69,10 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
-// Unified skill search — merges internal DB + skills.sh results
+// Unified skill search — merges internal DB + skills.sh registry results.
+// skills.sh is an external search index (https://skills.sh) that catalogs public
+// Agent Skills across GitHub. Results from skills.sh can be imported into Scope,
+// at which point their content is fetched directly from GitHub.
 // MUST be defined before /:id(*) to avoid being caught by the wildcard
 apiRoute(ctx.app, ctx.registry, {
   method: "get",
@@ -154,7 +157,7 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
-// Search external skills registry only (skills.sh)
+// Search external skills registry only (skills.sh — a public search index over GitHub-hosted Agent Skills)
 apiRoute(ctx.app, ctx.registry, {
   method: "get",
   path: "/api/v1/skills/search/external",

@@ -16,9 +16,13 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2, Eye, GitBranch, Download } from "lucide-react";
 import { truncate } from "@/lib/utils";
 import { criteriaToExportYaml, downloadAsFile } from "@/lib/criteria-export";
+import { formatGateList, GATE_METADATA, isCriterionCompatibleWithGate, type GateId } from "@/lib/gates";
+import { useVisibleGates } from "@/hooks/useVisibleGates";
 import {
   ListLayout,
   FilterRail,
+  FilterSection,
+  CheckboxFilterGroup,
   ClearFiltersLink,
   CustomizeColumnsLink,
   CustomizeColumnsPanel,
@@ -30,12 +34,14 @@ import {
   type DataTableColumn,
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
-const FILTER_KEYS = [] as const;
+const FILTER_KEYS = ["gate"] as const;
 
 const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "id", label: "ID", required: true },
   { id: "prompt", label: "Prompt" },
+  { id: "gates", label: "Gates" },
   { id: "dependencies", label: "Dependencies" },
   { id: "actions", label: "Actions" },
 ];
@@ -48,6 +54,7 @@ export function CriteriaList() {
   const { id: activeId } = useParams<{ id?: string }>();
   const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
   const visibility = useHiddenColumns({ storageKey: "criteria" });
+  const visibleGates = useVisibleGates();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
@@ -79,8 +86,15 @@ export function CriteriaList() {
   });
 
   const sortedCriteria = useMemo(() => {
-    if (!state.sort) return criteria;
-    const sorted = [...criteria];
+    const selectedGates = state.getFilterList("gate") as GateId[];
+    // A criterion matches if it is compatible with any selected gate (OR).
+    // Criteria with no explicit gates are compatible with every gate.
+    const filtered =
+      selectedGates.length === 0
+        ? criteria
+        : criteria.filter((c) => selectedGates.some((g) => isCriterionCompatibleWithGate(c.gates, g)));
+    if (!state.sort) return filtered;
+    const sorted = [...filtered];
     sorted.sort((a, b) => {
       const av = sortKey(a, state.sort!);
       const bv = sortKey(b, state.sort!);
@@ -90,7 +104,17 @@ export function CriteriaList() {
     });
     if (state.sortDir === "desc") sorted.reverse();
     return sorted;
-  }, [criteria, state.sort, state.sortDir]);
+  }, [criteria, state.sort, state.sortDir, state]);
+
+  const gateFilterOptions = useMemo(
+    () =>
+      visibleGates.map((gate) => ({
+        value: gate,
+        label: GATE_METADATA[gate].label,
+        count: criteria.filter((c) => isCriterionCompatibleWithGate(c.gates, gate)).length,
+      })),
+    [criteria, visibleGates],
+  );
 
   const total = sortedCriteria.length;
   const pageStart = (state.page - 1) * state.pageSize;
@@ -133,6 +157,17 @@ export function CriteriaList() {
       hidden: visibility.isHidden("prompt"),
       cell: (c) => (
         <span className="text-sm text-muted-foreground">{truncate(c.prompt, 100)}</span>
+      ),
+    },
+    {
+      id: "gates",
+      header: "Gates",
+      width: "160px",
+      hidden: visibility.isHidden("gates"),
+      cell: (c) => (
+        <Badge variant="secondary" className="text-xs">
+          {formatGateList(c.gates)}
+        </Badge>
       ),
     },
     {
@@ -199,7 +234,16 @@ export function CriteriaList() {
 
   return (
     <ListLayout
-      title="Criteria"
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          Criteria
+          <HelpTooltip
+            text="Reusable evaluation rules the judge applies to agent output. Criteria can depend on each other; descendants are skipped when a parent fails."
+            docs="criteria"
+            size="md"
+          />
+        </span>
+      }
       description="Manage evaluation criteria and their dependencies"
       railStorageKey="criteria"
       actions={
@@ -242,7 +286,13 @@ export function CriteriaList() {
             </>
           }
         >
-          {null}
+          <FilterSection title="Gate" storageKey="criteria-gate">
+            <CheckboxFilterGroup
+              options={gateFilterOptions}
+              selected={state.getFilterList("gate")}
+              onToggle={(value) => state.toggleFilterValue("gate", value)}
+            />
+          </FilterSection>
         </FilterRail>
       }
       secondaryPanel={
@@ -299,7 +349,7 @@ export function CriteriaList() {
           loading={isLoading}
           loadingRows={state.pageSize}
           emptyState={
-            state.search ? "No criteria match your search" : "No criteria defined yet"
+            state.hasActiveFilters ? "No criteria match your filters" : "No criteria defined yet"
           }
         />
         <Pagination

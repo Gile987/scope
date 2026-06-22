@@ -7,6 +7,8 @@ import {
   ConversationTurn,
   DetailedEvaluationResult,
   DependencyGraph,
+  GateId,
+  ToolCall,
 } from "shared";
 import { getCriteriaProvider } from "shared/criteria-provider-factory";
 import { createJudgeStrategy } from "./judge-strategies.js";
@@ -19,6 +21,10 @@ export interface EvaluationInput {
   personaInstructions?: string;
   /** Called when an individual criterion result is available (for real-time progress) */
   onProgress?: (result: CriterionResult) => void;
+  /** Which gate is being evaluated. Defaults to select. */
+  gate?: GateId;
+  /** This iteration's captured tool calls/outputs, exposed to the judge via read_tool_outputs. */
+  toolCalls?: ToolCall[];
 }
 
 export interface EvaluationResult {
@@ -95,6 +101,8 @@ export async function evaluateWorkspace(
       conversationHistory: input.conversationHistory,
       personaInstructions: input.personaInstructions,
       onProgress: input.onProgress,
+      gate: input.gate,
+      toolCalls: input.toolCalls,
     });
 
     console.log(

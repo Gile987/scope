@@ -277,6 +277,21 @@ describe("request schemas", () => {
         CreateRequestInputSchema.parse({ scenario: { criteria: ["c"] } }),
       ).toThrow();
     });
+
+    it("accepts gates with free-text promptText and optional promptId", () => {
+      const result = CreateRequestInputSchema.parse({
+        scenario: validScenario,
+        gates: [
+          { gate: "select", criteria: ["c"] },
+          { gate: "build", promptText: "Build the project.", criteria: ["builds_clean"] },
+        ],
+      });
+      expect(result.gates?.[1]).toMatchObject({
+        gate: "build",
+        promptText: "Build the project.",
+      });
+      expect(result.gates?.[1]?.promptId).toBeUndefined();
+    });
   });
 
   describe("RequestResponseSchema", () => {

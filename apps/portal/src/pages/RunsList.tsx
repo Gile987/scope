@@ -241,6 +241,11 @@ function AggregateProgress({
 // (used as a dependency by useColumnOrder via the column-id signature).
 const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "id", label: "ID", required: true },
+  // Status and Outcome lead the row so the run's headline result is visible
+  // before the metadata that produced it (per
+  // growth-ecosystems/scope-project#127).
+  { id: "status", label: "Status" },
+  { id: "outcome", label: "Outcome" },
   { id: "submission", label: "Submission" },
   { id: "task", label: "Task" },
   { id: "criteria", label: "Criteria" },
@@ -254,8 +259,6 @@ const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "extensions", label: "Extensions" },
   { id: "profile", label: "Profile" },
   { id: "priority", label: "Priority" },
-  { id: "status", label: "Status" },
-  { id: "outcome", label: "Outcome" },
   { id: "report", label: "Report" },
   { id: "attempt", label: "Attempt" },
   { id: "turns", label: "Turns" },
@@ -263,6 +266,7 @@ const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "duration", label: "Duration" },
   { id: "tokens", label: "Tokens" },
   { id: "created", label: "Created" },
+  { id: "updated", label: "Updated" },
 ];
 const COLUMN_IDS = COLUMN_OPTIONS.map((o) => o.id);
 
@@ -335,12 +339,12 @@ function NumericComparatorRow({
   onChange: (next: { op: IterationOp; value: string }) => void;
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-16 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
+    <div className="flex min-w-0 items-center gap-1.5">
+      <span className="w-12 shrink-0 truncate text-xs font-medium text-muted-foreground" title={label}>{label}</span>
       <Select value={op} onValueChange={(v) => onChange({ op: v as IterationOp, value })}>
         <SelectTrigger
           aria-label={`${ariaLabel} comparator`}
-          className="h-8 w-16 px-2 text-xs"
+          className="h-8 w-14 shrink-0 px-2 text-xs"
         >
           <SelectValue />
         </SelectTrigger>
@@ -371,7 +375,7 @@ function NumericComparatorRow({
           if (!Number.isFinite(n) || n < 0) return;
           onChange({ op, value: String(Math.floor(n)) });
         }}
-        className="h-8 flex-1 text-xs"
+        className="h-8 w-full min-w-0 flex-1 text-xs"
       />
     </div>
   );
@@ -395,16 +399,16 @@ export function RunsList() {
   // Persist sort preference to localStorage
   usePersistentSort(state, { pageKey: "runs" });
 
-  // Column visibility — persisted under scope:hidden-columns:runs:v2.
-  // The `:v2` suffix forces the new default set to apply for users who had
-  // an older preference stored under the unversioned key.
-  // Default visible: ID, Submission, Task, Criteria, Worker, Version, OS, MCP,
-  // Skills, Extensions, Profile, Priority, Status, Outcome.
+  // Column visibility — persisted under scope:hidden-columns:runs:v3.
+  // The `:v3` suffix forces the new default set + order to apply for users
+  // who had an older preference stored under a previous versioned key.
+  // Default visible: ID, Status, Outcome, Submission, Task, Criteria, Worker,
+  // Version, OS, MCP, Skills, Extensions, Profile, Priority.
   // Hidden by default (opt-in via Customize columns): Report, Attempt,
   // Turns, LLM Calls, Duration, Tokens, Created. Model is shown next to
   // Worker so users can see what model each run used at a glance.
   const columnVisibility = useHiddenColumns({
-    storageKey: "runs:v2",
+    storageKey: "runs:v3",
     defaultHidden: [
       "report",
       "attempt",
@@ -413,13 +417,14 @@ export function RunsList() {
       "duration",
       "tokens",
       "created",
+      "updated",
     ],
   });
   // Persisted column order (matches the customize panel). The `id` column is
   // marked `required` in COLUMN_OPTIONS and is locked from reordering by the
   // panel; `actions` lives outside COLUMN_OPTIONS and is always pinned right.
   const columnOrder = useColumnOrder({
-    storageKey: "runs:v2",
+    storageKey: "runs:v3",
     columnIds: COLUMN_IDS,
   });
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -961,10 +966,10 @@ export function RunsList() {
     () => availableAgents.find((a) => a._id === effectiveWorker),
     [availableAgents, effectiveWorker],
   );
-  const availableModels = effectiveAgent?.supportedModels ?? [];
-
-  // Effort-aware model capabilities for the dialog.
-  const { capabilitiesMap: resubmitCapabilitiesMap } = useModelCapabilities(effectiveWorker || undefined);
+  const { capabilitiesMap: resubmitCapabilitiesMap, activeModelIds: resubmitActiveModelIds } = useModelCapabilities(effectiveWorker || undefined);
+  const availableModels = resubmitActiveModelIds.length > 0
+    ? resubmitActiveModelIds
+    : (effectiveAgent?.supportedModels ?? []);
   const effectiveModel = activeProfile
     ? activeProfile.version.model
     : (resubmitOverrides.model ?? selectedRunsSummary.model);
@@ -1524,7 +1529,17 @@ export function RunsList() {
       sortable: true,
       width: "120px",
       hidden: columnVisibility.isHidden("status"),
-      cell: (r) => (r.run?.status ? <StatusBadge status={r.run.status} /> : <span className="text-xs text-muted-foreground">—</span>),
+      cell: (r) =>
+        r.run?.status ? (
+          <StatusBadge
+            status={r.run.status}
+            worker={r.run.worker}
+            lastHeartbeatAt={r.run.lastHeartbeatAt}
+            startedAt={r.run.startedAt}
+          />
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
     },
     {
       id: "outcome",
@@ -1635,6 +1650,16 @@ export function RunsList() {
       width: "160px",
       hidden: columnVisibility.isHidden("created"),
       cell: (r) => <span className="text-xs text-muted-foreground">{formatDate(r.createdAt)}</span>,
+    },
+    {
+      id: "updated",
+      header: "Updated",
+      sortable: true,
+      width: "160px",
+      hidden: columnVisibility.isHidden("updated"),
+      cell: (r) => (
+        <span className="text-xs text-muted-foreground">{r.updatedAt ? formatDate(r.updatedAt) : "–"}</span>
+      ),
     },
     {
       id: "actions",
@@ -1756,7 +1781,7 @@ export function RunsList() {
     <ListLayout
       title="Runs"
       description={
-        estimatedTotal != null
+        estimatedTotal != null && estimatedTotal > 0
           ? `~${estimatedTotal.toLocaleString()} runs total`
           : "Manage and monitor benchmark runs"
       }
@@ -3133,6 +3158,8 @@ function sortKey(r: Run, col: string): string | number {
     }
     case "created":
       return new Date(r.createdAt).getTime();
+    case "updated":
+      return r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
     default:
       return "";
   }

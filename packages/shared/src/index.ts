@@ -8,6 +8,7 @@ export * from "./storage/index.js";
 export * from "./judge/index.js";
 export * from "./graph/index.js";
 export * from "./criteria/index.js";
+export * from "./gates/index.js";
 export * from "./prompt-features/index.js";
 export * from "./task-prompts/index.js";
 export * from "./report-templates/index.js";
