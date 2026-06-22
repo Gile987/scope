@@ -12,6 +12,12 @@
 # =============================================================================
 set -euo pipefail
 
+# Ensure common tool paths are available (Docker Desktop, Homebrew, etc.)
+# Scripts may run in environments that only inherit the system PATH.
+for p in /usr/local/bin /opt/homebrew/bin "$HOME/.docker/bin"; do
+  [[ -d "$p" ]] && [[ ":$PATH:" != *":$p:"* ]] && export PATH="$p:$PATH"
+done
+
 # Read SCOPE_SHARED_INFRA flag safely (no source to avoid special char issues)
 if [ -f .env.local ]; then
   SCOPE_SHARED_INFRA=$(grep "^SCOPE_SHARED_INFRA=" .env.local | cut -d= -f2- || true)
