@@ -8,10 +8,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Read port offset
-PORT_OFFSET=0
-if [ -f ".port-offset" ]; then
-  PORT_OFFSET=$(cat .port-offset | tr -d '[:space:]')
+# Read port offset (env var takes precedence over file)
+if [ -z "${PORT_OFFSET:-}" ]; then
+  PORT_OFFSET=0
+  if [ -f ".port-offset" ]; then
+    PORT_OFFSET=$(cat .port-offset | tr -d '[:space:]')
+  fi
 fi
 
 CLUSTER_NAME="scope-${PORT_OFFSET:-0}"

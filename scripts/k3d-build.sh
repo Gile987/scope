@@ -13,10 +13,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Read port offset for registry port
-PORT_OFFSET=0
-if [ -f ".port-offset" ]; then
-  PORT_OFFSET=$(cat .port-offset | tr -d '[:space:]')
+# Read port offset for registry port (env var takes precedence over file)
+if [ -z "${PORT_OFFSET:-}" ]; then
+  PORT_OFFSET=0
+  if [ -f ".port-offset" ]; then
+    PORT_OFFSET=$(cat .port-offset | tr -d '[:space:]')
+  fi
 fi
 
 REGISTRY_PORT=$((5050 + PORT_OFFSET))
@@ -52,7 +54,7 @@ get_target() {
   local name=$1
   case "$name" in
     gateway) echo "runtime" ;;
-    *) echo "prod" ;;
+    *) echo "" ;;
   esac
 }
 
@@ -85,20 +87,22 @@ build_and_push() {
   # --file is relative to repo root; context may differ per service
   local abs_dockerfile="$REPO_ROOT/$dockerfile"
 
+  local target_arg=""
+  if [ -n "$target" ]; then
+    target_arg="--target $target"
+  fi
+
   echo "  Building $name..."
-  docker build \
+  if ! docker build \
     --file "$abs_dockerfile" \
     --tag "$image" \
-    --target "$target" \
+    ${target_arg} \
     ${build_args} \
     --quiet \
-    "$context" 2>/dev/null || \
-  docker build \
-    --file "$abs_dockerfile" \
-    --tag "$image" \
-    ${build_args} \
-    --quiet \
-    "$context"
+    "$context"; then
+    echo "  ⚠ Build failed for $name — skipping"
+    return 0
+  fi
 
   echo "  Pushing $name..."
   docker push "$image" --quiet
