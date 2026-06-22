@@ -57,10 +57,12 @@ export function validateSkillFrontmatter(
   const errors: SkillValidationError[] = [];
   const warnings: SkillValidationWarning[] = [];
 
-  // name: required (presence is a hard error); length/format limits are
+  // name: a missing name is recoverable (SkillResolver falls back to the parent
+  // directory name, which the spec requires the name to match), so it is a
+  // non-blocking warning rather than an error. Length/format limits are likewise
   // non-blocking warnings so off-spec skills can still be imported.
   if (!frontmatter.name) {
-    errors.push({ field: 'name', message: 'name is required' });
+    warnings.push({ field: 'name', message: 'name missing - recovered from parent directory' });
   } else {
     if (frontmatter.name.length > 64) {
       warnings.push({ field: 'name', message: `name must be at most 64 characters (got ${frontmatter.name.length})` });

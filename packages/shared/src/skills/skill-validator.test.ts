@@ -43,10 +43,10 @@ describe('validateSkillFrontmatter', () => {
     expect(result.warnings).toHaveLength(0);
   });
 
-  it('should fail for empty name', () => {
+  it('should warn (not fail) for empty name', () => {
     const result = validateSkillFrontmatter({ ...validFrontmatter, name: '' });
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContainEqual(
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toContainEqual(
       expect.objectContaining({ field: 'name' })
     );
   });

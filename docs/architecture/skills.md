@@ -94,7 +94,7 @@ The one hard requirement is a present, non-empty `description`. The `description
 | **`description` missing or empty** | **Hard error — rejected** (skill would be unusable) |
 | **Unparseable YAML frontmatter** | **Hard error — rejected** |
 
-`validateSkillFrontmatter` (`skill-validator.ts`) returns `errors` only for a missing `name`/`description` and `warnings` for every spec-constraint violation. `SkillResolver.resolve` never throws on validation; it merges any errors and warnings into the stored `validationWarnings`. (The empty-`description` case never reaches the validator because `skill-parser.ts` rejects it first.)
+`validateSkillFrontmatter` (`skill-validator.ts`) returns an `error` only for a missing `description` and `warnings` for every other issue (a missing `name`, which is recovered from the parent directory, and every spec-constraint violation). `SkillResolver.resolve` never throws on validation; it merges any errors and warnings into the stored `validationWarnings`. (The empty-`description` case never reaches the validator because `skill-parser.ts` rejects it first.)
 
 #### Discovery
 
@@ -199,7 +199,7 @@ When runs are resubmitted:
 | `packages/shared/src/skills/skill-extractor.ts` | Download + extract skill archives to workspace |
 | `packages/shared/src/skills/skill-prompt.ts` | Discovery prompt generation (`<available_skills>` XML) |
 | `packages/shared/src/skills/skill-resolver.ts` | Resolve skill slugs → revision refs via GitHub |
-| `packages/shared/src/skills/skill-parser.ts` | Parse SKILL.md frontmatter (hard-requires `name`/`description`) |
+| `packages/shared/src/skills/skill-parser.ts` | Parse SKILL.md frontmatter (hard-requires `description`; recovers missing `name`) |
 | `packages/shared/src/skills/skill-validator.ts` | Lenient spec validation → non-blocking `validationWarnings` |
 | `packages/shared/src/queue/queue-processor.ts` | Orchestrates skill extraction before agent processing |
 | `apps/api/src/index.ts` | REST endpoints for skills, revisions, archives |
