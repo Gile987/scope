@@ -214,6 +214,16 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.array(CriteriaResponseSchema),
   handler: async (req, res) => {
     const q = req.query.q;
+    const idsParam = req.query.ids;
+
+    // `q` (regex search) and `ids` (exact set + optional ancestor resolution)
+    // are mutually exclusive: applying the regex filter first would silently
+    // drop ancestors that don't match `q`, yielding an incomplete dependency tree.
+    if (q && idsParam) {
+      res.status(400).json({ error: "Query params 'q' and 'ids' are mutually exclusive" });
+      return;
+    }
+
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (q) {
       filter.$or = [
@@ -225,7 +235,6 @@ apiRoute(ctx.app, ctx.registry, {
     criteria.sort((a, b) => a.id.localeCompare(b.id));
 
     // Filter by IDs with optional ancestor resolution
-    const idsParam = req.query.ids;
     if (idsParam) {
       const requestedIds = idsParam.split(",").map(s => s.trim()).filter(Boolean);
       const includeAncestors = req.query.ancestors === "true";

@@ -2,33 +2,24 @@
 // Licensed under the MIT License.
 
 import type { CriteriaConfig } from "@/types";
+import { stringify as yamlStringify } from "yaml";
 
 /**
- * Convert a single criterion to YAML document string.
- * Uses block literal style for multi-line prompts.
+ * Convert a single criterion to a YAML document string.
+ *
+ * Uses the `yaml` library's serializer (not string interpolation) so values
+ * containing YAML-special characters are quoted/escaped safely and the output
+ * round-trips through the importer. Matches the CLI `criteria export` output.
  */
 function criterionToYaml(c: CriteriaConfig): string {
-  const lines: string[] = [`id: ${c.id}`];
-
-  // Use block literal (|) for prompts, inline for single-line
-  const promptLines = c.prompt.trimEnd().split("\n");
-  if (promptLines.length > 1 || c.prompt.length > 80) {
-    lines.push("prompt: |");
-    for (const line of promptLines) {
-      lines.push(`  ${line}`);
-    }
-  } else {
-    lines.push(`prompt: ${c.prompt.trimEnd()}`);
-  }
-
+  const doc: Record<string, unknown> = {
+    id: c.id,
+    prompt: c.prompt,
+  };
   if (c.dependsOn && c.dependsOn.length > 0) {
-    lines.push("depends_on:");
-    for (const dep of c.dependsOn) {
-      lines.push(`  - ${dep}`);
-    }
+    doc.depends_on = c.dependsOn;
   }
-
-  return lines.join("\n");
+  return yamlStringify(doc, { lineWidth: 0 }).trimEnd();
 }
 
 /**

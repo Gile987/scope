@@ -253,11 +253,15 @@ export function CriteriaList() {
             className="gap-1.5"
             disabled={criteria.length === 0}
             onClick={() => {
-              const yaml = criteriaToExportYaml(criteria);
-              downloadAsFile(yaml, "criteria.yaml");
+              try {
+                const yaml = criteriaToExportYaml(criteria);
+                downloadAsFile(yaml, "criteria.yaml");
+              } catch (err) {
+                toast.error(`Failed to export: ${err instanceof Error ? err.message : String(err)}`);
+              }
             }}
           >
-            <Download className="h-4 w-4" /> Export YAML
+            <Download className="h-4 w-4" /> Export All
           </Button>
           <Link to="/criteria/graph">
             <Button variant="outline" className="gap-1.5">

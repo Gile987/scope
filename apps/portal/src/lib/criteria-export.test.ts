@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect } from "vitest";
+import { parse } from "yaml";
 import { criteriaToExportYaml, resolveWithAncestors } from "./criteria-export";
 
 describe("criteriaToExportYaml", () => {
@@ -52,6 +53,16 @@ describe("criteriaToExportYaml", () => {
     const criteria = [{ id: "root", prompt: "Root criterion." }];
     const yaml = criteriaToExportYaml(criteria);
     expect(yaml).not.toContain("depends_on");
+  });
+
+  it("safely escapes YAML-special characters so output round-trips", () => {
+    const criteria = [
+      { id: "tricky", prompt: "key: value # not a comment {a: b}" },
+    ];
+    const yaml = criteriaToExportYaml(criteria);
+    const parsed = parse(yaml) as { id: string; prompt: string };
+    expect(parsed.id).toBe("tricky");
+    expect(parsed.prompt).toBe("key: value # not a comment {a: b}");
   });
 });
 

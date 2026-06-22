@@ -29,6 +29,7 @@ import {
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
 import { criteriaToExportYaml, downloadAsFile } from "@/lib/criteria-export";
+import { toast } from "sonner";
 
 export function CriterionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -226,9 +227,13 @@ export function CriterionDetail() {
                 variant="outline"
                 className="gap-1.5"
                 onClick={async () => {
-                  const subset = await api.listCriteria(undefined, { ids: [criterion.id], ancestors: true });
-                  const yaml = criteriaToExportYaml(subset);
-                  downloadAsFile(yaml, `${criterion.id}.yaml`);
+                  try {
+                    const subset = await api.listCriteria(undefined, { ids: [criterion.id], ancestors: true });
+                    const yaml = criteriaToExportYaml(subset);
+                    downloadAsFile(yaml, `${criterion.id}.yaml`);
+                  } catch (err) {
+                    toast.error(`Failed to export: ${err instanceof Error ? err.message : String(err)}`);
+                  }
                 }}
               >
                 <Download className="h-4 w-4" /> Export YAML
