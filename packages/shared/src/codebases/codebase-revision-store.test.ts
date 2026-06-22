@@ -92,6 +92,16 @@ function makeRevisionCollection(seed: CodebaseRevisionDocument[] = []) {
       }
       return { deletedCount: before - docs.length };
     },
+    async updateMany(filter: UnknownRecord, update: { $set?: Partial<CodebaseRevisionDocument> }) {
+      let modifiedCount = 0;
+      for (const doc of docs) {
+        if (matches(doc as unknown as UnknownRecord, filter)) {
+          if (update.$set) Object.assign(doc, update.$set);
+          modifiedCount += 1;
+        }
+      }
+      return { matchedCount: modifiedCount, modifiedCount };
+    },
   };
 }
 
@@ -149,6 +159,30 @@ describe("CodebaseRevisionStore", () => {
     await expect(revisionStore.getByRef("pamela-fox-site@r1")).resolves.toEqual(first);
     await expect(revisionStore.getLatest(codebase._id)).resolves.toEqual(second);
     await expect(revisionStore.listByCodebase(codebase._id)).resolves.toEqual([second, first]);
+  });
+
+  it("soft-deletes revisions by codebase: hidden from listings but still resolvable by id/ref", async () => {
+    const { revisionStore, codebase } = await makeStores();
+    const first = await revisionStore.createRevision(revisionInput(codebase));
+    const second = await revisionStore.createRevision(revisionInput(codebase));
+
+    const count = await revisionStore.softDeleteByCodebase(codebase._id);
+    expect(count).toBe(2);
+
+    // Listings exclude soft-deleted revisions by default.
+    await expect(revisionStore.listByCodebase(codebase._id)).resolves.toEqual([]);
+    await expect(revisionStore.getLatest(codebase._id)).resolves.toBeNull();
+
+    // includeDeleted brings them back for listings.
+    await expect(revisionStore.listByCodebase(codebase._id, { includeDeleted: true })).resolves.toHaveLength(2);
+    await expect(revisionStore.getLatest(codebase._id, { includeDeleted: true })).resolves.toMatchObject({
+      revisionNumber: 2,
+    });
+
+    // Direct id/ref/number lookups still resolve so runs keep working.
+    await expect(revisionStore.get(first._id)).resolves.toMatchObject({ _id: first._id });
+    await expect(revisionStore.getByRef(second.ref)).resolves.toMatchObject({ _id: second._id });
+    await expect(revisionStore.getByNumber(codebase._id, 1)).resolves.toMatchObject({ _id: first._id });
   });
 
   it("throws when the parent codebase does not exist", async () => {

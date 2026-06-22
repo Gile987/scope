@@ -11,10 +11,9 @@
  * `--strip-components` guesswork.
  */
 
-import { execFileSync } from "child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join, resolve, sep } from "path";
 
 /** Result of normalizing an archive to a root-level tar.gz. */
 export interface NormalizedArchive {
@@ -49,21 +48,84 @@ function countFiles(dir: string): number {
 }
 
 /**
+ * Resolve a zip entry's path inside `destDir`, guarding against Zip Slip.
+ * Rejects absolute paths and any `..` traversal that would escape `destDir`.
+ *
+ * Exported for unit testing.
+ */
+export function resolveSafeEntryPath(destDir: string, entryName: string): string {
+  // Normalize separators; zip entries use forward slashes by spec.
+  const normalized = entryName.split("/").join(sep);
+  const target = resolve(destDir, normalized);
+  const root = resolve(destDir);
+  if (target !== root && !target.startsWith(root + sep)) {
+    throw new Error(`Refusing to extract zip entry outside target directory: '${entryName}'`);
+  }
+  return target;
+}
+
+/**
+ * Safely extract a zip buffer into `destDir` using yauzl (no shell-out).
+ * Every entry path is validated to stay within `destDir` before any write.
+ */
+async function extractZipBuffer(buffer: Buffer, destDir: string): Promise<void> {
+  const yauzl = await import("yauzl");
+  const { createWriteStream, mkdirSync } = await import("fs");
+
+  await new Promise<void>((resolvePromise, reject) => {
+    yauzl.fromBuffer(buffer, { lazyEntries: true }, (err, zipfile) => {
+      if (err || !zipfile) {
+        reject(err ?? new Error("Failed to open zip archive"));
+        return;
+      }
+
+      const fail = (e: unknown) => {
+        zipfile.close();
+        reject(e instanceof Error ? e : new Error(String(e)));
+      };
+
+      zipfile.on("error", fail);
+      zipfile.on("end", () => resolvePromise());
+
+      zipfile.on("entry", (entry) => {
+        try {
+          const target = resolveSafeEntryPath(destDir, entry.fileName);
+          if (entry.fileName.endsWith("/")) {
+            // Directory entry.
+            mkdirSync(target, { recursive: true });
+            zipfile.readEntry();
+            return;
+          }
+          mkdirSync(dirname(target), { recursive: true });
+          zipfile.openReadStream(entry, (streamErr, readStream) => {
+            if (streamErr || !readStream) {
+              fail(streamErr ?? new Error("Failed to read zip entry"));
+              return;
+            }
+            const out = createWriteStream(target);
+            readStream.on("error", fail);
+            out.on("error", fail);
+            out.on("close", () => zipfile.readEntry());
+            readStream.pipe(out);
+          });
+        } catch (entryErr) {
+          fail(entryErr);
+        }
+      });
+
+      zipfile.readEntry();
+    });
+  });
+}
+
+/**
  * Extract an archive buffer (tar.gz, tar, or zip) into `destDir`.
  * Detects the format from magic bytes.
  */
 export async function extractArchiveBuffer(buffer: Buffer, destDir: string): Promise<void> {
   const format = detectFormat(buffer);
   if (format === "zip") {
-    const tmp = mkdtempSync(join(tmpdir(), "codebase-zip-"));
-    const zipPath = join(tmp, "archive.zip");
-    const { writeFileSync } = await import("fs");
-    writeFileSync(zipPath, buffer);
-    try {
-      execFileSync("unzip", ["-q", "-o", zipPath, "-d", destDir], { stdio: "pipe" });
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
+    await extractZipBuffer(buffer, destDir);
     return;
   }
   // tar.gz / tar — the `tar` lib auto-detects gzip.

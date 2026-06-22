@@ -58,22 +58,29 @@ export class CodebaseRevisionStore {
   }
 
   /** Get the latest (highest-numbered) revision for a codebase, or null. */
-  async getLatest(codebaseId: string): Promise<CodebaseRevisionDocument | null> {
+  async getLatest(
+    codebaseId: string,
+    opts?: { includeDeleted?: boolean }
+  ): Promise<CodebaseRevisionDocument | null> {
+    const filter: Record<string, unknown> = { codebaseId };
+    if (!opts?.includeDeleted) filter.deletedAt = { $exists: false };
     const [latest] = await this.collection
-      .find({ codebaseId })
+      .find(filter as object)
       .sort({ revisionNumber: -1 })
       .limit(1)
       .toArray();
     return latest ?? null;
   }
 
-  /** List revisions for a codebase, newest first. */
+  /** List revisions for a codebase, newest first (excludes soft-deleted by default). */
   async listByCodebase(
     codebaseId: string,
-    opts?: { limit?: number }
+    opts?: { limit?: number; includeDeleted?: boolean }
   ): Promise<CodebaseRevisionDocument[]> {
+    const filter: Record<string, unknown> = { codebaseId };
+    if (!opts?.includeDeleted) filter.deletedAt = { $exists: false };
     return this.collection
-      .find({ codebaseId })
+      .find(filter as object)
       .sort({ revisionNumber: -1 })
       .limit(opts?.limit ?? 100)
       .toArray();
@@ -115,8 +122,25 @@ export class CodebaseRevisionStore {
   }
 
   /**
-   * Delete all revisions for a codebase. Used when a codebase is hard-deleted
-   * to clean up associated revision data.
+   * Soft-delete all revisions for a codebase by setting `deletedAt`. Used when a
+   * codebase is soft-deleted so its revision history is hidden from listings but
+   * the immutable snapshot data is preserved (runs that reference a specific
+   * `codebaseRevisionId` still resolve via {@link get}/{@link getByRef}).
+   *
+   * @returns the number of revisions newly soft-deleted.
+   */
+  async softDeleteByCodebase(codebaseId: string): Promise<number> {
+    const result = await this.collection.updateMany(
+      { codebaseId, deletedAt: { $exists: false } } as object,
+      { $set: { deletedAt: new Date() } }
+    );
+    return result.modifiedCount;
+  }
+
+  /**
+   * Hard-delete all revisions for a codebase. Permanently removes revision data;
+   * intended only for rollback of a just-created codebase (e.g. an atomic
+   * archive-create that failed) — not for normal deletion, which soft-deletes.
    *
    * @returns the number of deleted revision documents.
    */

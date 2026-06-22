@@ -232,7 +232,9 @@ export function registerCodebasesRoutes(ctx: RouteContext): void {
           res.status(404).json({ error: "Codebase not found" });
           return;
         }
-        await ctx.codebaseRevisionStore.deleteByCodebase(req.params.id);
+        // Cascade the soft-delete to revisions: they are hidden from listings but
+        // preserved so runs referencing a specific revision still resolve.
+        await ctx.codebaseRevisionStore.softDeleteByCodebase(req.params.id);
         res.status(204).send();
       } catch (error) {
         next(error);

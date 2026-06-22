@@ -79,6 +79,13 @@ export interface CodebaseRevisionDocument {
   creator?: string;               // Who created the revision (provenance)
   resolvedAt: Date;               // When the snapshot was fetched/resolved
   createdAt: Date;
+  /**
+   * Soft-delete timestamp. Set when the parent codebase is soft-deleted
+   * (cascade). Revisions are never hard-deleted in normal operation so that
+   * runs referencing this revision keep resolving; lookups by id/ref/number
+   * intentionally ignore this flag, while listings exclude soft-deleted.
+   */
+  deletedAt?: Date;
 }
 
 /**

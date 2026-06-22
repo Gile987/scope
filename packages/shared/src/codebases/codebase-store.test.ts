@@ -145,15 +145,52 @@ describe("CodebaseStore", () => {
     await expect(store.allocateRevisionNumber("missing-codebase")).resolves.toBeNull();
   });
 
-  it("ensures unique slugs by suffixing taken bases", async () => {
-    const collection = makeCodebaseCollection();
+  it("retries create on an E11000 slug collision and re-derives a unique slug", async () => {
+    // Simulate a concurrent create winning the slug race: the first insert with a
+    // given slug throws E11000 and the winner's row is recorded, so the retry's
+    // ensureUniqueSlug suffixes the slug.
+    const docs: CodebaseDocument[] = [];
+    let firstInsert = true;
+    const collection = {
+      async findOne(filter: UnknownRecord) {
+        return docs.find((doc) => matches(doc, filter)) ?? null;
+      },
+      async insertOne(doc: CodebaseDocument) {
+        if (firstInsert) {
+          firstInsert = false;
+          // Another process grabbed this slug between our check and insert.
+          docs.push({ ...doc, _id: "rival" });
+          throw Object.assign(new Error("E11000 duplicate key error: slug"), {
+            code: 11000,
+            keyPattern: { slug: 1 },
+          });
+        }
+        docs.push({ ...doc });
+        return { insertedId: doc._id };
+      },
+    };
     const store = new CodebaseStore(collection as unknown as Collection<CodebaseDocument>);
-    const privateStore = store as unknown as CodebaseStorePrivate;
 
-    await expect(privateStore.ensureUniqueSlug("free-slug")).resolves.toBe("free-slug");
-    await store.create({ name: "Taken", slug: "taken", sourceType: "archive" });
-    await store.create({ name: "Taken 2", slug: "taken-2", sourceType: "archive" });
+    const created = await store.create({ name: "Race", sourceType: "archive" });
 
-    await expect(privateStore.ensureUniqueSlug("taken")).resolves.toBe("taken-3");
+    expect(created.slug).toBe("race-2");
+    expect(created._id).not.toBe("rival");
+  });
+
+  it("propagates a non-slug duplicate-key error without retrying", async () => {
+    const collection = {
+      async findOne() {
+        return null;
+      },
+      async insertOne() {
+        throw Object.assign(new Error("E11000 duplicate key error: _id"), {
+          code: 11000,
+          keyPattern: { _id: 1 },
+        });
+      },
+    };
+    const store = new CodebaseStore(collection as unknown as Collection<CodebaseDocument>);
+
+    await expect(store.create({ name: "Boom", sourceType: "archive" })).rejects.toThrow(/E11000/);
   });
 });

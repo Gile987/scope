@@ -128,6 +128,10 @@ The key is based on the immutable revision UUID, not the revision number or prov
 
 Both Git tarballs and uploaded archives are normalized by `normalizeToRootTarGz()`: the input is extracted, a single top-level wrapper directory is unwrapped when present, and the contents are re-archived at the root. Workers can therefore extract every revision directly into the workspace root without `--strip-components` logic.
 
+Extraction (`extractArchiveBuffer()`) detects the format from magic bytes. Tar/tar.gz use `node-tar` (safe by default). Zip uploads are extracted in-process with `yauzl` — never a shell-out — and every entry path is validated to stay within the destination directory (absolute paths and `..` traversal are rejected) to prevent Zip Slip.
+
+Deletion is soft and cascading: `DELETE /api/v1/codebases/:id` sets `deletedAt` on the codebase and on all of its revisions. Soft-deleted revisions are hidden from listings (`listByCodebase`, `getLatest`) but are **never destroyed** — lookups by id/ref/number still resolve them, so historical and in-flight runs that reference a specific `codebaseRevisionId` keep working. The slug stays reserved so refs remain stable. Only the atomic-create rollback path performs a hard delete.
+
 ### 4. Delivery (Worker)
 
 When a worker dequeues a request, `QueueProcessor` runs setup first so the worker-specific `workspacePath` is available. If `RequestDocument.codebaseRevisionId` is set, it then:
@@ -172,7 +176,7 @@ Codebase routes are registered in `apps/api/src/routes/codebases.ts`.
 | `POST` | `/api/v1/codebases` | Create a codebase. Git: JSON metadata; the API best-effort resolves the latest revision on creation (returns `firstRevision`, does not fail creation on resolve error). Archive: `multipart` with the `archive` file, creating the codebase plus its first revision atomically (rolls back on failure) |
 | `GET` | `/api/v1/codebases/:id` | Fetch one codebase by `_id` |
 | `PATCH` | `/api/v1/codebases/:id` | Update mutable metadata (`name`, `description`, `defaultBranch`) |
-| `DELETE` | `/api/v1/codebases/:id` | Soft-delete a codebase and delete its revisions |
+| `DELETE` | `/api/v1/codebases/:id` | Soft-delete a codebase and cascade-soft-delete its revisions |
 | `GET` | `/api/v1/codebases/:id/revisions` | List revisions for a codebase, newest first (`limit` 1–200, default 50) |
 | `POST` | `/api/v1/codebases/:id/revisions` | Resolve a new Git revision from `requestedRef` / latest |
 | `POST` | `/api/v1/codebases/:id/upload` | Upload an archive as a new archive revision (`multipart` field `archive`) |

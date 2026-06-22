@@ -6,6 +6,20 @@ import { randomUUID } from "crypto";
 import type { CodebaseDocument, CodebaseSourceType } from "../types/codebase.js";
 import { slugifyCodebaseName } from "./codebase-revision-id.js";
 
+/**
+ * True if `error` is a MongoDB duplicate-key error (E11000) caused by the unique
+ * `slug` index — i.e. a concurrent create grabbed the same slug first.
+ */
+function isSlugDuplicateKeyError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const e = error as { code?: number; keyPattern?: Record<string, unknown>; message?: string };
+  if (e.code !== 11000) return false;
+  // Prefer the structured keyPattern; fall back to the message for drivers/mocks
+  // that omit it.
+  if (e.keyPattern) return "slug" in e.keyPattern;
+  return typeof e.message === "string" && e.message.includes("slug");
+}
+
 /** Input for creating a new codebase entity. */
 export interface CreateCodebaseInput {
   name: string;
@@ -70,24 +84,41 @@ export class CodebaseStore {
     if (!baseSlug) {
       throw new Error("Could not derive a valid slug from the codebase name");
     }
-    const slug = await this.ensureUniqueSlug(baseSlug);
 
     const now = new Date();
-    const doc: CodebaseDocument = {
-      _id: randomUUID(),
-      slug,
-      name: input.name,
-      ...(input.description ? { description: input.description } : {}),
-      sourceType: input.sourceType,
-      ...(input.source ? { source: input.source } : {}),
-      ...(input.defaultBranch ? { defaultBranch: input.defaultBranch } : {}),
-      revisionCounter: 0,
-      ...(input.creator ? { creator: input.creator } : {}),
-      createdAt: now,
-    };
+    // `ensureUniqueSlug` + insert is check-then-act: two concurrent creates with
+    // the same name can both pass the check, then one insert loses the race on
+    // the unique slug index (E11000). Retry a few times, re-deriving the slug.
+    const maxAttempts = 5;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const slug = await this.ensureUniqueSlug(baseSlug);
+      const doc: CodebaseDocument = {
+        _id: randomUUID(),
+        slug,
+        name: input.name,
+        ...(input.description ? { description: input.description } : {}),
+        sourceType: input.sourceType,
+        ...(input.source ? { source: input.source } : {}),
+        ...(input.defaultBranch ? { defaultBranch: input.defaultBranch } : {}),
+        revisionCounter: 0,
+        ...(input.creator ? { creator: input.creator } : {}),
+        createdAt: now,
+      };
 
-    await this.collection.insertOne(doc as CodebaseDocument);
-    return doc;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await this.collection.insertOne(doc as CodebaseDocument);
+        return doc;
+      } catch (error) {
+        if (isSlugDuplicateKeyError(error) && attempt < maxAttempts) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    // Unreachable: the loop either returns or throws.
+    throw new Error(`Could not allocate a unique slug for '${baseSlug}'`);
   }
 
   /** Patch mutable metadata. Returns the updated document, or null if not found. */
