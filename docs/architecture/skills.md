@@ -135,6 +135,26 @@ The skill's `origin` is set to `"skills-sh"` to indicate it was discovered throu
 
 Skills are registered via the API by providing a GitHub source (`owner/repo`) and skill name. The API stores the skill record and immediately attempts to auto-resolve it: it fetches `SKILL.md` from GitHub at the latest commit, parses its YAML frontmatter (name, description, license, compatibility, etc.), uploads a tar.gz archive of the skill directory to Blob Storage, and creates the first `SkillRevision`. If auto-resolution fails (e.g., GitHub 404, network error), the skill record is still saved and the user can retry via `POST /api/v1/skills/:id/resolve`.
 
+#### Lenient spec validation
+
+Frontmatter is validated against the [Agent Skills spec](https://agentskills.io/specification), but validation is **non-blocking** for everything except a usable `description`. Spec *constraint* violations (length/format) do **not** fail the import — they are collected into the revision's `validationWarnings` array, which is surfaced in the Portal (`SkillDetail.tsx` banner + resolve toasts) and the CLI. This lets off-spec skills (e.g. an upstream skill with a 1057-char description) be imported while still flagging the deviation.
+
+The one hard requirement is a present, non-empty `description`. The `description` is the metadata an agent loads at startup to decide *when* to activate a skill (per the spec's progressive-disclosure model), and it has no fallback — a skill without one can never be invoked, so it is rejected at parse time (`skill-parser.ts`) rather than imported as a dead entry. A missing `name`, by contrast, is recoverable: the spec requires `name` to match the parent directory, so the parser tolerates an absent name and `SkillResolver.resolve` falls back to the directory name.
+
+| Frontmatter issue | Behavior |
+|-------------------|----------|
+| `name` longer than 64 characters | Warning, imports |
+| `name` not lowercase alphanumeric + hyphens (bad format) | Warning, imports |
+| `name` starts/ends with a hyphen or has consecutive hyphens | Warning, imports |
+| `name` does not match the parent directory | Warning, imports |
+| `name` missing | Recovered from the directory name, warning, imports |
+| `description` longer than 1024 characters | Warning, imports |
+| `compatibility` longer than 500 characters | Warning, imports |
+| **`description` missing or empty** | **Hard error — rejected** (skill would be unusable) |
+| **Unparseable YAML frontmatter** | **Hard error — rejected** |
+
+`validateSkillFrontmatter` (`skill-validator.ts`) returns an `error` only for a missing `description` and `warnings` for every other issue (a missing `name`, which is recovered from the parent directory, and every spec-constraint violation). `SkillResolver.resolve` never throws on validation; it merges any errors and warnings into the stored `validationWarnings`. (The empty-`description` case never reaches the validator because `skill-parser.ts` rejects it first.)
+
 #### Discovery
 
 `GET /api/v1/skills/discover?source=owner/repo` lists every `SKILL.md` found under well-known directories (`skills/`, `.agents/skills/`, `.github/skills/`, `.claude/skills/`, `.copilot/skills/`, `.roo/skills/`, `.cursor/skills/`, and the repo root). Implementation: a single recursive Trees API call to enumerate the repo, then per-skill best-effort frontmatter parsing via `raw.githubusercontent.com` (which doesn't count against the API rate limit). The portal exposes this as a multi-step import wizard: the user enters a repository, picks one or more discovered skills, and the wizard fires parallel `POST /api/v1/skills` requests with per-skill progress feedback. Returns `404` if the repository does not exist, `400` for malformed sources, and `502` for upstream GitHub errors (including rate limits — set `GITHUB_TOKEN` on the API to raise the limit).
@@ -238,6 +258,9 @@ When runs are resubmitted:
 | `packages/shared/src/skills/skill-extractor.ts` | Download + extract skill archives to workspace |
 | `packages/shared/src/skills/skill-prompt.ts` | Discovery prompt generation (`<available_skills>` XML) |
 | `packages/shared/src/skills/skill-resolver.ts` | Resolve skill slugs → revision refs via GitHub |
+| `packages/shared/src/skills/skill-parser.ts` | Parse SKILL.md frontmatter (hard-requires `description`; recovers missing `name`) |
+| `packages/shared/src/skills/skill-validator.ts` | Lenient spec validation → non-blocking `validationWarnings` |
 | `packages/shared/src/queue/queue-processor.ts` | Orchestrates skill extraction before agent processing |
 | `apps/api/src/index.ts` | REST endpoints for skills, revisions, archives |
 | `apps/portal/src/pages/RunsList.tsx` | Skills column + resubmit override UI |
+| `apps/portal/src/pages/SkillDetail.tsx` | Skill detail view + `validationWarnings` banner/toasts |
