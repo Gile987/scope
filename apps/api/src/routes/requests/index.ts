@@ -699,6 +699,31 @@ apiRoute(ctx.app, ctx.registry, {
     if (model) {
       const compoundModelId = `${workerType}:${model}`;
       const modelDoc = await ctx.modelCollection.findOne({ _id: compoundModelId });
+
+      // Preflight: warn (or reject) if the model has disappeared from the provider
+      if (modelDoc?.disappearedAt) {
+        const MS_PER_DAY = 86_400_000;
+        const daysSinceDisappeared = Math.floor(
+          (Date.now() - new Date(modelDoc.disappearedAt).getTime()) / MS_PER_DAY
+        );
+        if (daysSinceDisappeared >= 1) {
+          // Model has been gone for over 24 hours — hard reject
+          res.status(400).json({
+            error: `Model "${model}" is no longer available for agent "${workerType}"`,
+            errorCode: "model_unavailable_for_worker",
+            disappearedAt: modelDoc.disappearedAt,
+            lastSeenAt: modelDoc.lastSeenAt,
+            supportedModels: agentDoc?.supportedModels?.filter(m => m !== model),
+          });
+          return;
+        }
+        // Disappeared recently — warn but allow (scanner lag / transient)
+        warnings.push(
+          `Model "${model}" was last seen at ${modelDoc.lastSeenAt.toISOString()} and ` +
+          `disappeared at ${modelDoc.disappearedAt.toISOString()}. It may not be available at runtime.`
+        );
+      }
+
       if (modelDoc?.capabilities) {
         modelCapabilities = modelDoc.capabilities;
         const supportedEfforts = modelDoc.capabilities.reasoningEffort;

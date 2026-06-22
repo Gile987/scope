@@ -344,6 +344,9 @@ export interface RunState {
   outcome?: "succeeded" | "failed" | "finished";
   result?: string;
   error?: string;
+  /** Machine-readable error classification (e.g. "model_unavailable", "model_discovery_failed", "auth_failed").
+   *  Set alongside `error` when the failure has a well-known cause. */
+  errorCode?: string;
   /** Full blob URL pointing to this attempt's JSONL log blob in the `logs`
    *  container, e.g. `https://<account>.blob.core.windows.net/logs/{requestId}/runs/{runId}/run.jsonl`.
    *  Set at submit time so the SSE replay endpoint can read it directly from
