@@ -30,8 +30,11 @@ import {
   parseExtensionSpec,
   parseProfileSpec,
   resolveAgentVersion,
+  validateGateConfigs,
+  isCriterionCompatibleWithGate,
+  orderGates,
 } from "shared";
-import type { ProfileDocument, ProfileVersionDocument } from "shared";
+import type { ProfileDocument, ProfileVersionDocument, GateConfig, GateId } from "shared";
 import { apiRoute } from "../../openapi/api-route.js";
 import { VALID_WORKERS } from "../../route-context.js";
 import type {
@@ -59,6 +62,95 @@ const upload = multer({ dest: tmpdir() });
 /** Maximum number of profile variations (including the base profile) allowed in one submit. */
 const MAX_PROFILE_VARIATIONS = 25;
 
+/**
+ * Server-side validation of a request's gate configuration (docs/design/gates.md
+ * §4.3). Returns an error string when invalid, or null when valid.
+ *
+ * Store-backed checks layered on top of the pure `validateGateConfigs` shape
+ * check: every criterion must exist and be compatible with its gate, and every
+ * gate's prompt must resolve to a prompt whose `type` equals the gate. The
+ * downward-closed compatibility invariant (enforced by the criteria editor)
+ * guarantees a compatible criterion's ancestors are also compatible, so no
+ * extra dependency check is needed here.
+ */
+async function validateGatesForSubmit(
+  ctx: RouteContext,
+  gates: GateConfig[],
+  defaultMaxIterations: number | undefined,
+): Promise<string | null> {
+  const shapeErrors = validateGateConfigs(gates, defaultMaxIterations);
+  if (shapeErrors.length > 0) return shapeErrors.join(" ");
+
+  // Collect all referenced criterion ids and resolve them in one query.
+  const allCriterionIds = [...new Set(gates.flatMap((g) => g.criteria ?? []))];
+  const criteriaDocs = allCriterionIds.length
+    ? await ctx.criteriaCollection.find({ id: { $in: allCriterionIds } }).toArray()
+    : [];
+  const criteriaById = new Map(criteriaDocs.map((c) => [c.id, c]));
+
+  for (const gc of gates) {
+    for (const cid of gc.criteria ?? []) {
+      const doc = criteriaById.get(cid);
+      if (!doc) {
+        return `Gate '${gc.gate}' references unknown criterion '${cid}'.`;
+      }
+      if (!isCriterionCompatibleWithGate(doc.gates as GateId[] | undefined, gc.gate)) {
+        return `Criterion '${cid}' is not compatible with the '${gc.gate}' gate.`;
+      }
+    }
+
+    // Every configured gate must reference a prompt whose type === gate.
+    // The Select gate's prompt is the request task (resolved separately and
+    // guaranteed to exist), so its prompt is not checked here.
+    if (gc.gate === "select") continue;
+    if (!gc.promptId) {
+      return `Gate '${gc.gate}' is missing a prompt.`;
+    }
+    const prompt = await ctx.taskPromptCollection.findOne({ _id: gc.promptId });
+    if (!prompt) {
+      return `Gate '${gc.gate}' references unknown prompt '${gc.promptId}'.`;
+    }
+    // Legacy prompts without a type are treated as 'select'.
+    const promptType = (prompt as { type?: string }).type ?? "select";
+    if (promptType !== gc.gate) {
+      return `Gate '${gc.gate}' prompt '${gc.promptId}' has type '${promptType}' (expected '${gc.gate}').`;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Materialize free-text gate prompts into typed prompt entities (docs/design/
+ * gates.md §4.3/§4.4). For every non-Select gate that supplies `promptText`, the
+ * text is content-addressed via `taskPromptStore.findOrCreate(text, gate)` —
+ * idempotent and parallel to how the request task prompt is materialized — and
+ * the resulting id is written to `promptId`. `promptText` supersedes any provided
+ * `promptId` (an edited prompt wins over a stale picked id) and is stripped from
+ * the returned config so it never reaches the persisted/running gate.
+ *
+ * The Select gate is left untouched here: its prompt is the request task, which
+ * is resolved separately and stamped onto the Select gate's `promptId` later.
+ */
+async function resolveGatePromptText(
+  ctx: RouteContext,
+  gates: GateConfig[],
+): Promise<GateConfig[]> {
+  return Promise.all(
+    gates.map(async (gc) => {
+      const text = gc.promptText?.trim();
+      if (gc.gate === "select" || !text) {
+        // Drop any stray promptText so it never persists.
+        const { promptText: _ignored, ...rest } = gc;
+        return rest;
+      }
+      const prompt = await ctx.taskPromptStore.findOrCreate(text, gc.gate);
+      const { promptText: _ignored, ...rest } = gc;
+      return { ...rest, promptId: prompt._id };
+    }),
+  );
+}
+
 // Submit a request
 apiRoute(ctx.app, ctx.registry, {
   method: "post",
@@ -74,7 +166,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, gates: requestedGates } = req.body;
     let worker = req.query.worker as string | undefined;
 
     type VariationInput = {
@@ -542,6 +634,20 @@ apiRoute(ctx.app, ctx.registry, {
       }
     }
 
+    // Validate the per-gate configuration if provided (docs/design/gates.md §4.3).
+    // Free-text gate prompts are materialized into typed prompt entities first so
+    // validation and persistence both see resolved `promptId`s.
+    const gatesProvided = Array.isArray(requestedGates) && requestedGates.length > 0;
+    let resolvedGates: GateConfig[] = gatesProvided ? (requestedGates as GateConfig[]) : [];
+    if (gatesProvided) {
+      resolvedGates = await resolveGatePromptText(ctx, resolvedGates);
+      const gateError = await validateGatesForSubmit(ctx, resolvedGates, maxIterations);
+      if (gateError) {
+        res.status(400).json({ error: gateError });
+        return;
+      }
+    }
+
     // Validate count if provided
     if (typeof count !== "number" || count < 1 || count > 10) {
       res.status(400).json({ error: "count must be a number between 1 and 10" });
@@ -593,6 +699,31 @@ apiRoute(ctx.app, ctx.registry, {
     if (model) {
       const compoundModelId = `${workerType}:${model}`;
       const modelDoc = await ctx.modelCollection.findOne({ _id: compoundModelId });
+
+      // Preflight: warn (or reject) if the model has disappeared from the provider
+      if (modelDoc?.disappearedAt) {
+        const MS_PER_DAY = 86_400_000;
+        const daysSinceDisappeared = Math.floor(
+          (Date.now() - new Date(modelDoc.disappearedAt).getTime()) / MS_PER_DAY
+        );
+        if (daysSinceDisappeared >= 1) {
+          // Model has been gone for over 24 hours — hard reject
+          res.status(400).json({
+            error: `Model "${model}" is no longer available for agent "${workerType}"`,
+            errorCode: "model_unavailable_for_worker",
+            disappearedAt: modelDoc.disappearedAt,
+            lastSeenAt: modelDoc.lastSeenAt,
+            supportedModels: agentDoc?.supportedModels?.filter(m => m !== model),
+          });
+          return;
+        }
+        // Disappeared recently — warn but allow (scanner lag / transient)
+        warnings.push(
+          `Model "${model}" was last seen at ${modelDoc.lastSeenAt.toISOString()} and ` +
+          `disappeared at ${modelDoc.disappearedAt.toISOString()}. It may not be available at runtime.`
+        );
+      }
+
       if (modelDoc?.capabilities) {
         modelCapabilities = modelDoc.capabilities;
         const supportedEfforts = modelDoc.capabilities.reasoningEffort;
@@ -719,6 +850,14 @@ apiRoute(ctx.app, ctx.registry, {
     const taskPrompt = await ctx.taskPromptStore.findOrCreate(scenario.task);
     const taskPromptId = taskPrompt._id;
 
+    // Build the persisted gate configs: order canonically and point the Select
+    // gate's prompt at the resolved task prompt (docs/design/gates.md §4.3).
+    const persistedGates: GateConfig[] | undefined = gatesProvided
+      ? orderGates(resolvedGates).map((g) =>
+          g.gate === "select" ? { ...g, promptId: taskPromptId } : g,
+        )
+      : undefined;
+
     // Generate a submission ID to group all runs from this request
     const submissionId = uuidv4();
 
@@ -751,6 +890,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
           ...(profileId ? { profileId } : {}),
           ...(profileVersionId ? { profileVersionId } : {}),
+          ...(persistedGates ? { gates: persistedGates } : {}),
           submissionId,
           // Mint a distinct run id for the first attempt. Blob artifacts
           // are scoped under `{requestId}/runs/{runId}/...` so retries
@@ -809,6 +949,7 @@ apiRoute(ctx.app, ctx.registry, {
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
       ...(profileId ? { profileId } : {}),
       ...(profileVersionId ? { profileVersionId } : {}),
+      ...(persistedGates ? { gates: persistedGates } : {}),
       submissionId,
       // Mint a distinct run id for the first attempt. Blob artifacts
       // are scoped under `{requestId}/runs/{runId}/...` so retries

@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, X, Sparkles } from "lucide-react";
+import { GATE_METADATA, isCriterionCompatibleWithGate, type GateId } from "@/lib/gates";
+import type { CriteriaDocument } from "@/types";
 
 interface CriteriaPickerProps {
   selected: string[];
@@ -19,9 +21,17 @@ interface CriteriaPickerProps {
   inputId?: string;
   /** Optional trailing control rendered on the same row as the search input */
   trailingAction?: ReactNode;
+  /** Restrict suggestions to criteria compatible with this gate */
+  gate?: GateId;
+  /**
+   * Additional predicate restricting which criteria are offered as suggestions.
+   * Used to enforce gate-compatibility invariants (e.g. only show criteria that
+   * can legally be a parent/child of the criterion being authored).
+   */
+  filter?: (criterion: CriteriaDocument) => boolean;
 }
 
-export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, trailingAction }: CriteriaPickerProps) {
+export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, trailingAction, gate, filter }: CriteriaPickerProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -34,15 +44,20 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
     queryFn: () => api.listCriteria(),
   });
 
-  // Filter: show unselected criteria matching query
+  // Filter: show unselected criteria matching query, gate compatibility, and
+  // any additional caller-supplied predicate (e.g. parent/child gate invariant).
   const suggestions = useMemo(() => {
-    const available = criteria.filter((c) => !selected.includes(c.id));
+    const available = criteria.filter((c) =>
+      !selected.includes(c.id) &&
+      (!gate || isCriterionCompatibleWithGate(c.gates, gate)) &&
+      (!filter || filter(c))
+    );
     if (!query.trim()) return available.slice(0, 8);
     const q = query.toLowerCase();
     return available.filter(
       (c) => c.id.toLowerCase().includes(q) || c.prompt.toLowerCase().includes(q),
     );
-  }, [criteria, selected, query]);
+  }, [criteria, selected, query, gate, filter]);
 
   // Reset highlight when suggestions change
   useEffect(() => {
@@ -100,7 +115,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
 
   // Compute fixed position for portal-based dropdown so it isn't clipped by
   // overflow-y-auto scroll containers (e.g. dialogs).
-  const [dropdownStyle, setDropdownStyle] = useState<CSSProperties>({});
+  const [dropdownStyle, setDropdownStyle] = useState<CSSProperties>({ pointerEvents: "auto" });
 
   useEffect(() => {
     if (!open || !inputRef.current) return;
@@ -115,6 +130,10 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
           left: rect.left,
           width: rect.width,
           zIndex: 100,
+          // Re-enable interaction: a modal Radix Dialog sets pointer-events:none
+          // on <body>, and this dropdown is portaled to <body> (outside the
+          // dialog content), so without this the options render but can't be clicked.
+          pointerEvents: "auto",
         };
 
         if (
@@ -122,7 +141,8 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
           prev.top === nextStyle.top &&
           prev.left === nextStyle.left &&
           prev.width === nextStyle.width &&
-          prev.zIndex === nextStyle.zIndex
+          prev.zIndex === nextStyle.zIndex &&
+          prev.pointerEvents === nextStyle.pointerEvents
         ) {
           return prev;
         }
@@ -192,7 +212,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={handleKeyDown}
-          placeholder="Type to search criteria…"
+          placeholder={gate ? `Search ${GATE_METADATA[gate].label} criteria…` : "Type to search criteria…"}
           className="h-9 font-mono text-sm"
         />
         {trailingAction}

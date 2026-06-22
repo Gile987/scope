@@ -4,6 +4,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
 import { evaluateWorkspace } from "./judge-agent.js";
+import { verifyCopilotProtocol } from "./protocol-check.js";
 import { BlobStorage, RedisLogPublisher } from "shared";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -51,7 +52,7 @@ app.post(
     const startTime = Date.now();
 
     try {
-      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId } = req.body;
+      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl } = req.body;
 
       // Validate required fields
       if (!snapshotUrl || typeof snapshotUrl !== "string") {
@@ -88,6 +89,23 @@ app.post(
 
         console.log(`[judge] Snapshot extracted to ${workDir}`);
 
+        // Download this iteration's captured tool calls/outputs (build/test/run
+        // output), if provided. Failures are non-fatal — the judge can still
+        // evaluate the workspace files.
+        let toolCalls: import("shared").ToolCall[] = [];
+        if (toolCallsUrl && typeof toolCallsUrl === "string") {
+          try {
+            toolCalls = await blobStorage.getToolCalls(toolCallsUrl);
+            console.log(
+              `[judge] Loaded ${toolCalls.length} tool call(s) for gate '${gate ?? "select"}'`,
+            );
+          } catch (err) {
+            console.warn(
+              `[judge] Failed to load tool calls from ${toolCallsUrl}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+
         // Build onProgress callback that publishes criterion results via Redis
         const onProgress = (requestId && logPublisher)
           ? (result: import("shared").CriterionResult) => {
@@ -109,6 +127,8 @@ app.post(
           conversationHistory: conversationHistory || [],
           personaInstructions,
           onProgress,
+          gate,
+          toolCalls,
         });
 
         const elapsed = Date.now() - startTime;
@@ -135,6 +155,24 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 async function main(): Promise<void> {
+  // Fail fast on Copilot SDK<->CLI protocol drift instead of surfacing it as an
+  // opaque per-evaluation HTTP 500. Set JUDGE_SKIP_PROTOCOL_CHECK=true to bypass.
+  if (process.env.JUDGE_SKIP_PROTOCOL_CHECK !== "true") {
+    try {
+      await verifyCopilotProtocol();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(
+        "[judge] FATAL: Copilot SDK<->CLI protocol self-check failed — refusing to start.\n" +
+          "[judge] The installed @github/copilot-sdk and the bundled @github/copilot CLI disagree on the ACP protocol version.\n" +
+          "[judge] Fix: align @github/copilot-sdk with the @github/copilot override in package.json, then rebuild the judge image.\n" +
+          "[judge] (Set JUDGE_SKIP_PROTOCOL_CHECK=true to bypass — not recommended.)\n" +
+          `[judge] Detail: ${msg}`
+      );
+      process.exit(1);
+    }
+  }
+
   app.listen(port, () => {
     console.log(`[judge] Judge service listening on port ${port}`);
   });

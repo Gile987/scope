@@ -327,6 +327,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
           // run.* document.
           const runId = (typeof payload?.runId === "string" ? payload.runId : undefined);
           const errMsg = error instanceof Error ? error.message : String(error);
+          const errorCode = (error as any)?.errorCode as string | undefined;
           if (runId) {
             const result = await withRetry(() => this.collection.updateOne(
               { _id: documentId, "run._id": runId, "run.status": "processing" } as any,
@@ -335,6 +336,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
                   "run.status": "done",
                   "run.outcome": "failed",
                   "run.error": errMsg,
+                  ...(errorCode ? { "run.errorCode": errorCode } : {}),
                   "run.finishedAt": new Date(),
                   "run.updatedAt": new Date(),
                   updatedAt: new Date(),
@@ -361,6 +363,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
                   status: "done",
                   outcome: "failed",
                   error: errMsg,
+                  ...(errorCode ? { errorCode } : {}),
                   updatedAt: new Date(),
                 },
               } as any

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp } from "@/types";
+import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType } from "@/types";
 
 import { qs } from "./url";
 import { recordServerDate } from "./serverClock";
@@ -89,9 +89,11 @@ export const api = {
     count?: number;
     mcpServers?: string[];
     skills?: string[];
+    extensions?: string[];
     agentVersion?: string;
     profileId?: string;
     profileVariations?: string[];
+    gates?: GateConfig[];
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
     const url = worker ? `/requests?worker=${encodeURIComponent(worker)}` : `/requests`;
@@ -310,7 +312,7 @@ export const api = {
   },
 
   /** Create a new criterion */
-  createCriterion: (body: { id: string; prompt: string; dependsOn?: string[] }): Promise<CriteriaDocument> => {
+  createCriterion: (body: { id: string; prompt: string; dependsOn?: string[]; gates?: GateId[] }): Promise<CriteriaDocument> => {
     return request("/criteria", {
       method: "POST",
       body: JSON.stringify(body),
@@ -318,7 +320,7 @@ export const api = {
   },
 
   /** Update an existing criterion */
-  updateCriterion: (id: string, body: { prompt?: string; dependsOn?: string[] }): Promise<CriteriaDocument> => {
+  updateCriterion: (id: string, body: { prompt?: string; dependsOn?: string[]; gates?: GateId[] }): Promise<CriteriaDocument> => {
     return request(`/criteria/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
@@ -336,10 +338,10 @@ export const api = {
   },
 
   /** Generate a criteria prompt from a behavior description using AI */
-  generateCriteriaPrompt: (behavior: string, currentId?: string): Promise<GeneratePromptResponse> => {
+  generateCriteriaPrompt: (behavior: string, currentId?: string, gates?: string[]): Promise<GeneratePromptResponse> => {
     return request("/criteria/generate-prompt", {
       method: "POST",
-      body: JSON.stringify({ behavior, ...(currentId && { currentId }) }),
+      body: JSON.stringify({ behavior, ...(currentId && { currentId }), ...(gates && gates.length > 0 && { gates }) }),
     });
   },
 
@@ -390,11 +392,12 @@ export const api = {
   // ─── Task Prompts ──────────────────────────────────────────────────────────
 
   /** List all task prompts (paginated, optional search) */
-  listTaskPrompts: (opts?: { limit?: number; offset?: number; search?: string }): Promise<{ items: TaskPrompt[]; total: number }> => {
+  listTaskPrompts: (opts?: { limit?: number; offset?: number; search?: string; type?: PromptType }): Promise<{ items: TaskPrompt[]; total: number }> => {
     const params = new URLSearchParams();
     if (opts?.limit) params.set("limit", String(opts.limit));
     if (opts?.offset) params.set("offset", String(opts.offset));
     if (opts?.search) params.set("search", opts.search);
+    if (opts?.type) params.set("type", opts.type);
     const qs = params.toString();
     return request(`/task-prompts${qs ? `?${qs}` : ""}`);
   },
@@ -405,10 +408,10 @@ export const api = {
   },
 
   /** Create (or find existing) task prompt — idempotent */
-  createTaskPrompt: (text: string): Promise<TaskPrompt> => {
+  createTaskPrompt: (text: string, type?: PromptType): Promise<TaskPrompt> => {
     return request("/task-prompts", {
       method: "POST",
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, ...(type ? { type } : {}) }),
     });
   },
 
@@ -418,7 +421,7 @@ export const api = {
   },
 
   /** AI-generate a task prompt from a description or create a variation */
-  generateTaskPrompt: (opts: { description?: string; existingPrompt?: string }): Promise<{ taskPrompt: string }> => {
+  generateTaskPrompt: (opts: { description?: string; existingPrompt?: string }): Promise<{ taskPrompt: string; tasks?: string[] }> => {
     return request("/task-prompts/generate", {
       method: "POST",
       body: JSON.stringify(opts),
@@ -859,10 +862,11 @@ export const api = {
   // ─── Models ────────────────────────────────────────────────────────────────
 
   /** List all scanned models, optionally filtered by agentId or provider */
-  listModels: (params?: { agentId?: string; provider?: string }): Promise<Model[]> => {
+  listModels: (params?: { agentId?: string; provider?: string; status?: "active" | "disappeared" }): Promise<Model[]> => {
     const searchParams = new URLSearchParams();
     if (params?.agentId) searchParams.set("agentId", params.agentId);
     if (params?.provider) searchParams.set("provider", params.provider);
+    if (params?.status) searchParams.set("status", params.status);
     const qs = searchParams.toString();
     return request(`/models${qs ? `?${qs}` : ""}`);
   },
@@ -899,7 +903,7 @@ export const api = {
     return request(`/skills/${slug}`);
   },
 
-  /** Search skills (internal + skills.sh) */
+  /** Search skills in the internal library and the external skills.sh registry */
   searchSkills: (query: string, limit?: number): Promise<SkillSearchResult[]> => {
     const params = new URLSearchParams({ q: query });
     if (limit) params.set("limit", String(limit));

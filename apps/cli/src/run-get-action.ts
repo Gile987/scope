@@ -5,8 +5,28 @@
  * Action handler for `run get` subcommand — extracted for testability.
  */
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon } from "./utils/style.js";
+import { GATE_METADATA, GATE_ORDER, type ConversationTurn, type GateId, type GateRunSummary, type RequestDocument } from "shared";
 import { formatData, isMachineReadable } from "./utils/formatters.js";
 import type { OutputFormat, DisplayField } from "./utils/types.js";
+
+function gateLabel(gate: GateId): string {
+  return GATE_METADATA[gate]?.label ?? gate;
+}
+
+function formatGateStatus(summary: GateRunSummary | undefined): string {
+  if (!summary) return dimTimestamp("not run");
+  const text = `${summary.status} (${summary.iterations} iter${summary.iterations === 1 ? "" : "s"})`;
+  if (summary.status === "passed") return successText(text);
+  if (summary.status === "failed") return errorText(text);
+  return warnBanner(text);
+}
+
+function gateStatusIcon(summary: GateRunSummary | undefined): string {
+  if (!summary) return "  ";
+  if (summary.status === "passed") return criterionIcon(true, true);
+  if (summary.status === "failed") return criterionIcon(true, false);
+  return "○";
+}
 
 /** Strip trailing slashes from a URL */
 const normalizeUrl = (url: string): string => url.replace(/\/+$/, '');
@@ -28,7 +48,7 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
     process.exit(1);
   }
 
-  const run = await response.json();
+  const run = await response.json() as RequestDocument & { id?: string; completedAt?: string | Date };
   // Per-attempt state is nested under run.run (RunState).
   const rs = run.run;
 
@@ -41,6 +61,8 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
       { key: 'profileId', label: 'Profile', formatter: (r: any) => r.profileId ?? '' },
       { key: 'status', label: 'Status' },
       { key: 'maxIterations', label: 'Max Iterations' },
+      { key: 'gatesCount', label: 'Gates' },
+      { key: 'gateSummaries', label: 'Gate Status' },
       { key: 'turnsCount', label: 'Turns' },
       { key: 'passed', label: 'Passed' },
       { key: 'task', label: 'Task' },
@@ -55,6 +77,8 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
       outcome: rs?.outcome,
       error: rs?.error,
       turnsCount: rs?.turns?.length ?? 0,
+      gatesCount: run.gates?.length ?? run.gateSummaries?.length ?? 0,
+      gateSummaries: (run.gateSummaries ?? []).map((g) => `${g.gate}:${g.status}`).join(', '),
       passed: rs?.outcome === 'succeeded' ? 'yes' : rs?.outcome === 'failed' || rs?.outcome === 'finished' ? 'no' : '-',
       task: run.scenario?.task ?? '',
       criteriaCount: run.scenario?.criteria?.length ?? 0,
@@ -64,7 +88,7 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   }
 
   // Human-readable output
-  console.log(`${label('ID:')}             ${value(run.id)}`);
+  console.log(`${label('ID:')}             ${value(run.id ?? run._id)}`);
   console.log(`${label('Worker:')}         ${value(run.workerType)}`);
   if (run.model) console.log(`${label('Model:')}          ${value(run.model)}`);
   if (run.profileId) console.log(`${label('Profile:')}        ${value(run.profileId)}`);
@@ -77,6 +101,9 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   if (rs?.outcome) console.log(`${label('Outcome:')}        ${statusColor(rs.outcome)}`);
 
   if (run.maxIterations != null) console.log(`${label('Max Iterations:')} ${value(String(run.maxIterations))}`);
+  if (run.gates?.length) {
+    console.log(`${label('Configured Gates:')} ${value(run.gates.map((g) => gateLabel(g.gate)).join(' → '))}`);
+  }
   if (run.createdAt) console.log(`${label('Created:')}        ${dimTimestamp(new Date(run.createdAt).toLocaleString())}`);
   if (run.updatedAt) console.log(`${label('Updated:')}        ${dimTimestamp(new Date(run.updatedAt).toLocaleString())}`);
   if (run.completedAt) console.log(`${label('Completed:')}      ${dimTimestamp(new Date(run.completedAt).toLocaleString())}`);
@@ -111,15 +138,37 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
     }
   }
 
-  // Turns summary
+  // Gates and turns summary
+  const gateSummaries = run.gateSummaries ?? [];
+  if (gateSummaries.length > 0) {
+    console.log(`\n${banner('─── Gates ───')}`);
+    for (const summary of gateSummaries) {
+      console.log(`  ${gateStatusIcon(summary)} ${label(`${gateLabel(summary.gate)}:`)} ${formatGateStatus(summary)}`);
+    }
+  }
+
   if (rs?.turns?.length && rs.turns.length > 0) {
     console.log(`\n${banner('─── Turns ───')}`);
+    const turnsByGate = new Map<GateId, ConversationTurn[]>();
     for (const turn of rs.turns) {
-      const passIcon = criterionIcon(true, turn.passed);
-      const criteriaStr = turn.criteriaResults?.length
-        ? ` — ${turn.criteriaResults.filter((cr: { passed: boolean }) => cr.passed).length}/${turn.criteriaResults.length} criteria passed`
-        : '';
-      console.log(`  ${label(`Turn ${turn.iteration}:`)} ${passIcon}${criteriaStr}`);
+      const gate = turn.gate ?? "select";
+      const turns = turnsByGate.get(gate) ?? [];
+      turns.push(turn);
+      turnsByGate.set(gate, turns);
+    }
+
+    const gatesToDisplay = GATE_ORDER.filter((gate) => turnsByGate.has(gate) || gateSummaries.some((summary) => summary.gate === gate));
+    for (const gate of gatesToDisplay) {
+      const summary = gateSummaries.find((item) => item.gate === gate);
+      console.log(`  ${label(`${gateLabel(gate)} gate:`)} ${formatGateStatus(summary)}`);
+      // Iterations are numbered globally and continuously across all gates.
+      (turnsByGate.get(gate) ?? []).forEach((turn) => {
+        const passIcon = criterionIcon(true, turn.passed);
+        const criteriaStr = turn.criteriaResults?.length
+          ? ` — ${turn.criteriaResults.filter((cr: { passed: boolean }) => cr.passed).length}/${turn.criteriaResults.length} criteria passed`
+          : '';
+        console.log(`    ${label(`Iteration ${turn.iteration}:`)} ${passIcon}${criteriaStr}`);
+      });
     }
   }
 

@@ -3,14 +3,16 @@
 
 import { CopilotClient, defineTool, SessionEvent } from "@github/copilot-sdk";
 import { readFileSync, readdirSync, statSync, existsSync } from "fs";
-import { join } from "path";
-import { execSync } from "child_process";
+import { join, resolve, sep } from "path";
+import { execFileSync } from "child_process";
 import {
   CriteriaConfig,
   CriterionResult,
   DetailedEvaluationResult,
   ConversationTurn,
   DependencyGraph,
+  GateId,
+  ToolCall,
   TokenManagerClient,
   withRetry,
 } from "shared";
@@ -24,6 +26,10 @@ export interface JudgeStrategyContext {
   model?: string;
   /** Called when an individual criterion result is available (for real-time progress) */
   onProgress?: (result: CriterionResult) => void;
+  /** Which gate is being evaluated. Defaults to select. */
+  gate?: GateId;
+  /** This iteration's captured tool calls/outputs (build/test/run output). */
+  toolCalls?: ToolCall[];
 }
 
 /**
@@ -35,6 +41,68 @@ const DEFAULT_JUDGE_TIMEOUT = 480_000;
 /** Default number of retries for sendAndWait calls */
 const DEFAULT_JUDGE_RETRIES = 3;
 
+/**
+ * The `## Your Tools` + `## How to Judge` guidance injected into the judge
+ * system prompt when the coding agent's tool calls/outputs were captured for
+ * this iteration.
+ *
+ * The judge runs headless and cannot run any commands itself — it can only
+ * inspect the workspace and read what the coding agent already did. This text
+ * keeps the judge's own read-only tools unambiguous from the coding agent's
+ * tools/commands, and frames the codebase and captured tool outputs as two
+ * complementary, equally authoritative sources of evidence so the judge bases
+ * its decision on actual evidence instead of demanding the agent re-prove work
+ * it has already done. It is intentionally generic across all criteria.
+ */
+export const TOOL_OUTPUTS_GUIDANCE = `## Your Tools
+You have read-only tools to gather evidence: read_file, list_directory, search_files and file_exists to inspect the workspace, and read_tool_outputs / get_tool_output to review the tool calls the coding agent ran while doing the task. You yourself cannot run any commands or coding-agent tools — you can only read what the agent already did.
+
+## How to Judge
+The codebase and the agent's captured tool outputs are two complementary, equally authoritative sources of evidence — examine both. The files show the resulting state of the code; the captured outputs (logs, results, exit status) show what actually happened when the agent ran a command, which the files alone may not reveal. When a criterion concerns something the agent did or ran, take the agent's captured output and exit status as the record of what happened, rather than asking the agent to redo or re-prove work the evidence already shows. If a criterion's wording tells you to run, execute, or re-run a command, ignore that instruction and judge the outcome from the captured outputs together with the codebase.`;
+
+/**
+ * Tool filter applied to every judge session.
+ *
+ * The Copilot SDK's `CopilotClient` defaults to `mode: "copilot-cli"`, which
+ * injects the full set of built-in CLI tools (bash, edit, view, ...) into the
+ * session alongside the read-only `custom:*` tools we register in
+ * `createFileTools`/`createToolOutputTools`. Those built-ins are NOT
+ * `skipPermission`, and the judge runs headless (no TUI to answer prompts).
+ *
+ * The failure mode this guards against: instead of reading the coder's captured
+ * output via `read_tool_outputs`/`get_tool_output`, the judge model decides to
+ * "verify" a build/test by running the command itself through the built-in
+ * `bash` tool. Headless, that call is denied with "could not request permission
+ * from user". The judge then mis-reports this as the coder's result ("execution
+ * is blocked by a permission error"), producing a bogus, non-deterministic
+ * failure even when the coder's command actually succeeded. See scope #1117.
+ *
+ * Restricting `availableTools` to `custom:*` (and explicitly excluding
+ * `builtin:*`/`mcp:*` as defense in depth, since `excludedTools` always wins)
+ * guarantees the model can only ever call our injected, skipPermission tools.
+ */
+export const JUDGE_AVAILABLE_TOOLS = ["custom:*"] as const;
+export const JUDGE_EXCLUDED_TOOLS = ["builtin:*", "mcp:*"] as const;
+
+/**
+ * Returns true only if `target` resolves to a path inside (or equal to) the
+ * workspace `root`. A plain `startsWith` check is unsafe: `join()` normalizes
+ * `..`, so `join("/tmp/ws", "../ws2/x")` → `/tmp/ws2/x`, which shares the
+ * `/tmp/ws` prefix and would slip past `startsWith("/tmp/ws")`. We compare the
+ * fully-resolved paths and require an exact match or a separator boundary so a
+ * sibling like `/tmp/ws2` can never be mistaken for being under `/tmp/ws`.
+ * Both tools' handlers rely on this since they are `skipPermission: true` and
+ * therefore callable non-interactively by the model.
+ */
+export function isWithinWorkspace(root: string, target: string): boolean {
+  const resolvedRoot = resolve(root);
+  const resolvedTarget = resolve(target);
+  return (
+    resolvedTarget === resolvedRoot ||
+    resolvedTarget.startsWith(resolvedRoot + sep)
+  );
+}
+
 export abstract class JudgeStrategy {
   protected model: string;
   protected timeout: number;
@@ -42,7 +110,7 @@ export abstract class JudgeStrategy {
   protected tokenClient: TokenManagerClient;
 
   constructor(model?: string) {
-    this.model = model || process.env.JUDGE_MODEL || "gpt-4.1";
+    this.model = model || process.env.JUDGE_MODEL || "gpt-5.4-mini";
     this.timeout = parseInt(process.env.JUDGE_TIMEOUT || String(DEFAULT_JUDGE_TIMEOUT));
     this.maxRetries = parseInt(process.env.JUDGE_RETRIES || String(DEFAULT_JUDGE_RETRIES));
     this.tokenClient = new TokenManagerClient();
@@ -59,9 +127,15 @@ export abstract class JudgeStrategy {
    * Create filesystem inspection tools scoped to the workspace
    */
   protected createFileTools(workspacePath: string) {
+    const workspaceRoot = resolve(workspacePath);
     const readFile = defineTool("read_file", {
       description:
         "Read the contents of a file in the workspace. Returns the full text content. Use relative paths from the workspace root.",
+      // Read-only, workspace-scoped, traversal-guarded tools must run without a
+      // permission prompt: the judge is headless (no TUI), so the v3 runtime
+      // would otherwise deny every call with "could not request permission from
+      // user", silently breaking all workspace inspection. See scope-doc#64.
+      skipPermission: true,
       parameters: {
         type: "object",
         properties: {
@@ -73,8 +147,8 @@ export abstract class JudgeStrategy {
         required: ["path"],
       },
       handler: async (args: { path: string }) => {
-        const fullPath = join(workspacePath, args.path);
-        if (!fullPath.startsWith(workspacePath)) {
+        const fullPath = join(workspaceRoot, args.path);
+        if (!isWithinWorkspace(workspaceRoot, fullPath)) {
           return { error: "Path traversal not allowed" };
         }
         if (!existsSync(fullPath)) {
@@ -105,6 +179,7 @@ export abstract class JudgeStrategy {
     const listDirectory = defineTool("list_directory", {
       description:
         "List the contents of a directory in the workspace. Returns file and directory names with their types and sizes.",
+      skipPermission: true,
       parameters: {
         type: "object",
         properties: {
@@ -117,8 +192,8 @@ export abstract class JudgeStrategy {
         required: ["path"],
       },
       handler: async (args: { path: string }) => {
-        const fullPath = join(workspacePath, args.path);
-        if (!fullPath.startsWith(workspacePath)) {
+        const fullPath = join(workspaceRoot, args.path);
+        if (!isWithinWorkspace(workspaceRoot, fullPath)) {
           return { error: "Path traversal not allowed" };
         }
         if (!existsSync(fullPath)) {
@@ -153,6 +228,7 @@ export abstract class JudgeStrategy {
     const searchFiles = defineTool("search_files", {
       description:
         "Search for text patterns in files within the workspace using grep. Returns matching lines with file paths and line numbers.",
+      skipPermission: true,
       parameters: {
         type: "object",
         properties: {
@@ -178,23 +254,49 @@ export abstract class JudgeStrategy {
         path?: string;
         filePattern?: string;
       }) => {
-        const searchPath = join(workspacePath, args.path || ".");
-        if (!searchPath.startsWith(workspacePath)) {
+        const searchPath = join(workspaceRoot, args.path || ".");
+        if (!isWithinWorkspace(workspaceRoot, searchPath)) {
           return { error: "Path traversal not allowed" };
         }
         try {
-          let cmd = `grep -rn --include='${args.filePattern || "*"}' "${args.pattern.replace(/"/g, '\\"')}" "${searchPath}" 2>/dev/null | head -50`;
-          const output = execSync(cmd, {
-            encoding: "utf-8",
-            timeout: 10000,
-          }).trim();
-          if (!output) {
+          // Run grep without a shell. Passing an argv array (and `-e` before the
+          // pattern) means user-controlled values are never interpreted by a
+          // shell, eliminating the command-injection surface (e.g. `$(...)`,
+          // backticks). This matters because the tool is skipPermission: true.
+          let output: string;
+          try {
+            output = execFileSync(
+              "grep",
+              [
+                "-rn",
+                `--include=${args.filePattern || "*"}`,
+                "-e",
+                args.pattern,
+                searchPath,
+              ],
+              {
+                encoding: "utf-8",
+                timeout: 10000,
+                stdio: ["ignore", "pipe", "ignore"],
+                maxBuffer: 10 * 1024 * 1024,
+              }
+            );
+          } catch (err) {
+            // grep exits 1 when there are no matches — that's not an error.
+            const status = (err as { status?: number }).status;
+            if (status === 1) {
+              return { matches: [], message: "No matches found" };
+            }
+            throw err;
+          }
+          const trimmed = output.trim();
+          if (!trimmed) {
             return { matches: [], message: "No matches found" };
           }
-          const matches = output.split("\n").map((line) => {
-            const relLine = line.replace(workspacePath + "/", "");
-            return relLine;
-          });
+          const matches = trimmed
+            .split("\n")
+            .slice(0, 50)
+            .map((line) => line.replace(workspaceRoot + sep, ""));
           return { matches };
         } catch {
           return { matches: [], message: "No matches found or search error" };
@@ -204,6 +306,7 @@ export abstract class JudgeStrategy {
 
     const fileExists = defineTool("file_exists", {
       description: "Check if a file or directory exists in the workspace.",
+      skipPermission: true,
       parameters: {
         type: "object",
         properties: {
@@ -215,8 +318,8 @@ export abstract class JudgeStrategy {
         required: ["path"],
       },
       handler: async (args: { path: string }) => {
-        const fullPath = join(workspacePath, args.path);
-        if (!fullPath.startsWith(workspacePath)) {
+        const fullPath = join(workspaceRoot, args.path);
+        if (!isWithinWorkspace(workspaceRoot, fullPath)) {
           return { error: "Path traversal not allowed" };
         }
         const exists = existsSync(fullPath);
@@ -233,14 +336,103 @@ export abstract class JudgeStrategy {
   }
 
   /**
+   * Create tools that expose the tool calls/outputs captured during the gate
+   * iteration being judged (e.g. a build/test command's stdout/stderr/exit
+   * code). `read_tool_outputs` lists calls with truncated previews;
+   * `get_tool_output` returns the full output for a given index on demand.
+   */
+  protected createToolOutputTools(toolCalls: ToolCall[]) {
+    const PREVIEW_LIMIT = 2_000;
+    const FULL_LIMIT = 100_000;
+
+    const readToolOutputs = defineTool("read_tool_outputs", {
+      description:
+        "List the tool calls the coding agent made during this iteration (e.g. shell/bash commands and their output). Returns each call's index, name, arguments and a truncated response preview. Use get_tool_output(index) to fetch the full output of a specific call. Consult these to decide whether a command (build, test, run) actually succeeded.",
+      // Read-only in-memory inspection of already-captured tool calls. Like the
+      // file tools above, this MUST run without a permission prompt: the judge is
+      // headless (no TUI), so the v3 runtime would otherwise deny every call with
+      // "could not request permission from user" — which silently blocks the judge
+      // from ever seeing the coding agent's build/test output and forces it to
+      // demand on-disk proof files instead. See scope #1125.
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+      handler: async () => {
+        if (toolCalls.length === 0) {
+          return { count: 0, calls: [], message: "No tool calls were captured for this iteration." };
+        }
+        const calls = toolCalls.map((tc, index) => {
+          const response = tc.response ?? "";
+          return {
+            index,
+            name: tc.name,
+            arguments: tc.arguments,
+            responsePreview:
+              response.length > PREVIEW_LIMIT
+                ? response.substring(0, PREVIEW_LIMIT) + "\n…(truncated, use get_tool_output)"
+                : response,
+            responseTruncated: response.length > PREVIEW_LIMIT,
+            responseLength: response.length,
+          };
+        });
+        return { count: calls.length, calls };
+      },
+    });
+
+    const getToolOutput = defineTool("get_tool_output", {
+      description:
+        "Return the full captured output (response) of a single tool call by its index, as listed by read_tool_outputs.",
+      // Read-only; same headless permission rationale as read_tool_outputs. See scope #1125.
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          index: {
+            type: "number",
+            description: "Zero-based index of the tool call from read_tool_outputs",
+          },
+        },
+        required: ["index"],
+      },
+      handler: async (args: { index: number }) => {
+        const tc = toolCalls[args.index];
+        if (!tc) {
+          return { error: `No tool call at index ${args.index} (have ${toolCalls.length})` };
+        }
+        const response = tc.response ?? "";
+        if (response.length > FULL_LIMIT) {
+          return {
+            index: args.index,
+            name: tc.name,
+            arguments: tc.arguments,
+            response: response.substring(0, FULL_LIMIT),
+            truncated: true,
+            totalLength: response.length,
+          };
+        }
+        return { index: args.index, name: tc.name, arguments: tc.arguments, response };
+      },
+    });
+
+    return [readToolOutputs, getToolOutput];
+  }
+
+  /**
    * Run a Copilot session with given prompt and tools, retrying on timeout.
    */
   protected async runCopilotSession(
     workspacePath: string,
     systemPrompt: string,
-    userPrompt: string
+    userPrompt: string,
+    toolCalls?: ToolCall[]
   ): Promise<string> {
-    const tools = this.createFileTools(workspacePath);
+    const tools = [
+      ...this.createFileTools(workspacePath),
+      ...(toolCalls && toolCalls.length > 0 ? this.createToolOutputTools(toolCalls) : []),
+    ];
 
     return withRetry(
       () => this.doRunCopilotSession(tools, systemPrompt, userPrompt),
@@ -268,22 +460,35 @@ export abstract class JudgeStrategy {
     );
   }
 
+  /**
+   * Builds the `createSession` config for a judge session. Extracted so the
+   * tool-restriction policy (availableTools/excludedTools) is unit-testable
+   * without spinning up a real Copilot runtime. See {@link JUDGE_AVAILABLE_TOOLS}.
+   */
+  protected buildSessionConfig(tools: any[], systemPrompt: string) {
+    return {
+      model: this.model,
+      streaming: true as const,
+      tools,
+      availableTools: [...JUDGE_AVAILABLE_TOOLS],
+      excludedTools: [...JUDGE_EXCLUDED_TOOLS],
+      systemMessage: { mode: "replace" as const, content: systemPrompt },
+    };
+  }
+
   private async doRunCopilotSession(
-    tools: ReturnType<typeof this.createFileTools>,
+    tools: any[],
     systemPrompt: string,
     userPrompt: string
   ): Promise<string> {
     const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
-    const client = new CopilotClient({ githubToken });
+    const client = new CopilotClient({ gitHubToken: githubToken });
     let fullResponse = "";
 
     try {
-      const session = await client.createSession({
-        model: this.model,
-        streaming: true,
-        tools,
-        systemMessage: { mode: "replace", content: systemPrompt },
-      });
+      const session = await client.createSession(
+        this.buildSessionConfig(tools, systemPrompt) as any
+      );
 
       session.on((event: SessionEvent) => {
         if (event.type === "assistant.message_delta") {
@@ -321,58 +526,52 @@ export class BundledStrategy extends JudgeStrategy {
       criteria,
       conversationHistory,
       personaInstructions,
+      toolCalls,
     } = context;
 
     const systemPrompt = this.buildSystemPrompt(
-      criteria,
-      conversationHistory,
-      personaInstructions
+      personaInstructions,
+      toolCalls && toolCalls.length > 0
     );
+
+    const userPrompt = this.buildUserPrompt(criteria, conversationHistory);
 
     const response = await this.runCopilotSession(
       workspacePath,
       systemPrompt,
-      "Evaluate the workspace against ALL criteria. Use the file tools to inspect the code, then provide your verdict in JSON format."
+      userPrompt,
+      toolCalls
     );
 
     return this.parseJsonResponse(response, criteria, context.onProgress);
   }
 
+  /**
+   * Builds the invariant system prompt (role, persona, tools, judging method,
+   * instructions, output format). It does NOT contain the criteria or the
+   * previous-iteration history — those are per-request data carried by the user
+   * prompt (see {@link buildUserPrompt}) so the system prompt stays identical
+   * across every criterion and iteration in a run.
+   */
   private buildSystemPrompt(
-    criteria: CriteriaConfig[],
-    conversationHistory: ConversationTurn[],
-    personaInstructions?: string
+    personaInstructions?: string,
+    hasToolOutputs?: boolean
   ): string {
-    const criteriaList = criteria
-      .map((c) => `  - ${c.id}: ${c.prompt}`)
-      .join("\n");
-
-    const historySection =
-      conversationHistory.length > 0
-        ? `\n## Previous Iterations\n${conversationHistory
-            .map((t) => {
-              const car = t.codingAgentResponse ?? "(no response captured)";
-              const fb = t.judgeFeedback;
-              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 500)}${car.length > 500 ? "..." : ""}\n- **Your previous feedback**: ${fb.substring(0, 500)}${fb.length > 500 ? "..." : ""}\n- **Passed**: ${t.passed}`;
-            })
-            .join("\n\n")}`
-        : "";
-
     const personaSection = personaInstructions
       ? `\n## Persona\n${personaInstructions}\n`
       : "";
 
-    return `You are an expert code reviewer evaluating whether generated code meets requirements.
+    const toolOutputsSection = hasToolOutputs
+      ? `\n${TOOL_OUTPUTS_GUIDANCE}\n`
+      : "";
+
+    return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent.
 ${personaSection}
-## Your Task
-Inspect the workspace using the provided tools (read_file, list_directory, search_files, file_exists) and evaluate whether the code meets each criterion.
-
-## Criteria
-${criteriaList}
-${historySection}
-
+## What to Evaluate
+Evaluate whether the coding agent's work — its generated code together with the captured outputs of the tools it ran — meets each criterion provided in the user message.
+${toolOutputsSection}
 ## Instructions
-1. Use the tools to thoroughly inspect the workspace.
+1. Gather evidence from both the workspace and the coding agent's captured tool outputs.
 2. Evaluate EACH criterion individually.
 3. For each criterion, provide specific feedback about what you found.
 4. Be constructive and actionable in your feedback.
@@ -389,6 +588,36 @@ Your response MUST be valid JSON with this structure:
 \`\`\`
 
 IMPORTANT: Return ONLY the JSON, no additional text before or after.`;
+  }
+
+  /**
+   * Builds the per-request user prompt: the criteria to evaluate plus any
+   * previous-iteration context. This is the data the (invariant) system prompt
+   * refers to.
+   */
+  private buildUserPrompt(
+    criteria: CriteriaConfig[],
+    conversationHistory: ConversationTurn[]
+  ): string {
+    const criteriaList = criteria
+      .map((c) => `  - ${c.id}: ${c.prompt}`)
+      .join("\n");
+
+    const historySection =
+      conversationHistory.length > 0
+        ? `\n\n## Previous Iterations\n${conversationHistory
+            .map((t) => {
+              const car = t.codingAgentResponse ?? "(no response captured)";
+              const fb = t.judgeFeedback;
+              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 500)}${car.length > 500 ? "..." : ""}\n- **Your previous feedback**: ${fb.substring(0, 500)}${fb.length > 500 ? "..." : ""}\n- **Passed**: ${t.passed}`;
+            })
+            .join("\n\n")}`
+        : "";
+
+    return `Evaluate the workspace against ALL criteria below. Use the file tools to inspect the code, then provide your verdict in JSON format.
+
+## Criteria
+${criteriaList}${historySection}`;
   }
 
   private parseJsonResponse(
@@ -499,6 +728,8 @@ export class IndependentStrategy extends JudgeStrategy {
       conversationHistory,
       personaInstructions,
       onProgress,
+      gate,
+      toolCalls,
     } = context;
 
     // Get topological order
@@ -562,7 +793,9 @@ export class IndependentStrategy extends JudgeStrategy {
             criteriaById.get(cid)!,
             conversationHistory,
             personaInstructions,
-            evalIndex++
+            evalIndex++,
+            gate,
+            toolCalls
           )
         );
 
@@ -601,53 +834,23 @@ export class IndependentStrategy extends JudgeStrategy {
     criterion: CriteriaConfig,
     conversationHistory: ConversationTurn[],
     personaInstructions: string | undefined,
-    index: number
+    index: number,
+    gate?: GateId,
+    toolCalls?: ToolCall[]
   ): Promise<CriterionResult> {
-    const historySection =
-      conversationHistory.length > 0
-        ? `\n## Previous Iterations (for context)\n${conversationHistory
-            .map((t) => {
-              const car = t.codingAgentResponse ?? "(no response captured)";
-              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 300)}${car.length > 300 ? "..." : ""}\n- **Passed**: ${t.passed}`;
-            })
-            .join("\n\n")}`
-        : "";
+    const systemPrompt = this.buildSystemPrompt(
+      personaInstructions,
+      toolCalls && toolCalls.length > 0
+    );
 
-    const personaSection = personaInstructions
-      ? `\n## Persona\n${personaInstructions}\n`
-      : "";
-
-    const systemPrompt = `You are an expert code reviewer evaluating ONE specific criterion.
-${personaSection}
-## Your Task
-Inspect the workspace using the provided tools and evaluate ONLY this criterion:
-
-**Criterion**: ${criterion.prompt}
-
-${historySection}
-
-## Instructions
-1. Use the file tools to thoroughly inspect the workspace.
-2. Determine if this specific criterion is met (PASS) or not met (FAIL).
-3. Provide specific feedback about what you found.
-
-## Output Format
-**CRITICAL**: The FIRST LINE of your response MUST be exactly "PASS:" or "FAIL:" (nothing else on that line).
-Then provide your explanation on subsequent lines.
-
-Example:
-PASS:
-The workspace contains a package.json file with express listed as a dependency (version 4.18.0).
-
-Or:
-FAIL:
-No package.json file was found in the workspace root.`;
+    const userPrompt = this.buildUserPrompt(criterion, conversationHistory);
 
     try {
       const response = await this.runCopilotSession(
         workspacePath,
         systemPrompt,
-        `Evaluate criterion "${criterion.id}": ${criterion.prompt}`
+        userPrompt,
+        toolCalls
       );
 
       const passed = this.detectPassFail(response);
@@ -670,6 +873,70 @@ No package.json file was found in the workspace root.`;
         evaluated: false,
       };
     }
+  }
+
+  /**
+   * Builds the invariant system prompt (role, persona, tools, judging method,
+   * instructions, output format). It does NOT contain the criterion or the
+   * previous-iteration history — those are per-request data carried by the user
+   * prompt (see {@link buildUserPrompt}) so the system prompt stays identical
+   * across every criterion and iteration in a run.
+   */
+  protected buildSystemPrompt(
+    personaInstructions?: string,
+    hasToolOutputs?: boolean
+  ): string {
+    const personaSection = personaInstructions
+      ? `\n## Persona\n${personaInstructions}\n`
+      : "";
+
+    const toolOutputsSection = hasToolOutputs
+      ? `\n${TOOL_OUTPUTS_GUIDANCE}\n`
+      : "";
+
+    return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent against ONE specific criterion.
+${personaSection}
+## What to Evaluate
+Evaluate the coding agent's work — its generated code together with the captured outputs of the tools it ran — against the criterion provided in the user message.
+${toolOutputsSection}
+## Instructions
+1. Gather evidence from both the workspace and the coding agent's captured tool outputs.
+2. Determine if the criterion is met (PASS) or not met (FAIL).
+3. Provide specific feedback about what you found.
+
+## Output Format
+**CRITICAL**: The FIRST LINE of your response MUST be exactly "PASS:" or "FAIL:" (nothing else on that line).
+Then provide your explanation on subsequent lines.
+
+Example:
+PASS:
+The workspace contains a package.json file with express listed as a dependency (version 4.18.0).
+
+Or:
+FAIL:
+No package.json file was found in the workspace root.`;
+  }
+
+  /**
+   * Builds the per-request user prompt: the single criterion to evaluate plus
+   * any previous-iteration context. This is the data the (invariant) system
+   * prompt refers to.
+   */
+  protected buildUserPrompt(
+    criterion: CriteriaConfig,
+    conversationHistory: ConversationTurn[]
+  ): string {
+    const historySection =
+      conversationHistory.length > 0
+        ? `\n\n## Previous Iterations (for context)\n${conversationHistory
+            .map((t) => {
+              const car = t.codingAgentResponse ?? "(no response captured)";
+              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 300)}${car.length > 300 ? "..." : ""}\n- **Passed**: ${t.passed}`;
+            })
+            .join("\n\n")}`
+        : "";
+
+    return `Evaluate criterion "${criterion.id}": ${criterion.prompt}${historySection}`;
   }
 
   private detectPassFail(response: string): boolean {

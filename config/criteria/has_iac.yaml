@@ -2,3 +2,5 @@ id: has_iac
 prompt: >-
   Contains infrastructure as code
   (AZD, Terraform, shell scripts, ...)
+gates:
+  - select

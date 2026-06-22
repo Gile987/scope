@@ -89,6 +89,13 @@ flowchart TB
 4. **Judge** — After the agent completes, the worker invokes the Judge to evaluate output against criteria. Results (pass/fail per criterion, scores) are persisted to CosmosDB.
 5. **Snapshot** — Each iteration's workspace is snapshotted to Blob Storage for later inspection.
 
+> A run may execute as a sequence of **gates** (`Select → Build → Test → Run →
+> Deploy`), each with its own prompt, criteria subset, and iteration budget,
+> running stop-on-failure against the same workspace. Requests without an explicit
+> gate configuration run as a single Select gate (identical to before). See the
+> [gates design doc](../design/gates.md) and
+> [app-design.md](app-design.md#gates--multi-phase-evaluation-pipeline).
+
 ## Benchmarking Configuration
 
 | Config Folder | Description |

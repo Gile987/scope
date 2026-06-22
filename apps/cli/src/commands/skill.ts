@@ -60,7 +60,7 @@ skill
 withOutputOption(
 skill
   .command("search")
-  .description("Search skills (internal + skills.sh registry)")
+  .description("Search skills in the internal library and the external skills.sh registry (content is always sourced from GitHub)")
   .requiredOption("-q, --query <query>", "Search query")
   .option("--limit <number>", "Maximum results", parseInt)
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
@@ -148,9 +148,9 @@ skill
 
 skill
   .command("import")
-  .description("Import a skill from a GitHub repository")
+  .description("Import a skill from a GitHub repository into the internal library")
   .requiredOption("--source <source>", "GitHub repo (e.g. vercel-labs/agent-skills)")
-  .requiredOption("--skill-name <name>", "Skill name within the repo")
+  .requiredOption("--skill-name <name>", "Skill directory name within the repo")
   .requiredOption("--name <displayName>", "Display name")
   .option("--description <desc>", "Description")
   .option("--origin <origin>", "Origin: skills-sh or manual", "manual")

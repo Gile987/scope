@@ -5,3 +5,5 @@ prompt: |
 depends_on:
   - has_iac
   - has_azure
+gates:
+  - select

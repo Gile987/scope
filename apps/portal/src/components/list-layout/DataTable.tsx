@@ -131,14 +131,22 @@ export function DataTable<T>({
   className,
 }: DataTableProps<T>) {
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
+  const stickyScrollRef = useRef<HTMLDivElement | null>(null);
+  const nativeScrollbarSentinelRef = useRef<HTMLDivElement | null>(null);
+  const isSyncingRef = useRef(false);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const [tableScrollWidth, setTableScrollWidth] = useState(0);
+  const [nativeScrollbarVisible, setNativeScrollbarVisible] = useState(true);
+  const [proxyRect, setProxyRect] = useState<{ left: number; width: number } | null>(null);
 
   const updateTableScrollIndicators = useCallback(() => {
     const el = tableScrollRef.current;
     if (!el) {
       setCanScrollLeft(false);
       setCanScrollRight(false);
+      setTableScrollWidth(0);
+      setProxyRect(null);
       return;
     }
     const hasOverflow = el.scrollWidth - el.clientWidth > 1;
@@ -146,6 +154,17 @@ export function DataTable<T>({
     const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
     setCanScrollLeft(hasOverflow && left);
     setCanScrollRight(hasOverflow && right);
+    setTableScrollWidth(hasOverflow ? el.scrollWidth : 0);
+    if (hasOverflow) {
+      const rect = el.getBoundingClientRect();
+      setProxyRect((prev) =>
+        prev && prev.left === rect.left && prev.width === rect.width
+          ? prev
+          : { left: rect.left, width: rect.width },
+      );
+    } else {
+      setProxyRect(null);
+    }
   }, []);
 
   const visibleColumns = columns.filter((c) => !c.hidden);
@@ -175,21 +194,75 @@ export function DataTable<T>({
     if (!el) return;
 
     updateTableScrollIndicators();
-    const onScroll = () => updateTableScrollIndicators();
-    el.addEventListener("scroll", onScroll, { passive: true });
+
+    const onTableScroll = () => {
+      updateTableScrollIndicators();
+      if (isSyncingRef.current) {
+        isSyncingRef.current = false;
+        return;
+      }
+      const proxy = stickyScrollRef.current;
+      if (proxy && proxy.scrollLeft !== el.scrollLeft) {
+        isSyncingRef.current = true;
+        proxy.scrollLeft = el.scrollLeft;
+      }
+    };
+    el.addEventListener("scroll", onTableScroll, { passive: true });
+
+    // Listen to the nearest vertical scroll ancestor for rect updates.
+    // Always also listen on `window` so document/body scrolls are covered
+    // and so we don't rely solely on a single cached ancestor.
+    let scrollParent: HTMLElement | null = el.parentElement;
+    while (scrollParent && scrollParent !== document.documentElement) {
+      const style = getComputedStyle(scrollParent);
+      if (style.overflowY === "auto" || style.overflowY === "scroll") break;
+      scrollParent = scrollParent.parentElement;
+    }
+    const onParentScroll = () => updateTableScrollIndicators();
+    if (scrollParent) {
+      scrollParent.addEventListener("scroll", onParentScroll, { passive: true });
+    }
+    window.addEventListener("scroll", onParentScroll, { passive: true });
 
     const resizeObserver = new ResizeObserver(() => updateTableScrollIndicators());
     resizeObserver.observe(el);
     const tableElement = el.querySelector("table");
     if (tableElement) resizeObserver.observe(tableElement);
 
-    window.addEventListener("resize", onScroll);
+    window.addEventListener("resize", onTableScroll);
     return () => {
-      el.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
+      el.removeEventListener("scroll", onTableScroll);
+      if (scrollParent) scrollParent.removeEventListener("scroll", onParentScroll);
+      window.removeEventListener("scroll", onParentScroll);
+      window.removeEventListener("resize", onTableScroll);
       resizeObserver.disconnect();
     };
   }, [updateTableScrollIndicators, visibleColumns.length, items.length, selection]);
+
+  // Hide the sticky scrollbar proxy when the native scrollbar is visible in the viewport
+  useEffect(() => {
+    const sentinel = nativeScrollbarSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setNativeScrollbarVisible(entry.isIntersecting),
+      { threshold: 0 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
+
+  const onStickyScroll = useCallback(() => {
+    if (isSyncingRef.current) {
+      isSyncingRef.current = false;
+      return;
+    }
+    const proxy = stickyScrollRef.current;
+    const el = tableScrollRef.current;
+    if (proxy && el && el.scrollLeft !== proxy.scrollLeft) {
+      isSyncingRef.current = true;
+      el.scrollLeft = proxy.scrollLeft;
+    }
+  }, []);
 
   const selectableItems = selection
     ? visibleItems.filter((it) => !(selection.isDisabled?.(it) ?? false))
@@ -553,6 +626,8 @@ export function DataTable<T>({
           )}
         </TableBody>
       </table>
+      {/* Sentinel to detect when the native scrollbar area is visible in viewport */}
+      <div ref={nativeScrollbarSentinelRef} className="h-px w-full" aria-hidden="true" />
       </div>
       {canScrollLeft && (
         <>
@@ -569,6 +644,18 @@ export function DataTable<T>({
             <ChevronRight className="h-3 w-3" />
           </div>
         </>
+      )}
+      {/* Sticky horizontal scrollbar proxy — fixed to viewport bottom */}
+      {tableScrollWidth > 0 && !nativeScrollbarVisible && proxyRect && (
+        <div
+          ref={stickyScrollRef}
+          className="fixed bottom-0 z-50 overflow-x-auto border-t border-border/40 bg-background shadow-[0_-2px_4px_rgba(0,0,0,0.1)]"
+          style={{ left: proxyRect.left, width: proxyRect.width }}
+          onScroll={onStickyScroll}
+          aria-hidden="true"
+        >
+          <div style={{ width: tableScrollWidth, height: 1 }} />
+        </div>
       )}
       </div>
       </div>

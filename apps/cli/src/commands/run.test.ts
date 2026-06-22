@@ -234,3 +234,68 @@ describe("run retry", () => {
     );
   });
 });
+
+describe("run submit gates", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends parsed gates in the request body", async () => {
+    mockFetchWith({
+      id: "req-gates-1",
+      workerType: "coder-acp-copilot",
+      mode: "multi-turn",
+      status: "queued",
+    });
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code}) called`);
+    }) as never);
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync([
+        "run",
+        "submit",
+        "--message",
+        "Implement the task",
+        "--max-iterations",
+        "3",
+        "--gates",
+        JSON.stringify([
+          { gate: "select", criteria: ["implements_task"] },
+          { gate: "build", promptId: "build-prompt", criteria: [], maxIterations: 1 },
+        ]),
+        "--no-stream",
+        "-u",
+        "http://localhost:3100",
+      ], { from: "user" });
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:3100/api/v1/requests?worker=coder-acp-copilot",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          scenario: { task: "Implement the task", criteria: [] },
+          maxIterations: 3,
+          gates: [
+            { gate: "select", criteria: ["implements_task"] },
+            { gate: "build", promptId: "build-prompt", criteria: [], maxIterations: 1 },
+          ],
+        }),
+      }),
+    );
+  });
+});
