@@ -12,7 +12,7 @@ import { Readable } from "stream";
 import { resolveScenarioAndPersona } from "../config-loader.js";
 import { configureHelp } from "../utils/helpFormatter.js";
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon, styleText } from "../utils/style.js";
-import { formatData, isMachineReadable } from "../utils/formatters.js";
+import { formatData, isMachineReadable, formatDate } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { runGetAction } from "../run-get-action.js";
 import { normalizeUrl, printFollowUpCommands, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
@@ -472,6 +472,12 @@ run
         },
         { key: 'submissionId', label: 'Submission',
           formatter: (req: any) => req.submissionId ? req.submissionId.substring(0, 8) : '–',
+        },
+        { key: 'createdAt', label: 'Created',
+          formatter: (req: any) => formatDate(req.createdAt),
+        },
+        { key: 'updatedAt', label: 'Updated',
+          formatter: (req: any) => formatDate(req.updatedAt),
         },
       ];
 

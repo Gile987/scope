@@ -266,6 +266,7 @@ const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "duration", label: "Duration" },
   { id: "tokens", label: "Tokens" },
   { id: "created", label: "Created" },
+  { id: "updated", label: "Updated" },
 ];
 const COLUMN_IDS = COLUMN_OPTIONS.map((o) => o.id);
 
@@ -416,6 +417,7 @@ export function RunsList() {
       "duration",
       "tokens",
       "created",
+      "updated",
     ],
   });
   // Persisted column order (matches the customize panel). The `id` column is
@@ -1638,6 +1640,16 @@ export function RunsList() {
       width: "160px",
       hidden: columnVisibility.isHidden("created"),
       cell: (r) => <span className="text-xs text-muted-foreground">{formatDate(r.createdAt)}</span>,
+    },
+    {
+      id: "updated",
+      header: "Updated",
+      sortable: true,
+      width: "160px",
+      hidden: columnVisibility.isHidden("updated"),
+      cell: (r) => (
+        <span className="text-xs text-muted-foreground">{r.updatedAt ? formatDate(r.updatedAt) : "–"}</span>
+      ),
     },
     {
       id: "actions",
@@ -3136,6 +3148,8 @@ function sortKey(r: Run, col: string): string | number {
     }
     case "created":
       return new Date(r.createdAt).getTime();
+    case "updated":
+      return r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
     default:
       return "";
   }
