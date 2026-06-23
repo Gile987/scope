@@ -883,6 +883,46 @@ export function SubmitRun() {
             )}
           </div>
 
+          {/* ─── Codebase (optional, discreet) ───────────────────────────── */}
+          {!(codebaseOpen || selectedCodebaseSpec) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-xs text-muted-foreground"
+              onClick={() => setCodebaseOpen(true)}
+            >
+              <FolderGit2 className="h-3.5 w-3.5" />
+              Add codebase
+            </Button>
+          ) : (
+            <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-xs">
+                    Codebase{" "}
+                    <span className="font-normal text-muted-foreground">(optional)</span>
+                  </Label>
+                  <HelpTooltip text="Optional workspace seed. Pick a git codebase to resolve at submit time or a specific archive/git revision." />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                  onClick={() => {
+                    setSelectedCodebaseSpec(null);
+                    setCodebaseOpen(false);
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Remove
+                </Button>
+              </div>
+              <CodebasePicker selected={selectedCodebaseSpec} onChange={setSelectedCodebaseSpec} />
+            </div>
+          )}
+
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">
               <Label htmlFor="criteria">
@@ -1585,24 +1625,6 @@ export function SubmitRun() {
           </div>
         </CollapsibleCard>
       )}
-
-
-      {/* ─── Codebase (collapsible) ─────────────────────────────────────── */}
-      <CollapsibleCard
-        icon={FolderGit2}
-        title="Codebase"
-        help={
-          <HelpTooltip
-            text="Optional workspace seed. Pick a git codebase to resolve at submit time or a specific archive/git revision."
-           
-          />
-        }
-        summary={selectedCodebaseSpec ? selectedCodebaseSpec : "None — empty workspace"}
-        open={codebaseOpen}
-        onOpenChange={setCodebaseOpen}
-      >
-        <CodebasePicker selected={selectedCodebaseSpec} onChange={setSelectedCodebaseSpec} />
-      </CollapsibleCard>
 
       {/* ─── Skills (collapsible) ──────────────────────────────────────── */}
       <CollapsibleCard
