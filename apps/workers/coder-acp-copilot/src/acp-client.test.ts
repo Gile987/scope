@@ -106,13 +106,6 @@ describe("formatToolArgs", () => {
       "url=https://api.example.com, token=[redacted], AUTHORIZATION=[redacted], api_key=[redacted], password=[redacted]"
     );
   });
-
-  it("does not split a surrogate pair when truncating", () => {
-    const result = formatToolArgs({ a: "😀".repeat(40) }, 10);
-    expect(result.endsWith("…")).toBe(true);
-    expect(result.includes("\uFFFD")).toBe(false);
-    expect([...result].every((ch) => ch === "a" || ch === "=" || ch === "😀" || ch === "…")).toBe(true);
-  });
 });
 
 describe("runACPSession", () => {

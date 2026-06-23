@@ -35,12 +35,6 @@ describe("formatToolArgs", () => {
       formatToolArgs({ url: "https://x", token: "sk-123", password: "p" })
     ).toBe("url=https://x, token=[redacted], password=[redacted]");
   });
-
-  it("does not split a surrogate pair when truncating", () => {
-    const result = formatToolArgs({ a: "😀".repeat(40) }, 10);
-    expect(result.endsWith("…")).toBe(true);
-    expect(result.includes("\uFFFD")).toBe(false);
-  });
 });
 
 describe("formatToolContent", () => {

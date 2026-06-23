@@ -34,15 +34,10 @@ const REDACTED = "[redacted]";
 
 /**
  * Truncate a string to at most `maxLength` characters, appending an ellipsis
- * when truncated. Splits on code points (via `Array.from`) so a surrogate pair
- * (emoji/CJK) is never cut mid-character.
+ * when truncated.
  */
 function truncate(value: string, maxLength: number): string {
-  const chars = Array.from(value);
-  if (chars.length <= maxLength) {
-    return value;
-  }
-  return `${chars.slice(0, maxLength - 1).join("")}…`;
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
 }
 
 /**
