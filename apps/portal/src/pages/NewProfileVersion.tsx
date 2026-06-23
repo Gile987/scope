@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { CodingAgent, McpServerDocument } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -13,14 +13,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { SkillPicker } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
+import { McpServerCreateDialog } from "@/components/McpServerCreateDialog";
 import { useModelCapabilities, useReasoningEffort, ReasoningEffortSelect, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Loader2, Save } from "lucide-react";
+import { ArrowLeft, Loader2, Plus, Save } from "lucide-react";
 import { toast } from "sonner";
 
 export function NewProfileVersion() {
   const { profileId } = useParams<{ profileId: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   // Configuration fields
   const [worker, setWorker] = useState("");
@@ -30,6 +32,7 @@ export function NewProfileVersion() {
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
+  const [createMcpOpen, setCreateMcpOpen] = useState(false);
 
   // Fetch profile to pre-fill from latest version
   const { data: profile, isLoading: profileLoading } = useQuery({
@@ -137,6 +140,20 @@ export function NewProfileVersion() {
   }
 
   const ev = profile?.version;
+
+  const handleMcpServerCreated = (server: McpServerDocument) => {
+    queryClient.setQueryData<McpServerDocument[]>(["mcp-servers"], (previous) => {
+      const existing = previous ?? [];
+      if (existing.some((item) => item._id === server._id)) {
+        return existing.map((item) => (item._id === server._id ? server : item));
+      }
+      return [server, ...existing];
+    });
+    void queryClient.invalidateQueries({ queryKey: ["mcp-servers"] });
+    setSelectedMcpServers((prev) => (prev.includes(server._id) ? prev : [...prev, server._id]));
+    setCreateMcpOpen(false);
+  };
+
   const hasChanges = !!ev && (
     worker !== ev.workerType ||
     model !== ev.model ||
@@ -230,13 +247,31 @@ export function NewProfileVersion() {
       </Card>
 
       {/* MCP Servers */}
-      {mcpServers.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>MCP Servers</CardTitle>
-            <CardDescription>Select MCP servers to include in this version</CardDescription>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>MCP Servers</CardTitle>
+              <CardDescription>Select MCP servers to include in this version</CardDescription>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setCreateMcpOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New MCP server…
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {mcpServers.length === 0 ? (
+            <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+              No MCP servers configured yet. Create one to attach it to this version.
+            </p>
+          ) : (
             <div className="space-y-2">
               {mcpServers.map((s: McpServerDocument) => (
                 <div key={s._id} className="flex items-center space-x-2">
@@ -254,9 +289,16 @@ export function NewProfileVersion() {
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
+
+      <McpServerCreateDialog
+        open={createMcpOpen}
+        onOpenChange={setCreateMcpOpen}
+        onCreated={handleMcpServerCreated}
+      />
+
 
       {/* Skills */}
       <Card>

@@ -2,12 +2,13 @@
 // Licensed under the MIT License.
 
 import { useCallback, useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Save, Zap } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Loader2, Plus, Save, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { SkillPicker } from "@/components/SkillPicker";
+import { McpServerCreateDialog } from "@/components/McpServerCreateDialog";
 import {
   ModelSelectItems,
   ReasoningEffortSelect,
@@ -48,6 +49,9 @@ export function ProfileCreateForm({
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
+  const [createMcpOpen, setCreateMcpOpen] = useState(false);
+
+  const queryClient = useQueryClient();
 
   const { data: agents = [] } = useQuery({
     queryKey: ["agents"],
@@ -155,6 +159,19 @@ export function ProfileCreateForm({
   };
 
   const canSubmit = name.trim() && name.length <= 128 && description.length <= 512 && worker && model;
+
+  const handleMcpServerCreated = (server: McpServerDocument) => {
+    queryClient.setQueryData<McpServerDocument[]>(["mcp-servers"], (previous) => {
+      const existing = previous ?? [];
+      if (existing.some((item) => item._id === server._id)) {
+        return existing.map((item) => (item._id === server._id ? server : item));
+      }
+      return [server, ...existing];
+    });
+    void queryClient.invalidateQueries({ queryKey: ["mcp-servers"] });
+    setSelectedMcpServers((prev) => (prev.includes(server._id) ? prev : [...prev, server._id]));
+    setCreateMcpOpen(false);
+  };
 
   return (
     <div className={className ? `space-y-6 ${className}` : "space-y-6"}>
@@ -282,13 +299,31 @@ export function ProfileCreateForm({
         </CardContent>
       </Card>
 
-      {mcpServers.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>MCP Servers</CardTitle>
-            <CardDescription>Select MCP servers to include in this profile</CardDescription>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>MCP Servers</CardTitle>
+              <CardDescription>Select MCP servers to include in this profile</CardDescription>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setCreateMcpOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New MCP server…
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {mcpServers.length === 0 ? (
+            <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+              No MCP servers configured yet. Create one to attach it to this profile.
+            </p>
+          ) : (
             <div className="space-y-2">
               {mcpServers.map((s: McpServerDocument) => (
                 <div key={s._id} className="flex items-center space-x-2">
@@ -306,9 +341,16 @@ export function ProfileCreateForm({
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
+
+      <McpServerCreateDialog
+        open={createMcpOpen}
+        onOpenChange={setCreateMcpOpen}
+        onCreated={handleMcpServerCreated}
+      />
+
 
       <Card>
         <CardHeader>

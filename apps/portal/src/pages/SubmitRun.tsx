@@ -26,6 +26,7 @@ import { CreateCriterionDialog } from "@/components/CreateCriterionDialog";
 import { SkillPicker } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { ProfileCreateForm } from "@/components/ProfileCreateForm";
+import { McpServerCreateDialog } from "@/components/McpServerCreateDialog";
 import { ProfilePicker } from "@/components/ProfilePicker";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { AdvancedSection } from "@/components/AdvancedSection";
@@ -228,6 +229,7 @@ export function SubmitRun() {
   const [createCriterionOpen, setCreateCriterionOpen] = useState(false);
   const [gateCriterionDialog, setGateCriterionDialog] = useState<Exclude<GateId, "select"> | null>(null);
   const [createProfileOpen, setCreateProfileOpen] = useState(false);
+  const [createMcpOpen, setCreateMcpOpen] = useState(false);
 
   // Save as Profile
   const [saveProfileName, setSaveProfileName] = useState("");
@@ -393,6 +395,20 @@ export function SubmitRun() {
     setVariationDrafts((prev) => prev.filter((variation) => variation.profileId !== profile._id));
     setGalleryOpen(false);
     applyVersionConfig(profile.version);
+  };
+
+  const handleMcpServerCreated = (server: McpServerDocument) => {
+    queryClient.setQueryData<McpServerDocument[]>(["mcp-servers"], (previous) => {
+      const existing = previous ?? [];
+      if (existing.some((item) => item._id === server._id)) {
+        return existing.map((item) => (item._id === server._id ? server : item));
+      }
+      return [server, ...existing];
+    });
+    void queryClient.invalidateQueries({ queryKey: ["mcp-servers"] });
+    setSelectedMcpServers((prev) => (prev.includes(server._id) ? prev : [...prev, server._id]));
+    setMcpOpen(true);
+    setCreateMcpOpen(false);
   };
 
   const addVariationDraft = () => {
@@ -1528,27 +1544,44 @@ export function SubmitRun() {
       </Card>
 
       {/* ─── MCP Servers (collapsible) ─────────────────────────────────── */}
-      {activeMcpServers.length > 0 && (
-        <CollapsibleCard
-          icon={Server}
-          title="MCP Servers"
-          help={
-            <HelpTooltip
-              text="Model Context Protocol servers expose tools and resources to the agent (filesystem, GitHub, browser, etc.)."
-              docs="mcpServers"
-            />
-          }
-          summary={
-            selectedMcpServers.length === 0
-              ? "None selected"
-              : `${selectedMcpServers.length} server${selectedMcpServers.length === 1 ? "" : "s"} selected`
-          }
-          open={mcpOpen}
-          onOpenChange={setMcpOpen}
-          disabled={profileLocked}
-        >
-          <div className="space-y-2">
-            {activeMcpServers.map((s: McpServerDocument) => (
+      <CollapsibleCard
+        icon={Server}
+        title="MCP Servers"
+        help={
+          <HelpTooltip
+            text="Model Context Protocol servers expose tools and resources to the agent (filesystem, GitHub, browser, etc.)."
+            docs="mcpServers"
+          />
+        }
+        summary={
+          selectedMcpServers.length === 0
+            ? "None selected"
+            : `${selectedMcpServers.length} server${selectedMcpServers.length === 1 ? "" : "s"} selected`
+        }
+        open={mcpOpen}
+        onOpenChange={setMcpOpen}
+        disabled={profileLocked}
+      >
+        <div className="space-y-2">
+          <div className="flex items-center justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              disabled={profileLocked}
+              onClick={() => setCreateMcpOpen(true)}
+            >
+              <Plus className="h-4 w-4" />
+              New MCP server…
+            </Button>
+          </div>
+          {activeMcpServers.length === 0 ? (
+            <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+              No MCP servers configured yet. Create one to attach it to this run.
+            </p>
+          ) : (
+            activeMcpServers.map((s: McpServerDocument) => (
               <label
                 key={s._id}
                 className={`flex items-center gap-3 rounded-md border p-3 transition-colors ${profileLocked ? "opacity-60" : "cursor-pointer hover:bg-accent/50"}`}
@@ -1572,10 +1605,11 @@ export function SubmitRun() {
                   </p>
                 </div>
               </label>
-            ))}
-          </div>
-        </CollapsibleCard>
-      )}
+            ))
+          )}
+        </div>
+      </CollapsibleCard>
+
 
       {/* ─── Skills (collapsible) ──────────────────────────────────────── */}
       <CollapsibleCard
@@ -1643,7 +1677,14 @@ export function SubmitRun() {
         </DialogContent>
       </Dialog>
 
+      <McpServerCreateDialog
+        open={createMcpOpen}
+        onOpenChange={setCreateMcpOpen}
+        onCreated={handleMcpServerCreated}
+      />
+
       {/* ─── Sticky action bar ─────────────────────────────────────────── */}
+
       <div className="sticky bottom-0 -mx-6 lg:-mx-8 -mb-6 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 px-6 lg:px-8 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
