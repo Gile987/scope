@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { Command } from "commander";
-import { readFileSync, readdirSync, existsSync, statSync } from "fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "fs";
 import { join, resolve, basename, extname } from "path";
 import { parseAllDocuments, stringify as yamlStringify } from "yaml";
 import { configureHelp } from "../utils/helpFormatter.js";
@@ -62,10 +62,7 @@ criteria
         },
         { key: 'dependsOn', label: 'Deps', formatter: (c: any) => String((c.dependsOn ?? []).length) },
         { key: 'gates', label: 'Gates', formatter: (c: any) => formatGateList(c.gates) },
-        { key: 'prompt', label: 'Prompt', formatter: (c: any) => {
-          const prompt = c.prompt.replace(/\n/g, ' ');
-          return prompt.length > 60 ? prompt.substring(0, 60) + '…' : prompt;
-        }, tableFormatter: (c: any) => {
+        { key: 'prompt', label: 'Prompt', tableFormatter: (c: any) => {
           const prompt = c.prompt.replace(/\n/g, ' ');
           const truncated = prompt.length > 60 ? prompt.substring(0, 60) + '…' : prompt;
           return dimTimestamp(truncated);
@@ -328,6 +325,85 @@ criteria
   });
 
 criteria
+  .command("export")
+  .description("Export criteria as import-compatible multi-document YAML")
+  .option("--ids <ids...>", "Export only these criteria and their dependency ancestors")
+  .option("-o, --output-file <path>", "Write to file instead of stdout")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      // Build query params for server-side filtering
+      const params = new URLSearchParams();
+      if (options.ids && options.ids.length > 0) {
+        params.set("ids", options.ids.join(","));
+        params.set("ancestors", "true");
+      }
+      const qs = params.toString();
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria${qs ? `?${qs}` : ""}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
+
+      if (items.length === 0) {
+        console.error(errorText("No criteria found to export."));
+        process.exit(1);
+      }
+
+      // Topological sort: parents before children
+      const byId = new Map(items.map(c => [c.id, c]));
+      const sorted: typeof items = [];
+      const visited = new Set<string>();
+
+      const visit = (id: string) => {
+        if (visited.has(id)) return;
+        visited.add(id);
+        const c = byId.get(id);
+        if (!c) return;
+        for (const dep of c.dependsOn ?? []) {
+          visit(dep);
+        }
+        sorted.push(c);
+      };
+
+      for (const c of items) {
+        visit(c.id);
+      }
+
+      // Format as multi-document YAML with snake_case field names
+      const docs = sorted.map(c => {
+        const doc: Record<string, unknown> = {
+          id: c.id,
+          prompt: c.prompt,
+        };
+        if (c.dependsOn && c.dependsOn.length > 0) {
+          doc.depends_on = c.dependsOn;
+        }
+        return doc;
+      });
+
+      const yamlOutput = docs
+        .map(doc => yamlStringify(doc, { lineWidth: 0 }).trimEnd())
+        .join('\n---\n');
+
+      if (options.outputFile) {
+        const outputPath = resolve(process.env.INIT_CWD || process.cwd(), options.outputFile);
+        writeFileSync(outputPath, yamlOutput + '\n', 'utf-8');
+        console.error(`${successText('Exported')} ${value(String(sorted.length))} criteria to ${value(options.outputFile)}`);
+      } else {
+        process.stdout.write(yamlOutput + '\n');
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+criteria
   .command("import")
   .description("Import criteria from YAML file(s) into the database (upsert — won't overwrite existing)")
   .argument("<path>", "Path to a .yaml file or a directory of .yaml files")
@@ -335,7 +411,7 @@ criteria
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (inputPath: string, options) => {
     try {
-      const absPath = resolve(inputPath);
+      const absPath = resolve(process.env.INIT_CWD || process.cwd(), inputPath);
       if (!existsSync(absPath)) {
         console.error(errorText(`Path not found: ${absPath}`));
         process.exit(1);

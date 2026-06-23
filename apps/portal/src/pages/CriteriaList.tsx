@@ -13,8 +13,9 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Eye, GitBranch } from "lucide-react";
+import { Plus, Trash2, Eye, GitBranch, Download } from "lucide-react";
 import { truncate } from "@/lib/utils";
+import { criteriaToExportYaml, downloadAsFile } from "@/lib/criteria-export";
 import { formatGateList, GATE_METADATA, isCriterionCompatibleWithGate, type GateId } from "@/lib/gates";
 import { useVisibleGates } from "@/hooks/useVisibleGates";
 import {
@@ -247,6 +248,21 @@ export function CriteriaList() {
       railStorageKey="criteria"
       actions={
         <>
+          <Button
+            variant="outline"
+            className="gap-1.5"
+            disabled={criteria.length === 0}
+            onClick={() => {
+              try {
+                const yaml = criteriaToExportYaml(criteria);
+                downloadAsFile(yaml, "criteria.yaml");
+              } catch (err) {
+                toast.error(`Failed to export: ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }}
+          >
+            <Download className="h-4 w-4" /> Export All
+          </Button>
           <Link to="/criteria/graph">
             <Button variant="outline" className="gap-1.5">
               <GitBranch className="h-4 w-4" /> Graph

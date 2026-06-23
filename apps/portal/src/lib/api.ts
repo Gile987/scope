@@ -298,10 +298,12 @@ export const api = {
 
   // ─── Criteria ──────────────────────────────────────────────────────────────
 
-  /** List all criteria, optionally filtered by search query */
-  listCriteria: (q?: string): Promise<CriteriaDocument[]> => {
+  /** List all criteria, optionally filtered by search query or IDs with ancestor resolution */
+  listCriteria: (q?: string, opts?: { ids?: string[]; ancestors?: boolean }): Promise<CriteriaDocument[]> => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
+    if (opts?.ids && opts.ids.length > 0) params.set("ids", opts.ids.join(","));
+    if (opts?.ancestors) params.set("ancestors", "true");
     const qs = params.toString();
     return request(`/criteria${qs ? `?${qs}` : ""}`);
   },

@@ -17,7 +17,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Save, Trash2, Loader2, Sparkles, Check, X, Plus } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Loader2, Sparkles, Check, X, Plus, Download } from "lucide-react";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { GateCompatibilityPicker } from "@/components/GateCompatibilityPicker";
 import { formatDate } from "@/lib/utils";
@@ -28,6 +28,8 @@ import {
 } from "@/lib/gates";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
+import { criteriaToExportYaml, downloadAsFile } from "@/lib/criteria-export";
+import { toast } from "sonner";
 
 export function CriterionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -220,6 +222,21 @@ export function CriterionDetail() {
                   New Criterion
                   <KbdBadge />
                 </Link>
+              </Button>
+              <Button
+                variant="outline"
+                className="gap-1.5"
+                onClick={async () => {
+                  try {
+                    const subset = await api.listCriteria(undefined, { ids: [criterion.id], ancestors: true });
+                    const yaml = criteriaToExportYaml(subset);
+                    downloadAsFile(yaml, `${criterion.id}.yaml`);
+                  } catch (err) {
+                    toast.error(`Failed to export: ${err instanceof Error ? err.message : String(err)}`);
+                  }
+                }}
+              >
+                <Download className="h-4 w-4" /> Export YAML
               </Button>
               <Button variant="outline" onClick={startEditing}>
                 Edit

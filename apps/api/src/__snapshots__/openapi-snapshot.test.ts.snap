@@ -3679,6 +3679,30 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Comma-separated criterion IDs to include",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "description": "Comma-separated criterion IDs to include",
+              "type": "string",
+            },
+          },
+          {
+            "description": "When true and ids is set, also include dependency ancestors",
+            "in": "query",
+            "name": "ancestors",
+            "required": false,
+            "schema": {
+              "description": "When true and ids is set, also include dependency ancestors",
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
