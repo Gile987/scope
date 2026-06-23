@@ -29,6 +29,18 @@ describe("formatToolArgs", () => {
     expect(result.length).toBe(20);
     expect(result.endsWith("…")).toBe(true);
   });
+
+  it("redacts values of sensitive keys", () => {
+    expect(
+      formatToolArgs({ url: "https://x", token: "sk-123", password: "p" })
+    ).toBe("url=https://x, token=[redacted], password=[redacted]");
+  });
+
+  it("does not split a surrogate pair when truncating", () => {
+    const result = formatToolArgs({ a: "😀".repeat(40) }, 10);
+    expect(result.endsWith("…")).toBe(true);
+    expect(result.includes("\uFFFD")).toBe(false);
+  });
 });
 
 describe("formatToolContent", () => {
@@ -44,6 +56,14 @@ describe("formatToolContent", () => {
         { type: "diff", path: "/tmp/app.js", newText: "const x = 1", oldText: null },
       ])
     ).toBe("diff /tmp/app.js const x = 1");
+  });
+
+  it("redacts diff text for sensitive file paths", () => {
+    expect(
+      formatToolContent([
+        { type: "diff", path: "/app/.env", newText: "API_KEY=sk-123", oldText: null },
+      ])
+    ).toBe("diff /app/.env [redacted]");
   });
 
   it("formats a terminal variant as `terminal <terminalId>`", () => {
@@ -176,6 +196,41 @@ describe("ACPClientHandler tool call logging", () => {
     } as never);
 
     expect(logs).toEqual(["Tool update: toolu_bdrk_unknown - completed"]);
+  });
+
+  it("drops the cached title once the tool call completes", async () => {
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "toolu_bdrk_789",
+        title: "Write",
+        status: "pending",
+        kind: "edit",
+      },
+    } as never);
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "toolu_bdrk_789",
+        status: "completed",
+      },
+    } as never);
+    logs.length = 0;
+
+    // A late update reusing the same id no longer finds the cached title,
+    // confirming the entry was pruned on completion.
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "toolu_bdrk_789",
+        status: "failed",
+      },
+    } as never);
+
+    expect(logs).toEqual(["Tool update: toolu_bdrk_789 - failed"]);
   });
 });
 

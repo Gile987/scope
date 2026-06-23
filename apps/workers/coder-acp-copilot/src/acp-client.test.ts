@@ -20,6 +20,14 @@ describe("formatToolContent", () => {
     ).toBe("diff /tmp/app.js const x = 1");
   });
 
+  it("redacts diff text for sensitive file paths", () => {
+    expect(
+      formatToolContent([
+        { type: "diff", path: "/app/.env", newText: "API_KEY=sk-123", oldText: null },
+      ])
+    ).toBe("diff /app/.env [redacted]");
+  });
+
   it("formats a terminal variant as `terminal <terminalId>`", () => {
     expect(
       formatToolContent([{ type: "terminal", terminalId: "term-123" }])
@@ -83,6 +91,27 @@ describe("formatToolArgs", () => {
     const result = formatToolArgs({ path: "a".repeat(300) }, 20);
     expect(result.length).toBe(20);
     expect(result.endsWith("…")).toBe(true);
+  });
+
+  it("redacts values of sensitive keys", () => {
+    expect(
+      formatToolArgs({
+        url: "https://api.example.com",
+        token: "sk-secret-123",
+        AUTHORIZATION: "Bearer abc",
+        api_key: "xyz",
+        password: "hunter2",
+      })
+    ).toBe(
+      "url=https://api.example.com, token=[redacted], AUTHORIZATION=[redacted], api_key=[redacted], password=[redacted]"
+    );
+  });
+
+  it("does not split a surrogate pair when truncating", () => {
+    const result = formatToolArgs({ a: "😀".repeat(40) }, 10);
+    expect(result.endsWith("…")).toBe(true);
+    expect(result.includes("\uFFFD")).toBe(false);
+    expect([...result].every((ch) => ch === "a" || ch === "=" || ch === "😀" || ch === "…")).toBe(true);
   });
 });
 

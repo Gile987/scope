@@ -16,10 +16,41 @@ import * as acp from "@agentclientprotocol/sdk";
 import type { McpServerConfig } from "shared";
 
 /**
+ * Argument keys whose values are redacted in log previews to avoid leaking
+ * secrets (API keys, tokens, passwords) into logs that are streamed via SSE
+ * and persisted to MongoDB/Blob storage. Matched case-insensitively as a
+ * substring of the key name.
+ */
+const SENSITIVE_KEY_PATTERN =
+  /token|secret|password|passwd|authorization|credential|api[-_]?key|key/i;
+
+/**
+ * File paths whose diff contents are redacted, since their text is typically
+ * secret material rather than source code (e.g. `.env`, private keys/certs).
+ */
+const SENSITIVE_PATH_PATTERN = /(^|\/)\.env|secret|credential|\.pem$|\.key$/i;
+
+const REDACTED = "[redacted]";
+
+/**
+ * Truncate a string to at most `maxLength` characters, appending an ellipsis
+ * when truncated. Splits on code points (via `Array.from`) so a surrogate pair
+ * (emoji/CJK) is never cut mid-character.
+ */
+function truncate(value: string, maxLength: number): string {
+  const chars = Array.from(value);
+  if (chars.length <= maxLength) {
+    return value;
+  }
+  return `${chars.slice(0, maxLength - 1).join("")}…`;
+}
+
+/**
  * Build a short, human-readable preview of a tool call's raw input arguments
  * for logging (e.g. `command=npm create astro, path=src`). Whitespace is
- * collapsed and the result is truncated. Returns an empty string when there is
- * nothing useful to show.
+ * collapsed and the result is truncated. Values of sensitive keys (tokens,
+ * passwords, etc.) are redacted. Returns an empty string when there is nothing
+ * useful to show.
  */
 export function formatToolArgs(rawInput: unknown, maxLength = 160): string {
   if (rawInput === null || typeof rawInput !== "object") {
@@ -31,6 +62,9 @@ export function formatToolArgs(rawInput: unknown, maxLength = 160): string {
   }
   const formatted = entries
     .map(([key, value]) => {
+      if (SENSITIVE_KEY_PATTERN.test(key)) {
+        return `${key}=${REDACTED}`;
+      }
       let rendered: string;
       if (typeof value === "string") {
         rendered = value;
@@ -45,15 +79,13 @@ export function formatToolArgs(rawInput: unknown, maxLength = 160): string {
       return `${key}=${rendered}`;
     })
     .join(", ");
-  return formatted.length > maxLength
-    ? `${formatted.slice(0, maxLength - 1)}…`
-    : formatted;
+  return truncate(formatted, maxLength);
 }
 
 /**
  * Build a short, human-readable preview of a tool call's `content` array for
  * logging. Handles the three ACP `ToolCallContent` variants:
- * - `diff`    -> `diff <path> <newText preview>`
+ * - `diff`    -> `diff <path> <newText preview>` (text redacted for secret paths)
  * - `terminal`-> `terminal <terminalId>`
  * - `content` -> the text block, or `[image]`/`[audio]`/`[resource]` for non-text
  * Whitespace is collapsed and the result is truncated. Returns an empty string
@@ -70,7 +102,8 @@ export function formatToolContent(content: unknown, maxLength = 160): string {
     if (c.type === "diff") {
       const path = typeof c.path === "string" ? c.path : "";
       const newText = typeof c.newText === "string" ? c.newText : "";
-      parts.push(["diff", path, newText].filter(Boolean).join(" "));
+      const body = path && SENSITIVE_PATH_PATTERN.test(path) ? REDACTED : newText;
+      parts.push(["diff", path, body].filter(Boolean).join(" "));
     } else if (c.type === "terminal") {
       const terminalId = typeof c.terminalId === "string" ? c.terminalId : "";
       parts.push(["terminal", terminalId].filter(Boolean).join(" "));
@@ -87,9 +120,7 @@ export function formatToolContent(content: unknown, maxLength = 160): string {
   if (!formatted) {
     return "";
   }
-  return formatted.length > maxLength
-    ? `${formatted.slice(0, maxLength - 1)}…`
-    : formatted;
+  return truncate(formatted, maxLength);
 }
 
 export interface ACPClientOptions {
@@ -194,6 +225,11 @@ export class ACPClientHandler implements acp.Client {
         if (args) parts.push(args);
         if (update.status) parts.push(`- ${update.status}`);
         this.onLog(parts.join(" "));
+        // Drop the cached title/kind once the call reaches a terminal state so
+        // the map doesn't retain every tool id for the life of the session.
+        if (update.status === "completed" || update.status === "failed") {
+          this.toolCalls.delete(update.toolCallId);
+        }
         break;
       }
       default:
