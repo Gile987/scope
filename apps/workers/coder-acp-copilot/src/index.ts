@@ -25,6 +25,7 @@ export function buildSubprocessEnv(
   currentNodeOptions?: string,
   gatewayUrl?: string,
   proxyUrl?: string,
+  sslCertFile?: string,
 ): Record<string, string> {
   const gatewayHost = gatewayUrl ? new URL(gatewayUrl).hostname : null;
   const noProxy = ["localhost", "127.0.0.1", ...(gatewayHost ? [gatewayHost] : [])].join(",");
@@ -36,6 +37,7 @@ export function buildSubprocessEnv(
       NODE_TLS_REJECT_UNAUTHORIZED: "0",
       NO_PROXY: noProxy,
       no_proxy: noProxy,
+      ...(sslCertFile ? { SSL_CERT_FILE: sslCertFile } : {}),
       ...(proxyUrl ? {
         HTTP_PROXY: proxyUrl,
         HTTPS_PROXY: proxyUrl,
@@ -199,7 +201,7 @@ class CopilotProcessor implements WorkerProcessor {
       const result = await runACPSession(message, {
         command: "copilot",
         args,
-        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL, devProxy?.proxyUrl),
+        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL, devProxy?.proxyUrl, sslCertFile),
         cwd: this.workspacePath!,
         onLog: async (msg) => {
           await log("debug", msg);

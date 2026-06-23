@@ -44,6 +44,16 @@ describe("buildSubprocessEnv", () => {
       const env = buildSubprocessEnv(token, true);
       expect(env).not.toHaveProperty("NODE_EXTRA_CA_CERTS");
     });
+
+    it("sets SSL_CERT_FILE when sslCertFile is provided", () => {
+      const env = buildSubprocessEnv(token, true, undefined, undefined, undefined, "/tmp/ca-bundle.crt");
+      expect(env.SSL_CERT_FILE).toBe("/tmp/ca-bundle.crt");
+    });
+
+    it("does not set SSL_CERT_FILE when sslCertFile is omitted", () => {
+      const env = buildSubprocessEnv(token, true);
+      expect(env).not.toHaveProperty("SSL_CERT_FILE");
+    });
   });
 
   describe("when DevProxy is disabled", () => {
