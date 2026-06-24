@@ -659,6 +659,22 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     const totalAiCallCount = result.turns.reduce((sum, t) => sum + (t.aiCallCount ?? 0), 0);
 
+    // Aggregate per-turn tokenUsage into run-level totals
+    const hasAnyTokenUsage = result.turns.some((t) => t.tokenUsage);
+    const totalTokenUsage = hasAnyTokenUsage
+      ? result.turns.reduce(
+          (acc, t) => {
+            if (!t.tokenUsage) return acc;
+            return {
+              promptTokens: acc.promptTokens + t.tokenUsage.promptTokens,
+              completionTokens: acc.completionTokens + t.tokenUsage.completionTokens,
+              totalTokens: acc.totalTokens + t.tokenUsage.totalTokens,
+            };
+          },
+          { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        )
+      : undefined;
+
     // Guard final write: only update if the run is still "processing" for this
     // specific run._id. If a cancel already set status="done", this no-ops.
     const finalWrite = await withRetry(() => this.collection.updateOne(
@@ -672,6 +688,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           "run.updatedAt": new Date(),
           updatedAt: new Date(),
           ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),
+          ...(totalTokenUsage && { "run.tokenUsage": totalTokenUsage }),
           ...(result.passed ? {} : { "run.error": result.finalResult }),
           // Claim for post-processing atomically so polling dispatcher won't re-enqueue
           ...(this.postProcessorQueueClient ? { "run.postProcessorStatus": "queued" } : {}),

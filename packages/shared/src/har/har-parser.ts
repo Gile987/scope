@@ -536,12 +536,21 @@ export function extractTokenUsage(har: HarFile): TokenUsage | undefined {
     }
   }
 
-  if (!found) return undefined;
+  if (!found) {
+    // Fallback: extract from telemetry POST request bodies (for WebSocket runs
+    // where response bodies are empty). The Copilot CLI emits `assistant_usage`
+    // events to the telemetry endpoint with metrics.{input_tokens, output_tokens}.
+    const telemetryResult = extractTokenUsageFromTelemetry(har);
+    if (telemetryResult) return telemetryResult;
+    return undefined;
+  }
 
   return { promptTokens, completionTokens, totalTokens };
 
   function accumulateUsage(json: Record<string, unknown>): boolean {
-    const usage = json.usage as Record<string, unknown> | undefined;
+    // Check top-level usage first, then nested response.usage (Responses API)
+    const usage = (json.usage as Record<string, unknown> | undefined)
+      ?? ((json.response as Record<string, unknown> | undefined)?.usage as Record<string, unknown> | undefined);
     if (!usage || typeof usage !== "object") return false;
 
     // OpenAI / GitHub Models format
@@ -552,7 +561,15 @@ export function extractTokenUsage(har: HarFile): TokenUsage | undefined {
       return true;
     }
 
-    // Anthropic format
+    // OpenAI Responses API format (input_tokens + total_tokens present)
+    if (typeof usage.input_tokens === "number" && typeof usage.total_tokens === "number") {
+      promptTokens += usage.input_tokens;
+      completionTokens += (usage.output_tokens as number) ?? 0;
+      totalTokens += usage.total_tokens;
+      return true;
+    }
+
+    // Anthropic format (input_tokens without total_tokens)
     if (typeof usage.input_tokens === "number") {
       promptTokens += usage.input_tokens;
       completionTokens += (usage.output_tokens as number) ?? 0;
@@ -579,27 +596,128 @@ export async function extractTokenUsageFromFile(filePath: string): Promise<Token
  * - GitHub Copilot:  https://api.githubcopilot.com/chat/completions
  * - GitHub Models:   https://models.inference.ai.azure.com/chat/completions
  * - Anthropic:       https://api.anthropic.com/v1/messages
+ * - OpenAI Responses API: https://api.enterprise.githubcopilot.com/responses
  */
 const AI_COMPLETION_URL_PATTERNS: ReadonlyArray<RegExp> = [
   /\/chat\/completions(\?|$)/,
   /\/v1\/messages(\?|$)/,
+  /\/responses(\?|$)/,
 ];
 
 /**
  * Count the number of AI completion calls captured in a HAR file.
  *
- * Only POST requests with a 2xx response are counted:
- * - POST-only: excludes OPTIONS preflights and other methods
- * - 2xx-only: excludes 429 retries and transient 5xx errors so the
- *   count reflects successful agent interactions, not noise
- * - URL pattern uses (\?|$) to match paths with or without query params
- *   (e.g. Azure OpenAI appends ?api-version=...)
+ * Counts entries matching AI completion URL patterns:
+ * - POST with 2xx: standard REST completions (chat/completions, v1/messages,
+ *   and HTTP-mode Responses API)
+ * - GET with 101: WebSocket upgrade for the Responses API (Copilot CLI uses
+ *   WebSocket transport when `copilot_cli_websocket_responses` flag is enabled)
+ *
+ * Excludes 429 retries and transient 5xx errors so the count reflects
+ * successful agent interactions, not noise.
  */
 export function extractAiCallCount(har: HarFile): number {
-  return har.log.entries.filter((entry) =>
-    entry.request.method === "POST" &&
-    entry.response.status >= 200 &&
-    entry.response.status < 300 &&
-    AI_COMPLETION_URL_PATTERNS.some((p) => p.test(entry.request.url)),
-  ).length;
+  const directCount = har.log.entries.filter((entry) => {
+    if (!AI_COMPLETION_URL_PATTERNS.some((p) => p.test(entry.request.url))) return false;
+    // POST 2xx: standard REST/SSE calls
+    if (entry.request.method === "POST" && entry.response.status >= 200 && entry.response.status < 300) return true;
+    // GET 101: WebSocket upgrade (Responses API)
+    if (entry.request.method === "GET" && entry.response.status === 101) return true;
+    return false;
+  }).length;
+
+  // If we found direct AI calls, use that count. Otherwise fall back to
+  // counting assistant_usage telemetry events (for cases where DevProxy only
+  // captures a single WebSocket upgrade but multiple LLM calls happened within).
+  if (directCount > 0) return directCount;
+
+  return countAiCallsFromTelemetry(har);
+}
+
+/** URL pattern for the Copilot telemetry endpoint. */
+const TELEMETRY_URL_PATTERN = /\/telemetry(\?|$)/;
+
+/**
+ * Extract token usage from telemetry POST request bodies.
+ *
+ * When the Copilot CLI uses WebSocket transport for the Responses API, the HAR
+ * captures only a 101 upgrade with no response body. However, the CLI posts
+ * `assistant_usage` telemetry events that contain per-call token metrics.
+ *
+ * Each event has:
+ * ```json
+ * { "kind": "assistant_usage", "metrics": { "input_tokens": N, "output_tokens": N } }
+ * ```
+ *
+ * This function sums those metrics as a fallback when response-body extraction
+ * yields nothing.
+ */
+export function extractTokenUsageFromTelemetry(har: HarFile): TokenUsage | undefined {
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let totalTokens = 0;
+  let found = false;
+
+  for (const entry of har.log.entries) {
+    if (!TELEMETRY_URL_PATTERN.test(entry.request.url)) continue;
+    if (entry.request.method !== "POST") continue;
+
+    const body = entry.request?.postData?.text;
+    if (!body) continue;
+
+    // Telemetry bodies are NDJSON (newline-delimited JSON)
+    for (const line of body.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const event = JSON.parse(trimmed);
+        const props = event?.data?.baseData?.properties;
+        if (!props?.payload) continue;
+        const payload = JSON.parse(props.payload);
+        if (payload?.kind !== "assistant_usage") continue;
+        const metrics = payload.metrics;
+        if (!metrics || typeof metrics.input_tokens !== "number") continue;
+
+        promptTokens += metrics.input_tokens;
+        completionTokens += (metrics.output_tokens as number) ?? 0;
+        totalTokens += metrics.input_tokens + ((metrics.output_tokens as number) ?? 0);
+        found = true;
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return found ? { promptTokens, completionTokens, totalTokens } : undefined;
+}
+
+/**
+ * Count AI calls from telemetry `assistant_usage` events.
+ * Used as a fallback when the HAR doesn't contain direct AI completion entries
+ * (e.g. WebSocket transport where a single 101 upgrade covers many LLM calls).
+ */
+export function countAiCallsFromTelemetry(har: HarFile): number {
+  let count = 0;
+  for (const entry of har.log.entries) {
+    if (!TELEMETRY_URL_PATTERN.test(entry.request.url)) continue;
+    if (entry.request.method !== "POST") continue;
+
+    const body = entry.request?.postData?.text;
+    if (!body) continue;
+
+    for (const line of body.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const event = JSON.parse(trimmed);
+        const props = event?.data?.baseData?.properties;
+        if (!props?.payload) continue;
+        const payload = JSON.parse(props.payload);
+        if (payload?.kind === "assistant_usage") count++;
+      } catch {
+        continue;
+      }
+    }
+  }
+  return count;
 }
