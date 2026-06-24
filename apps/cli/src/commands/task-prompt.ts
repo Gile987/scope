@@ -9,7 +9,8 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { criterionIcon, dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { apiFetch } from "../utils/api-client.js";
 import { parsePromptTypeOption, type PromptType } from "../utils/gates.js";
 
 export function registerTaskPromptCommands(program: Command): void {
@@ -44,7 +45,7 @@ taskPrompt
       if (options.limit) params.set("limit", options.limit);
       if (options.offset) params.set("offset", options.offset);
       const qs = params.toString();
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts${qs ? `?${qs}` : ""}`);
+      const response = await apiFetch(options.url, `/task-prompts${qs ? `?${qs}` : ""}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -101,7 +102,7 @@ taskPrompt
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(options.id)}`);
+      const response = await apiFetch(options.url, `/task-prompts/${encodeURIComponent(options.id)}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -198,7 +199,7 @@ taskPrompt
       }
 
       const type = parsePromptTypeOption(options.type) ?? "select";
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts`, {
+      const response = await apiFetch(options.url, `/task-prompts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, type }),
@@ -228,7 +229,7 @@ taskPrompt
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(options.id)}`, {
+      const response = await apiFetch(options.url, `/task-prompts/${encodeURIComponent(options.id)}`, {
         method: "DELETE",
       });
 
@@ -265,7 +266,7 @@ taskPrompt
       const body: Record<string, unknown> = {};
       if (options.model) body.model = options.model;
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(options.id)}/extract-features${qs}`, {
+      const response = await apiFetch(options.url, `/task-prompts/${encodeURIComponent(options.id)}/extract-features${qs}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

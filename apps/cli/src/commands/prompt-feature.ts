@@ -9,7 +9,8 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { criterionIcon, dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { apiFetch } from "../utils/api-client.js";
 import { mapYamlCriterion } from "../utils/yaml-mappers.js";
 
 export function registerPromptFeatureCommands(program: Command): void {
@@ -37,7 +38,7 @@ promptFeature
       const params = new URLSearchParams();
       if (options.query) params.set("q", options.query);
       const qs = params.toString();
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features${qs ? `?${qs}` : ""}`);
+      const response = await apiFetch(options.url, `/prompt-features${qs ? `?${qs}` : ""}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -86,7 +87,7 @@ promptFeature
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/${options.id}`);
+      const response = await apiFetch(options.url, `/prompt-features/${options.id}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -136,7 +137,7 @@ promptFeature
         prompt: options.prompt,
       };
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features`, {
+      const response = await apiFetch(options.url, `/prompt-features`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -172,7 +173,7 @@ promptFeature
         process.exit(1);
       }
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/${options.id}`, {
+      const response = await apiFetch(options.url, `/prompt-features/${options.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -198,7 +199,7 @@ promptFeature
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/${options.id}`, {
+      const response = await apiFetch(options.url, `/prompt-features/${options.id}`, {
         method: "DELETE",
       });
 
@@ -295,7 +296,7 @@ promptFeature
       }
 
       console.log();
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/seed`, {
+      const response = await apiFetch(options.url, `/prompt-features/seed`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ features: allFeatures }),
@@ -362,7 +363,7 @@ promptFeature
 
       // Step 1: Register task prompt (idempotent)
       if (!isMachineReadable(format)) console.log(`${label('Registering task prompt...')}`);
-      const createResponse = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts`, {
+      const createResponse = await apiFetch(options.url, `/task-prompts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: taskText }),
@@ -384,7 +385,7 @@ promptFeature
       const body: Record<string, unknown> = {};
       if (options.model) body.model = options.model;
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(taskPromptDoc._id)}/extract-features${qs}`, {
+      const response = await apiFetch(options.url, `/task-prompts/${encodeURIComponent(taskPromptDoc._id)}/extract-features${qs}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

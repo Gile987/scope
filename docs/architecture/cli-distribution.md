@@ -98,6 +98,19 @@ After each command, the CLI performs a non-blocking check for newer versions:
 - Suppressed by `SCOPE_NO_UPDATE_CHECK=1`
 - Requires `GH_TOKEN` or `GITHUB_TOKEN` for private repo access (silently skips without it)
 
+This is the **one** place in the CLI that calls `fetch` directly rather than the
+centralized `apiFetch()` wrapper (`apps/cli/src/utils/api-client.ts`): it targets the
+external GitHub API with its own `token` auth and must never receive the Scope
+`SCOPE_TOKEN` bearer that `apiFetch()` injects. All Scope-API requests go through
+`apiFetch()` (see [auth-rbac.md](./auth-rbac.md) subtask 7).
+
+`apiFetch()` is a thin facade over the [`ky`](https://github.com/sindresorhus/ky)
+HTTP client: ky owns the underlying transport (a cached `ky.create()` instance with a
+`beforeRequest` auth hook), while the facade keeps the CLI-specific concerns — URL
+normalization, the single `401` re-auth retry, redacted logging, and `ApiError`
+shaping. `update-check.ts` stays on raw `fetch` precisely because it must bypass that
+auth hook.
+
 Source: `apps/cli/src/utils/update-check.ts`
 
 ## Local development vs bundled

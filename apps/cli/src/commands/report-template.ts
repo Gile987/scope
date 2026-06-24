@@ -9,7 +9,8 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { apiFetch } from "../utils/api-client.js";
 import { mapYamlReportTemplate } from "../utils/yaml-mappers.js";
 
 export function registerReportTemplateCommands(program: Command): void {
@@ -30,7 +31,7 @@ reportTemplate
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/available-models`);
+      const response = await apiFetch(options.url, `/report-templates/available-models`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -60,7 +61,7 @@ reportTemplate
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates`);
+      const response = await apiFetch(options.url, `/report-templates`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -116,7 +117,7 @@ reportTemplate
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${options.id}`);
+      const response = await apiFetch(options.url, `/report-templates/${options.id}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -216,7 +217,7 @@ reportTemplate
         body.trigger = trigger;
       }
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates`, {
+      const response = await apiFetch(options.url, `/report-templates`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -284,7 +285,7 @@ reportTemplate
         process.exit(1);
       }
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${options.id}`, {
+      const response = await apiFetch(options.url, `/report-templates/${options.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -310,7 +311,7 @@ reportTemplate
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${options.id}`, {
+      const response = await apiFetch(options.url, `/report-templates/${options.id}`, {
         method: "DELETE",
       });
 
@@ -413,11 +414,11 @@ reportTemplate
       for (const t of allTemplates) {
         const id = t.id as string;
         // Try to GET existing
-        const getResp = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${id}`);
+        const getResp = await apiFetch(options.url, `/report-templates/${id}`);
         if (getResp.ok) {
           // Update
           const { id: _id, ...updateBody } = t;
-          const resp = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${id}`, {
+          const resp = await apiFetch(options.url, `/report-templates/${id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(updateBody),
@@ -431,7 +432,7 @@ reportTemplate
           }
         } else if (getResp.status === 404) {
           // Create
-          const resp = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates`, {
+          const resp = await apiFetch(options.url, `/report-templates`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(t),

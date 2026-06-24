@@ -5,11 +5,12 @@ import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePrompt
 
 import { qs } from "./url";
 import { recordServerDate } from "./serverClock";
+import { apiClient } from "./api-client";
 
 const BASE = "/api/v1";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await apiClient(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
@@ -221,7 +222,7 @@ export const api = {
 
   /** Download a batch archive of multiple runs as a single .tar.gz */
   batchArchive: async (ids: string[]): Promise<void> => {
-    const resp = await fetch(`${BASE}/requests/archive`, {
+    const resp = await apiClient(`${BASE}/requests/archive`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids }),
@@ -697,6 +698,9 @@ export const api = {
 
   /** Get API readiness and migration status (hits root-level /ready, not /api/v1) */
   getReadiness: async (): Promise<{ status: string; migrations: { ready: boolean; applied: string[]; pending: string[]; totalApplied: number } }> => {
+    // Intentional direct-`fetch` exception (not routed through `apiClient`):
+    // the root-level `/ready` probe is unauthenticated, lives outside `/api/v1`,
+    // and needs bespoke 503 handling (a 503 still carries a useful JSON body).
     const res = await fetch("/ready");
     // /ready returns 503 when not ready — we still want the JSON body
     if (!res.ok && res.status !== 503) {

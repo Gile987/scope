@@ -156,6 +156,9 @@ importers:
       eventsource:
         specifier: ^2.0.2
         version: 2.0.2
+      ky:
+        specifier: ^2.0.2
+        version: 2.0.2
       semver:
         specifier: ^7.8.0
         version: 7.8.0
@@ -344,6 +347,9 @@ importers:
       jsqr:
         specifier: ^1.4.0
         version: 1.4.0
+      ky:
+        specifier: ^2.0.2
+        version: 2.0.2
       lucide-react:
         specifier: ^0.469.0
         version: 0.469.0(react@19.2.4)
@@ -4570,6 +4576,10 @@ packages:
   kind-of@6.0.3:
     resolution: {integrity: sha512-dcS1ul+9tmeD95T+x28/ehLgd9mENa3LsvDTtzm3vyBEO7RPptvAD+t44WVXaUjTBRcrpFeFlC8WCruUR456hw==}
     engines: {node: '>=0.10.0'}
+
+  ky@2.0.2:
+    resolution: {integrity: sha512-/GmXpo9F9W+f8n4Ivr2iH+7h7wL7jLbLKWkMlpflcCRb6kGjBfTlASEXaZ9qUgNTn4VgS0P2pwxxzQ4EM6Ulgg==}
+    engines: {node: '>=22'}
 
   lazystream@1.0.1:
     resolution: {integrity: sha512-b94GiNHQNy6JNTrt5w6zNyffMrNkXZb3KTkCZJb2V1xaEGCk093vkZ2jk3tpaeP33/OiXC+WvK9AxUebnf5nbw==}
@@ -10221,6 +10231,8 @@ snapshots:
     optional: true
 
   kind-of@6.0.3: {}
+
+  ky@2.0.2: {}
 
   lazystream@1.0.1:
     dependencies:
