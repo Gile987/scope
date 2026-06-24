@@ -24,7 +24,6 @@ import { CriteriaGraphView } from "@/components/CriteriaGraphView";
 import { HarNetworkViewer } from "@/components/HarNetworkViewer";
 import { ConversationView } from "@/components/ConversationView";
 import { VideoPlayer } from "@/components/VideoPlayer";
-import { TaxonomyTab } from "@/components/TaxonomyTab";
 import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
@@ -326,7 +325,6 @@ export function RunDetail() {
   }
 
   const hasHarData = !!(activeRun?.harUrl || activeRun?.turns?.some(t => t.harUrl));
-  const hasTaxonomy = !!activeRun?.taxonomyUrl;
   const hasVideoData = !!(activeRun?.videoUrls?.length || activeRun?.setupVideoUrls?.length || activeRun?.turns?.some(t => t.videoUrls?.length));
   const videoCount = (activeRun?.setupVideoUrls?.length ?? 0)
     + (activeRun?.videoUrls?.length ?? 0)
@@ -654,7 +652,6 @@ export function RunDetail() {
           )}
           {hasHarData && <TabsTrigger value="network">Network</TabsTrigger>}
           {hasHarData && <TabsTrigger value="tool-calls">Tool Calls</TabsTrigger>}
-          {hasTaxonomy && <TabsTrigger value="taxonomy">Taxonomy</TabsTrigger>}
           {hasVideoData && <TabsTrigger value="video"><Video className="h-3.5 w-3.5 mr-1" />Videos ({videoCount})</TabsTrigger>}
           <TabsTrigger value="logs">Logs</TabsTrigger>
           <TabsTrigger value="reports">
@@ -684,13 +681,6 @@ export function RunDetail() {
             ) : (
               <HarNetworkViewer runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
             )}
-          </TabsContent>
-        )}
-
-        {/* Taxonomy tab — structured scorecard + behavior analysis + action items */}
-        {hasTaxonomy && (
-          <TabsContent value="taxonomy" className="mt-4">
-            <TaxonomyTab runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
           </TabsContent>
         )}
 

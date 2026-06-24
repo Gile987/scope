@@ -80,7 +80,6 @@ flowchart TB
 | `workers/coder-acp-claude-code` | Claude Code agent via Agent Client Protocol (ACP) |
 | `workers/coder-acp-copilot` | GitHub Copilot agent via Agent Client Protocol (ACP) |
 | `workers/report-generator` | Copilot SDK worker that generates post-run markdown reports |
-| `workers/taxonomy` | Copilot SDK worker that generates validated post-run taxonomy JSON |
 | `gateway` | AI Gateway — shared Rust TLS-intercepting proxy with plugin architecture (HAR capture, future: token refresh, rate limiting) |
 
 ## Data Flow

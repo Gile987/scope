@@ -112,7 +112,6 @@ export interface RunState {
   resumedAt?: string;
   postProcessorVersion?: number;
   postProcessorStatus?: "queued" | "processing" | "done" | "failed";
-  taxonomyUrl?: string;
 }
 
 export interface Run {

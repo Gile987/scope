@@ -272,14 +272,13 @@ export interface RunState {
     podName?: string;
   };
   harUrl?: string;
-  taxonomyUrl?: string;
   videoUrls?: string[];
   setupVideoUrls?: string[];
   tokenUsage?: TokenUsage;
   aiCallCount?: number;
   rawChatUrl?: string;
   rawChatFormat?: string;
-  /** Per-handler post-processing status. Keys are handler IDs (e.g. "pp-atif", "pp-taxonomy"). */
+  /** Per-handler post-processing status. Keys are handler IDs (e.g. "pp-atif"). */
   handlerStatus?: Record<string, HandlerRunStatus>;
   /** Set once the scheduler has triggered report generation for this run after
    *  the handler DAG drained (every handler reached a terminal state). Acts as
@@ -329,7 +328,6 @@ export const RUN_STATE_FIELD_NAMES = [
   "lastHeartbeatAt",
   "worker",
   "harUrl",
-  "taxonomyUrl",
   "videoUrls",
   "setupVideoUrls",
   "tokenUsage",
