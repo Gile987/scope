@@ -20,6 +20,11 @@ import {
 } from "../utils/codebase-helpers.js";
 
 export function registerCodebasesRoutes(ctx: RouteContext): void {
+  // Upload size is intentionally NOT capped here. The 1 MB limit is enforced at
+  // the ingress edge (nginx `client_max_body_size`) as the single source of truth,
+  // which rejects oversized uploads before they reach the API; the portal maps the
+  // resulting 413 to a friendly message. Keeping one limit at the edge avoids drift
+  // between two places that would both need updating.
   const upload = multer({ dest: tmpdir() });
 
   const uploadArchive = createCodebaseArchiveUploader({

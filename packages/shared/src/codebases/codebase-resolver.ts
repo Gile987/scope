@@ -114,6 +114,13 @@ export class CodebaseResolver {
 
     // Dedup: if the latest revision already points at this exact commit, reuse
     // it instead of creating a redundant revision (and re-downloading the tree).
+    //
+    // Known tradeoff (best-effort, not transactional): two concurrent resolves of
+    // the same commit can both miss this check and each create a revision, leaving
+    // two identical snapshots. This is benign — revisions are immutable and any of
+    // them seeds the same bytes — so we accept the rare duplicate rather than add a
+    // unique index (awkward across archive revisions, which have no commit SHA, and
+    // soft-deleted refs). Sequential re-resolves dedup correctly.
     const latest = await store.getLatest(codebase._id);
     if (latest && latest.sourceType === "git" && latest.resolvedCommitSha === commit.sha) {
       return { revision: latest, deduplicated: true };

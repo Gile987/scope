@@ -65,6 +65,37 @@ export function resolveSafeEntryPath(destDir: string, entryName: string): string
 }
 
 /**
+ * Tar extraction filter that guards against path-traversal and symlink escape.
+ *
+ * `node-tar` v7 already strips `..` and refuses to write through symlinks, but
+ * this makes the protection explicit and symmetric with the zip path: it rejects
+ * any entry — or any sym/hard-link target — that would resolve outside `destDir`.
+ * Throwing here aborts the whole extraction so a malicious archive is rejected
+ * rather than partially extracted.
+ *
+ * Exported for unit testing.
+ */
+export function assertTarEntrySafe(destDir: string, entryPath: string, linkpath?: string): boolean {
+  const root = resolve(destDir);
+  const within = (p: string) => p === root || p.startsWith(root + sep);
+
+  const target = resolve(destDir, entryPath);
+  if (!within(target)) {
+    throw new Error(`Refusing to extract tar entry outside target directory: '${entryPath}'`);
+  }
+  if (linkpath) {
+    // Link targets are resolved relative to the entry's own directory.
+    const linkTarget = resolve(dirname(target), linkpath);
+    if (!within(linkTarget)) {
+      throw new Error(
+        `Refusing to extract tar link escaping target directory: '${entryPath}' -> '${linkpath}'`
+      );
+    }
+  }
+  return true;
+}
+
+/**
  * Safely extract a zip buffer into `destDir` using yauzl (no shell-out).
  * Every entry path is validated to stay within `destDir` before any write.
  */
@@ -135,7 +166,13 @@ export async function extractArchiveBuffer(buffer: Buffer, destDir: string): Pro
   const tarPath = join(tmp, "archive.tar");
   writeFileSync(tarPath, buffer);
   try {
-    await tar.extract({ file: tarPath, cwd: destDir });
+    await tar.extract({
+      file: tarPath,
+      cwd: destDir,
+      // Defense-in-depth: reject any entry or link target that escapes destDir.
+      filter: (path, entry) =>
+        assertTarEntrySafe(destDir, path, (entry as { linkpath?: string }).linkpath),
+    });
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

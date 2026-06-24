@@ -33,6 +33,7 @@ export interface CodebaseDocument {
    */
   revisionCounter: number;
   latestRevisionId?: string;      // Convenience pointer to the newest revision
+  latestRevisionNumber?: number;  // revisionNumber of latestRevisionId; guards the pointer against stale concurrent writes
   creator?: string;               // Who created it (provenance)
   createdAt: Date;
   updatedAt?: Date;

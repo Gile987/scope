@@ -117,7 +117,11 @@ export class CodebaseRevisionStore {
     };
 
     await this.collection.insertOne(doc as CodebaseRevisionDocument);
-    await this.codebaseStore.setLatestRevision(input.codebaseId, doc._id);
+    await this.codebaseStore.setLatestRevision(
+      input.codebaseId,
+      doc._id,
+      doc.revisionNumber
+    );
     return doc;
   }
 

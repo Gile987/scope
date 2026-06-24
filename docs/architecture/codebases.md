@@ -47,7 +47,7 @@ flowchart TB
     Skills --> Agent
 ```
 
-Codebase revisions are **not content-addressed**, but uploads/resolutions that produce no change are deduped against the codebase's latest revision. A Git resolution whose resolved commit SHA matches the latest revision, or an archive upload whose `contentSha256` matches the latest revision, reuses that revision instead of creating a redundant one. Any actual change creates a new revision with the next sequential `revisionNumber`. Existing revisions are never mutated.
+Codebase revisions are **not content-addressed**, but uploads/resolutions that produce no change are deduped against the codebase's latest revision. A Git resolution whose resolved commit SHA matches the latest revision, or an archive upload whose `contentSha256` matches the latest revision, reuses that revision instead of creating a redundant one. Any actual change creates a new revision with the next sequential `revisionNumber`. Existing revisions are never mutated. Dedup is best-effort, not transactional: two concurrent resolves/uploads of identical content can both miss the check and each create a revision, leaving two identical snapshots. This is a deliberate tradeoff — revisions are immutable and any duplicate seeds the same bytes — accepted in preference to a unique index, which would be awkward across archive revisions (no commit SHA) and slug-reserving soft-deleted refs.
 
 ## Data Model
 
@@ -82,7 +82,7 @@ erDiagram
 - **CodebaseRevision** — Immutable snapshot in the `codebase-revisions` collection. It has a fresh UUID `_id`, `codebaseId`, denormalized `slug`, sequential `revisionNumber`, canonical `ref`, `sourceType`, provenance fields, `archiveUrl`, optional size/file metadata, optional `creator`, `resolvedAt`, and `createdAt`.
 - **Request.codebaseRevisionId** — Optional foreign key to `CodebaseRevisionDocument._id`. When present, workers seed the run workspace from that revision before the agent starts.
 
-Revision numbers are assigned by atomically `$inc`-ing `codebases.revisionCounter` in `CodebaseStore.allocateRevisionNumber()`. The store then builds the uniform `ref` as `{slug}@r{revisionNumber}` for both Git and archive revisions and advances `latestRevisionId`.
+Revision numbers are assigned by atomically `$inc`-ing `codebases.revisionCounter` in `CodebaseStore.allocateRevisionNumber()`. The store then builds the uniform `ref` as `{slug}@r{revisionNumber}` for both Git and archive revisions and advances `latestRevisionId`. The pointer advance is **guarded by `revisionNumber`** (it tracks `latestRevisionNumber` and only moves forward), so a slower concurrent writer that allocated an earlier number cannot regress the convenience pointer to an older revision. The authoritative "latest" lookup remains `getLatest()` (sorts by `revisionNumber`), so seeding is correct regardless of the pointer.
 
 `resolvedCommitSha` (Git) and `contentSha256` (archive) are provenance only — they are not part of the revision `_id` and not part of the `ref`. Each is compared against the latest revision during resolution/upload so an unchanged commit or identical archive reuses the existing revision, but neither is otherwise an identity key.
 
@@ -128,7 +128,7 @@ The key is based on the immutable revision UUID, not the revision number or prov
 
 Both Git tarballs and uploaded archives are normalized by `normalizeToRootTarGz()`: the input is extracted, a single top-level wrapper directory is unwrapped when present, and the contents are re-archived at the root. Workers can therefore extract every revision directly into the workspace root without `--strip-components` logic.
 
-Extraction (`extractArchiveBuffer()`) detects the format from magic bytes. Tar/tar.gz use `node-tar` (safe by default). Zip uploads are extracted in-process with `yauzl` — never a shell-out — and every entry path is validated to stay within the destination directory (absolute paths and `..` traversal are rejected) to prevent Zip Slip.
+Extraction (`extractArchiveBuffer()`) detects the format from magic bytes. Tar/tar.gz use `node-tar` (≥7, which already strips `..` and refuses to write through symlinks) with an **explicit `filter` guard** (`assertTarEntrySafe`) that rejects any entry — or sym/hard-link target — resolving outside the destination directory, aborting the whole extraction. Zip uploads are extracted in-process with `yauzl` — never a shell-out — and every entry path is validated to stay within the destination directory (absolute paths and `..` traversal are rejected) to prevent Zip Slip. Both paths share the same containment invariant.
 
 Deletion is soft and cascading: `DELETE /api/v1/codebases/:id` sets `deletedAt` on the codebase and on all of its revisions. Soft-deleted revisions are hidden from listings (`listByCodebase`, `getLatest`) but are **never destroyed** — lookups by id/ref/number still resolve them, so historical and in-flight runs that reference a specific `codebaseRevisionId` keep working. The slug stays reserved so refs remain stable. Only the atomic-create rollback path performs a hard delete.
 

@@ -175,11 +175,35 @@ export class CodebaseStore {
     return doc ? doc.revisionCounter : null;
   }
 
-  /** Update the `latestRevisionId` pointer after a new revision is created. */
-  async setLatestRevision(codebaseId: string, revisionId: string): Promise<void> {
+  /**
+   * Advance the convenience `latestRevisionId` pointer after a new revision is
+   * created. The update is **guarded by `revisionNumber`**: it only advances the
+   * pointer when the incoming revision is newer than the one currently recorded.
+   * This prevents a slower concurrent writer (which allocated an earlier number)
+   * from overwriting the pointer with a stale revision. The authoritative "latest"
+   * lookup is {@link CodebaseRevisionStore.getLatest} (sorts by `revisionNumber`);
+   * this pointer is a denormalized convenience that must not regress.
+   */
+  async setLatestRevision(
+    codebaseId: string,
+    revisionId: string,
+    revisionNumber: number
+  ): Promise<void> {
     await this.collection.updateOne(
-      { _id: codebaseId } as object,
-      { $set: { latestRevisionId: revisionId, updatedAt: new Date() } }
+      {
+        _id: codebaseId,
+        $or: [
+          { latestRevisionNumber: { $exists: false } },
+          { latestRevisionNumber: { $lt: revisionNumber } },
+        ],
+      } as object,
+      {
+        $set: {
+          latestRevisionId: revisionId,
+          latestRevisionNumber: revisionNumber,
+          updatedAt: new Date(),
+        },
+      }
     );
   }
 

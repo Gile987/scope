@@ -11,10 +11,19 @@ type UnknownRecord = Record<string, unknown>;
 
 function matches<T extends UnknownRecord>(doc: T, filter: UnknownRecord): boolean {
   for (const [key, condition] of Object.entries(filter)) {
+    if (key === "$or" && Array.isArray(condition)) {
+      if (!condition.some((sub) => matches(doc, sub as UnknownRecord))) return false;
+      continue;
+    }
     const value = doc[key];
     if (typeof condition === "object" && condition !== null && "$exists" in condition) {
       const exists = value !== undefined;
       if ((condition as { $exists: boolean }).$exists !== exists) return false;
+      continue;
+    }
+    if (typeof condition === "object" && condition !== null && "$lt" in condition) {
+      if (typeof value !== "number") return false;
+      if (!(value < (condition as { $lt: number }).$lt)) return false;
       continue;
     }
     if (value !== condition) return false;
@@ -183,6 +192,33 @@ describe("CodebaseRevisionStore", () => {
     await expect(revisionStore.get(first._id)).resolves.toMatchObject({ _id: first._id });
     await expect(revisionStore.getByRef(second.ref)).resolves.toMatchObject({ _id: second._id });
     await expect(revisionStore.getByNumber(codebase._id, 1)).resolves.toMatchObject({ _id: first._id });
+  });
+
+  it("advances latestRevisionId to the newest revision on create", async () => {
+    const { revisionStore, codebase, codebaseStore } = await makeStores();
+    const first = await revisionStore.createRevision(revisionInput(codebase));
+    let cb = await codebaseStore.get(codebase._id);
+    expect(cb?.latestRevisionId).toBe(first._id);
+    expect(cb?.latestRevisionNumber).toBe(1);
+
+    const second = await revisionStore.createRevision(revisionInput(codebase));
+    cb = await codebaseStore.get(codebase._id);
+    expect(cb?.latestRevisionId).toBe(second._id);
+    expect(cb?.latestRevisionNumber).toBe(2);
+  });
+
+  it("does not regress the latestRevisionId pointer when an older revision is set after a newer one", async () => {
+    const { revisionStore, codebase, codebaseStore } = await makeStores();
+    // Simulate a concurrency race: r2 created, then a slower writer for r1 tries to
+    // set the pointer back. The guard must keep the pointer at the newer revision.
+    const r1 = await revisionStore.createRevision(revisionInput(codebase));
+    const r2 = await revisionStore.createRevision(revisionInput(codebase));
+
+    await codebaseStore.setLatestRevision(codebase._id, r1._id, r1.revisionNumber);
+
+    const cb = await codebaseStore.get(codebase._id);
+    expect(cb?.latestRevisionId).toBe(r2._id);
+    expect(cb?.latestRevisionNumber).toBe(2);
   });
 
   it("throws when the parent codebase does not exist", async () => {

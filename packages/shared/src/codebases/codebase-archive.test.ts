@@ -2,11 +2,11 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import yazl from "yazl";
-import { extractArchiveBuffer, resolveSafeEntryPath } from "./codebase-archive.js";
+import { extractArchiveBuffer, resolveSafeEntryPath, assertTarEntrySafe } from "./codebase-archive.js";
 
 /** Build an in-memory zip from a map of entry name -> contents. */
 async function makeZip(entries: Record<string, string>): Promise<Buffer> {
@@ -103,5 +103,63 @@ describe("extractArchiveBuffer (zip)", () => {
       /outside target directory|invalid relative path/
     );
     expect(existsSync(join(dest, "..", "evil.txt"))).toBe(false);
+  });
+});
+
+describe("assertTarEntrySafe", () => {
+  const dest = "/tmp/codebase-dest";
+
+  it("accepts a normal nested path", () => {
+    expect(assertTarEntrySafe(dest, "src/index.ts")).toBe(true);
+  });
+
+  it("rejects a '../' traversal escaping destDir", () => {
+    expect(() => assertTarEntrySafe(dest, "../evil.txt")).toThrow(/outside target directory/);
+  });
+
+  it("rejects an absolute entry path", () => {
+    expect(() => assertTarEntrySafe(dest, "/etc/passwd")).toThrow(/outside target directory/);
+  });
+
+  it("accepts a symlink whose target stays inside destDir", () => {
+    expect(assertTarEntrySafe(dest, "link", "real.txt")).toBe(true);
+  });
+
+  it("rejects a symlink whose target escapes destDir", () => {
+    expect(() => assertTarEntrySafe(dest, "link", "../../etc/passwd")).toThrow(
+      /link escaping target directory/
+    );
+  });
+});
+
+describe("extractArchiveBuffer (tar.gz)", () => {
+  const dirs: string[] = [];
+  const newDir = () => {
+    const d = mkdtempSync(join(tmpdir(), "codebase-archive-tar-test-"));
+    dirs.push(d);
+    return d;
+  };
+
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("extracts a well-formed tar.gz into the destination", async () => {
+    const tar = await import("tar");
+    const src = newDir();
+    writeFileSync(join(src, "README.md"), "hello tar");
+    mkdirSync(join(src, "src"));
+    writeFileSync(join(src, "src", "index.ts"), "export const y = 2;");
+
+    const tgz = newDir();
+    const tgzPath = join(tgz, "out.tar.gz");
+    await tar.create({ gzip: true, file: tgzPath, cwd: src }, ["README.md", "src"]);
+    const buffer = readFileSync(tgzPath);
+
+    const dest = newDir();
+    await extractArchiveBuffer(buffer, dest);
+
+    expect(readFileSync(join(dest, "README.md"), "utf8")).toBe("hello tar");
+    expect(readFileSync(join(dest, "src", "index.ts"), "utf8")).toBe("export const y = 2;");
   });
 });
