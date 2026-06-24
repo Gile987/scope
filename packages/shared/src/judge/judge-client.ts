@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 import { ConversationTurn, CriterionResult } from "../types/types.js";
-import { withRetry } from "../utils/retry.js";
 
 /**
  * Request payload for the judge service's /api/v1/evaluate endpoint.
@@ -125,43 +124,52 @@ export class JudgeClient {
 
   /**
    * Calls the judge service to evaluate a workspace snapshot against criteria.
-   * Retries on timeout, transient network errors, and rate-limit errors with
-   * exponential backoff. Rate-limit errors use longer backoff (parsed from error)
-   * and more retry attempts.
+   * Retries on timeout, transient network errors, and rate-limit errors.
+   *
+   * Rate-limit errors honor the server's suggested backoff duration (e.g.
+   * "try again in 5 minutes") rather than using a fixed exponential schedule.
+   * Non-rate-limit transient errors use exponential backoff with jitter.
    */
   async evaluate(request: JudgeEvaluateRequest): Promise<JudgeEvaluateResponse> {
     const url = `${this.baseUrl}/api/v1/evaluate`;
     const criteriaCount = request.criteria.length;
+    const effectiveRetries = Math.max(this.maxRetries, this.rateLimitRetries);
 
     console.log(
       `[JudgeClient] Evaluating ${criteriaCount} criteria (timeout: ${this.timeoutMs}ms, retries: ${this.maxRetries}, rateLimitRetries: ${this.rateLimitRetries})`
     );
 
-    // Use the higher retry count since rate-limit errors are included in the retryable set
-    const effectiveRetries = Math.max(this.maxRetries, this.rateLimitRetries);
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= effectiveRetries; attempt++) {
+      try {
+        return await this.doEvaluate(url, request);
+      } catch (error) {
+        lastError = error;
+        if (attempt >= effectiveRetries || !isRetryableJudgeError(error)) {
+          throw error;
+        }
 
-    return withRetry(
-      () => this.doEvaluate(url, request),
-      {
-        maxRetries: effectiveRetries,
-        baseDelayMs: 5_000,
-        maxDelayMs: 5 * 60 * 1000, // 5 minutes max (rate-limit errors can suggest 5 min waits)
-        isRetryable: isRetryableJudgeError,
-        onRetry: (error, attempt) => {
-          const msg = error instanceof Error ? error.message : String(error);
-          if (isRateLimitError(error)) {
-            const backoffMs = parseRateLimitBackoff(error);
-            console.warn(
-              `[JudgeClient] Rate limit hit on attempt ${attempt} (waiting ${Math.round(backoffMs / 1000)}s before retry): ${msg.substring(0, 200)}`
-            );
-          } else {
-            console.warn(
-              `[JudgeClient] Evaluate attempt ${attempt} failed (retrying): ${msg.substring(0, 200)}`
-            );
-          }
-        },
+        const msg = error instanceof Error ? error.message : String(error);
+        let delayMs: number;
+
+        if (isRateLimitError(error)) {
+          // Honor the server's suggested backoff duration
+          delayMs = parseRateLimitBackoff(error);
+          console.warn(
+            `[JudgeClient] Rate limit hit on attempt ${attempt + 1}/${effectiveRetries} (waiting ${Math.round(delayMs / 1000)}s before retry): ${msg.substring(0, 200)}`
+          );
+        } else {
+          // Exponential backoff with jitter for transient errors
+          delayMs = Math.min(5_000 * Math.pow(2, attempt), 5 * 60 * 1000) + Math.random() * 1_000;
+          console.warn(
+            `[JudgeClient] Evaluate attempt ${attempt + 1}/${effectiveRetries} failed (retrying in ${Math.round(delayMs / 1000)}s): ${msg.substring(0, 200)}`
+          );
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
-    );
+    }
+    throw lastError;
   }
 
   private async doEvaluate(url: string, request: JudgeEvaluateRequest): Promise<JudgeEvaluateResponse> {

@@ -12,7 +12,8 @@ import {
   ConversationTurn,
   DependencyGraph,
   TokenManagerClient,
-  withRetry,
+  isRateLimitError,
+  parseRateLimitBackoff,
 } from "shared";
 
 export interface JudgeStrategyContext {
@@ -234,6 +235,9 @@ export abstract class JudgeStrategy {
 
   /**
    * Run a Copilot session with given prompt and tools, retrying on timeout and rate limits.
+   *
+   * Rate-limit errors honor the server's suggested backoff (e.g. "try again in
+   * 5 minutes"). Transient errors use exponential backoff with jitter.
    */
   protected async runCopilotSession(
     workspacePath: string,
@@ -242,41 +246,44 @@ export abstract class JudgeStrategy {
   ): Promise<string> {
     const tools = this.createFileTools(workspacePath);
 
-    return withRetry(
-      () => this.doRunCopilotSession(tools, systemPrompt, userPrompt),
-      {
-        maxRetries: this.maxRetries,
-        baseDelayMs: 10_000,
-        maxDelayMs: 5 * 60 * 1000, // 5 minutes max for rate-limit backoff
-        isRetryable: (error) => {
-          const msg = error instanceof Error ? error.message : String(error);
-          return (
-            msg.includes("timeout") ||
-            msg.includes("Timeout") ||
-            msg.includes("aborted") ||
-            msg.includes("ECONNRESET") ||
-            msg.includes("socket hang up") ||
-            msg.includes("rate limit") ||
-            msg.includes("rate-limit") ||
-            msg.includes("Too Many Requests") ||
-            (msg.includes("429") && msg.includes("rate"))
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      try {
+        return await this.doRunCopilotSession(tools, systemPrompt, userPrompt);
+      } catch (error) {
+        lastError = error;
+        const msg = error instanceof Error ? error.message : String(error);
+
+        const isTransient =
+          msg.includes("timeout") ||
+          msg.includes("Timeout") ||
+          msg.includes("aborted") ||
+          msg.includes("ECONNRESET") ||
+          msg.includes("socket hang up");
+
+        if (attempt >= this.maxRetries || (!isTransient && !isRateLimitError(error))) {
+          throw error;
+        }
+
+        let delayMs: number;
+        if (isRateLimitError(error)) {
+          // Honor the server's suggested backoff duration
+          delayMs = parseRateLimitBackoff(error);
+          console.warn(
+            `[judge-strategy] Rate limit hit on attempt ${attempt + 1}/${this.maxRetries} (waiting ${Math.round(delayMs / 1000)}s before retry): ${msg.substring(0, 200)}`
           );
-        },
-        onRetry: (error, attempt) => {
-          const msg = error instanceof Error ? error.message : String(error);
-          const isRateLimit = msg.includes("rate limit") || msg.includes("rate-limit") || msg.includes("Too Many Requests");
-          if (isRateLimit) {
-            console.warn(
-              `[judge-strategy] Rate limit hit on attempt ${attempt} (will retry with backoff): ${msg.substring(0, 200)}`
-            );
-          } else {
-            console.warn(
-              `[judge-strategy] sendAndWait attempt ${attempt} failed (retrying in ≤30s): ${msg.substring(0, 200)}`
-            );
-          }
-        },
+        } else {
+          // Exponential backoff with jitter for transient errors
+          delayMs = Math.min(10_000 * Math.pow(2, attempt), 5 * 60 * 1000) + Math.random() * 1_000;
+          console.warn(
+            `[judge-strategy] sendAndWait attempt ${attempt + 1}/${this.maxRetries} failed (retrying in ${Math.round(delayMs / 1000)}s): ${msg.substring(0, 200)}`
+          );
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
-    );
+    }
+    throw lastError;
   }
 
   private async doRunCopilotSession(
