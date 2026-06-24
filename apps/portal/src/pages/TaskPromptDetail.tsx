@@ -14,6 +14,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Trash2, List } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
+import { Badge } from "@/components/ui/badge";
+import { GATE_METADATA } from "@/lib/gates";
 
 export function TaskPromptDetail() {
   const { id } = useParams<{ id: string }>();
@@ -106,6 +108,12 @@ export function TaskPromptDetail() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="space-y-1">
+            <span className="text-sm font-medium text-muted-foreground">Type</span>
+            <div>
+              <Badge variant="secondary">{GATE_METADATA[taskPrompt.type ?? "select"].label}</Badge>
+            </div>
+          </div>
           <div className="space-y-1">
             <span className="text-sm font-medium text-muted-foreground">Created</span>
             <p className="text-sm">{formatDate(taskPrompt.createdAt)}</p>

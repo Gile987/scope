@@ -154,6 +154,64 @@ describe("API Endpoints", () => {
 
       expect(res.status).toBe(409);
     });
+
+    it("returns 400 when creating a criterion that introduces a cycle", async () => {
+      const dataset = [
+        { id: "a", prompt: "A", dependsOn: ["b"], createdAt: new Date() },
+      ];
+      (mocks.criteriaCollection.findOne as any).mockImplementation((f: any) =>
+        Promise.resolve(dataset.find((d) => d.id === f.id) ?? null),
+      );
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        sort: () => ({ toArray: () => Promise.resolve(dataset) }),
+        toArray: () => Promise.resolve(dataset),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/criteria")
+        .send({ id: "b", prompt: "B", dependsOn: ["a"] });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when a dependency is not gate-compatible", async () => {
+      const dataset = [
+        { id: "parent", prompt: "P", dependsOn: [], gates: ["select"], createdAt: new Date() },
+      ];
+      (mocks.criteriaCollection.findOne as any).mockImplementation((f: any) =>
+        Promise.resolve(dataset.find((d) => d.id === f.id) ?? null),
+      );
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        sort: () => ({ toArray: () => Promise.resolve(dataset) }),
+        toArray: () => Promise.resolve(dataset),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/criteria")
+        .send({ id: "child", prompt: "C", dependsOn: ["parent"], gates: ["select", "build"] });
+
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe("POST /api/v1/criteria/seed", () => {
+    it("returns 400 when the seeded batch would form a cycle", async () => {
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        toArray: () => Promise.resolve([]),
+        sort: () => ({ toArray: () => Promise.resolve([]) }),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/criteria/seed")
+        .send({
+          criteria: [
+            { id: "a", prompt: "A", dependsOn: ["b"] },
+            { id: "b", prompt: "B", dependsOn: ["a"] },
+          ],
+        });
+
+      expect(res.status).toBe(400);
+    });
   });
 
   describe("GET /api/v1/criteria/:id", () => {
@@ -1178,6 +1236,88 @@ describe("API Endpoints", () => {
       expect(res.status).toBe(201);
       expect(res.body.warnings).toBeDefined();
       expect(res.body.warnings.some((w: string) => w.includes("only supports reasoning effort"))).toBe(true);
+    });
+  });
+
+  // ===================================================================
+  // Submit with gates — free-text gate prompt materialization
+  // ===================================================================
+
+  describe("POST /api/v1/requests?worker=... (gates)", () => {
+    beforeEach(() => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
+        supportedModels: [],
+      });
+      // Build gate criterion is compatible with the build gate; "works" is
+      // compatible with all gates (no gates restriction).
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([
+          { id: "builds_clean", gates: ["build"] },
+          { id: "works", gates: [] },
+        ]),
+      });
+      // findOrCreate: select task (1 arg) vs typed gate prompt (text, gate).
+      (mocks.taskPromptStore.findOrCreate as any).mockImplementation(
+        async (text: string, type?: string) => ({ _id: type ? `tp-${type}` : "tp-select", text, type }),
+      );
+      // The resolved gate prompt id resolves to a prompt whose type === gate.
+      (mocks.taskPromptCollection.findOne as any).mockImplementation(
+        async (q: { _id: string }) => ({ _id: q._id, type: q._id.replace("tp-", "") }),
+      );
+    });
+
+    it("materializes a free-text gate prompt into a typed prompt and persists the resolved id", async () => {
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          gates: [
+            { gate: "select", criteria: ["works"] },
+            { gate: "build", promptText: "  Build the project and fix errors.  ", criteria: ["builds_clean"] },
+          ],
+        });
+
+      expect(res.status).toBe(201);
+      expect(mocks.taskPromptStore.findOrCreate).toHaveBeenCalledWith("Build the project and fix errors.", "build");
+      const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
+      const buildGate = doc.gates.find((g: { gate: string }) => g.gate === "build");
+      expect(buildGate.promptId).toBe("tp-build");
+      expect(buildGate.promptText).toBeUndefined();
+    });
+
+    it("lets promptText supersede a provided promptId", async () => {
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          gates: [
+            { gate: "select", criteria: ["works"] },
+            { gate: "build", promptId: "stale-id", promptText: "Fresh build prompt.", criteria: ["builds_clean"] },
+          ],
+        });
+
+      expect(res.status).toBe(201);
+      expect(mocks.taskPromptStore.findOrCreate).toHaveBeenCalledWith("Fresh build prompt.", "build");
+      const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
+      const buildGate = doc.gates.find((g: { gate: string }) => g.gate === "build");
+      expect(buildGate.promptId).toBe("tp-build");
+    });
+
+    it("returns 400 when a non-select gate has neither promptId nor promptText", async () => {
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          gates: [
+            { gate: "select", criteria: ["works"] },
+            { gate: "build", criteria: ["builds_clean"] },
+          ],
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("missing a prompt");
     });
   });
 

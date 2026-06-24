@@ -38,6 +38,21 @@ function makeLog(criterionId: string, passed: boolean, evaluated: boolean): LogE
   };
 }
 
+function makeGateLog(
+  criterionId: string,
+  passed: boolean,
+  evaluated: boolean,
+  gate: string
+): LogEvent {
+  return {
+    timestamp: new Date().toISOString(),
+    level: "info",
+    source: "judge",
+    message: `criterion_result: ${criterionId}`,
+    data: { type: "criterion_result", criterionId, passed, evaluated, feedback: "", gate },
+  };
+}
+
 const meta = {
   component: CriteriaGraphView,
   tags: ["ai-generated"],
@@ -107,5 +122,25 @@ export const Empty: Story = {
   args: {
     scenarioCriteria: ["nonexistent-criterion"],
     logs: [],
+  },
+};
+
+// Demonstrates the `gate` prop: only logs tagged with the matching gate color the
+// nodes. Here the same `tests-pass` criterion fails under the "build" gate but the
+// status shown is scoped to the "test" gate (passing).
+export const GateScoped: Story = {
+  args: {
+    scenarioCriteria,
+    gate: "test",
+    logs: [
+      makeGateLog("code-runs", true, true, "test"),
+      makeGateLog("has-tests", true, true, "test"),
+      makeGateLog("tests-pass", true, true, "test"),
+      makeGateLog("uses-typescript", true, true, "test"),
+      makeGateLog("no-lint-errors", true, true, "test"),
+      // These build-gate events must be ignored when gate="test".
+      makeGateLog("tests-pass", false, true, "build"),
+      makeGateLog("uses-typescript", false, true, "build"),
+    ],
   },
 };

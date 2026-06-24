@@ -193,7 +193,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
     const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
     await log("info", "Acquired Copilot SDK token");
 
-    const client = new CopilotClient({ githubToken });
+    const client = new CopilotClient({ gitHubToken: githubToken });
     let fullResponse = "";
     let lastLoggedCharCount = 0;
 

@@ -3,6 +3,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { WorkerResult } from "../types/types.js";
+// Resolves to the mocked class defined in vi.mock("./judge-client.js") below.
+import { JudgeInfrastructureError } from "./judge-client.js";
+
 // Mock BlobStorage
 const mockUploadFile = vi.fn();
 vi.mock("../storage/blob-storage.js", () => ({
@@ -26,6 +29,15 @@ vi.mock("./judge-client.js", () => ({
   JudgeClient: vi.fn().mockImplementation(() => ({
     evaluate: vi.fn().mockResolvedValue({ passed: true, feedback: "All good" }),
   })),
+  JudgeInfrastructureError: class JudgeInfrastructureError extends Error {
+    readonly isInfrastructure = true as const;
+    readonly isVersionMismatch: boolean;
+    constructor(message: string, opts: { isVersionMismatch?: boolean } = {}) {
+      super(message);
+      this.name = "JudgeInfrastructureError";
+      this.isVersionMismatch = opts.isVersionMismatch ?? false;
+    }
+  },
 }));
 
 // Import after mocks
@@ -398,6 +410,70 @@ describe("runMultiTurnLoop — hadError", () => {
     expect(result.passed).toBe(false);
     expect(result.hadError).toBe(false);
     expect(result.finalResult).toContain("Max iterations");
+  });
+  it("judge protocol-version mismatch → hadError with a distinct infrastructure label and metadata", async () => {
+    const config = makeConfig({
+      maxIterations: 1,
+      judgeClient: {
+        evaluate: vi.fn().mockRejectedValue(
+          new JudgeInfrastructureError("Judge infra: protocol mismatch", { isVersionMismatch: true })
+        ),
+      } as any,
+    });
+    (config.processor as any).processMessage.mockResolvedValue({ response: "did work" } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.passed).toBe(false);
+    expect(result.hadError).toBe(true);
+    expect(result.finalResult).toContain("Judge infrastructure error (evaluation could not run");
+    expect(result.turns[0].judgeFeedback).toContain("Judge infrastructure error (evaluation could not run");
+
+    const infraLog = (config.log as any).mock.calls.find(
+      (c: any[]) => typeof c[1] === "string" && c[1].includes("Judge infrastructure error")
+    );
+    expect(infraLog).toBeTruthy();
+    expect(infraLog[2]).toMatchObject({ judgeInfrastructureError: true, protocolVersionMismatch: true });
+  });
+
+  it("generic judge infrastructure error (non-version) sets the infra flag without protocolVersionMismatch", async () => {
+    const config = makeConfig({
+      maxIterations: 1,
+      judgeClient: {
+        evaluate: vi.fn().mockRejectedValue(new JudgeInfrastructureError("Judge infra: HTTP 503")),
+      } as any,
+    });
+    (config.processor as any).processMessage.mockResolvedValue({ response: "did work" } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.hadError).toBe(true);
+    expect(result.finalResult).toContain("Judge infrastructure error (evaluation could not run");
+    const infraLog = (config.log as any).mock.calls.find(
+      (c: any[]) => typeof c[1] === "string" && c[1].includes("Judge infrastructure error")
+    );
+    expect(infraLog).toBeTruthy();
+    expect(infraLog[2].judgeInfrastructureError).toBe(true);
+    expect(infraLog[2].protocolVersionMismatch).toBeUndefined();
+  });
+
+  it("a non-infrastructure judge error keeps the plain 'Judge evaluation failed' label", async () => {
+    const config = makeConfig({
+      maxIterations: 1,
+      judgeClient: { evaluate: vi.fn().mockRejectedValue(new Error("transient boom")) } as any,
+    });
+    (config.processor as any).processMessage.mockResolvedValue({ response: "did work" } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.hadError).toBe(true);
+    expect(result.finalResult).toContain("Judge evaluation failed");
+    expect(result.finalResult).not.toContain("infrastructure error");
+    const failLog = (config.log as any).mock.calls.find(
+      (c: any[]) => typeof c[1] === "string" && c[1].includes("Judge evaluation failed")
+    );
+    expect(failLog).toBeTruthy();
+    expect(failLog[2].judgeInfrastructureError).toBeUndefined();
   });
 });
 

@@ -338,7 +338,7 @@ All workers must ensure that their coding agent can execute tool calls and file 
 
 The mechanism varies by worker type:
 
-- **ACP-based workers** — implement `requestPermission()` to auto-approve all permission requests, and pass CLI flags like `--yolo` where supported:
+- **ACP-based workers** — implement `requestPermission()` to auto-approve all permission requests, **and** set the ACP session mode to `autopilot` after creating the session. The `--yolo` CLI flag alone does **not** change the ACP session mode: an ACP session starts in `agent` mode, where execute/bash tool calls (e.g. `npm run build`) are denied non-interactively. Autopilot mode enables allow-all and runs without prompts. The Copilot CLI advertises modes by their canonical ACP URL ids (e.g. `https://agentclientprotocol.com/protocol/session-modes#autopilot`), so match on the full id:
 
 ```typescript
 async requestPermission(
@@ -349,6 +349,15 @@ async requestPermission(
     return { outcome: { outcome: "selected", optionId: firstOption.optionId } };
   }
   return { outcome: { outcome: "cancelled" } };
+}
+
+// After session/new — switch to autopilot so commands run headlessly.
+const AUTOPILOT_MODE_ID =
+  "https://agentclientprotocol.com/protocol/session-modes#autopilot";
+const autopilot = sessionResult.modes?.availableModes
+  ?.find((m) => m.id === AUTOPILOT_MODE_ID || m.id.endsWith("#autopilot"));
+if (autopilot) {
+  await connection.setSessionMode({ sessionId, modeId: autopilot.id });
 }
 ```
 

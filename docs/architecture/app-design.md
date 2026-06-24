@@ -23,7 +23,7 @@ flowchart LR
 |---------|---------------|
 | `api` | REST API (Express), SSE log streaming, run management, criteria CRUD |
 | `cli` | Command-line interface for submitting tasks, streaming logs, managing runs |
-| `portal` | Vue.js web UI for run management, insights, criteria graph editing |
+| `portal` | React web UI for run management, insights, criteria graph editing |
 | `judge` | Evaluation engine — executes criteria against agent output |
 | `shared` | Types, database models, queue/blob/redis clients, config loaders |
 | `workers/*` | Coding agent adapters — each implements the same interface for a different agent |
@@ -73,6 +73,32 @@ flowchart TD
     I --> J
 ```
 
+## Gates — multi-phase evaluation pipeline
+
+Runs execute through a hard-coded, ordered sequence of **gates**: `Select → Build
+→ Test → Run → Deploy`. Each gate runs the per-iteration coding + judge loop
+against the **same** workspace, with its own prompt, its own subset of criteria,
+and its own iteration budget. Gates run **stop-on-failure**: when a gate exhausts
+its budget without passing, downstream gates are recorded as `skipped`.
+
+- A request carries an optional `gates: GateConfig[]` (`{ gate, promptId, criteria,
+  maxIterations? }`). When absent, the request is normalised to a single **Select**
+  gate built from the legacy `scenario.criteria` + `maxIterations` + `taskPromptId`
+  — so existing requests behave identically.
+- Criteria declare a `gates: GateId[]` compatibility list (empty = all gates); the
+  list is **downward-closed** along the DAG (a parent is compatible with at least
+  every gate its children are).
+- Prompts are **typed** (`type: PromptType`, one literal per gate); a gate's prompt
+  must have `type === gate`. The Select gate's prompt is the request's task prompt.
+- For non-Select gates the judge can inspect captured command output via the
+  `read_tool_outputs` tool, not just the workspace files.
+- Per-gate outcomes are persisted on the request as `gateSummaries:
+  GateRunSummary[]`; each `ConversationTurn` is tagged with its `gate`.
+
+The orchestration lives in `runGatedLoop` (`packages/shared/src/judge/gated-loop.ts`),
+which wraps the per-gate `runMultiTurnLoop`. See the full
+[gates design doc](../design/gates.md).
+
 ## Queue Pattern
 
 Each worker type has a dedicated Azure Storage Queue. The API resolves the target queue via **version-aware routing**: when a run is submitted, the API looks up the selected (or latest active) agent version and uses its registered `queueName` to route the message.
@@ -85,7 +111,7 @@ Currently all versions of an agent share a single queue (e.g., `queue-coder-acp-
 
 ### Run submission flow
 
-1. User submits via Portal or CLI with: **task**, **criteria** (required), **worker**, **model** (required), and optionally **agentVersion**
+1. User submits via Portal or CLI with: **task**, **criteria** (required), **worker**, **model** (required), and optionally **agentVersion**, and optionally a per-gate **`gates`** configuration (see [Gates](#gates--multi-phase-evaluation-pipeline))
 2. API resolves `agentVersion`: explicit selection → validate active; omitted → latest active by `createdAt`
 3. API resolves `model`: explicit → validate against `supportedModels`; omitted → `defaultModel`
 4. API looks up `AgentVersion.queueName` and routes message to that queue
@@ -102,6 +128,10 @@ Profile fan-out mode is also supported for comparative runs:
 
 Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API subscribes and relays them as Server-Sent Events (SSE) to CLI and Portal clients.
 
+## Portal Shell
+
+The Portal desktop shell uses a persistent left navigation sidebar. It defaults to the compact icon rail, and users can expand it to show navigation labels; the choice is stored in `localStorage` under `scope:layout:sidebar-expanded`. Mobile navigation remains a sheet-based menu with labels always visible.
+
 ## Criteria System
 
 Criteria are reusable evaluation rules stored in the database and optionally defined in `config/criteria/*.yaml`. They support:
@@ -109,6 +139,7 @@ Criteria are reusable evaluation rules stored in the database and optionally def
 - **DAG dependencies** — criterion A can depend on criterion B (B must pass before A is evaluated)
 - **AI-generated prompts** — natural language behavior descriptions can be converted to evaluation prompts via LLM
 - **Traits** — reusable labels for filtering and composition (e.g., `has_azure`, `has_node`)
+- **Gate compatibility** — a `gates: GateId[]` list controls which [gates](#gates--multi-phase-evaluation-pipeline) a criterion may be selected for (empty = all); the list is downward-closed along the DAG
 
 See [`ENV_VARIABLES.md`](../../scope-mt-app/ENV_VARIABLES.md) for related configuration options.
 

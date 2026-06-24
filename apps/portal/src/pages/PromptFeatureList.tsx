@@ -21,6 +21,7 @@ import {
   useListUrlState,
   type DataTableColumn,
 } from "@/components/list-layout";
+import { HelpTooltip } from "@/components/HelpTooltip";
 import type { PromptFeatureDocument } from "@/types";
 
 export function PromptFeatureList() {
@@ -122,7 +123,16 @@ export function PromptFeatureList() {
 
   return (
     <ListLayout
-      title="Prompt Features"
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          Prompt Features
+          <HelpTooltip
+            text="Detection rules that flag whether the agent's prompt or output uses specific capabilities (tools, agents, plans). Used for capability tracking and analytics."
+            docs="promptFeatures"
+            size="md"
+          />
+        </span>
+      }
       description="Manage prompt feature detection"
       railStorageKey="prompt-features"
       actions={

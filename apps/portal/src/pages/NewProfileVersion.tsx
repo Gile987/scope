@@ -65,11 +65,13 @@ export function NewProfileVersion() {
 
   // Find selected agent for model/version lists
   const selectedAgent = agents.find((a: CodingAgent) => a._id === worker);
-  const supportedModels = selectedAgent?.supportedModels ?? [];
   const isVscodeWorker = worker.includes("vscode");
 
   // Model capabilities and effort management
-  const { capabilitiesMap } = useModelCapabilities(worker || undefined);
+  const { capabilitiesMap, activeModelIds } = useModelCapabilities(worker || undefined);
+  const supportedModels = activeModelIds.length > 0
+    ? activeModelIds
+    : (selectedAgent?.supportedModels ?? []);
   const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
   const { supportedEfforts, workerEffortWarning } = useReasoningEffort({
     model,

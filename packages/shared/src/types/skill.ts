@@ -4,16 +4,28 @@
 // --- Skill types ---
 
 /**
- * How a skill was added to the internal skill list.
- * - "skills-sh": imported from skills.sh search results
- * - "manual": added manually by entering source + skill name
+ * How a skill was added to the internal library.
+ *
+ * - `"manual"` — imported via the Portal discovery wizard (scanning a GitHub repo)
+ *   or the CLI `skill import` command. The user explicitly provided the GitHub
+ *   repository and skill name. Content is always fetched directly from GitHub.
+ *
+ * - `"skills-sh"` — imported from skills.sh search results. The user found the
+ *   skill through the skills.sh external registry (a search index over public
+ *   GitHub repos). Content is still fetched from GitHub — skills.sh only provides
+ *   discovery/metadata, not the skill content itself.
+ *
+ * In both cases, GitHub is the source of truth for skill content.
  */
 export type SkillOrigin = "skills-sh" | "manual";
 
 /**
  * Skill reference document stored in MongoDB (`skills` collection).
  *
- * A mutable pointer to a skill in a GitHub repository.
+ * A mutable pointer to a skill in a GitHub repository. Represents an "imported"
+ * skill in Scope's internal library. Regardless of origin (manual or skills-sh),
+ * the skill content is always resolved from the GitHub repository specified by `source`.
+ *
  * The `_id` slug is `{source}/{skillName}` (e.g. "vercel-labs/agent-skills/vercel-react-best-practices").
  */
 export interface SkillDocument {
@@ -76,7 +88,11 @@ export interface SkillConfig {
 
 /**
  * Unified search result returned by the skills search endpoint.
- * Merges results from the internal DB and external registries (skills.sh).
+ * Merges results from the internal DB and the external skills.sh registry.
+ *
+ * skills.sh (https://skills.sh) is an external search index over publicly
+ * available Agent Skills in GitHub repos. It provides discovery/metadata only —
+ * actual skill content is always fetched from GitHub during import.
  */
 export interface SkillSearchResult {
   id: string;                     // Slug: "{source}/{skillName}"

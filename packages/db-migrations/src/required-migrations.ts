@@ -30,7 +30,9 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "015-add-priority-and-scheduler-index.ts",
   "016-fix-scheduler-sort-index.ts",
   "017-add-post-processor-dispatch-index.ts",
+  "018-backfill-criteria-gates.ts",
   "018-migrate-services-to-handler-dag.ts",
   "019-add-handler-status-index.ts",
+  "019-backfill-task-prompt-type.ts",
   "020-backfill-handler-status.ts",
 ];

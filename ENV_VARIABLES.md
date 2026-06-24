@@ -138,6 +138,23 @@ match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
 
 ## Judge Strategy Configuration
 
+### JUDGE_MODEL
+**Default:** `gpt-5.4-mini`
+**Type:** string
+
+Model used by the judge to evaluate agent output against criteria. Defaults to
+`gpt-5.4-mini` (set in code, docker-compose, and the K8s manifest). Override via
+`JUDGE_MODEL` (e.g. in `.env`) to use a different model.
+
+### FEEDBACK_MODEL
+**Default:** `gpt-5.4-mini`
+**Type:** string
+
+Model used by the feedback generator that produces actionable feedback for the
+coding agent between iterations. Defaults to `gpt-5.4-mini` (set in code,
+docker-compose, and the K8s manifest). Override via `FEEDBACK_MODEL` (e.g. in
+`.env`) to use a different model.
+
 ### JUDGE_STRATEGY
 **Default:** `bundled`
 **Options:** `bundled` | `independent`
@@ -175,6 +192,12 @@ Timeout for the HTTP request from workers to the judge service (`/api/v1/evaluat
 
 Maximum number of retry attempts when the judge client encounters a timeout or transient network error. Uses exponential backoff (5s base, 30s max). Set to `0` to disable retries.
 
+### JUDGE_SKIP_PROTOCOL_CHECK
+**Default:** `false`
+**Type:** boolean (`true` to enable)
+
+At startup the judge service runs a self-check that spawns the bundled Copilot CLI and asserts its ACP protocol version matches the installed `@github/copilot-sdk`. On a mismatch (e.g. the `@github/copilot` override in `package.json` drifted ahead of the SDK) the judge logs a clear fatal message and exits instead of serving opaque per-evaluation HTTP 500s. Set to `true` to bypass the check (not recommended).
+
 ## Feedback Configuration
 
 ### FEEDBACK_MAX_CRITERIA
@@ -202,6 +225,15 @@ Path to the directory containing criteria definition YAML files for v2 scenarios
 **Type:** `"true"` | (any other value or unset)
 
 When set to `"true"`, displays the Pass@k metrics table on the Insights page. By default, this table is hidden. This is a Vite env var and must be prefixed with `VITE_` to be exposed to the frontend.
+
+## Portal Runtime Configuration
+
+### SCOPE_DOCS_BASE_URL
+**Default:** `https://urban-disco-1qzzq7z.pages.github.io`
+**Type:** URL string
+**Scope:** Portal container (runtime)
+
+Base URL for the public Scope docs site that in-app help tooltips link to. Unlike `VITE_*` flags (which Vite inlines into the bundle at build time), this is read at **container start**: the portal's entrypoint regenerates `/config.js` from this variable and the frontend reads it via `window.__SCOPE_CONFIG__.docsBaseUrl`. This means a single built image can be promoted across environments and still point at the correct docs deployment without a rebuild — set or override it via the Kubernetes Deployment env (`deploy/base/portal.yaml` or an overlay patch). In local Vite development the static `apps/portal/public/config.js` provides the default.
 
 ## Setting Variables
 
@@ -254,10 +286,10 @@ FEEDBACK_DESCENDANT_GUARD=false
 Azure Storage Queue name for report generation jobs. The API enqueues messages here when a report is requested; the report-generator worker polls this queue.
 
 ### REPORT_MODEL
-**Default:** `gpt-4.1`
+**Default:** `gpt-5.4-mini`
 **Type:** string
 
-The LLM model used by the report-generator worker (via the Copilot SDK) to generate run analysis reports. Examples: `gpt-4.1`, `gpt-4o`, `claude-sonnet-4`.
+The LLM model used by the report-generator worker (via the Copilot SDK) to generate run analysis reports. Examples: `gpt-5.4-mini`, `gpt-4.1`, `gpt-4o`, `claude-sonnet-4`.
 
 ### SCOPE_MT_API_URL
 **Default:** `http://localhost:3001` (local), `http://api:80` (Docker)
@@ -316,7 +348,33 @@ Base URL the **scheduler** uses to reach the API's `POST /api/v1/reports/trigger
 - **Docker Compose:** `http://api:80`
 - **Kubernetes:** `http://api.scoped.svc.cluster.local:80`
 
+### SCOPE_REAPER_ENABLED
+**Default:** `false`
+**Type:** boolean (`true` to enable)
+
+Kill-switch for the scheduler's stuck-run reaper. **Disabled by default** — set to `true` (and ensure `REDIS_HOST` is set) to run a periodic backstop sweep that fails `processing` runs whose worker died without writing a terminal state and whose queue message no longer triggers recovery. When disabled, the queue redelivery path still operates. Redis is **non-fatal**: even when enabled, if `REDIS_HOST` is absent or the heartbeat store can't be constructed, the reaper self-disables and the dispatch loop keeps running.
+
+### SCOPE_REAPER_POLL_INTERVAL_MS
+**Default:** `60000`
+**Type:** integer (milliseconds)
+
+How often the stuck-run reaper sweeps MongoDB for stale `processing` runs. A run must look stale in **two consecutive** sweeps before it is reaped, so the effective time-to-reap after the staleness threshold is roughly one extra poll interval. Invalid/non-positive values fall back to the default.
+
+### SCOPE_REAPER_MAX_PER_SWEEP
+**Default:** `30`
+**Type:** integer
+
+Circuit-breaker bound on how many runs a single reaper sweep may fail. If a sweep would reap more than this, it **skips and logs loudly** instead — a high count implies a systemic slowdown (e.g. CosmosDB 429 storm lagging heartbeats fleet-wide) rather than that many independent worker deaths. Invalid/non-positive values fall back to the default.
+
+The reaper reuses `SCOPE_RUN_HEARTBEAT_STALE_MS` (Worker Configuration, below) as its staleness threshold. The scheduler must therefore have Redis credentials (`redis-secrets`) to read per-run heartbeats; see [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#stuck-run-reaper-scheduler-backstop).
+
 ## Worker Configuration
+
+### ACP_SESSION_TIMEOUT_MS
+**Default:** `3600000` (60 minutes)
+**Type:** integer (milliseconds)
+
+Maximum time the `coder-acp-copilot` worker waits for a Copilot CLI ACP session to complete before terminating it. If the agent takes longer than this to produce a response, the session is killed and the iteration fails with a timeout error. Increase for complex tasks that require extended processing. Set to `0` to disable the timeout entirely (not recommended in production).
 
 ### SCOPE_RUN_HEARTBEAT_STALE_MS
 **Default:** `120000` (2 × `HEARTBEAT_VISIBILITY_SECONDS`)
@@ -324,11 +382,17 @@ Base URL the **scheduler** uses to reach the API's `POST /api/v1/reports/trigger
 
 Threshold used by the queue-processor redelivery handler to decide whether an in-flight `processing` run is still alive. When a worker dequeues a duplicate message for a run already in `processing`, it reads the per-run liveness heartbeat from Redis (`run-heartbeat:<runId>`) and compares `Date.now() - lastBeat`:
 
-- **≤ threshold** → original worker is alive; drop the duplicate, leave the run untouched.
+- **≤ threshold** → original worker is alive; **re-defer** the duplicate (push its visibility out by `SCOPE_RUN_REDELIVER_DEFER_MS`), leave the run untouched. The message is **not** deleted — it is the recovery token if the original worker later dies hard.
 - **> threshold** → worker presumed dead; mark the run failed atomically.
-- **missing key** → fall back to `run.startedAt`. If picked up ≤ threshold ago, drop (transient race / Redis blip); otherwise mark failed.
+- **missing key** → fall back to `run.startedAt`. If picked up ≤ threshold ago, re-defer (transient race / Redis blip); otherwise mark failed.
 
-Lower values fail crashed runs faster but increase the risk of false positives if the heartbeat is briefly delayed (network, throttling, GC). The default gives the per-run heartbeat (every 15s) a generous 8× margin. See [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#liveness-heartbeat--redelivery).
+Lower values fail crashed runs faster but increase the risk of false positives if the heartbeat is briefly delayed (network, throttling, GC). The default gives the per-run heartbeat (every 15s) a generous 8× margin. This value is also the staleness threshold used by the scheduler's stuck-run reaper — keep the scheduler and workers on the same value so both recovery paths agree on "worker dead". See [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#liveness-heartbeat--redelivery).
+
+### SCOPE_RUN_REDELIVER_DEFER_MS
+**Default:** value of `SCOPE_RUN_HEARTBEAT_STALE_MS` (`120000`)
+**Type:** integer (milliseconds)
+
+How far the queue-processor pushes out a duplicate message's visibility when the original worker is still alive (fresh heartbeat). The duplicate is re-deferred rather than deleted so the message survives as the at-least-once recovery token; each time it resurfaces, a fresh heartbeat re-defers it (cheap) and a stale heartbeat marks the run failed. Defaulting to the staleness threshold makes the re-check cadence match the staleness window.
 
 ### SCOPE_RUN_HEARTBEAT_REDIS_TTL_MS
 **Default:** `300000` (5 × `HEARTBEAT_VISIBILITY_SECONDS`)

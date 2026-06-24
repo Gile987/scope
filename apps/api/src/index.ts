@@ -141,18 +141,23 @@ async function initializeClients(): Promise<void> {
   // Run `pnpm migrate:up` to apply pending migrations.
 
   // Seed default feature flags (upsert — won't overwrite existing enabled state)
-  const defaultFlags: Array<{ key: string; label: string }> = [
+  const defaultFlags: Array<{ key: string; label: string; enabled?: boolean }> = [
     { key: "mcp", label: "MCP Servers" },
     { key: "models", label: "Models" },
     { key: "agents", label: "Agents" },
     { key: "tokens", label: "Tokens" },
     { key: "extensions", label: "VS Code Extensions" },
     { key: "statistics-graph", label: "Statistics Graph" },
+    // Gate pipeline: Run and Deploy are not ready for users yet — hidden in the
+    // portal by default. Backend/CLI stay permissive; flip these on in Admin
+    // when ready. See apps/portal/src/lib/gates.ts (GATE_FEATURE_FLAGS).
+    { key: "gates-run", label: "Run Gate", enabled: false },
+    { key: "gates-deploy", label: "Deploy Gate", enabled: false },
   ];
   for (const flag of defaultFlags) {
     await featureFlagCollection.updateOne(
       { key: flag.key },
-      { $setOnInsert: { key: flag.key, label: flag.label, enabled: true, updatedAt: new Date() } },
+      { $setOnInsert: { key: flag.key, label: flag.label, enabled: flag.enabled ?? true, updatedAt: new Date() } },
       { upsert: true }
     );
   }

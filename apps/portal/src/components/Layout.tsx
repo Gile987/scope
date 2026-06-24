@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useMemo, Fragment } from "react";
+import { useState, useMemo, useEffect, Fragment } from "react";
 import { Link, useLocation, Outlet, matchPath } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import {
@@ -25,6 +25,8 @@ import {
   Plug,
   Puzzle,
   SlidersHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -108,6 +110,8 @@ const devNavItems: NavItem[] = [
   { to: "/criteria/mdp", label: "MDP", icon: GitBranch },
 ];
 
+const SIDEBAR_EXPANDED_STORAGE_KEY = "scope:layout:sidebar-expanded";
+
 /**
  * Routes that opt-in to the full-bleed list/detail layout (no `container`
  * max-width or vertical padding). The list page must render `<ListLayout>`.
@@ -139,13 +143,23 @@ interface SidebarIconLinkProps {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   active: boolean;
+  expanded: boolean;
   external?: boolean;
   emphasized?: boolean;
 }
 
-function SidebarIconLink({ to, label, icon: Icon, active, external, emphasized }: SidebarIconLinkProps) {
+function SidebarIconLink({
+  to,
+  label,
+  icon: Icon,
+  active,
+  expanded,
+  external,
+  emphasized,
+}: SidebarIconLinkProps) {
   const className = cn(
-    "relative flex h-10 w-10 items-center justify-center rounded-md transition-colors",
+    "relative flex h-10 items-center rounded-md transition-colors",
+    expanded ? "w-full justify-start gap-3 px-3" : "w-10 justify-center",
     emphasized
       ? "bg-action text-action-foreground shadow-sm hover:bg-action/90"
       : active
@@ -160,27 +174,35 @@ function SidebarIconLink({ to, label, icon: Icon, active, external, emphasized }
           aria-hidden
         />
       )}
-      <Icon className="h-5 w-5" />
+      <Icon className="h-5 w-5 shrink-0" />
+      {expanded && <span className="truncate text-sm font-medium">{label}</span>}
     </>
   );
+
+  const link = external ? (
+    <a
+      href={to}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={className}
+      aria-label={expanded ? undefined : label}
+    >
+      {content}
+    </a>
+  ) : (
+    <Link to={to} className={className} aria-label={expanded ? undefined : label}>
+      {content}
+    </Link>
+  );
+
+  if (expanded) {
+    return link;
+  }
+
   return (
     <Tooltip delayDuration={150}>
       <TooltipTrigger asChild>
-        {external ? (
-          <a
-            href={to}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={className}
-            aria-label={label}
-          >
-            {content}
-          </a>
-        ) : (
-          <Link to={to} className={className} aria-label={label}>
-            {content}
-          </Link>
-        )}
+        {link}
       </TooltipTrigger>
       <TooltipContent side="right" sideOffset={8}>
         {label}
@@ -193,6 +215,21 @@ export function Layout() {
   const location = useLocation();
   const { isFeatureEnabled } = useFeatureFlags();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_EXPANDED_STORAGE_KEY, sidebarExpanded ? "1" : "0");
+    } catch {
+      // Ignore unavailable storage so navigation remains usable.
+    }
+  }, [sidebarExpanded]);
 
   const filterByFeature = (items: NavItem[]) =>
     items.filter((item) => !item.featureKey || isFeatureEnabled(item.featureKey));
@@ -235,30 +272,80 @@ export function Layout() {
         </header>
 
         <div className="flex min-h-0 flex-1">
-          {/* Desktop sidebar — icon-only, sticks below the top header */}
+          {/* Desktop sidebar — collapsible, sticks below the top header */}
           <aside
-            className="sticky top-12 z-30 hidden h-[calc(100vh-3rem)] w-14 shrink-0 flex-col items-center self-start overflow-y-auto overscroll-contain border-r border-border/60 bg-card/40 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex"
+            className={cn(
+              "sticky top-12 z-30 hidden h-[calc(100vh-3rem)] shrink-0 flex-col self-start overflow-y-auto overscroll-contain border-r border-border/60 bg-card/40 transition-[width] duration-200 ease-out [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex",
+              sidebarExpanded ? "w-56" : "w-14 items-center",
+            )}
             aria-label="Primary navigation"
           >
+            <div
+              className={cn(
+                "flex w-full border-b border-border/60 p-2",
+                sidebarExpanded ? "justify-end" : "justify-center",
+              )}
+            >
+              <Tooltip delayDuration={150}>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9"
+                    onClick={() => setSidebarExpanded((expanded) => !expanded)}
+                    aria-label={sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
+                    aria-expanded={sidebarExpanded}
+                  >
+                    {sidebarExpanded ? (
+                      <PanelLeftClose className="h-5 w-5" />
+                    ) : (
+                      <PanelLeftOpen className="h-5 w-5" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right" sideOffset={8}>
+                  {sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+
             {/* Primary nav */}
-            <nav className="flex w-full flex-col items-center gap-1 py-3">
+            <nav
+              className={cn(
+                "flex w-full flex-col gap-1 py-3",
+                sidebarExpanded ? "px-2" : "items-center",
+              )}
+            >
               {/* New Run — emphasized primary CTA */}
               <SidebarIconLink
                 to="/runs/new"
                 label="New Run"
                 icon={Plus}
                 active={location.pathname === "/runs/new"}
+                expanded={sidebarExpanded}
                 emphasized
               />
-              <div className="my-1 h-px w-6 bg-border/60" aria-hidden />
+              <div
+                className={cn("my-1 h-px bg-border/60", sidebarExpanded ? "w-full" : "w-6")}
+                aria-hidden
+              />
               {visibleGroups.map((group, groupIdx) => (
                 <Fragment key={group.id}>
                   {groupIdx > 0 && (
                     <div
-                      className="my-1 h-px w-6 bg-border/60"
+                      className={cn(
+                        "my-1 h-px bg-border/60",
+                        sidebarExpanded ? "w-full" : "w-6",
+                      )}
                       role="separator"
                       aria-label={group.label}
                     />
+                  )}
+                  {sidebarExpanded && (
+                    <div className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      {group.label}
+                    </div>
                   )}
                   {group.items.map((item) => {
                     const isActive = location.pathname.startsWith(item.to);
@@ -269,6 +356,7 @@ export function Layout() {
                         label={item.label}
                         icon={item.icon}
                         active={isActive}
+                        expanded={sidebarExpanded}
                       />
                     );
                   })}
@@ -276,7 +364,15 @@ export function Layout() {
               ))}
               {visibleDevItems.length > 0 && (
                 <>
-                  <div className="my-1 h-px w-6 bg-border/60" aria-hidden />
+                  <div
+                    className={cn("my-1 h-px bg-border/60", sidebarExpanded ? "w-full" : "w-6")}
+                    aria-hidden
+                  />
+                  {sidebarExpanded && (
+                    <div className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Dev
+                    </div>
+                  )}
                   {visibleDevItems.map((item) => {
                     const isActive = location.pathname.startsWith(item.to);
                     return (
@@ -286,6 +382,7 @@ export function Layout() {
                         label={item.label}
                         icon={item.icon}
                         active={isActive}
+                        expanded={sidebarExpanded}
                       />
                     );
                   })}
@@ -294,12 +391,18 @@ export function Layout() {
             </nav>
 
             {/* Footer: API docs + Admin — pinned to bottom when there's room, scrolls with content otherwise */}
-            <div className="mt-auto flex w-full flex-col items-center gap-1 border-t border-border/60 py-3">
+            <div
+              className={cn(
+                "mt-auto flex w-full flex-col gap-1 border-t border-border/60 py-3",
+                sidebarExpanded ? "px-2" : "items-center",
+              )}
+            >
               <SidebarIconLink
                 to="/api-docs"
                 label="API Documentation"
                 icon={Plug}
                 active={false}
+                expanded={sidebarExpanded}
                 external
               />
               <SidebarIconLink
@@ -307,6 +410,7 @@ export function Layout() {
                 label="Admin"
                 icon={Settings}
                 active={adminActive}
+                expanded={sidebarExpanded}
               />
             </div>
           </aside>

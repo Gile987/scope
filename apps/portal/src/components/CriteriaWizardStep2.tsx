@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
+import { gatesSatisfyInvariant, GATE_METADATA, orderGateIds } from "@/lib/gates";
 import { Loader2, Check, RefreshCw } from "lucide-react";
 import type { CriteriaWizardState } from "@/hooks/useCriteriaWizard";
 
@@ -20,6 +21,7 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
     id,
     dependsOn,
     setDependsOn,
+    gates,
     prompt,
     setPrompt,
     aiGenerated,
@@ -53,6 +55,22 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
             {id}
           </Badge>
         </div>
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+            Gate compatibility
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {!gates || gates.length === 0 ? (
+              <Badge variant="outline">All gates</Badge>
+            ) : (
+              orderGateIds(gates).map((g) => (
+                <Badge key={g} variant="outline">
+                  {GATE_METADATA[g].label}
+                </Badge>
+              ))
+            )}
+          </div>
+        </div>
       </div>
 
       <Separator />
@@ -62,9 +80,17 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
         <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
           Parents
         </Label>
-        <CriteriaPicker selected={dependsOn} onChange={setDependsOn} aiSuggested={suggestedParents} />
+        <CriteriaPicker
+          selected={dependsOn}
+          onChange={setDependsOn}
+          aiSuggested={suggestedParents}
+          filter={(c) => gatesSatisfyInvariant(c.gates, gates) && !acceptedChildren.includes(c.id)}
+        />
         <p className="text-xs text-muted-foreground">
-          Criteria that must pass before this one is evaluated
+          Criteria that must pass before this one is evaluated. Only criteria compatible with
+          every selected gate are shown. List only direct parents —
+          the judge automatically evaluates all transitive ancestors in topological order,
+          so you don't need to repeat a parent's own dependencies here.
         </p>
       </div>
 
@@ -75,9 +101,15 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
         <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
           Children
         </Label>
-        <CriteriaPicker selected={acceptedChildren} onChange={setAcceptedChildren} aiSuggested={suggestedChildren} />
+        <CriteriaPicker
+          selected={acceptedChildren}
+          onChange={setAcceptedChildren}
+          aiSuggested={suggestedChildren}
+          filter={(c) => gatesSatisfyInvariant(gates, c.gates) && !dependsOn.includes(c.id)}
+        />
         <p className="text-xs text-muted-foreground">
-          These criteria will be updated to depend on <span className="font-mono">{id || "this criterion"}</span> after creation
+          These criteria will be updated to depend on <span className="font-mono">{id || "this criterion"}</span> after creation.
+          Only criteria compatible with a subset of the selected gates are shown.
         </p>
       </div>
 

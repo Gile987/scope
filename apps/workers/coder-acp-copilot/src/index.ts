@@ -181,6 +181,7 @@ class CopilotProcessor implements WorkerProcessor {
           await log("debug", msg);
         },
         mcpServers: [],
+        sessionTimeoutMs: process.env.ACP_SESSION_TIMEOUT_MS ? Number(process.env.ACP_SESSION_TIMEOUT_MS) : undefined,
         model: options?.model,
         reasoningEffort: options?.reasoningEffort,
       });

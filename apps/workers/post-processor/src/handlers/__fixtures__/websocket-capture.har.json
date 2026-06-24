@@ -1,0 +1,64 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": { "name": "scope-gateway", "version": "test" },
+    "entries": [
+      {
+        "startedDateTime": "2026-06-16T20:00:00.000Z",
+        "time": 1234,
+        "_resourceType": "websocket",
+        "request": {
+          "method": "GET",
+          "url": "wss://api.individual.githubcopilot.com/responses",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            { "name": "editor-plugin-version", "value": "copilot-chat/0.99.0" }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": -1,
+          "bodySize": 0
+        },
+        "response": {
+          "status": 101,
+          "statusText": "Switching Protocols",
+          "httpVersion": "HTTP/1.1",
+          "headers": [],
+          "cookies": [],
+          "content": { "size": 0, "mimeType": "x-unknown" },
+          "redirectURL": "",
+          "headersSize": -1,
+          "bodySize": 0
+        },
+        "cache": {},
+        "timings": { "send": 0, "wait": 0, "receive": 0 },
+        "_webSocketMessages": [
+          {
+            "type": "send",
+            "opcode": 1,
+            "time": 1781035200.0,
+            "data": "{\"type\":\"response.create\",\"model\":\"gpt-4.1\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Write a haiku about the sea\"}]}]}"
+          },
+          {
+            "type": "receive",
+            "opcode": 1,
+            "time": 1781035200.5,
+            "data": "{\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\"}}"
+          },
+          {
+            "type": "receive",
+            "opcode": 1,
+            "time": 1781035200.6,
+            "data": "{\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"Endless waves whisper\"}"
+          },
+          {
+            "type": "receive",
+            "opcode": 1,
+            "time": 1781035200.9,
+            "data": "{\"type\":\"response.completed\",\"response\":{\"model\":\"gpt-4.1\",\"usage\":{\"input_tokens\":12,\"output_tokens\":8,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens_details\":{\"reasoning_tokens\":0}}}}"
+          }
+        ]
+      }
+    ]
+  }
+}

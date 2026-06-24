@@ -3,3 +3,5 @@ prompt: |
   The project uses Azure cloud services.
 depends_on:
   - has_cloud
+gates:
+  - select

@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { ArrowLeft, Plus, Trash2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { SecretInput } from "@/components/ui/secret-input";
 
 const SLUG_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
@@ -302,13 +303,13 @@ export function CreateMcpServer() {
                     placeholder="Header name"
                     value={header.name}
                     onChange={(e) => updateHeader(idx, "name", e.target.value)}
-                    className="font-mono text-sm"
+                    className="font-mono text-sm w-1/3 shrink-0"
                   />
-                  <Input
+                  <SecretInput
                     placeholder="Header value"
-                    type="password"
                     value={header.value}
                     onChange={(e) => updateHeader(idx, "value", e.target.value)}
+                    containerClassName="flex-1"
                     className="font-mono text-sm"
                   />
                   <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-destructive" onClick={() => removeHeader(idx)}>
@@ -343,13 +344,13 @@ export function CreateMcpServer() {
                     placeholder="KEY"
                     value={pair.name}
                     onChange={(e) => updateEnvPair(idx, "name", e.target.value)}
-                    className="font-mono text-sm"
+                    className="font-mono text-sm w-1/3 shrink-0"
                   />
-                  <Input
+                  <SecretInput
                     placeholder="value"
-                    type="password"
                     value={pair.value}
                     onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
+                    containerClassName="flex-1"
                     className="font-mono text-sm"
                   />
                   <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-destructive" onClick={() => removeEnvPair(idx)}>

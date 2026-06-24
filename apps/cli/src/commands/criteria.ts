@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { Command } from "commander";
-import { readFileSync, readdirSync, existsSync, statSync } from "fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "fs";
 import { join, resolve, basename, extname } from "path";
 import { parseAllDocuments, stringify as yamlStringify } from "yaml";
 import { configureHelp } from "../utils/helpFormatter.js";
@@ -11,6 +11,7 @@ import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 import { mapYamlCriterion } from "../utils/yaml-mappers.js";
+import { formatGateList, parseGateListOption, type GateId } from "../utils/gates.js";
 
 export function registerCriteriaCommands(program: Command): void {
 // ─── Criteria management ─────────────────────────────────────────────────────
@@ -45,7 +46,7 @@ criteria
         process.exit(1);
       }
 
-      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
+      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[]; gates?: GateId[] }>;
       if (items.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner("No criteria found."));
         return;
@@ -60,10 +61,8 @@ criteria
           tableFormatter: (c: any) => value(c.id),
         },
         { key: 'dependsOn', label: 'Deps', formatter: (c: any) => String((c.dependsOn ?? []).length) },
-        { key: 'prompt', label: 'Prompt', formatter: (c: any) => {
-          const prompt = c.prompt.replace(/\n/g, ' ');
-          return prompt.length > 60 ? prompt.substring(0, 60) + '…' : prompt;
-        }, tableFormatter: (c: any) => {
+        { key: 'gates', label: 'Gates', formatter: (c: any) => formatGateList(c.gates) },
+        { key: 'prompt', label: 'Prompt', tableFormatter: (c: any) => {
           const prompt = c.prompt.replace(/\n/g, ' ');
           const truncated = prompt.length > 60 ? prompt.substring(0, 60) + '…' : prompt;
           return dimTimestamp(truncated);
@@ -96,7 +95,7 @@ criteria
       }
 
       const c = await response.json() as {
-        id: string; prompt: string; dependsOn?: string[];
+        id: string; prompt: string; dependsOn?: string[]; gates?: GateId[];
         dependents: string[]; createdAt: string; updatedAt?: string;
       };
 
@@ -105,6 +104,7 @@ criteria
           { key: 'id', label: 'ID' },
           { key: 'prompt', label: 'Prompt' },
           { key: 'dependsOn', label: 'Depends On', formatter: (item: any) => (item.dependsOn ?? []).join(', ') || '(none)' },
+          { key: 'gates', label: 'Gates', formatter: (item: any) => formatGateList(item.gates) },
           { key: 'dependents', label: 'Dependents', formatter: (item: any) => (item.dependents ?? []).join(', ') || '(none)' },
           { key: 'createdAt', label: 'Created' },
           { key: 'updatedAt', label: 'Updated' },
@@ -123,6 +123,7 @@ criteria
       } else {
         console.log(`${label('Depends on:')} ${dimTimestamp('(none — root criterion)')}`);
       }
+      console.log(`${label('Gates:')}      ${value(formatGateList(c.gates))}`);
       if (c.dependents.length > 0) {
         console.log(`${label('Dependents:')} ${c.dependents.map(d => value(d)).join(', ')}`);
       }
@@ -140,6 +141,7 @@ criteria
   .requiredOption("--id <id>", "Criterion ID (lowercase snake_case)")
   .requiredOption("--prompt <prompt>", "Evaluation prompt for the judge")
   .option("-d, --depends-on <ids...>", "IDs of parent criteria")
+  .option("--gates <gates...>", "Compatible gates (space/comma separated), or all/* for unrestricted")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
@@ -150,6 +152,8 @@ criteria
       if (options.dependsOn && options.dependsOn.length > 0) {
         body.dependsOn = options.dependsOn;
       }
+      const gates = parseGateListOption(options.gates);
+      if (gates !== undefined) body.gates = gates;
 
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria`, {
         method: "POST",
@@ -177,15 +181,18 @@ criteria
   .requiredOption("-i, --id <id>", "Criterion ID")
   .option("--prompt <prompt>", "New evaluation prompt")
   .option("-d, --depends-on <ids...>", "New parent criteria IDs (replaces all)")
+  .option("--gates <gates...>", "New compatible gates (space/comma separated), or all/* for unrestricted")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
       if (options.prompt !== undefined) body.prompt = options.prompt;
       if (options.dependsOn !== undefined) body.dependsOn = options.dependsOn;
+      const gates = parseGateListOption(options.gates);
+      if (gates !== undefined) body.gates = gates;
 
       if (Object.keys(body).length === 0) {
-        console.error(errorText("Error: provide --prompt and/or --depends-on"));
+        console.error(errorText("Error: provide --prompt, --depends-on, and/or --gates"));
         process.exit(1);
       }
 
@@ -318,6 +325,85 @@ criteria
   });
 
 criteria
+  .command("export")
+  .description("Export criteria as import-compatible multi-document YAML")
+  .option("--ids <ids...>", "Export only these criteria and their dependency ancestors")
+  .option("-o, --output-file <path>", "Write to file instead of stdout")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      // Build query params for server-side filtering
+      const params = new URLSearchParams();
+      if (options.ids && options.ids.length > 0) {
+        params.set("ids", options.ids.join(","));
+        params.set("ancestors", "true");
+      }
+      const qs = params.toString();
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria${qs ? `?${qs}` : ""}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
+
+      if (items.length === 0) {
+        console.error(errorText("No criteria found to export."));
+        process.exit(1);
+      }
+
+      // Topological sort: parents before children
+      const byId = new Map(items.map(c => [c.id, c]));
+      const sorted: typeof items = [];
+      const visited = new Set<string>();
+
+      const visit = (id: string) => {
+        if (visited.has(id)) return;
+        visited.add(id);
+        const c = byId.get(id);
+        if (!c) return;
+        for (const dep of c.dependsOn ?? []) {
+          visit(dep);
+        }
+        sorted.push(c);
+      };
+
+      for (const c of items) {
+        visit(c.id);
+      }
+
+      // Format as multi-document YAML with snake_case field names
+      const docs = sorted.map(c => {
+        const doc: Record<string, unknown> = {
+          id: c.id,
+          prompt: c.prompt,
+        };
+        if (c.dependsOn && c.dependsOn.length > 0) {
+          doc.depends_on = c.dependsOn;
+        }
+        return doc;
+      });
+
+      const yamlOutput = docs
+        .map(doc => yamlStringify(doc, { lineWidth: 0 }).trimEnd())
+        .join('\n---\n');
+
+      if (options.outputFile) {
+        const outputPath = resolve(process.env.INIT_CWD || process.cwd(), options.outputFile);
+        writeFileSync(outputPath, yamlOutput + '\n', 'utf-8');
+        console.error(`${successText('Exported')} ${value(String(sorted.length))} criteria to ${value(options.outputFile)}`);
+      } else {
+        process.stdout.write(yamlOutput + '\n');
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+criteria
   .command("import")
   .description("Import criteria from YAML file(s) into the database (upsert — won't overwrite existing)")
   .argument("<path>", "Path to a .yaml file or a directory of .yaml files")
@@ -325,7 +411,7 @@ criteria
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (inputPath: string, options) => {
     try {
-      const absPath = resolve(inputPath);
+      const absPath = resolve(process.env.INIT_CWD || process.cwd(), inputPath);
       if (!existsSync(absPath)) {
         console.error(errorText(`Path not found: ${absPath}`));
         process.exit(1);
@@ -349,7 +435,7 @@ criteria
       }
 
       // Parse all criteria from files (supports multi-document YAML)
-      const allCriteria: Array<{ id: string; prompt: string; dependsOn?: string[] }> = [];
+      const allCriteria: Array<{ id: string; prompt: string; dependsOn?: string[]; gates?: GateId[] }> = [];
       const parseErrors: string[] = [];
 
       for (const file of yamlFiles) {
@@ -363,7 +449,7 @@ criteria
             const doc = docs[docIdx].toJSON();
             if (!doc || typeof doc !== 'object') continue;
 
-            const criterion = mapYamlCriterion(doc, fname, docIdx);
+            const criterion = mapYamlCriterion(doc, fname, docIdx, { includeGates: true });
             if (criterion) {
               allCriteria.push(criterion);
             } else {
@@ -393,7 +479,8 @@ criteria
       for (const c of allCriteria) {
         const deps = (c.dependsOn ?? []).length;
         const depsStr = deps > 0 ? ` ${dimTimestamp(`(${deps} dep${deps > 1 ? 's' : ''})`)}` : '';
-        console.log(`  ${value(c.id)}${depsStr}`);
+        const gatesStr = c.gates ? ` ${dimTimestamp(`[${formatGateList(c.gates)}]`)}` : '';
+        console.log(`  ${value(c.id)}${depsStr}${gatesStr}`);
       }
 
       if (options.dryRun) {

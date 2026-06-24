@@ -81,7 +81,14 @@ export function RunPreviewPanel() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap items-center gap-2">
-              {status && <StatusBadge status={status} />}
+              {status && (
+                <StatusBadge
+                  status={status}
+                  worker={state?.worker}
+                  lastHeartbeatAt={state?.lastHeartbeatAt}
+                  startedAt={state?.startedAt}
+                />
+              )}
               {outcome && <OutcomeBadge outcome={outcome} />}
             </div>
           </CardContent>
