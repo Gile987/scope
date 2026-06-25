@@ -494,7 +494,9 @@ export function extractThinkingContent(har: HarFile): string {
  *
  * Scans response bodies for `usage` objects containing token counts
  * (OpenAI / GitHub Models format: prompt_tokens, completion_tokens, total_tokens;
- *  Anthropic format: input_tokens, output_tokens).
+ *  Anthropic format: input_tokens, output_tokens, plus prompt-cache fields
+ *  cache_creation_input_tokens / cache_read_input_tokens which are added to the
+ *  prompt count since Anthropic's `input_tokens` excludes cached tokens).
  *
  * Sums usage across all matching responses in the HAR.
  * Returns undefined if no token usage data is found.
@@ -569,11 +571,22 @@ export function extractTokenUsage(har: HarFile): TokenUsage | undefined {
       return true;
     }
 
-    // Anthropic format (input_tokens without total_tokens)
+    // Anthropic format (input_tokens without total_tokens).
+    // Anthropic reports prompt-cache tokens separately: `input_tokens` is only
+    // the NON-cached remainder of the prompt. The bulk lives in
+    // `cache_creation_input_tokens` (written to cache) and
+    // `cache_read_input_tokens` (read back on later calls). The true prompt size
+    // is the sum of all three — omitting the cache fields undercounts prompt
+    // tokens by orders of magnitude when prompt caching is active (which it
+    // always is for Claude via the Copilot CLI).
     if (typeof usage.input_tokens === "number") {
-      promptTokens += usage.input_tokens;
-      completionTokens += (usage.output_tokens as number) ?? 0;
-      totalTokens += usage.input_tokens + ((usage.output_tokens as number) ?? 0);
+      const cacheCreation = (usage.cache_creation_input_tokens as number) ?? 0;
+      const cacheRead = (usage.cache_read_input_tokens as number) ?? 0;
+      const prompt = usage.input_tokens + cacheCreation + cacheRead;
+      const completion = (usage.output_tokens as number) ?? 0;
+      promptTokens += prompt;
+      completionTokens += completion;
+      totalTokens += prompt + completion;
       return true;
     }
 
