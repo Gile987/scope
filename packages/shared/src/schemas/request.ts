@@ -129,6 +129,14 @@ export const CreateRequestInputSchema = z
     profileId: z.string().optional(),
     profileVariations: z.array(z.string()).optional(),
     priority: z.number().int().optional(),
+    // Raw AGENTS.md body to deliver to the worker workspace. When present, the
+    // API findOrCreates an `agents.md`-typed prompt and stores its id on the
+    // request (see `agentsMdPromptId`).
+    agentsMd: z.string().optional(),
+    // Lineage edges (parent AGENTS.md prompt ids) when this candidate was
+    // derived from earlier ones: [] / omitted = root, [p] = mutation,
+    // [i, j] = merge of two parents.
+    agentsMdParentIds: z.array(z.string()).optional(),
     gates: z.array(GateConfigSchema).optional(),
   })
   .openapi("CreateRequestInput");
@@ -147,6 +155,8 @@ export const RequestResponseSchema = z
     persona: PersonaSchema.optional(),
     deletedAt: z.coerce.date().optional(),
     taskPromptId: z.string().optional(),
+    agentsMdPromptId: z.string().optional(),
+    agentsMdParentIds: z.array(z.string()).optional(),
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
     codebaseRevisionId: z.string().optional(),

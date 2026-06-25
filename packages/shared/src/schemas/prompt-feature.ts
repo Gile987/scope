@@ -3,6 +3,7 @@
 
 import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
+import { PromptTypeSchema } from "./task-prompt.js";
 
 extendZodWithOpenApi(z);
 
@@ -10,6 +11,7 @@ export const CreatePromptFeatureInputSchema = z
   .object({
     id: z.string().regex(/^[a-z][a-z0-9_]*$/),
     prompt: z.string(),
+    type: PromptTypeSchema.optional(),
   })
   .openapi("CreatePromptFeatureInput");
 
@@ -23,6 +25,7 @@ export const PromptFeatureResponseSchema = z
   .object({
     id: z.string(),
     prompt: z.string(),
+    type: PromptTypeSchema.optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     deletedAt: z.coerce.date().optional(),

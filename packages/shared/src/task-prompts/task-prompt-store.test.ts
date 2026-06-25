@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { TaskPromptStore } from "./task-prompt-store.js";
-import { computeTaskPromptId } from "./task-prompt-id.js";
+import { computeTaskPromptId, computePromptId } from "./task-prompt-id.js";
 import type { TaskPromptDocument, PromptFeatureResult } from "../types/types.js";
 
 // ── Mock Collection ──────────────────────────────────────────────────────────
@@ -63,9 +63,10 @@ function createMockCollection() {
       let count = 0;
       for (const doc of docs.values()) {
         if (filter.deletedAt?.$exists === false && doc.deletedAt) continue;
+        if (!matchesType(filter, doc)) continue;
         if (filter.text?.$regex) {
           const regex = new RegExp(filter.text.$regex, filter.text.$options);
-          if (!regex.test(doc.text)) continue;
+          if (!regex.test(doc.text ?? "")) continue;
         }
         count++;
       }
@@ -76,15 +77,37 @@ function createMockCollection() {
       const results: TaskPromptDocument[] = [];
       for (const doc of docs.values()) {
         if (filter.deletedAt?.$exists === false && doc.deletedAt) continue;
+        if (!matchesType(filter, doc)) continue;
         if (filter.text?.$regex) {
           const regex = new RegExp(filter.text.$regex, filter.text.$options);
-          if (!regex.test(doc.text)) continue;
+          if (!regex.test(doc.text ?? "")) continue;
         }
         results.push({ ...doc });
       }
       return mockCursor(results);
     }),
   };
+}
+
+/** Replicates the store's `$or`/`type` filter against an in-memory doc. */
+function matchesType(filter: any, doc: TaskPromptDocument): boolean {
+  if (filter.$or) {
+    return filter.$or.some((clause: any) => {
+      if (clause.type?.$exists === false) return doc.type === undefined;
+      return doc.type === clause.type;
+    });
+  }
+  if (filter.type !== undefined) {
+    const cond = filter.type;
+    if (cond && typeof cond === "object") {
+      // `$nin` (and `$in`) treat a missing `type` as `undefined` — mirrors Mongo,
+      // so legacy untyped docs stay visible under the default `$nin` filter.
+      if (Array.isArray(cond.$nin)) return !cond.$nin.includes(doc.type);
+      if (Array.isArray(cond.$in)) return cond.$in.includes(doc.type);
+    }
+    return doc.type === cond;
+  }
+  return true;
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -130,6 +153,98 @@ describe("TaskPromptStore", () => {
       const revived = await store.findOrCreate("deleted prompt");
       expect(revived._id).toBe(doc._id);
       expect(revived.deletedAt).toBeUndefined();
+    });
+
+    it("namespaces non-task types into a distinct id", async () => {
+      const task = await store.findOrCreate("same text");
+      const agents = await store.findOrCreate("same text", "agents.md");
+      expect(agents._id).not.toBe(task._id);
+      expect(agents._id).toBe(computePromptId("agents.md", "same text"));
+      expect(agents.type).toBe("agents.md");
+    });
+
+    it("keeps task ids backward-compatible (unchanged by type arg)", async () => {
+      const a = await store.findOrCreate("hello");
+      const b = await store.findOrCreate("hello", "select");
+      expect(a._id).toBe(b._id);
+      expect(a._id).toBe(computeTaskPromptId("hello"));
+    });
+  });
+
+  // -- size-based storage ---------------------------------------------------
+
+  describe("size-based storage", () => {
+    function createMockBlob() {
+      const blobs = new Map<string, string>();
+      return {
+        store: blobs,
+        uploadText: vi.fn(async (name: string, text: string) => {
+          blobs.set(name, text);
+          return `https://acct.blob/snapshots/${name}`;
+        }),
+        downloadBlobToBuffer: vi.fn(async (name: string) => {
+          const v = blobs.get(name);
+          if (v === undefined) throw new Error(`blob ${name} not found`);
+          return Buffer.from(v, "utf-8");
+        }),
+      };
+    }
+
+    it("stores small bodies inline and never touches blob", async () => {
+      const blob = createMockBlob();
+      const s = new TaskPromptStore(col as any, blob as any, 1024);
+      const doc = await s.findOrCreate("tiny");
+      expect(doc.text).toBe("tiny");
+      expect(doc.contentBlobUrl).toBeUndefined();
+      expect(blob.uploadText).not.toHaveBeenCalled();
+    });
+
+    it("uploads over-threshold bodies to blob on a create miss", async () => {
+      const blob = createMockBlob();
+      const s = new TaskPromptStore(col as any, blob as any, 16);
+      const big = "x".repeat(64);
+      const doc = await s.findOrCreate(big, "agents.md");
+      expect(doc.text).toBeUndefined();
+      expect(doc.contentBlobUrl).toContain(`prompts/${doc._id}.txt`);
+      expect(blob.uploadText).toHaveBeenCalledTimes(1);
+    });
+
+    it("skips the upload on a hit (idempotent)", async () => {
+      const blob = createMockBlob();
+      const s = new TaskPromptStore(col as any, blob as any, 16);
+      const big = "y".repeat(64);
+      await s.findOrCreate(big, "agents.md");
+      await s.findOrCreate(big, "agents.md");
+      expect(blob.uploadText).toHaveBeenCalledTimes(1);
+    });
+
+    it("resolvePromptText returns inline text without blob access", async () => {
+      const blob = createMockBlob();
+      const s = new TaskPromptStore(col as any, blob as any, 1024);
+      const doc = await s.findOrCreate("inline body");
+      expect(await s.resolvePromptText(doc)).toBe("inline body");
+      expect(blob.downloadBlobToBuffer).not.toHaveBeenCalled();
+    });
+
+    it("resolvePromptText downloads blob-backed bodies", async () => {
+      const blob = createMockBlob();
+      const s = new TaskPromptStore(col as any, blob as any, 16);
+      const big = "z".repeat(64);
+      const doc = await s.findOrCreate(big, "agents.md");
+      expect(await s.resolvePromptText(doc)).toBe(big);
+      expect(blob.downloadBlobToBuffer).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects bodies over the hard max size", async () => {
+      const blob = createMockBlob();
+      const s = new TaskPromptStore(col as any, blob as any, 16);
+      const huge = "a".repeat(256 * 1024 + 1);
+      await expect(s.findOrCreate(huge)).rejects.toThrow(/maximum/);
+    });
+
+    it("throws when an over-threshold body has no blob storage configured", async () => {
+      const s = new TaskPromptStore(col as any, undefined, 16);
+      await expect(s.findOrCreate("b".repeat(64))).rejects.toThrow(/BlobStorage/);
     });
   });
 
@@ -221,6 +336,22 @@ describe("TaskPromptStore", () => {
       const { items, total } = await store.getAll({ search: "azure" });
       expect(total).toBe(1);
       expect(items[0].text).toBe("Azure deployment");
+    });
+
+    it("defaults to task-typed prompts (and legacy untyped docs)", async () => {
+      await store.findOrCreate("a task prompt");
+      await store.findOrCreate("an agents file", "agents.md");
+      const { items, total } = await store.getAll();
+      expect(total).toBe(1);
+      expect(items[0].text).toBe("a task prompt");
+    });
+
+    it("filters by agents.md type", async () => {
+      await store.findOrCreate("a task prompt");
+      await store.findOrCreate("an agents file", "agents.md");
+      const { items, total } = await store.getAll({ type: "agents.md" });
+      expect(total).toBe(1);
+      expect(items[0].text).toBe("an agents file");
     });
   });
 
