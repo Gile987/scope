@@ -19,9 +19,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // relative-time displays survive a misconfigured local clock.
   recordServerDate(res.headers.get("Date"));
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
+    const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string; details?: Array<{ path: string; message: string }> };
     const message = body.error || `HTTP ${res.status}`;
-    const details = body.details as Array<{ path: string; message: string }> | undefined;
+    const details = body.details;
     if (details?.length) {
       throw new Error(`${message}: ${details.map((d) => `${d.path || "body"}: ${d.message}`).join(", ")}`);
     }
@@ -232,7 +232,7 @@ export const api = {
     });
     recordServerDate(resp.headers.get("Date"));
     if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      const err = await resp.json().catch(() => ({ error: resp.statusText })) as { error?: string };
       throw new Error(err.error ?? "Failed to download batch archive");
     }
     const blob = await resp.blob();
