@@ -25,6 +25,46 @@ export interface NormalizedArchive {
   sizeBytes: number;
 }
 
+/**
+ * Bounds applied while extracting an untrusted archive, guarding against
+ * decompression bombs (a tiny compressed input that inflates to many GB).
+ *
+ * The 1 MB ingress cap enforced at the edge applies to *compressed* bytes, so
+ * it does not bound the inflated size — these limits do.
+ */
+export interface ExtractLimits {
+  /** Maximum total uncompressed bytes written across all entries. */
+  maxBytes: number;
+  /** Maximum number of entries (files + directories) extracted. */
+  maxEntries: number;
+}
+
+/** Thrown when an archive exceeds its {@link ExtractLimits} during extraction. */
+export class ArchiveTooLargeError extends Error {
+  readonly code = "ARCHIVE_TOO_LARGE";
+  constructor(message: string) {
+    super(message);
+    this.name = "ArchiveTooLargeError";
+  }
+}
+
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * Default extraction limits, overridable via environment variables:
+ * - `CODEBASE_MAX_EXTRACTED_BYTES` (default 256 MiB)
+ * - `CODEBASE_MAX_EXTRACTED_ENTRIES` (default 50,000)
+ */
+export const DEFAULT_EXTRACT_LIMITS: ExtractLimits = {
+  maxBytes: envInt("CODEBASE_MAX_EXTRACTED_BYTES", 256 * 1024 * 1024),
+  maxEntries: envInt("CODEBASE_MAX_EXTRACTED_ENTRIES", 50_000),
+};
+
 function detectFormat(buffer: Buffer): "gzip" | "zip" | "tar" | "unknown" {
   if (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) return "gzip";
   if (buffer.length >= 2 && buffer[0] === 0x50 && buffer[1] === 0x4b) return "zip";
@@ -70,10 +110,13 @@ export function resolveSafeEntryPath(destDir: string, entryName: string): string
  * `node-tar` v7 already strips `..` and refuses to write through symlinks, but
  * this makes the protection explicit and symmetric with the zip path: it rejects
  * any entry — or any sym/hard-link target — that would resolve outside `destDir`.
- * Throwing here aborts the whole extraction so a malicious archive is rejected
- * rather than partially extracted.
  *
- * Exported for unit testing.
+ * Throws on violation. NOTE: this must NOT be thrown directly from a `tar.extract`
+ * `filter` callback — node-tar surfaces a thrown filter error as an *uncaught*
+ * exception from the parser rather than rejecting the extract promise, which would
+ * crash the process. `extractArchiveBuffer` therefore calls this inside a
+ * try/catch, captures the violation, skips the entry, and rethrows after extraction
+ * completes. Exported for unit testing.
  */
 export function assertTarEntrySafe(destDir: string, entryPath: string, linkpath?: string): boolean {
   const root = resolve(destDir);
@@ -97,9 +140,14 @@ export function assertTarEntrySafe(destDir: string, entryPath: string, linkpath?
 
 /**
  * Safely extract a zip buffer into `destDir` using yauzl (no shell-out).
- * Every entry path is validated to stay within `destDir` before any write.
+ * Every entry path is validated to stay within `destDir` before any write, and
+ * the cumulative entry count and uncompressed byte total are bounded by `limits`.
  */
-async function extractZipBuffer(buffer: Buffer, destDir: string): Promise<void> {
+async function extractZipBuffer(
+  buffer: Buffer,
+  destDir: string,
+  limits: ExtractLimits
+): Promise<void> {
   const yauzl = await import("yauzl");
   const { createWriteStream, mkdirSync } = await import("fs");
 
@@ -115,16 +163,37 @@ async function extractZipBuffer(buffer: Buffer, destDir: string): Promise<void> 
         reject(e instanceof Error ? e : new Error(String(e)));
       };
 
+      let entryCount = 0;
+      let totalBytes = 0;
+
       zipfile.on("error", fail);
       zipfile.on("end", () => resolvePromise());
 
       zipfile.on("entry", (entry) => {
         try {
+          entryCount += 1;
+          if (entryCount > limits.maxEntries) {
+            fail(
+              new ArchiveTooLargeError(
+                `Archive exceeds the maximum entry count (${limits.maxEntries})`
+              )
+            );
+            return;
+          }
           const target = resolveSafeEntryPath(destDir, entry.fileName);
           if (entry.fileName.endsWith("/")) {
             // Directory entry.
             mkdirSync(target, { recursive: true });
             zipfile.readEntry();
+            return;
+          }
+          // Fast pre-reject using the (untrusted) central-directory size.
+          if (totalBytes + (entry.uncompressedSize ?? 0) > limits.maxBytes) {
+            fail(
+              new ArchiveTooLargeError(
+                `Archive exceeds the maximum uncompressed size (${limits.maxBytes} bytes)`
+              )
+            );
             return;
           }
           mkdirSync(dirname(target), { recursive: true });
@@ -134,6 +203,20 @@ async function extractZipBuffer(buffer: Buffer, destDir: string): Promise<void> 
               return;
             }
             const out = createWriteStream(target);
+            // Defense-in-depth: count the bytes we actually inflate, in case the
+            // central-directory header lied about the uncompressed size.
+            readStream.on("data", (chunk: Buffer) => {
+              totalBytes += chunk.length;
+              if (totalBytes > limits.maxBytes) {
+                readStream.destroy();
+                out.destroy();
+                fail(
+                  new ArchiveTooLargeError(
+                    `Archive exceeds the maximum uncompressed size (${limits.maxBytes} bytes)`
+                  )
+                );
+              }
+            });
             readStream.on("error", fail);
             out.on("error", fail);
             out.on("close", () => zipfile.readEntry());
@@ -151,30 +234,70 @@ async function extractZipBuffer(buffer: Buffer, destDir: string): Promise<void> 
 
 /**
  * Extract an archive buffer (tar.gz, tar, or zip) into `destDir`.
- * Detects the format from magic bytes.
+ * Detects the format from magic bytes. Extraction is bounded by `limits` to
+ * guard against decompression bombs.
  */
-export async function extractArchiveBuffer(buffer: Buffer, destDir: string): Promise<void> {
+export async function extractArchiveBuffer(
+  buffer: Buffer,
+  destDir: string,
+  limits: ExtractLimits = DEFAULT_EXTRACT_LIMITS
+): Promise<void> {
   const format = detectFormat(buffer);
   if (format === "zip") {
-    await extractZipBuffer(buffer, destDir);
+    await extractZipBuffer(buffer, destDir, limits);
     return;
   }
   // tar.gz / tar — the `tar` lib auto-detects gzip.
   const tar = await import("tar");
-  const { writeFileSync } = await import("fs");
+  const { writeFileSync, rmSync: rmDir } = await import("fs");
   const tmp = mkdtempSync(join(tmpdir(), "codebase-tar-"));
   const tarPath = join(tmp, "archive.tar");
   writeFileSync(tarPath, buffer);
+
+  // A thrown error inside node-tar's `filter` surfaces as an uncaught exception
+  // rather than rejecting the extract promise, so we capture the first violation,
+  // skip the offending entry, and rethrow after extraction settles.
+  let violation: Error | undefined;
+  let entryCount = 0;
+  let totalBytes = 0;
+
   try {
     await tar.extract({
       file: tarPath,
       cwd: destDir,
-      // Defense-in-depth: reject any entry or link target that escapes destDir.
-      filter: (path, entry) =>
-        assertTarEntrySafe(destDir, path, (entry as { linkpath?: string }).linkpath),
+      filter: (path, entry) => {
+        if (violation) return false;
+        entryCount += 1;
+        if (entryCount > limits.maxEntries) {
+          violation = new ArchiveTooLargeError(
+            `Archive exceeds the maximum entry count (${limits.maxEntries})`
+          );
+          return false;
+        }
+        totalBytes += (entry as { size?: number }).size ?? 0;
+        if (totalBytes > limits.maxBytes) {
+          violation = new ArchiveTooLargeError(
+            `Archive exceeds the maximum uncompressed size (${limits.maxBytes} bytes)`
+          );
+          return false;
+        }
+        try {
+          // Defense-in-depth: reject any entry or link target that escapes destDir.
+          return assertTarEntrySafe(destDir, path, (entry as { linkpath?: string }).linkpath);
+        } catch (err) {
+          violation = err instanceof Error ? err : new Error(String(err));
+          return false;
+        }
+      },
     });
   } finally {
     rmSync(tmp, { recursive: true, force: true });
+  }
+
+  if (violation) {
+    // Discard whatever was written before the violation was detected.
+    rmDir(destDir, { recursive: true, force: true });
+    throw violation;
   }
 }
 
@@ -185,7 +308,10 @@ export async function extractArchiveBuffer(buffer: Buffer, destDir: string): Pro
  * (e.g. GitHub tarballs are wrapped in `{owner}-{repo}-{sha}/`), then re-archives
  * the contents at the root.
  */
-export async function normalizeToRootTarGz(buffer: Buffer): Promise<NormalizedArchive> {
+export async function normalizeToRootTarGz(
+  buffer: Buffer,
+  limits: ExtractLimits = DEFAULT_EXTRACT_LIMITS
+): Promise<NormalizedArchive> {
   const tar = await import("tar");
   const workDir = mkdtempSync(join(tmpdir(), "codebase-normalize-"));
   const extractDir = join(workDir, "extracted");
@@ -193,7 +319,7 @@ export async function normalizeToRootTarGz(buffer: Buffer): Promise<NormalizedAr
   mkdirSync(extractDir, { recursive: true });
 
   try {
-    await extractArchiveBuffer(buffer, extractDir);
+    await extractArchiveBuffer(buffer, extractDir, limits);
 
     // Unwrap a single top-level directory.
     const entries = readdirSync(extractDir, { withFileTypes: true }).filter(

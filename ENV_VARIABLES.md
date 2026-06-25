@@ -218,6 +218,20 @@ When enabled, prevents feedback from hinting about descendant criteria (requirem
 
 Path to the directory containing criteria definition YAML files for v2 scenarios.
 
+## Codebase Configuration
+
+### CODEBASE_MAX_EXTRACTED_BYTES
+**Default:** `268435456` (256 MiB)
+**Type:** integer (bytes)
+
+Maximum total *uncompressed* bytes written while extracting a codebase archive (Git tarball or uploaded zip/tar). Guards against decompression bombs — the edge ingress cap limits compressed bytes only. Extraction is aborted with HTTP `413` once exceeded.
+
+### CODEBASE_MAX_EXTRACTED_ENTRIES
+**Default:** `50000`
+**Type:** integer
+
+Maximum number of entries (files + directories) extracted from a codebase archive. Aborts extraction with HTTP `413` once exceeded.
+
 ## Portal Feature Flags
 
 ### VITE_SHOW_PASS_AT_K

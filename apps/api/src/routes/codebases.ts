@@ -19,6 +19,31 @@ import {
   downloadCodebaseArchive,
 } from "../utils/codebase-helpers.js";
 
+/**
+ * Validate a git `source` of the form `owner/repo`.
+ *
+ * Beyond the character allow-list, every path segment must be a real name —
+ * `.` and `..` are rejected so a crafted `source` cannot traverse outside the
+ * intended repo when interpolated into the GitHub API URL.
+ */
+export function isValidGitSource(source: string | undefined): source is string {
+  if (!source || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source)) return false;
+  return source.split("/").every((segment) => segment !== "." && segment !== "..");
+}
+
+/**
+ * Map an archive extraction failure to an HTTP status:
+ * - decompression-bomb / size-limit breach -> 413 Payload Too Large
+ * - path-traversal / link escape           -> 422 Unprocessable Entity
+ * - anything else                          -> 400 Bad Request
+ */
+function archiveErrorStatus(error: unknown): number {
+  if ((error as { code?: string })?.code === "ARCHIVE_TOO_LARGE") return 413;
+  const message = error instanceof Error ? error.message : String(error);
+  if (/Refusing to extract/i.test(message)) return 422;
+  return 400;
+}
+
 export function registerCodebasesRoutes(ctx: RouteContext): void {
   // Upload size is intentionally NOT capped here. The 1 MB limit is enforced at
   // the ingress edge (nginx `client_max_body_size`) as the single source of truth,
@@ -85,7 +110,7 @@ export function registerCodebasesRoutes(ctx: RouteContext): void {
         }
         const { name, slug, description, sourceType, source, defaultBranch, creator } = parsed.data;
 
-        if (sourceType === "git" && (!source || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source))) {
+        if (sourceType === "git" && !isValidGitSource(source)) {
           res.status(400).json({ error: "Git codebases require a 'source' in the form 'owner/repo'" });
           return;
         }
@@ -132,7 +157,9 @@ export function registerCodebasesRoutes(ctx: RouteContext): void {
           } catch (revisionError) {
             await ctx.codebaseStore.hardDelete(codebase._id);
             const message = revisionError instanceof Error ? revisionError.message : String(revisionError);
-            res.status(400).json({ error: `Failed to create the first archive revision: ${message}` });
+            res
+              .status(archiveErrorStatus(revisionError))
+              .json({ error: `Failed to create the first archive revision: ${message}` });
             return;
           }
         }
@@ -370,6 +397,12 @@ export function registerCodebasesRoutes(ctx: RouteContext): void {
           .status(result.deduplicated ? 200 : 201)
           .json({ ...result.revision, deduplicated: result.deduplicated });
       } catch (error) {
+        const status = archiveErrorStatus(error);
+        if (status !== 400) {
+          const message = error instanceof Error ? error.message : String(error);
+          res.status(status).json({ error: message });
+          return;
+        }
         next(error);
       } finally {
         if (file?.path && existsSync(file.path)) rmSync(file.path, { force: true });
