@@ -137,6 +137,7 @@ export interface Run {
   mcpServers?: string[];
   skills?: string[];
   skillRevisions?: string[];
+  codebaseRevisionId?: string;
   extensions?: string[];
   priority?: number;
   submissionId?: string;
@@ -868,6 +869,57 @@ export interface SkillDiscoveryResult {
   latestUpstreamCommitSha?: string;
   updateAvailable?: boolean;
   lastImportedAt?: string;
+}
+
+// =============================================================================
+// Codebase types
+// =============================================================================
+
+/** The source a codebase revision is captured from. */
+export type CodebaseSourceType = "git" | "archive";
+
+/** A first-class codebase entity (mutable pointer/metadata). */
+export interface CodebaseDocument {
+  _id: string;
+  slug: string;
+  name: string;
+  description?: string;
+  sourceType: CodebaseSourceType;
+  source?: string;
+  defaultBranch?: string;
+  revisionCounter: number;
+  latestRevisionId?: string;
+  creator?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+/** An immutable, incremental codebase revision (snapshot). */
+export interface CodebaseRevisionDocument {
+  _id: string;
+  codebaseId: string;
+  slug: string;
+  revisionNumber: number;
+  ref: string;
+  sourceType: CodebaseSourceType;
+  source?: string;
+  requestedRef?: string;
+  resolvedCommitSha?: string;
+  commitTimestamp?: string;
+  originalFilename?: string;
+  contentSha256?: string;
+  archiveUrl: string;
+  sizeBytes?: number;
+  fileCount?: number;
+  creator?: string;
+  resolvedAt: string;
+  createdAt: string;
+  /**
+   * Present only on resolve/upload responses: true when the revision was reused
+   * (deduplicated) because nothing changed, false when newly created.
+   */
+  deduplicated?: boolean;
 }
 
 // =============================================================================

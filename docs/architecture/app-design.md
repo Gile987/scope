@@ -25,7 +25,7 @@ flowchart LR
 | `cli` | Command-line interface for submitting tasks, streaming logs, managing runs |
 | `portal` | React web UI for run management, insights, criteria graph editing |
 | `judge` | Evaluation engine — executes criteria against agent output |
-| `shared` | Types, database models, queue/blob/redis clients, config loaders |
+| `shared` | Types, database models, queue/blob/redis clients, config loaders, codebase/skill stores and clients |
 | `workers/*` | Coding agent adapters — each implements the same interface for a different agent |
 
 ## Data Model
@@ -39,15 +39,19 @@ erDiagram
     RUN }o--|| SCENARIO : uses
     RUN }o--|| PERSONA : uses
     RUN }o--|| WORKER_TYPE : targets
+    RUN }o--|| CODEBASE_REVISION : seeds
     ITERATION ||--o{ CRITERION_RESULT : evaluated_by
     CRITERION ||--o{ CRITERION_RESULT : produces
     CRITERION }o--o{ CRITERION : depends_on
+    CODEBASE ||--o{ CODEBASE_REVISION : has
 ```
 
 - **Run** — A single benchmark execution: one scenario + one persona + one worker
 - **Iteration** — A coding agent turn within a run (agent may iterate multiple times)
 - **Criterion** — An evaluation check (e.g., "has a working Express server"). Criteria form a DAG (directed acyclic graph) with dependencies.
 - **CriterionResult** — Pass/fail result of evaluating a criterion against a specific iteration
+- **Codebase** — Mutable first-class project entity in `codebases`, with a unique slug, source type (`git` or `archive`), optional GitHub source/default branch, revision counter, latest revision pointer, and soft-delete metadata.
+- **CodebaseRevision** — Immutable snapshot in `codebase-revisions`. Every Git resolution or archive upload creates a fresh UUID revision with the next per-codebase `revisionNumber` and canonical `{slug}@r{N}` ref.
 
 ## Judge Pipeline
 
@@ -111,11 +115,13 @@ Currently all versions of an agent share a single queue (e.g., `queue-coder-acp-
 
 ### Run submission flow
 
-1. User submits via Portal or CLI with: **task**, **criteria** (required), **worker**, **model** (required), and optionally **agentVersion**, and optionally a per-gate **`gates`** configuration (see [Gates](#gates--multi-phase-evaluation-pipeline))
+1. User submits via Portal or CLI with: **task**, **criteria** (required), **worker**, **model** (required), and optionally **agentVersion**, a **codebase** selection, and/or a per-gate **`gates`** configuration (see [Gates](#gates--multi-phase-evaluation-pipeline))
 2. API resolves `agentVersion`: explicit selection → validate active; omitted → latest active by `createdAt`
 3. API resolves `model`: explicit → validate against `supportedModels`; omitted → `defaultModel`
 4. API looks up `AgentVersion.queueName` and routes message to that queue
 5. `agentVersion` and `model` are persisted on the `RequestDocument`
+
+When a codebase is selected, the API resolves the submitted spec (`codebaseRevisionId`, `{slug}@r{N}`, or bare `{slug}`) before enqueueing. Bare archive slugs resolve to the latest existing revision; bare Git slugs resolve the default branch at submit time and create a new immutable revision. The resolved revision UUID is stored as `RequestDocument.codebaseRevisionId`, and workers seed the workspace from that revision after setup and before skills extraction.
 
 Profile fan-out mode is also supported for comparative runs:
 
@@ -142,6 +148,19 @@ Criteria are reusable evaluation rules stored in the database and optionally def
 - **Gate compatibility** — a `gates: GateId[]` list controls which [gates](#gates--multi-phase-evaluation-pipeline) a criterion may be selected for (empty = all); the list is downward-closed along the DAG
 
 See [`ENV_VARIABLES.md`](../../scope-mt-app/ENV_VARIABLES.md) for related configuration options.
+
+## Codebase System
+
+Codebases are reusable source snapshots that can be attached to run submissions. The shared package owns the core types (`CodebaseDocument`, `CodebaseRevisionDocument`, `CodebaseConfig`), stores, resolver, API client, and worker seeder. The API exposes CRUD, Git resolution, archive upload, and archive-download proxy endpoints; workers use `CodebaseClient` to fetch a normalized root-level tar.gz and extract it into the run workspace.
+
+Two MongoDB collections back the feature:
+
+| Collection | Purpose |
+|------------|---------|
+| `codebases` | Mutable codebase metadata, slug uniqueness, source type/source, `revisionCounter`, `latestRevisionId`, and soft deletion |
+| `codebase-revisions` | Immutable revisions addressed by UUID or `{slug}@r{N}`, with Git/archive provenance and the normalized archive URL |
+
+See [Codebases Architecture](codebases.md) for revision addressing, blob storage naming, REST endpoints, and worker seeding details.
 
 ## OpenAPI Documentation
 
