@@ -22,10 +22,16 @@ export class KubedockClient {
     this.socketPath = host.replace(/^unix:\/\//, "");
   }
 
-  /** Returns true if DOCKER_HOST is set and points to a Unix socket */
+  /**
+   * Returns true when kubedock is the Docker backend.
+   *
+   * Requires both DOCKER_HOST (unix socket) and KUBEDOCK_ENABLED=true.
+   * In Docker Compose the host socket is mounted directly — cleanup must
+   * NOT run there because purgeContainers would kill the entire stack.
+   */
   static isEnabled(): boolean {
     const host = process.env.DOCKER_HOST ?? "";
-    return host.startsWith("unix://");
+    return host.startsWith("unix://") && process.env.KUBEDOCK_ENABLED === "true";
   }
 
   /** List all container IDs (including stopped) */
