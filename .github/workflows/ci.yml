@@ -184,14 +184,11 @@ jobs:
             test_pattern: apps/workers/coder-acp-copilot
             images: |
               source apps/workers/coder-acp-copilot/versions.env
-              docker buildx build \
+              docker build \
                 -t coder-acp-copilot-integration-test \
                 -f apps/workers/coder-acp-copilot/Dockerfile \
                 --target dev \
                 --build-arg COPILOT_CLI_VERSION=$COPILOT_CLI_VERSION \
-                --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
-                --load \
                 .
           - name: vscode-electron
             images: |
@@ -266,8 +263,10 @@ jobs:
         run: |
           ${{ matrix.worker.images }}
           # Rotate cache to avoid unbounded growth
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          if [ -d /tmp/.buildx-cache-new ]; then
+            rm -rf /tmp/.buildx-cache
+            mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          fi
 
       - name: Run integration tests
         run: npx vitest run --config vitest.integration.config.ts --silent=false ${{ matrix.worker.test_pattern }}
