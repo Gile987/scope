@@ -18,6 +18,18 @@ import { runGetAction } from "../run-get-action.js";
 import { normalizeUrl, printFollowUpCommands, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 import { parseGatesOption } from "../utils/gates.js";
 
+/**
+ * Resolve a CLI option that may be either a literal string or a `@path`
+ * reference to a file whose contents should be read. Used for flags like
+ * `--agents-md` where large bodies are inconvenient to pass inline.
+ */
+function resolveTextOrFile(input: string): string {
+  if (input.startsWith("@")) {
+    return readFileSync(resolve(input.slice(1)), "utf8");
+  }
+  return input;
+}
+
 export function registerRunCommands(program: Command): void {
 const run = program
   .command("run")
@@ -48,11 +60,12 @@ run
   .option("--profile <id>", "Saved profile to apply (supplies worker, model, extensions, etc.)")
   .addOption(new Option("--base-profile <id>", "Deprecated alias for --profile.").hideHelp())
   .option("--profile-variations-file <path>", "Path to JSON file containing profile variation entries")
+  .option("--agents-md <text|@file>", "AGENTS.md content delivered to the workspace (prefix with @ to read from a file)")
   .option("--gates <jsonOrFile>", "GateConfig[] JSON or path/@path to a JSON file for gated runs")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options, command) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, codebase: codebaseRef, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, codebase: codebaseRef, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption, agentsMd: agentsMdInput } = options;
     // `--profile` is the documented flag; `--base-profile` is kept as a hidden
     // back-compat alias. Both resolve to the same request `profileId`.
     const profileId = profile ?? baseProfile;
@@ -123,6 +136,14 @@ run
       }
       if (profileId) {
         body.profileId = profileId;
+      }
+      if (agentsMdInput) {
+        // `@path` reads the AGENTS.md body from a file; otherwise the value is
+        // treated as the literal content.
+        const agentsMd = resolveTextOrFile(agentsMdInput);
+        if (agentsMd.trim().length > 0) {
+          body.agentsMd = agentsMd;
+        }
       }
       if (gatesOption) {
         body.gates = parseGatesOption(gatesOption, maxIterations);
