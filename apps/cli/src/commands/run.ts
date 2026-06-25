@@ -42,6 +42,7 @@ run
   .option("--reasoning-effort <level>", "Reasoning effort level (e.g. low, medium, high)")
   .option("--mcp-servers <slugs...>", "MCP server slugs to use for this run")
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
+  .option("--codebase <ref>", "Codebase revision id, ref (slug@rN), or slug to use for this run")
   .option("--extensions <ids...>", "VS Code extension IDs to install for this run (e.g. ms-python.python)")
   .option("--agent-version <version>", "Agent version to target (e.g. copilot-0.0.415); defaults to latest active")
   .option("--profile <id>", "Saved profile to apply (supplies worker, model, extensions, etc.)")
@@ -51,7 +52,7 @@ run
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options, command) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, codebase: codebaseRef, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption } = options;
     // `--profile` is the documented flag; `--base-profile` is kept as a hidden
     // back-compat alias. Both resolve to the same request `profileId`.
     const profileId = profile ?? baseProfile;
@@ -110,6 +111,9 @@ run
       }
       if (skillSlugs && skillSlugs.length > 0) {
         body.skills = skillSlugs;
+      }
+      if (codebaseRef) {
+        body.codebase = codebaseRef;
       }
       if (extensionIds && extensionIds.length > 0) {
         body.extensions = extensionIds;

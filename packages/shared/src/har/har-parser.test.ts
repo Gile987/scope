@@ -981,6 +981,53 @@ describe("extractTokenUsage", () => {
     });
   });
 
+  it("includes Anthropic prompt-cache tokens in the prompt count", () => {
+    // Anthropic's `input_tokens` is only the non-cached remainder; the bulk of
+    // the prompt is reported in cache_creation_input_tokens / cache_read_input_tokens.
+    const har = makeHar([
+      makeEntry({
+        responseBody: {
+          content: [{ type: "text", text: "hello" }],
+          usage: {
+            input_tokens: 9,
+            cache_creation_input_tokens: 22153,
+            cache_read_input_tokens: 100,
+            output_tokens: 249,
+          },
+        },
+      }),
+    ]);
+    const usage = extractTokenUsage(har);
+    // prompt = 9 + 22153 + 100
+    expect(usage).toEqual({
+      promptTokens: 22262,
+      completionTokens: 249,
+      totalTokens: 22511,
+    });
+  });
+
+  it("counts Anthropic SSE usage once and includes cache tokens (message_delta)", () => {
+    // Anthropic streams usage twice: message_start carries it under
+    // `message.usage` (ignored — not at the top level), message_delta carries
+    // the final usage at the top-level `usage`. Only the latter is counted, so
+    // cache tokens are added exactly once.
+    const sseBody = [
+      "event: message_start",
+      'data: {"type":"message_start","message":{"usage":{"input_tokens":9,"cache_creation_input_tokens":22153,"cache_read_input_tokens":0,"output_tokens":8}}}',
+      "event: message_delta",
+      'data: {"type":"message_delta","usage":{"input_tokens":9,"cache_creation_input_tokens":22153,"cache_read_input_tokens":0,"output_tokens":249}}',
+      "data: [DONE]",
+    ].join("\n");
+    const har = makeHar([makeEntry({ responseBody: sseBody })]);
+    const usage = extractTokenUsage(har);
+    // prompt = 9 + 22153 + 0 (counted once, from message_delta)
+    expect(usage).toEqual({
+      promptTokens: 22162,
+      completionTokens: 249,
+      totalTokens: 22411,
+    });
+  });
+
   it("extracts token usage from SSE streaming response (final chunk)", () => {
     const sseBody = [
       'data: {"choices":[{"delta":{"content":"hi"}}]}',

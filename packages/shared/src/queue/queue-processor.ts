@@ -32,6 +32,8 @@ import { McpSecretClient } from "../mcp/mcp-secret-client.js";
 import { SkillClient } from "../skills/skill-client.js";
 import { ExtensionClient } from "../extensions/extension-client.js";
 import { extractSkillsToWorkspace } from "../skills/skill-extractor.js";
+import { CodebaseClient } from "../codebases/codebase-client.js";
+import { seedCodebaseToWorkspace } from "../codebases/codebase-seeder.js";
 
 /**
  * Queue processor for coding agent workers.
@@ -568,6 +570,26 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           await log("warn", `Failed to upload setup video files: ${msg}`);
         }
       }
+    }
+
+    // Seed the workspace from a selected codebase revision (after setup so
+    // workspacePath is resolved, BEFORE skills so skills overlay the project).
+    // Seeding is a hard prerequisite — a failure here fails the run rather than
+    // silently starting the agent from an empty workspace.
+    if (requestDoc.codebaseRevisionId) {
+      const apiBaseUrl = process.env.SCOPE_MT_API_URL;
+      if (!apiBaseUrl) {
+        throw new Error("Codebase revision requested but SCOPE_MT_API_URL is not configured");
+      }
+      const codebaseWorkspacePath =
+        this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
+      const codebaseClient = new CodebaseClient(apiBaseUrl);
+      await seedCodebaseToWorkspace({
+        revisionId: requestDoc.codebaseRevisionId,
+        codebaseClient,
+        workspacePath: codebaseWorkspacePath,
+        log: (msg) => log("info", msg),
+      });
     }
 
     // Extract skills to the workspace (after setup so workspacePath is resolved)

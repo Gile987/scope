@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType } from "@/types";
+import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType } from "@/types";
 
 import { qs } from "./url";
 import { recordServerDate } from "./serverClock";
+import { MAX_ARCHIVE_UPLOAD_LABEL } from "./codebaseUpload";
 
 const BASE = "/api/v1";
 
@@ -94,6 +95,8 @@ export const api = {
     profileId?: string;
     profileVariations?: string[];
     gates?: GateConfig[];
+    codebase?: string;
+    codebaseRevisionId?: string;
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
     const url = worker ? `/requests?worker=${encodeURIComponent(worker)}` : `/requests`;
@@ -946,6 +949,120 @@ export const api = {
   /** List revisions for a skill */
   listSkillRevisions: (slug: string): Promise<SkillRevisionDocument[]> => {
     return request(`/skills/${slug}/revisions`);
+  },
+
+  // ─── Codebases ─────────────────────────────────────────────────────────────
+
+  /** List all codebases */
+  listCodebases: (): Promise<CodebaseDocument[]> => {
+    return request("/codebases");
+  },
+
+  /** Get a single codebase by id */
+  getCodebase: (id: string): Promise<CodebaseDocument> => {
+    return request(`/codebases/${id}`);
+  },
+
+  /** Create a git codebase (JSON metadata only). The API best-effort resolves
+   *  the latest revision on creation, so the response may include firstRevision. */
+  createCodebase: (body: {
+    name: string;
+    sourceType: CodebaseSourceType;
+    source?: string;
+    description?: string;
+    defaultBranch?: string;
+    slug?: string;
+  }): Promise<CodebaseDocument & { firstRevision?: CodebaseRevisionDocument }> => {
+    return request("/codebases", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /**
+   * Create an archive codebase together with its first revision (multipart).
+   * The archive file is required; the server rolls back the codebase if the
+   * revision fails to materialize.
+   */
+  createArchiveCodebase: async (
+    meta: { name: string; description?: string; slug?: string },
+    file: File,
+  ): Promise<CodebaseDocument & { firstRevision?: CodebaseRevisionDocument }> => {
+    const form = new FormData();
+    form.append("sourceType", "archive");
+    form.append("name", meta.name);
+    if (meta.description) form.append("description", meta.description);
+    if (meta.slug) form.append("slug", meta.slug);
+    form.append("archive", file);
+    const res = await fetch(`${BASE}/codebases`, {
+      method: "POST",
+      body: form,
+    });
+    recordServerDate(res.headers.get("Date"));
+    if (res.status === 413) {
+      throw new Error(`Archive exceeds the ${MAX_ARCHIVE_UPLOAD_LABEL} upload limit.`);
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+  /** Update a codebase */
+  updateCodebase: (
+    id: string,
+    body: Partial<Pick<CodebaseDocument, "name" | "description" | "defaultBranch">>,
+  ): Promise<CodebaseDocument> => {
+    return request(`/codebases/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete a codebase */
+  deleteCodebase: (id: string): Promise<void> => {
+    return request(`/codebases/${id}`, { method: "DELETE" });
+  },
+
+  /** List revisions for a codebase */
+  listCodebaseRevisions: (id: string, limit?: number): Promise<CodebaseRevisionDocument[]> => {
+    return request(`/codebases/${id}/revisions${limit ? `?limit=${limit}` : ""}`);
+  },
+
+  /** Resolve a new git codebase revision (snapshot the repo at a ref / "latest") */
+  resolveCodebaseRevision: (
+    id: string,
+    requestedRef?: string,
+  ): Promise<CodebaseRevisionDocument> => {
+    return request(`/codebases/${id}/revisions`, {
+      method: "POST",
+      body: JSON.stringify(requestedRef ? { requestedRef } : {}),
+    });
+  },
+
+  /** Upload an archive as a new codebase revision (multipart) */
+  uploadCodebaseArchive: async (id: string, file: File): Promise<CodebaseRevisionDocument> => {
+    const form = new FormData();
+    form.append("archive", file);
+    const res = await fetch(`${BASE}/codebases/${id}/upload`, {
+      method: "POST",
+      body: form,
+    });
+    recordServerDate(res.headers.get("Date"));
+    if (res.status === 413) {
+      throw new Error(`Archive exceeds the ${MAX_ARCHIVE_UPLOAD_LABEL} upload limit.`);
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+  /** Get a single codebase revision by id */
+  getCodebaseRevision: (id: string): Promise<CodebaseRevisionDocument> => {
+    return request(`/codebase-revisions/${id}`);
   },
 
   // ─── Extensions ──────────────────────────────────────────────────────────

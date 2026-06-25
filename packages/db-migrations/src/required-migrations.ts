@@ -35,4 +35,5 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "019-add-handler-status-index.ts",
   "019-backfill-task-prompt-type.ts",
   "020-backfill-handler-status.ts",
+  "020-create-codebase-indexes.ts",
 ];
