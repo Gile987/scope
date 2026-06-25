@@ -130,7 +130,10 @@ async function initializeClients(): Promise<void> {
   mcpServerCollection = db.collection<McpServerDocument>("mcp-servers");
   insightsCollection = db.collection<InsightDocument>("insights");
   taskPromptCollection = db.collection<TaskPromptDocument>("task-prompts");
-  taskPromptStore = new TaskPromptStore(taskPromptCollection);
+  // Blob storage is also (re)assigned below for logs/snapshots; construct an
+  // instance here so the task-prompt store can offload over-threshold bodies.
+  blobStorage = new BlobStorage({ storageAccountName, storageConnectionString });
+  taskPromptStore = new TaskPromptStore(taskPromptCollection, blobStorage);
   featureFlagCollection = db.collection<FeatureFlagDocument>("feature-flags");
   reportTemplateCollection = db.collection<ReportTemplateDocument>("report-templates");
   skillCollection = db.collection<SkillDocument>("skills");
@@ -220,7 +223,9 @@ async function initializeClients(): Promise<void> {
 
   console.log(`Initialized Queue clients for workers: ${Array.from(queueClients.keys()).join(", ")}, report`);
 
-  // Initialize blob storage (used for log persistence and snapshots)
+  // Initialize blob storage (used for log persistence and snapshots).
+  // Already constructed above for the task-prompt store; reassign to keep the
+  // original initialization order/comment intact.
   blobStorage = new BlobStorage({ storageAccountName, storageConnectionString });
 
   // Initialize Redis-backed heartbeat store. Workers write per-run
