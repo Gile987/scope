@@ -110,6 +110,11 @@ gate type (see §4.5).
 | `run` | App runs / serves correctly | "Server starts", "GET / returns 200" |
 | `deploy` | Deploys to target environment | "azd up succeeds", "Resource provisioned" |
 
+> **UI label:** the `select` gate is presented to users as **"Requirements"** in the
+> portal and CLI (`GATE_METADATA.select.label`). The internal id stays `select` —
+> criteria gate-compatibility, prompt `type`, run turns/summaries, and prompt-id
+> hashing are all unchanged.
+
 #### 4.1.1 Portal visibility flags (Run / Deploy)
 
 The **Run** and **Deploy** gates are functionally complete end-to-end but not yet

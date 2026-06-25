@@ -712,8 +712,8 @@ export function SubmitRun() {
   // ─── Render helpers ─────────────────────────────────────────────────────
   const summaryChips: string[] = [
     `${maxIterations} iteration${maxIterations === 1 ? "" : "s"}`,
-    `${pickedCriteria.length} select criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
-    gatesEnabled ? `${gateConfigs.length} configured gates` : "single-pass Select",
+    `${pickedCriteria.length} requirements criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
+    gatesEnabled ? `${gateConfigs.length} configured gates` : "single-pass Requirements",
     occurrences > 1 ? `×${occurrences} runs` : "",
     worker,
     model || "",
@@ -1030,7 +1030,7 @@ export function SubmitRun() {
         <CardHeader>
           <CardTitle>Gate pipeline</CardTitle>
           <CardDescription>
-            Optional phase gates after Select. Leave all disabled for the existing single-pass flow.
+            Optional phase gates after Requirements. Leave all disabled for the existing single-pass flow.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
