@@ -9,6 +9,7 @@ import {
   IndependentStrategy,
   BundledStrategy,
   TOOL_OUTPUTS_GUIDANCE,
+  buildEvidenceGuidance,
   isWithinWorkspace,
   JUDGE_AVAILABLE_TOOLS,
   JUDGE_EXCLUDED_TOOLS,
@@ -26,11 +27,14 @@ class TestableStrategy extends IndependentStrategy {
   publicCreateToolOutputTools(toolCalls: any[]) {
     return this.createToolOutputTools(toolCalls);
   }
+  publicCreateAgentResponseTool(response: string) {
+    return this.createAgentResponseTool(response);
+  }
   publicBuildSessionConfig(tools: any[], systemPrompt: string) {
     return this.buildSessionConfig(tools, systemPrompt);
   }
-  publicBuildSystemPrompt(hasToolOutputs: boolean) {
-    return (this as any).buildSystemPrompt(undefined, hasToolOutputs);
+  publicBuildSystemPrompt(hasToolOutputs: boolean, hasAgentResponse?: boolean) {
+    return (this as any).buildSystemPrompt(undefined, hasToolOutputs, hasAgentResponse);
   }
   publicBuildUserPrompt(
     criterion: { id: string; prompt: string },
@@ -114,6 +118,111 @@ describe("judge tool-output tools (issue #1125)", () => {
     for (const tool of tools) {
       expect(tool.skipPermission, `${tool.name} must skip the permission prompt`).toBe(true);
     }
+  });
+});
+
+describe("judge agent-response tool (issue #1136)", () => {
+  const strategy = new TestableStrategy("test-model");
+
+  async function callAgentResponse(response: string): Promise<any> {
+    const [tool] = strategy.publicCreateAgentResponseTool(response);
+    if (!tool?.handler) throw new Error("read_agent_response has no handler");
+    return (tool.handler as (a: unknown, b: unknown) => unknown)({}, stubInvocation);
+  }
+
+  it("exposes a single read_agent_response tool", () => {
+    const tools = strategy.publicCreateAgentResponseTool("the agent said hello");
+    expect(tools.map((t) => t.name)).toEqual(["read_agent_response"]);
+  });
+
+  // Same headless permission rationale as the file and tool-output tools: a tool
+  // without skipPermission is denied at execution time, so the judge could never
+  // read the agent's response. See scope #1125, #1136.
+  it("marks read_agent_response to skip the permission prompt", () => {
+    const [tool] = strategy.publicCreateAgentResponseTool("x");
+    expect(tool.skipPermission).toBe(true);
+  });
+
+  it("takes no parameters", () => {
+    const [tool] = strategy.publicCreateAgentResponseTool("x");
+    const params = tool.parameters as { required?: string[]; properties?: Record<string, unknown> };
+    expect(params.required ?? []).toEqual([]);
+    expect(params.properties ?? {}).toEqual({});
+  });
+
+  it("returns the full response text untruncated under the cap", async () => {
+    const result = await callAgentResponse("The factorial of 5 is 120.");
+    expect(result.hasResponse).toBe(true);
+    expect(result.response).toBe("The factorial of 5 is 120.");
+    expect(result.truncated).toBe(false);
+  });
+
+  it("reports no response for an empty string", async () => {
+    const result = await callAgentResponse("");
+    expect(result.hasResponse).toBe(false);
+    expect(result.response).toBe("");
+  });
+
+  // The full-text cap mirrors get_tool_output (FULL_LIMIT = 100_000): it bounds
+  // the payload while still delivering far more than the lossy 300-500 char
+  // prior-iteration truncation that motivated #1136.
+  it("truncates and flags responses that exceed the safety cap", async () => {
+    const huge = "a".repeat(100_001);
+    const result = await callAgentResponse(huge);
+    expect(result.hasResponse).toBe(true);
+    expect(result.truncated).toBe(true);
+    expect(result.totalLength).toBe(100_001);
+    expect(result.response.length).toBe(100_000);
+  });
+});
+
+describe("judge evidence guidance — agent response (issue #1136)", () => {
+  // buildEvidenceGuidance composes the system-prompt guidance from whichever
+  // evidence sources exist. The no-code / Q&A case has ZERO tool calls but a
+  // non-empty response, so the guidance + read_agent_response tool must appear
+  // even when hasToolOutputs is false.
+
+  it("names read_agent_response and frames the response as authoritative when present", () => {
+    const g = buildEvidenceGuidance({ hasToolOutputs: false, hasAgentResponse: true });
+    expect(g).toContain("## Your Tools");
+    expect(g).toContain("read_agent_response");
+    expect(g).toContain("## How to Judge");
+    expect(g.toLowerCase()).toContain("equally authoritative");
+    // It must NOT advertise tool-output tools that aren't available here.
+    expect(g).not.toContain("read_tool_outputs");
+    expect(g).not.toContain("get_tool_output");
+  });
+
+  it("lists all three sources when both tool outputs and a response are present", () => {
+    const g = buildEvidenceGuidance({ hasToolOutputs: true, hasAgentResponse: true });
+    expect(g).toContain("read_tool_outputs");
+    expect(g).toContain("get_tool_output");
+    expect(g).toContain("read_agent_response");
+    expect(g.toLowerCase()).toContain("equally authoritative");
+  });
+
+  it("is byte-identical to TOOL_OUTPUTS_GUIDANCE for the tool-outputs-only case", () => {
+    const g = buildEvidenceGuidance({ hasToolOutputs: true, hasAgentResponse: false });
+    expect(g).toBe(TOOL_OUTPUTS_GUIDANCE);
+    expect(g).not.toContain("read_agent_response");
+  });
+
+  it("injects guidance into the system prompt when only a response is present (no tool outputs)", () => {
+    const sys = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(false, true);
+    expect(sys).toContain("read_agent_response");
+    expect(sys).toContain("## How to Judge");
+  });
+
+  it("injects guidance for the IndependentStrategy when only a response is present", () => {
+    const sys = new TestableStrategy("test-model").publicBuildSystemPrompt(false, true);
+    expect(sys).toContain("read_agent_response");
+    expect(sys).toContain("## How to Judge");
+  });
+
+  it("omits all evidence guidance when neither tool outputs nor a response exist", () => {
+    const sys = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(false, false);
+    expect(sys).not.toContain("read_agent_response");
+    expect(sys).not.toContain("## How to Judge");
   });
 });
 
@@ -243,8 +352,8 @@ describe("judge session tool restriction (scope #1117)", () => {
  * without running a real Copilot session.
  */
 class TestableBundledStrategy extends BundledStrategy {
-  publicBuildSystemPrompt(hasToolOutputs: boolean) {
-    return (this as any).buildSystemPrompt(undefined, hasToolOutputs);
+  publicBuildSystemPrompt(hasToolOutputs: boolean, hasAgentResponse?: boolean) {
+    return (this as any).buildSystemPrompt(undefined, hasToolOutputs, hasAgentResponse);
   }
   publicBuildUserPrompt(
     criteria: { id: string; prompt: string }[] = [
