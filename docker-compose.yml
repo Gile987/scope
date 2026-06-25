@@ -444,6 +444,8 @@ services:
       args:
         CLAUDE_CODE_ACP_VERSION: ${CLAUDE_CODE_ACP_VERSION:-}
     profiles: [claude-code]
+    group_add:
+      - "0"  # Grant Docker socket access (socket is root-owned on Docker Desktop)
     environment:
       <<: *worker-env
       WORKER_NAME: coder-acp-claude-code
@@ -456,9 +458,11 @@ services:
       DEV_PROXY_HAR_DIR: /har-output
       NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
       MCP_GATEWAY_URL: http://mcp-gateway-claude-code:8080
+      DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
       - claude_har_output:/har-output
       - claude_workspace:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       <<: *worker-deps
       devproxy-claude-code:
@@ -532,6 +536,8 @@ services:
       args:
         COPILOT_CLI_VERSION: ${COPILOT_CLI_VERSION:-}
     profiles: [copilot]
+    group_add:
+      - "0"  # Grant Docker socket access (socket is root-owned on Docker Desktop)
     environment:
       <<: *worker-env
       WORKER_NAME: coder-acp-copilot
@@ -544,9 +550,11 @@ services:
       DEV_PROXY_HAR_DIR: /har-output
       NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
       MCP_GATEWAY_URL: http://mcp-gateway-copilot:8080
+      DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
       - copilot_har_output:/har-output
       - copilot_workspace:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       <<: *worker-deps
       mcp-gateway-copilot:
