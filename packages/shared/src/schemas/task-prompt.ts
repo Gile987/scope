@@ -4,11 +4,11 @@
 import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 import { PromptFeatureResultSchema } from "./prompt-feature.js";
-import { PROMPT_TYPES } from "../types/types.js";
+import { PromptTypeSchema } from "./prompt-type.js";
 
 extendZodWithOpenApi(z);
 
-export const PromptTypeSchema = z.enum(PROMPT_TYPES).openapi("PromptType");
+export { PromptTypeSchema };
 
 export const CreateTaskPromptInputSchema = z
   .object({

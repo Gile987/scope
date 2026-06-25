@@ -2990,7 +2990,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             ],
           },
           "features": {
-            "items": {},
+            "items": {
+              "$ref": "#/components/schemas/PromptFeatureResult",
+            },
             "type": "array",
           },
           "featuresExtractedAt": {

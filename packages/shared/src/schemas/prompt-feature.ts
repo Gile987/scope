@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
-import { PromptTypeSchema } from "./task-prompt.js";
+import { PromptTypeSchema } from "./prompt-type.js";
 
 extendZodWithOpenApi(z);
 
