@@ -143,6 +143,10 @@ export interface Run {
   submissionId?: string;
   profileId?: string;
   profileVersionId?: string;
+  /** Resolved AGENTS.md prompt id when an AGENTS.md was supplied. */
+  agentsMdPromptId?: string;
+  /** Parent AGENTS.md prompt ids forming the AGENTS.md lineage (mutation/merge edges). */
+  agentsMdParentIds?: string[];
   gates?: GateConfig[];
   gateSummaries?: GateRunSummary[];
 }
@@ -158,7 +162,7 @@ export interface CursorPaginatedResponse<T> {
 }
 
 export type GateId = "select" | "build" | "test" | "run" | "deploy";
-export type PromptType = GateId;
+export type PromptType = GateId | "agents.md";
 
 export interface GateConfig {
   gate: GateId;
@@ -230,6 +234,8 @@ export interface GeneratePromptResponse {
 export interface PromptFeatureConfig {
   id: string;
   prompt: string;
+  /** Prompt type this feature applies to (absent ⇒ "select"). */
+  type?: PromptType;
 }
 
 export interface PromptFeatureDocument extends PromptFeatureConfig {
@@ -264,8 +270,9 @@ export interface PromptFeatureExtraction {
 // Task Prompt types (first-class entity for benchmark task texts)
 export interface TaskPrompt {
   _id: string;                          // UUIDv5 content-addressed ID
-  text: string;
-  type?: PromptType;                         // Full task prompt text
+  text?: string;                        // Full task prompt text (absent when blob-backed)
+  type?: PromptType;                    // Gate id or "agents.md"; absent ⇒ legacy "select"
+  contentBlobUrl?: string;              // Blob reference when body exceeds the inline threshold
   features?: PromptFeatureResult[];     // Detected prompt features
   featuresExtractedAt?: string;         // When features were last extracted
   createdAt: string;

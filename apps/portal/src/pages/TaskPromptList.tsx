@@ -24,7 +24,7 @@ import { formatDate, formatId, truncate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { Stepper } from "@/components/Stepper";
-import { GATE_METADATA, type PromptType } from "@/lib/gates";
+import { GATE_METADATA, promptTypeLabel, type PromptType } from "@/lib/gates";
 import { useVisibleGates } from "@/hooks/useVisibleGates";
 import { KbdBadge } from "@/components/KbdBadge";
 import {
@@ -177,7 +177,7 @@ export function TaskPromptList() {
       header: "Text",
       hidden: visibility.isHidden("text"),
       cell: (tp) => (
-        <span className="text-sm text-muted-foreground">{truncate(tp.text, 80)}</span>
+        <span className="text-sm text-muted-foreground">{truncate(tp.text ?? "", 80)}</span>
       ),
     },
     {
@@ -187,7 +187,7 @@ export function TaskPromptList() {
       hidden: visibility.isHidden("type"),
       cell: (tp) => (
         <Badge variant="secondary" className="text-xs">
-          {GATE_METADATA[tp.type ?? "select"].label}
+          {promptTypeLabel(tp.type)}
         </Badge>
       ),
     },

@@ -15,7 +15,7 @@ import { ArrowLeft, Trash2, List } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
 import { Badge } from "@/components/ui/badge";
-import { GATE_METADATA } from "@/lib/gates";
+import { promptTypeLabel } from "@/lib/gates";
 
 export function TaskPromptDetail() {
   const { id } = useParams<{ id: string }>();
@@ -111,7 +111,7 @@ export function TaskPromptDetail() {
           <div className="space-y-1">
             <span className="text-sm font-medium text-muted-foreground">Type</span>
             <div>
-              <Badge variant="secondary">{GATE_METADATA[taskPrompt.type ?? "select"].label}</Badge>
+              <Badge variant="secondary">{promptTypeLabel(taskPrompt.type)}</Badge>
             </div>
           </div>
           <div className="space-y-1">

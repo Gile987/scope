@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search } from "lucide-react";
 import { truncate, formatId } from "@/lib/utils";
-import { GATE_METADATA, type PromptType } from "@/lib/gates";
+import { GATE_METADATA, promptTypeLabel, type PromptType } from "@/lib/gates";
 import type { TaskPrompt } from "@/types";
 
 interface TaskPromptPickerProps {
@@ -50,7 +50,7 @@ export function TaskPromptPicker({ onSelect, onSelectPrompt, type, placeholder }
 
   const selectItem = useCallback(
     (prompt: TaskPrompt) => {
-      onSelect(prompt.text);
+      onSelect(prompt.text ?? "");
       onSelectPrompt?.(prompt);
       setQuery("");
       setOpen(false);
@@ -123,10 +123,10 @@ export function TaskPromptPicker({ onSelect, onSelectPrompt, type, placeholder }
                   </span>
                   {!type && (
                     <span className="mr-2 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
-                      {GATE_METADATA[tp.type ?? "select"].label}
+                      {promptTypeLabel(tp.type)}
                     </span>
                   )}
-                  {truncate(tp.text.replace(/\n/g, " "), 80)}
+                  {truncate((tp.text ?? "").replace(/\n/g, " "), 80)}
                 </li>
               ))}
             </ul>
