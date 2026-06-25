@@ -32,6 +32,8 @@ import { McpSecretClient } from "../mcp/mcp-secret-client.js";
 import { SkillClient } from "../skills/skill-client.js";
 import { ExtensionClient } from "../extensions/extension-client.js";
 import { extractSkillsToWorkspace } from "../skills/skill-extractor.js";
+import { CodebaseClient } from "../codebases/codebase-client.js";
+import { seedCodebaseToWorkspace } from "../codebases/codebase-seeder.js";
 
 /**
  * Queue processor for coding agent workers.
@@ -566,6 +568,26 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       }
     }
 
+    // Seed the workspace from a selected codebase revision (after setup so
+    // workspacePath is resolved, BEFORE skills so skills overlay the project).
+    // Seeding is a hard prerequisite — a failure here fails the run rather than
+    // silently starting the agent from an empty workspace.
+    if (requestDoc.codebaseRevisionId) {
+      const apiBaseUrl = process.env.SCOPE_MT_API_URL;
+      if (!apiBaseUrl) {
+        throw new Error("Codebase revision requested but SCOPE_MT_API_URL is not configured");
+      }
+      const codebaseWorkspacePath =
+        this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
+      const codebaseClient = new CodebaseClient(apiBaseUrl);
+      await seedCodebaseToWorkspace({
+        revisionId: requestDoc.codebaseRevisionId,
+        codebaseClient,
+        workspacePath: codebaseWorkspacePath,
+        log: (msg) => log("info", msg),
+      });
+    }
+
     // Extract skills to the workspace (after setup so workspacePath is resolved)
     if (skillConfigs) {
       await this.extractSkills(requestDoc, skillConfigs, log);
@@ -659,6 +681,22 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     const totalAiCallCount = result.turns.reduce((sum, t) => sum + (t.aiCallCount ?? 0), 0);
 
+    // Aggregate per-turn tokenUsage into run-level totals
+    const hasAnyTokenUsage = result.turns.some((t) => t.tokenUsage);
+    const totalTokenUsage = hasAnyTokenUsage
+      ? result.turns.reduce(
+          (acc, t) => {
+            if (!t.tokenUsage) return acc;
+            return {
+              promptTokens: acc.promptTokens + t.tokenUsage.promptTokens,
+              completionTokens: acc.completionTokens + t.tokenUsage.completionTokens,
+              totalTokens: acc.totalTokens + t.tokenUsage.totalTokens,
+            };
+          },
+          { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        )
+      : undefined;
+
     // Guard final write: only update if the run is still "processing" for this
     // specific run._id. If a cancel already set status="done", this no-ops.
     const finalWrite = await withRetry(() => this.collection.updateOne(
@@ -672,6 +710,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           "run.updatedAt": new Date(),
           updatedAt: new Date(),
           ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),
+          ...(totalTokenUsage && { "run.tokenUsage": totalTokenUsage }),
           ...(result.passed ? {} : { "run.error": result.finalResult }),
           // Claim for post-processing atomically so polling dispatcher won't re-enqueue
           ...(this.postProcessorQueueClient ? { "run.postProcessorStatus": "queued" } : {}),

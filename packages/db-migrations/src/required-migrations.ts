@@ -32,4 +32,5 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "017-add-post-processor-dispatch-index.ts",
   "018-backfill-criteria-gates.ts",
   "019-backfill-task-prompt-type.ts",
+  "020-create-codebase-indexes.ts",
 ];

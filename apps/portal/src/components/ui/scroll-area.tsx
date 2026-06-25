@@ -5,18 +5,57 @@ import * as React from "react";
 import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area";
 import { cn } from "@/lib/utils";
 
+interface ScrollAreaProps
+  extends React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root> {
+  /** Which scrollbars to render. Defaults to vertical only (existing behavior). */
+  orientation?: "vertical" | "horizontal" | "both";
+  /** Forwarded to the underlying Radix Viewport element. */
+  viewportRef?: React.Ref<HTMLDivElement>;
+  /** Extra classes appended to the Viewport. */
+  viewportClassName?: string;
+  /**
+   * When true, the Viewport no longer forces its content child to full width,
+   * allowing horizontal overflow (and thus horizontal scrolling). Defaults to
+   * false to preserve existing layouts.
+   */
+  fitContent?: boolean;
+}
+
 const ScrollArea = React.forwardRef<
   React.ElementRef<typeof ScrollAreaPrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root>
->(({ className, children, ...props }, ref) => (
-  <ScrollAreaPrimitive.Root ref={ref} className={cn("relative overflow-hidden", className)} {...props}>
-    <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit] [&>div]:!block [&>div]:!w-full">
-      {children}
-    </ScrollAreaPrimitive.Viewport>
-    <ScrollBar />
-    <ScrollAreaPrimitive.Corner />
-  </ScrollAreaPrimitive.Root>
-));
+  ScrollAreaProps
+>(
+  (
+    {
+      className,
+      children,
+      orientation = "vertical",
+      viewportRef,
+      viewportClassName,
+      fitContent = false,
+      ...props
+    },
+    ref
+  ) => (
+    <ScrollAreaPrimitive.Root ref={ref} className={cn("relative overflow-hidden", className)} {...props}>
+      <ScrollAreaPrimitive.Viewport
+        ref={viewportRef}
+        className={cn(
+          "h-full w-full rounded-[inherit] [&>div]:!block",
+          !fitContent && "[&>div]:!w-full",
+          viewportClassName
+        )}
+      >
+        {children}
+      </ScrollAreaPrimitive.Viewport>
+      {(orientation === "vertical" || orientation === "both") && <ScrollBar orientation="vertical" />}
+      {(orientation === "horizontal" || orientation === "both") && (
+        <ScrollBar orientation="horizontal" />
+      )}
+      <ScrollAreaPrimitive.Corner />
+    </ScrollAreaPrimitive.Root>
+  )
+);
 ScrollArea.displayName = ScrollAreaPrimitive.Root.displayName;
 
 const ScrollBar = React.forwardRef<

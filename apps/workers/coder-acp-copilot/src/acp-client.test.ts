@@ -2,9 +2,111 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi } from "vitest";
-import { runACPSession, selectModel, selectReasoningEffort, selectPermissionMode, formatModeError, AUTOPILOT_MODE_ID } from "./acp-client.js";
+import { runACPSession, selectModel, selectReasoningEffort, selectPermissionMode, formatModeError, formatToolArgs, formatToolContent, AUTOPILOT_MODE_ID } from "./acp-client.js";
 import type * as acp from "@agentclientprotocol/sdk";
 import os from "node:os";
+
+describe("formatToolContent", () => {
+  it("returns an empty string for non-array or empty input", () => {
+    expect(formatToolContent(undefined)).toBe("");
+    expect(formatToolContent([])).toBe("");
+  });
+
+  it("formats a diff variant as `diff <path> <newText>`", () => {
+    expect(
+      formatToolContent([
+        { type: "diff", path: "/tmp/app.js", newText: "const x = 1", oldText: null },
+      ])
+    ).toBe("diff /tmp/app.js const x = 1");
+  });
+
+  it("redacts diff text for sensitive file paths", () => {
+    expect(
+      formatToolContent([
+        { type: "diff", path: "/app/.env", newText: "API_KEY=sk-123", oldText: null },
+      ])
+    ).toBe("diff /app/.env [redacted]");
+  });
+
+  it("formats a terminal variant as `terminal <terminalId>`", () => {
+    expect(
+      formatToolContent([{ type: "terminal", terminalId: "term-123" }])
+    ).toBe("terminal term-123");
+  });
+
+  it("formats a text content block as its text and others as a bracketed type", () => {
+    expect(
+      formatToolContent([
+        { type: "content", content: { type: "text", text: "hello world" } },
+      ])
+    ).toBe("hello world");
+    expect(
+      formatToolContent([
+        { type: "content", content: { type: "image", data: "..." } },
+      ])
+    ).toBe("[image]");
+  });
+
+  it("truncates long previews with an ellipsis", () => {
+    const result = formatToolContent(
+      [{ type: "diff", path: "f", newText: "a".repeat(300) }],
+      20
+    );
+    expect(result.length).toBe(20);
+    expect(result.endsWith("…")).toBe(true);
+  });
+});
+
+describe("formatToolArgs", () => {
+  it("returns an empty string for non-object input", () => {
+    expect(formatToolArgs(undefined)).toBe("");
+    expect(formatToolArgs(null)).toBe("");
+    expect(formatToolArgs("hello")).toBe("");
+    expect(formatToolArgs(42)).toBe("");
+  });
+
+  it("returns an empty string for an empty object", () => {
+    expect(formatToolArgs({})).toBe("");
+  });
+
+  it("formats string arguments as key=value pairs", () => {
+    expect(formatToolArgs({ command: "ls -la", cwd: "/tmp" })).toBe(
+      "command=ls -la, cwd=/tmp"
+    );
+  });
+
+  it("collapses whitespace in values", () => {
+    expect(formatToolArgs({ content: "line1\n  line2\t line3" })).toBe(
+      "content=line1 line2 line3"
+    );
+  });
+
+  it("JSON-stringifies non-string values", () => {
+    expect(formatToolArgs({ count: 3, flag: true })).toBe(
+      "count=3, flag=true"
+    );
+  });
+
+  it("truncates long previews with an ellipsis", () => {
+    const result = formatToolArgs({ path: "a".repeat(300) }, 20);
+    expect(result.length).toBe(20);
+    expect(result.endsWith("…")).toBe(true);
+  });
+
+  it("redacts values of sensitive keys", () => {
+    expect(
+      formatToolArgs({
+        url: "https://api.example.com",
+        token: "sk-secret-123",
+        AUTHORIZATION: "Bearer abc",
+        api_key: "xyz",
+        password: "hunter2",
+      })
+    ).toBe(
+      "url=https://api.example.com, token=[redacted], AUTHORIZATION=[redacted], api_key=[redacted], password=[redacted]"
+    );
+  });
+});
 
 describe("runACPSession", () => {
   const cwd = os.tmpdir();

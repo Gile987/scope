@@ -844,4 +844,65 @@ describe("packRunIntoTar", () => {
     expect(yaml).toContain("iteration-1.chat-result.json");
     expect(yaml).not.toContain("blob.core.windows.net");
   });
+
+  it("bundles the seeding codebase snapshot as codebase.tar.gz and rewrites its URL", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const codebaseData = Buffer.from("fake-codebase-tarball");
+    const blobUrl = "https://storage.blob.core.windows.net/snapshots/codebase-revisions/cb-1/rev-1.tar.gz";
+    const container = makeMockBlobContainer({
+      "codebase-revisions/cb-1/rev-1.tar.gz": { body: codebaseData, length: codebaseData.length },
+    });
+
+    const run: ArchivableRun = {
+      _id: "run-010",
+      codebaseRevisionId: "rev-1",
+      codebase: {
+        ref: "pamelafox-site@r1",
+        sourceType: "git",
+        resolvedCommitSha: "297abf5ffd8328da9fbc37496e774be1799fb412",
+        archiveUrl: blobUrl,
+      },
+      run: { turns: [] },
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    await packRunIntoTar(p, run, container, "run-010", () => true);
+    p.finalize();
+
+    const entries = await entriesPromise;
+    const names = entries.map(e => e.name);
+    expect(names).toContain("run-010/codebase.tar.gz");
+    expect(entries.find(e => e.name === "run-010/codebase.tar.gz")!.data).toEqual(codebaseData);
+
+    const yaml = entries.find(e => e.name === "run-010/run.yaml")!.data.toString();
+    // The codebase block is present with provenance.
+    expect(yaml).toContain("pamelafox-site@r1");
+    expect(yaml).toContain("297abf5ffd8328da9fbc37496e774be1799fb412");
+    // archiveUrl is rewritten to the bundled relative path; blob URL preserved.
+    expect(yaml).toContain("archiveUrl: codebase.tar.gz");
+    expect(yaml).toContain(`archiveBlobUrl: ${blobUrl}`);
+  });
+
+  it("does not mutate the caller's codebase.archiveUrl when rewriting", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const blobUrl = "https://storage.blob.core.windows.net/snapshots/codebase-revisions/cb-2/rev-2.tar.gz";
+    const data = Buffer.from("x");
+    const container = makeMockBlobContainer({
+      "codebase-revisions/cb-2/rev-2.tar.gz": { body: data, length: data.length },
+    });
+    const run: ArchivableRun = {
+      _id: "run-011",
+      codebase: { ref: "x@r1", archiveUrl: blobUrl },
+      run: { turns: [] },
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    await packRunIntoTar(p, run, container, "run-011", () => true);
+    p.finalize();
+    await entriesPromise;
+
+    expect(run.codebase!.archiveUrl).toBe(blobUrl);
+  });
 });

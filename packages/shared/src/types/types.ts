@@ -269,6 +269,7 @@ export interface RequestDocument {
   promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
   mcpServers?: string[];          // MCP server slugs selected for this run
   skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
+  codebaseRevisionId?: string;    // FK → CodebaseRevisionDocument._id — seeds the workspace before the agent starts
   extensions?: string[];           // VS Code extension IDs selected for this run (e.g. "ms-python.python")
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
@@ -344,6 +345,9 @@ export interface RunState {
   outcome?: "succeeded" | "failed" | "finished";
   result?: string;
   error?: string;
+  /** Machine-readable error classification (e.g. "model_unavailable", "model_discovery_failed", "auth_failed").
+   *  Set alongside `error` when the failure has a well-known cause. */
+  errorCode?: string;
   /** Full blob URL pointing to this attempt's JSONL log blob in the `logs`
    *  container, e.g. `https://<account>.blob.core.windows.net/logs/{requestId}/runs/{runId}/run.jsonl`.
    *  Set at submit time so the SSE replay endpoint can read it directly from

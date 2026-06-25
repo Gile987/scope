@@ -49,6 +49,7 @@ import type { AnalysisResponse, AnalyzableRun } from "../../analysis.js";
 import { parseStateKey } from "../../criteria-mdp.js";
 import { buildGroupingPipeline } from "../../grouping.js";
 import { resolveSkillSpecs } from "../../utils/skill-helpers.js";
+import { resolveCodebaseSpec, createCodebaseArchiveUploader } from "../../utils/codebase-helpers.js";
 import {
   packRunIntoTar,
 } from "../../archive-har.js";
@@ -162,12 +163,39 @@ apiRoute(ctx.app, ctx.registry, {
     promptFeatureExtractionId: z.string().optional(),
     skills: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
+    codebase: z.string().optional(),
   }),
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, gates: requestedGates } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, gates: requestedGates, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId } = req.body;
     let worker = req.query.worker as string | undefined;
+
+    // Resolve the optional per-run codebase selection into a concrete revision id.
+    // Accepts an already-resolved `codebaseRevisionId`, or a `codebase` spec
+    // (revision id / `{slug}@r{N}` ref / bare slug). A bare git slug resolves the
+    // default branch and creates a new incremental revision at submit time.
+    let resolvedCodebaseRevisionId: string | undefined;
+    {
+      const spec = (codebaseSpec ?? requestedCodebaseRevisionId)?.trim();
+      if (spec) {
+        const uploadArchive = createCodebaseArchiveUploader({
+          storageConnectionString: ctx.storageConnectionString,
+          storageAccountName: ctx.storageAccountName,
+        });
+        const result = await resolveCodebaseSpec(spec, {
+          codebaseStore: ctx.codebaseStore,
+          codebaseRevisionStore: ctx.codebaseRevisionStore,
+          codebaseResolver: ctx.codebaseResolver,
+          uploadArchive,
+        });
+        if (result.error || !result.revisionId) {
+          res.status(400).json({ error: result.error ?? "Failed to resolve codebase" });
+          return;
+        }
+        resolvedCodebaseRevisionId = result.revisionId;
+      }
+    }
 
     type VariationInput = {
       profileId: string;
@@ -461,6 +489,7 @@ apiRoute(ctx.app, ctx.registry, {
             ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
             ...(r.mcpServers ? { mcpServers: r.mcpServers } : {}),
             ...(r.skillRevisions ? { skillRevisions: r.skillRevisions } : {}),
+            ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
             ...(r.extensions ? { extensions: r.extensions } : {}),
             ...(r.agentVersion ? { agentVersion: r.agentVersion } : {}),
             profileId: r.profile._id,
@@ -699,6 +728,31 @@ apiRoute(ctx.app, ctx.registry, {
     if (model) {
       const compoundModelId = `${workerType}:${model}`;
       const modelDoc = await ctx.modelCollection.findOne({ _id: compoundModelId });
+
+      // Preflight: warn (or reject) if the model has disappeared from the provider
+      if (modelDoc?.disappearedAt) {
+        const MS_PER_DAY = 86_400_000;
+        const daysSinceDisappeared = Math.floor(
+          (Date.now() - new Date(modelDoc.disappearedAt).getTime()) / MS_PER_DAY
+        );
+        if (daysSinceDisappeared >= 1) {
+          // Model has been gone for over 24 hours — hard reject
+          res.status(400).json({
+            error: `Model "${model}" is no longer available for agent "${workerType}"`,
+            errorCode: "model_unavailable_for_worker",
+            disappearedAt: modelDoc.disappearedAt,
+            lastSeenAt: modelDoc.lastSeenAt,
+            supportedModels: agentDoc?.supportedModels?.filter(m => m !== model),
+          });
+          return;
+        }
+        // Disappeared recently — warn but allow (scanner lag / transient)
+        warnings.push(
+          `Model "${model}" was last seen at ${modelDoc.lastSeenAt.toISOString()} and ` +
+          `disappeared at ${modelDoc.disappearedAt.toISOString()}. It may not be available at runtime.`
+        );
+      }
+
       if (modelDoc?.capabilities) {
         modelCapabilities = modelDoc.capabilities;
         const supportedEfforts = modelDoc.capabilities.reasoningEffort;
@@ -861,6 +915,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
           ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
           ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
+          ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
           ...(validatedExtensions ? { extensions: validatedExtensions } : {}),
           ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
           ...(profileId ? { profileId } : {}),
@@ -920,6 +975,7 @@ apiRoute(ctx.app, ctx.registry, {
       ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
       ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
       ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
+      ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
       ...(validatedExtensions ? { extensions: validatedExtensions } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
       ...(profileId ? { profileId } : {}),

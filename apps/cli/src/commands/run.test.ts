@@ -312,3 +312,59 @@ describe("run submit gates", () => {
     );
   });
 });
+
+describe("run submit codebase", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends codebase in the request body", async () => {
+    mockFetchWith({
+      id: "req-codebase-1",
+      workerType: "coder-acp-copilot",
+      mode: "one-shot",
+      status: "queued",
+    });
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code}) called`);
+    }) as never);
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync([
+        "run",
+        "submit",
+        "--message",
+        "Implement the task",
+        "--codebase",
+        "scope-core@r3",
+        "--no-stream",
+        "-u",
+        "http://localhost:3100",
+      ], { from: "user" });
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:3100/api/v1/requests?worker=coder-acp-copilot",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          scenario: { task: "Implement the task", criteria: [] },
+          codebase: "scope-core@r3",
+        }),
+      }),
+    );
+  });
+});

@@ -266,6 +266,7 @@ const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "duration", label: "Duration" },
   { id: "tokens", label: "Tokens" },
   { id: "created", label: "Created" },
+  { id: "updated", label: "Updated" },
 ];
 const COLUMN_IDS = COLUMN_OPTIONS.map((o) => o.id);
 
@@ -416,6 +417,7 @@ export function RunsList() {
       "duration",
       "tokens",
       "created",
+      "updated",
     ],
   });
   // Persisted column order (matches the customize panel). The `id` column is
@@ -964,10 +966,10 @@ export function RunsList() {
     () => availableAgents.find((a) => a._id === effectiveWorker),
     [availableAgents, effectiveWorker],
   );
-  const availableModels = effectiveAgent?.supportedModels ?? [];
-
-  // Effort-aware model capabilities for the dialog.
-  const { capabilitiesMap: resubmitCapabilitiesMap } = useModelCapabilities(effectiveWorker || undefined);
+  const { capabilitiesMap: resubmitCapabilitiesMap, activeModelIds: resubmitActiveModelIds } = useModelCapabilities(effectiveWorker || undefined);
+  const availableModels = resubmitActiveModelIds.length > 0
+    ? resubmitActiveModelIds
+    : (effectiveAgent?.supportedModels ?? []);
   const effectiveModel = activeProfile
     ? activeProfile.version.model
     : (resubmitOverrides.model ?? selectedRunsSummary.model);
@@ -1527,7 +1529,17 @@ export function RunsList() {
       sortable: true,
       width: "120px",
       hidden: columnVisibility.isHidden("status"),
-      cell: (r) => (r.run?.status ? <StatusBadge status={r.run.status} /> : <span className="text-xs text-muted-foreground">—</span>),
+      cell: (r) =>
+        r.run?.status ? (
+          <StatusBadge
+            status={r.run.status}
+            worker={r.run.worker}
+            lastHeartbeatAt={r.run.lastHeartbeatAt}
+            startedAt={r.run.startedAt}
+          />
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
     },
     {
       id: "outcome",
@@ -1638,6 +1650,16 @@ export function RunsList() {
       width: "160px",
       hidden: columnVisibility.isHidden("created"),
       cell: (r) => <span className="text-xs text-muted-foreground">{formatDate(r.createdAt)}</span>,
+    },
+    {
+      id: "updated",
+      header: "Updated",
+      sortable: true,
+      width: "160px",
+      hidden: columnVisibility.isHidden("updated"),
+      cell: (r) => (
+        <span className="text-xs text-muted-foreground">{r.updatedAt ? formatDate(r.updatedAt) : "–"}</span>
+      ),
     },
     {
       id: "actions",
@@ -3136,6 +3158,8 @@ function sortKey(r: Run, col: string): string | number {
     }
     case "created":
       return new Date(r.createdAt).getTime();
+    case "updated":
+      return r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
     default:
       return "";
   }

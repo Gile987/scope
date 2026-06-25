@@ -60,10 +60,11 @@ export function ProfileCreateForm({
   });
 
   const selectedAgent = agents.find((a: CodingAgent) => a._id === worker);
-  const supportedModels = selectedAgent?.supportedModels ?? [];
+  const { capabilitiesMap, activeModelIds } = useModelCapabilities(worker || undefined);
+  const supportedModels = activeModelIds.length > 0
+    ? activeModelIds
+    : (selectedAgent?.supportedModels ?? []);
   const isVscodeWorker = worker.includes("vscode");
-
-  const { capabilitiesMap } = useModelCapabilities(worker || undefined);
   const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
   const { supportedEfforts } = useReasoningEffort({
     model,
