@@ -150,14 +150,21 @@ export class TaskPromptStore {
   /**
    * List active (non-deleted) task prompts.
    * Supports pagination, optional substring search on text, and an optional
-   * `type` filter. With no `type`, prompts of every type are returned; pass a
-   * `type` (e.g. `'select'` or `'agents.md'`) to scope the list.
+   * `type` filter. Pass a `type` (e.g. `'select'` or `'agents.md'`) to scope the
+   * list to a single type.
+   *
+   * With no `type`, the default list shows all gate prompt types and legacy
+   * untyped docs, but hides non-gate types such as `agents.md` (which can be
+   * high-volume when auto-generated). Set `includeNonGate` to also surface those
+   * non-gate types in the unfiltered list — used by the Prompt Library, which
+   * manages AGENTS.md prompts alongside task/gate prompts.
    */
   async getAll(opts?: {
     limit?: number;
     offset?: number;
     search?: string;
     type?: PromptType;
+    includeNonGate?: boolean;
   }): Promise<{ items: TaskPromptDocument[]; total: number }> {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
 
@@ -166,7 +173,7 @@ export class TaskPromptStore {
     }
     if (opts?.type) {
       filter.type = opts.type;
-    } else {
+    } else if (!opts?.includeNonGate) {
       // The default (unfiltered) list shows all gate prompt types and legacy
       // untyped docs, but hides non-gate types such as auto-generated
       // 'agents.md' candidates, which can be high-volume noise. `$nin`

@@ -779,6 +779,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       },
       "list": {
         "options": [
+          "--include-non-gate",
           "--limit",
           "--offset",
           "--output",

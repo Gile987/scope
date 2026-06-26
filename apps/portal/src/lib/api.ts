@@ -400,12 +400,13 @@ export const api = {
   // ─── Task Prompts ──────────────────────────────────────────────────────────
 
   /** List all task prompts (paginated, optional search + type filter) */
-  listTaskPrompts: (opts?: { limit?: number; offset?: number; search?: string; type?: PromptType }): Promise<{ items: TaskPrompt[]; total: number }> => {
+  listTaskPrompts: (opts?: { limit?: number; offset?: number; search?: string; type?: PromptType; includeNonGate?: boolean }): Promise<{ items: TaskPrompt[]; total: number }> => {
     const params = new URLSearchParams();
     if (opts?.limit) params.set("limit", String(opts.limit));
     if (opts?.offset) params.set("offset", String(opts.offset));
     if (opts?.search) params.set("search", opts.search);
     if (opts?.type) params.set("type", opts.type);
+    if (opts?.includeNonGate) params.set("includeNonGate", "true");
     const qs = params.toString();
     return request(`/task-prompts${qs ? `?${qs}` : ""}`);
   },

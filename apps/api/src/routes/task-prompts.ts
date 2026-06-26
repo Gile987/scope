@@ -80,6 +80,7 @@ apiRoute(ctx.app, ctx.registry, {
     offset: z.coerce.number().optional(),
     search: z.string().optional(),
     type: PromptTypeSchema.optional(),
+    includeNonGate: z.coerce.boolean().optional(),
   }),
   response: z.object({
     items: z.array(TaskPromptResponseSchema),
@@ -92,8 +93,9 @@ apiRoute(ctx.app, ctx.registry, {
     const offset = req.query.offset ?? 0;
     const search = req.query.search;
     const type = req.query.type;
+    const includeNonGate = req.query.includeNonGate;
 
-    const { items, total } = await ctx.taskPromptStore.getAll({ limit, offset, search, type });
+    const { items, total } = await ctx.taskPromptStore.getAll({ limit, offset, search, type, includeNonGate });
     res.json({ items, total, limit, offset });
   },
 });

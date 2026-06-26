@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { TaskPrompt } from "@/types";
+import type { TaskPrompt, PromptType } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -24,7 +24,7 @@ import { formatDate, formatId, truncate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { Stepper } from "@/components/Stepper";
-import { GATE_METADATA, promptTypeLabel, type PromptType } from "@/lib/gates";
+import { GATE_METADATA, promptTypeLabel } from "@/lib/gates";
 import { useVisibleGates } from "@/hooks/useVisibleGates";
 import { KbdBadge } from "@/components/KbdBadge";
 import {
@@ -79,7 +79,7 @@ export function TaskPromptList() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["task-prompts", state.search, typeFilter],
-    queryFn: () => api.listTaskPrompts({ search: state.search || undefined, type: typeFilter }),
+    queryFn: () => api.listTaskPrompts({ search: state.search || undefined, type: typeFilter, includeNonGate: true }),
   });
 
   const items = data?.items ?? [];
@@ -314,6 +314,7 @@ export function TaskPromptList() {
                           {GATE_METADATA[gate].label}
                         </SelectItem>
                       ))}
+                      <SelectItem value="agents.md">{promptTypeLabel("agents.md")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -399,7 +400,10 @@ export function TaskPromptList() {
         >
           <FilterSection title="Prompt type" defaultOpen>
             <CheckboxFilterGroup
-              options={visibleGates.map((gate) => ({ value: gate, label: GATE_METADATA[gate].label }))}
+              options={[
+                ...visibleGates.map((gate) => ({ value: gate, label: GATE_METADATA[gate].label })),
+                { value: "agents.md", label: promptTypeLabel("agents.md") },
+              ]}
               selected={selectedTypes}
               onToggle={(value) => state.setFilter("type", selectedTypes.includes(value as PromptType) ? [] : [value])}
             />
