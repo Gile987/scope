@@ -102,7 +102,7 @@ export function TaskPromptDetail() {
       {/* Identity card */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Task Prompt</CardTitle>
+          <CardTitle className="text-lg">{promptTypeLabel(taskPrompt.type)} Prompt</CardTitle>
           <CardDescription className="font-mono text-xs select-all">
             {taskPrompt._id}
           </CardDescription>
@@ -130,7 +130,7 @@ export function TaskPromptDetail() {
       {/* Task text card */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Task Text</CardTitle>
+          <CardTitle className="text-lg">Prompt Text</CardTitle>
           <CardDescription>Immutable — content determines the ID</CardDescription>
         </CardHeader>
         <CardContent>
