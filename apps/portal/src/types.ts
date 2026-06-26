@@ -1044,3 +1044,41 @@ export interface RunGroup {
   aggregates: GroupAggregates;
   uniform: GroupUniformValues;
 }
+
+/** One selectable value + full-dataset count for a Runs-list filter dimension. */
+export interface RunFacetBucket {
+  value: string;
+  count: number;
+}
+
+/** Server-computed facet counts for the Runs list filter rail (issue #1138). */
+export interface RunFacetsResponse {
+  total: number;
+  facets: {
+    workerType: RunFacetBucket[];
+    status: RunFacetBucket[];
+    outcome: RunFacetBucket[];
+    model: RunFacetBucket[];
+    os: RunFacetBucket[];
+    priority: RunFacetBucket[];
+    agentVersion: RunFacetBucket[];
+    profileId: RunFacetBucket[];
+  };
+}
+
+/** The categorical dimensions exposed by the facets endpoint. */
+export type RunFacetDimension = keyof RunFacetsResponse["facets"];
+
+/** Sentinel value matching rows that are missing a categorical field ("(Unknown)"). */
+export const EMPTY_FILTER_VALUE = "__empty__";
+
+/** Server-side sort fields for the Runs list. */
+export type RunSortField =
+  | "created"
+  | "updated"
+  | "priority"
+  | "worker"
+  | "status"
+  | "id"
+  | "duration";
+export type RunSortDir = "asc" | "desc";
