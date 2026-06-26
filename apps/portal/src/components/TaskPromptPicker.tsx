@@ -8,8 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search } from "lucide-react";
 import { truncate, formatId } from "@/lib/utils";
-import { GATE_METADATA, promptTypeLabel, type PromptType } from "@/lib/gates";
-import type { TaskPrompt } from "@/types";
+import { promptTypeLabel } from "@/lib/gates";
+import type { TaskPrompt, PromptType } from "@/types";
 
 interface TaskPromptPickerProps {
   onSelect: (text: string) => void;
@@ -81,7 +81,7 @@ export function TaskPromptPicker({ onSelect, onSelectPrompt, type, placeholder }
         <Search className="h-4 w-4 text-muted-foreground" />
         <Input
           ref={inputRef}
-          placeholder={placeholder ?? (type ? `Search ${GATE_METADATA[type].label} prompts…` : "Search existing task prompts…")}
+          placeholder={placeholder ?? (type ? `Search ${promptTypeLabel(type)} prompts…` : "Search existing task prompts…")}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
