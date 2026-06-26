@@ -132,4 +132,38 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
     expect(seen.parents).toBe(existing.length);
     expect(seen.children).toBe(existing.length);
   });
+
+  it("steers the author prompt toward captured tool output for tool-output gates", async () => {
+    let authorUserMsg = "";
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") {
+        authorUserMsg = body.messages[1].content;
+        return reply({ prompt: "p", suggestedId: "x" });
+      }
+      return reply({ suggestions: [] });
+    });
+
+    await generateCriteriaPrompt("project builds", existing, ["build"]);
+
+    expect(authorUserMsg).toContain("build gate");
+    expect(authorUserMsg).toMatch(/tool output/i);
+  });
+
+  it("steers the author prompt toward the codebase for the select gate", async () => {
+    let authorUserMsg = "";
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") {
+        authorUserMsg = body.messages[1].content;
+        return reply({ prompt: "p", suggestedId: "x" });
+      }
+      return reply({ suggestions: [] });
+    });
+
+    await generateCriteriaPrompt("uses typescript", existing, ["select"]);
+
+    expect(authorUserMsg).toContain("select gate");
+    expect(authorUserMsg).not.toMatch(/captured tool output/i);
+  });
 });
