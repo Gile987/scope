@@ -673,13 +673,17 @@ export class BundledStrategy extends JudgeStrategy {
         })}\n`
       : "";
 
+    const gatherEvidenceInstruction = hasAgentResponse
+      ? "Gather evidence from every available source: the workspace, the coding agent's captured tool outputs, and the agent's own response for this iteration."
+      : "Gather evidence from both the workspace and the coding agent's captured tool outputs.";
+
     return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent.
 ${personaSection}
 ## What to Evaluate
 Evaluate whether the coding agent's work — its generated code together with the captured outputs of the tools it ran — meets each criterion provided in the user message.
 ${evidenceSection}
 ## Instructions
-1. Gather evidence from every available source: the workspace, the coding agent's captured tool outputs, and the agent's own response for this iteration.
+1. ${gatherEvidenceInstruction}
 2. Evaluate EACH criterion individually.
 3. For each criterion, provide specific feedback about what you found.
 4. Be constructive and actionable in your feedback.
@@ -1011,13 +1015,17 @@ export class IndependentStrategy extends JudgeStrategy {
         })}\n`
       : "";
 
+    const gatherEvidenceInstruction = hasAgentResponse
+      ? "Gather evidence from every available source: the workspace, the coding agent's captured tool outputs, and the agent's own response for this iteration."
+      : "Gather evidence from both the workspace and the coding agent's captured tool outputs.";
+
     return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent against ONE specific criterion.
 ${personaSection}
 ## What to Evaluate
 Evaluate the coding agent's work — its generated code together with the captured outputs of the tools it ran — against the criterion provided in the user message.
 ${evidenceSection}
 ## Instructions
-1. Gather evidence from every available source: the workspace, the coding agent's captured tool outputs, and the agent's own response for this iteration.
+1. ${gatherEvidenceInstruction}
 2. Determine if the criterion is met (PASS) or not met (FAIL).
 3. Provide specific feedback about what you found.
 

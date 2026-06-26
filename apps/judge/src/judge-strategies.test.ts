@@ -224,6 +224,39 @@ describe("judge evidence guidance — agent response (issue #1136)", () => {
     expect(sys).not.toContain("read_agent_response");
     expect(sys).not.toContain("## How to Judge");
   });
+
+  // Backward-compat guard: when no agent response is present, the always-on
+  // `## Instructions` text must stay byte-identical to the pre-#1136 prompt, so
+  // criteria that never involved an agent response evaluate exactly as before.
+  // The new wording (which names the response) must appear ONLY when a response
+  // is actually available.
+  it("keeps the static instructions byte-identical when no agent response is present (both strategies)", () => {
+    const originalLine =
+      "1. Gather evidence from both the workspace and the coding agent's captured tool outputs.";
+    const newLineFragment = "the agent's own response for this iteration";
+
+    for (const hasToolOutputs of [true, false]) {
+      const bundled = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(
+        hasToolOutputs,
+        false
+      );
+      const independent = new TestableStrategy("test-model").publicBuildSystemPrompt(
+        hasToolOutputs,
+        false
+      );
+      expect(bundled).toContain(originalLine);
+      expect(bundled).not.toContain(newLineFragment);
+      expect(independent).toContain(originalLine);
+      expect(independent).not.toContain(newLineFragment);
+    }
+  });
+
+  it("names the response in the instructions only when a response is present", () => {
+    const bundled = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(false, true);
+    const independent = new TestableStrategy("test-model").publicBuildSystemPrompt(false, true);
+    expect(bundled).toContain("the agent's own response for this iteration");
+    expect(independent).toContain("the agent's own response for this iteration");
+  });
 });
 
 describe("isWithinWorkspace", () => {
