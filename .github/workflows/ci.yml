@@ -167,7 +167,7 @@ jobs:
                 --build-arg VSCODE_VERSION=$VSCODE_VERSION \
                 --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
                 --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
                 --load \
                 .
               docker buildx build \
@@ -175,7 +175,7 @@ jobs:
                 --build-arg VSCODE_VERSION=$VSCODE_VERSION \
                 --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
                 --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
                 --load \
                 .
           - name: copilot-acp
@@ -190,7 +190,7 @@ jobs:
                 --target dev \
                 --build-arg COPILOT_CLI_VERSION=$COPILOT_CLI_VERSION \
                 --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
                 --load \
                 .
           - name: vscode-electron
@@ -200,7 +200,7 @@ jobs:
                 --build-arg VSCODE_VERSION=$VSCODE_VERSION \
                 --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
                 --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
                 --load \
                 .
           - name: claude-code-acp
@@ -216,11 +216,19 @@ jobs:
                 --build-arg CLAUDE_CODE_ACP_VERSION=$CLAUDE_CODE_ACP_VERSION \
                 --build-arg CLAUDE_AGENT_SDK_VERSION=$CLAUDE_AGENT_SDK_VERSION \
                 --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
                 --load \
                 .
 
     steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/share/boost /usr/local/graalvm /usr/local/share/chromium \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h /
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
