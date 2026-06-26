@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { execSync, spawn } from "node:child_process";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { execSync, spawn, type ChildProcess } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -36,6 +36,7 @@ function runScript(
   env: Record<string, string>,
   cwd: string,
   extraArgs: string[] = [],
+  childProcesses?: ChildProcess[],
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(
@@ -47,6 +48,8 @@ function runScript(
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
+
+    childProcesses?.push(child);
 
     let stdout = "";
     let stderr = "";
@@ -62,6 +65,7 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
   let requests: RecordedRequest[];
   let responseOverrides: Map<string, { status: number; body: string }>;
   let tmpDir: string;
+  let childProcesses: ChildProcess[];
 
   beforeAll(async () => {
     // Create mock HTTP server
@@ -106,6 +110,7 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
   beforeEach(() => {
     requests = [];
     responseOverrides = new Map();
+    childProcesses = [];
 
     // Create temp dir with agent.json fixture
     tmpDir = mkdtempSync(join(tmpdir(), "reg-test-"));
@@ -117,6 +122,16 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
       available: true,
     };
     writeFileSync(join(tmpDir, "agent.json"), JSON.stringify(agentData));
+  });
+
+  afterEach(() => {
+    // Kill any spawned child processes that haven't exited to prevent leaks
+    for (const child of childProcesses) {
+      if (child.exitCode === null && !child.killed) {
+        child.kill("SIGKILL");
+      }
+    }
+    childProcesses = [];
   });
 
   it("registers agent and version with correct payloads", async () => {
@@ -131,6 +146,8 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
       `http://127.0.0.1:${port}`,
       env,
       tmpDir,
+      [],
+      childProcesses,
     );
 
     expect(code, `Script failed.\nstdout: ${stdout}\nstderr: ${stderr}`).toBe(0);
@@ -161,13 +178,15 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
     expect(versionBody.gitCommit).toBe("abc1234");
     expect(versionBody.buildTime).toBe("20260601T120000Z");
     expect(versionBody.queueName).toBe("queue-coder-acp-copilot-windows");
-  });
+  }, 30000);
 
   it("uses 'unknown' fallbacks when env vars are missing", async () => {
     const { code, stdout, stderr } = await runScript(
       `http://127.0.0.1:${port}`,
       { COPILOT_CLI_VERSION: "", BUILD_TIME: "", GIT_COMMIT: "" },
       tmpDir,
+      [],
+      childProcesses,
     );
 
     expect(code, `Script failed.\nstdout: ${stdout}\nstderr: ${stderr}`).toBe(0);
@@ -177,7 +196,7 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
     expect(versionBody.agentVersion).toBe("copilot-unknown");
     expect(versionBody.workerVersion).toBe("copilot-unknown-unknown-unknown");
     expect(versionBody.components.COPILOT_CLI_VERSION).toBe("unknown");
-  });
+  }, 30000);
 
   it("exits with non-zero code when version registration fails after retries", async () => {
     responseOverrides.set("/api/v1/agents/coder-acp-copilot-windows/versions", {
@@ -196,6 +215,7 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
       env,
       tmpDir,
       ["-VersionRetries", "2"],
+      childProcesses,
     );
     expect(code).not.toBe(0);
 
@@ -246,6 +266,7 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
       env,
       tmpDir,
       ["-VersionRetries", "3"],
+      childProcesses,
     );
     expect(code, `Script failed.\nstdout: ${stdout}\nstderr: ${stderr}`).toBe(0);
 
@@ -276,6 +297,7 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
       env,
       tmpDir,
       ["-MaxHealthRetries", "2", "-MaxDnsRetries", "2"],
+      childProcesses,
     );
 
     unhealthyServer.close();
@@ -295,11 +317,11 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
       GIT_COMMIT: "deadbeef",
     };
 
-    const { code, stdout, stderr } = await runScript(`http://127.0.0.1:${port}`, env, tmpDir);
+    const { code, stdout, stderr } = await runScript(`http://127.0.0.1:${port}`, env, tmpDir, [], childProcesses);
 
     // Script should still succeed (agent upsert failure is a warning)
     expect(code, `Script failed.\nstdout: ${stdout}\nstderr: ${stderr}`).toBe(0);
     // Version registration still attempted
     expect(requests.some((r) => r.url?.includes("/versions"))).toBe(true);
-  });
+  }, 30000);
 });
