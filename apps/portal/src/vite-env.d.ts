@@ -8,6 +8,14 @@ declare const __GIT_BRANCH__: string;
 interface ImportMetaEnv {
   /** Show the Pass@k metrics table on the Statistics page (default: hidden) */
   readonly VITE_SHOW_PASS_AT_K?: string;
+  /** Microsoft Entra authority, e.g. https://login.microsoftonline.com/common */
+  readonly VITE_AUTH_AUTHORITY?: string;
+  /** Public Portal/CLI client app registration ID */
+  readonly VITE_AUTH_CLIENT_ID?: string;
+  /** Comma-separated scopes, e.g. api://<api-app-id>/access_as_user */
+  readonly VITE_AUTH_SCOPES?: string;
+  /** Expected API audience */
+  readonly VITE_AUTH_AUDIENCE?: string;
 }
 
 interface ImportMeta {

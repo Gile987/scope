@@ -102,6 +102,10 @@ services:
       target: dev
     environment:
       VITE_API_PROXY_TARGET: http://api:80
+      VITE_AUTH_AUTHORITY: ${AUTH_AUTHORITY:-}
+      VITE_AUTH_CLIENT_ID: ${AUTH_CLIENT_ID:-}
+      VITE_AUTH_SCOPES: ${AUTH_SCOPES:-}
+      VITE_AUTH_AUDIENCE: ${AUTH_API_CLIENT_ID:-}
       GIT_BRANCH: ${GIT_BRANCH:-}
       GIT_COMMIT: ${GIT_COMMIT:-}
       BUILD_TIME: ${BUILD_TIME:-}

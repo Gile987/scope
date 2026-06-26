@@ -11,7 +11,7 @@ interface FeatureFlagContextValue {
   flags: FeatureFlag[];
   /** Whether flags are still loading */
   isLoading: boolean;
-  /** Check if a feature is enabled. Returns true by default (fail-open) if flags haven't loaded. */
+  /** Check if a feature is globally enabled. Returns true while flags load or when a flag is absent. */
   isFeatureEnabled: (key: string) => boolean;
 }
 
@@ -29,15 +29,19 @@ export function FeatureFlagProvider({ children }: { children: ReactNode }) {
   });
 
   function isFeatureEnabled(key: string): boolean {
-    // Fail-open: if flags haven't loaded yet, assume enabled
     if (isLoading || flags.length === 0) return true;
     const flag = flags.find((f) => f.key === key);
-    // If flag doesn't exist in the DB, assume enabled
     return flag?.enabled ?? true;
   }
 
   return (
-    <FeatureFlagContext.Provider value={{ flags, isLoading, isFeatureEnabled }}>
+    <FeatureFlagContext.Provider
+      value={{
+        flags,
+        isLoading,
+        isFeatureEnabled,
+      }}
+    >
       {children}
     </FeatureFlagContext.Provider>
   );

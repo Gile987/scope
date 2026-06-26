@@ -10,7 +10,7 @@ The entire stack — application code, Azure infrastructure, and Kubernetes GitO
 flowchart TB
     subgraph App["scope-mt-app"]
         CLI["CLI"]
-        Portal["Portal (Vue.js)"]
+        Portal["Portal (React)"]
         API["API (Express)"]
         Judge["Judge"]
         GW["AI Gateway<br/><i>Rust TLS proxy</i>"]
@@ -74,7 +74,7 @@ flowchart TB
 |---------|-------------|
 | `api` | Express.js REST API — routes requests to workers, streams logs via SSE |
 | `cli` | CLI tool for submitting tasks, streaming logs, and running benchmarks |
-| `portal` | Vue.js web UI for managing runs, viewing insights, and configuring criteria |
+| `portal` | React web UI for managing runs, viewing insights, and configuring criteria |
 | `judge` | Evaluates coding agent output against scenario criteria |
 | `shared` | Shared types and utilities |
 | `workers/coder-acp-claude-code` | Claude Code agent via Agent Client Protocol (ACP) |

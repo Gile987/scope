@@ -2,26 +2,46 @@
 // Licensed under the MIT License.
 
 import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp } from "@/types";
+import type { MeResponse } from "@/auth/types";
 
+import { acquirePortalAccessToken, redirectToLogin } from "@/auth/msal";
 import { qs } from "./url";
 import { recordServerDate } from "./serverClock";
 
 const BASE = "/api/v1";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  const token = await acquirePortalAccessToken();
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Content-Type") && init?.body !== undefined) {
+    headers.set("Content-Type", "application/json");
+  }
+  headers.set("Authorization", `Bearer ${token}`);
+
+  const url = path.startsWith("http") || path.startsWith(BASE) ? path : `${BASE}${path}`;
+  const res = await fetch(url, {
     ...init,
+    headers,
   });
+  recordServerDate(res.headers.get("Date"));
+
+  if (res.status === 401) {
+    await redirectToLogin();
+  }
+
+  return res;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await apiFetch(path, init);
   // Sample the server's wall-clock from the standard HTTP `Date` header so
   // relative-time displays survive a misconfigured local clock.
-  recordServerDate(res.headers.get("Date"));
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
+    const body: { error?: string; details?: Array<{ path: string; message: string }> } =
+      await res.json().catch(() => ({ error: res.statusText }));
     const message = body.error || `HTTP ${res.status}`;
-    const details = body.details as Array<{ path: string; message: string }> | undefined;
-    if (details?.length) {
-      throw new Error(`${message}: ${details.map((d) => `${d.path || "body"}: ${d.message}`).join(", ")}`);
+    if (body.details?.length) {
+      throw new Error(`${message}: ${body.details.map((d) => `${d.path || "body"}: ${d.message}`).join(", ")}`);
     }
     throw new Error(message);
   }
@@ -30,6 +50,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  /** Get the currently authenticated Scope user */
+  getMe: (): Promise<MeResponse> => {
+    return request("/users/me");
+  },
+
   /** List runs with cursor-based pagination */
   listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; profileId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<Run>> => {
     return request(`/requests${qs({
@@ -219,14 +244,12 @@ export const api = {
 
   /** Download a batch archive of multiple runs as a single .tar.gz */
   batchArchive: async (ids: string[]): Promise<void> => {
-    const resp = await fetch(`${BASE}/requests/archive`, {
+    const resp = await apiFetch(`${BASE}/requests/archive`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids }),
     });
-    recordServerDate(resp.headers.get("Date"));
     if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      const err: { error?: string } = await resp.json().catch(() => ({ error: resp.statusText }));
       throw new Error(err.error ?? "Failed to download batch archive");
     }
     const blob = await resp.blob();

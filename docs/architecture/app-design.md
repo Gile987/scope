@@ -23,7 +23,7 @@ flowchart LR
 |---------|---------------|
 | `api` | REST API (Express), SSE log streaming, run management, criteria CRUD |
 | `cli` | Command-line interface for submitting tasks, streaming logs, managing runs |
-| `portal` | Vue.js web UI for run management, insights, criteria graph editing |
+| `portal` | React web UI for run management, insights, criteria graph editing |
 | `judge` | Evaluation engine — executes criteria against agent output |
 | `shared` | Types, database models, queue/blob/redis clients, config loaders |
 | `workers/*` | Coding agent adapters — each implements the same interface for a different agent |
@@ -101,6 +101,29 @@ Profile fan-out mode is also supported for comparative runs:
 ## Real-Time Log Streaming
 
 Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API subscribes and relays them as Server-Sent Events (SSE) to CLI and Portal clients.
+
+## Portal Authentication
+
+Portal authentication follows the Authentication & RBAC spec in
+[`docs/architecture/auth-rbac.md`](auth-rbac.md):
+
+- The Portal uses Microsoft Entra ID through MSAL (`@azure/msal-browser` and
+  `@azure/msal-react`) with auth-code + PKCE redirect flow.
+- Auth client settings are build-time Portal configuration; the Portal does not
+  fetch `/api/v1/auth/config`.
+- The API client acquires an access token silently and attaches
+  `Authorization: Bearer <token>` to API requests. `401` responses trigger
+  re-authentication.
+- The Portal loads the signed-in Scope user from `GET /api/v1/users/me` and
+  exposes `{ user, role, permissions }` through `AuthContext`.
+- Navigation and route guards check permissions such as `scope/run:read` and
+  `scope/user:admin`, not role names. UI gating is a convenience layer only; the
+  API remains the authorization enforcement boundary.
+- Live log streaming uses fetch-based SSE parsing so the request can carry the
+  same bearer token as every other API request.
+
+There is no anonymous Portal experience, no mock role switcher, no dev-user
+header, and no client-side role-policy override mechanism.
 
 ## Criteria System
 

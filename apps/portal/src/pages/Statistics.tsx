@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
 import { formatDuration, cn } from "@/lib/utils";
+import { useAuth } from "@/auth/AuthContext";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 import type { AnalysisResponse, TaskWorkerGroup } from "@/types";
 
@@ -684,7 +685,7 @@ function StatisticsSkeleton() {
 
 // ─── Empty state (zero runs) ────────────────────────────────────────────────
 
-function ZeroRunsState() {
+function ZeroRunsState({ canSubmitRun }: { canSubmitRun: boolean }) {
   return (
     <Card>
       <CardContent className="flex flex-col items-center justify-center gap-4 py-16 text-center">
@@ -698,11 +699,13 @@ function ZeroRunsState() {
             and insights here.
           </p>
         </div>
-        <Link to="/runs/new">
-          <Button size="lg" className="gap-2">
-            <Plus className="h-4 w-4" /> Submit your first run
-          </Button>
-        </Link>
+        {canSubmitRun && (
+          <Link to="/runs/new">
+            <Button size="lg" className="gap-2">
+              <Plus className="h-4 w-4" /> Submit your first run
+            </Button>
+          </Link>
+        )}
       </CardContent>
     </Card>
   );
@@ -713,6 +716,7 @@ function ZeroRunsState() {
 export function Statistics() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { isFeatureEnabled } = useFeatureFlags();
+  const { hasPermission } = useAuth();
 
   const selectedCriteria =
     searchParams.get("criteria")?.split(",").filter(Boolean) || [];
@@ -749,6 +753,7 @@ export function Statistics() {
 
   const hasData = !!data && data.summary.totalRuns > 0;
   const showPassAtK = import.meta.env.VITE_SHOW_PASS_AT_K === "true";
+  const canSubmitRun = isFeatureEnabled("submit-run") && hasPermission("scope/run:write");
 
   return (
     <div className="space-y-6">
@@ -775,7 +780,7 @@ export function Statistics() {
       {isLoading || !data ? (
         <StatisticsSkeleton />
       ) : !hasData ? (
-        <ZeroRunsState />
+        <ZeroRunsState canSubmitRun={canSubmitRun} />
       ) : (
         <>
           {/* Success Criteria Filter — kept as the existing component renders its own container */}
