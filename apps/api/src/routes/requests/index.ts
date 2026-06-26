@@ -18,15 +18,18 @@ import {
   BulkResubmitInputSchema,
   CreateRequestInputSchema,
   ExtensionClient,
+  EMPTY_FILTER_VALUE,
   ListRequestsQuerySchema,
   MULTI_TURN_DEFAULTS,
   PaginatedRunGroupsResponseSchema,
   PaginatedRunsResponseSchema,
   ReportResponseSchema,
   RequestResponseSchema,
+  RunFacetsResponseSchema,
   RunStateSchema,
   decodeCursor,
   encodeCursor,
+  runDurationMs,
   parseExtensionSpec,
   parseProfileSpec,
   resolveAgentVersion,
@@ -48,6 +51,17 @@ import { computeAnalysis } from "../../analysis.js";
 import type { AnalysisResponse, AnalyzableRun } from "../../analysis.js";
 import { parseStateKey } from "../../criteria-mdp.js";
 import { buildGroupingPipeline } from "../../grouping.js";
+import {
+  buildMultiClause,
+  buildSearchClause,
+  buildSeek,
+  buildSortObject,
+  deserializeSortValue,
+  parseMulti,
+  resolveSortField,
+  serializeSortValue,
+  sortValueOf,
+} from "./run-query.js";
 import { resolveSkillSpecs } from "../../utils/skill-helpers.js";
 import { resolveCodebaseSpec, createCodebaseArchiveUploader } from "../../utils/codebase-helpers.js";
 import {
@@ -1014,6 +1028,121 @@ apiRoute(ctx.app, ctx.registry, {
 // Get request status
 apiRoute(ctx.app, ctx.registry, {
   method: "get",
+  path: "/api/v1/requests/facets",
+  tags: ["Requests"],
+  summary: "List run filter facets",
+  description:
+    "Returns every distinct value and full-dataset count per categorical filter " +
+    "dimension for the Runs list rail. Honors the base filter (deletedAt, search, " +
+    "created-at range, iteration counts) but ignores the categorical selections, so " +
+    "all selectable values stay visible. Computed with parallel $group aggregations " +
+    "(Cosmos has no $facet).",
+  query: ListRequestsQuerySchema,
+  response: RunFacetsResponseSchema,
+  handler: async (req, res) => {
+    const searchFilter = req.query.search as string | undefined;
+    const includeDeleted = req.query.includeDeleted === "true";
+    const createdAfterRaw = req.query.createdAfter as string | Date | undefined;
+    const createdBeforeRaw = req.query.createdBefore as string | Date | undefined;
+    const turnsFilterRaw = req.query.turns as string | undefined;
+    const turnsOpFilter = (req.query.turnsOp as string | undefined) ?? "eq";
+    const maxIterationsFilterRaw = req.query.maxIterations as string | undefined;
+    const maxIterationsOpFilter = (req.query.maxIterationsOp as string | undefined) ?? "eq";
+
+    const flat: Record<string, unknown> = {};
+    const and: Record<string, unknown>[] = [];
+    if (!includeDeleted) flat.deletedAt = { $exists: false };
+
+    const search = buildSearchClause(searchFilter);
+    if (search) and.push(search);
+
+    const createdAfter = createdAfterRaw
+      ? (createdAfterRaw instanceof Date ? createdAfterRaw : new Date(createdAfterRaw))
+      : undefined;
+    const createdBefore = createdBeforeRaw
+      ? (createdBeforeRaw instanceof Date ? createdBeforeRaw : new Date(createdBeforeRaw))
+      : undefined;
+    if ((createdAfter && Number.isNaN(createdAfter.getTime())) || (createdBefore && Number.isNaN(createdBefore.getTime()))) {
+      res.status(400).json({ error: "Invalid createdAfter or createdBefore datetime" });
+      return;
+    }
+    if (createdAfter && createdBefore && createdAfter > createdBefore) {
+      res.status(400).json({ error: "createdAfter must be less than or equal to createdBefore" });
+      return;
+    }
+    if (createdAfter || createdBefore) {
+      flat.createdAt = {
+        ...(createdAfter ? { $gte: createdAfter } : {}),
+        ...(createdBefore ? { $lte: createdBefore } : {}),
+      };
+    }
+
+    const OP_MAP: Record<string, "$eq" | "$gte" | "$lte"> = { eq: "$eq", gte: "$gte", lte: "$lte" };
+    if (maxIterationsFilterRaw !== undefined && maxIterationsFilterRaw !== "") {
+      const n = Number(maxIterationsFilterRaw);
+      const op = OP_MAP[maxIterationsOpFilter];
+      if (!Number.isFinite(n) || n < 0 || !op) {
+        res.status(400).json({ error: "Invalid maxIterations or maxIterationsOp" });
+        return;
+      }
+      flat.maxIterations = { [op]: n };
+    }
+    if (turnsFilterRaw !== undefined && turnsFilterRaw !== "") {
+      const n = Number(turnsFilterRaw);
+      const op = OP_MAP[turnsOpFilter];
+      if (!Number.isFinite(n) || n < 0 || !op) {
+        res.status(400).json({ error: "Invalid turns or turnsOp" });
+        return;
+      }
+      flat.$expr = { [op]: [{ $size: { $ifNull: ["$run.turns", []] } }, n] };
+    }
+
+    const baseFilter: Record<string, unknown> = { ...flat, ...(and.length ? { $and: and } : {}) };
+
+    type FacetKey = "workerType" | "status" | "outcome" | "model" | "os" | "priority" | "agentVersion" | "profileId";
+    const DIMS: { key: FacetKey; field: string }[] = [
+      { key: "workerType", field: "workerType" },
+      { key: "status", field: "run.status" },
+      { key: "outcome", field: "run.outcome" },
+      { key: "model", field: "model" },
+      { key: "os", field: "run.os.platform" },
+      { key: "priority", field: "priority" },
+      { key: "agentVersion", field: "agentVersion" },
+      { key: "profileId", field: "profileId" },
+    ];
+
+    const [total, ...dimResults] = await Promise.all([
+      ctx.requestCollection.countDocuments(baseFilter),
+      ...DIMS.map((d) =>
+        ctx.requestCollection
+          .aggregate<{ _id: unknown; count: number }>([
+            { $match: baseFilter },
+            { $group: { _id: `$${d.field}`, count: { $sum: 1 } } },
+          ])
+          .toArray(),
+      ),
+    ]);
+
+    const facets: Record<FacetKey, { value: string; count: number }[]> = {
+      workerType: [], status: [], outcome: [], model: [], os: [], priority: [], agentVersion: [], profileId: [],
+    };
+    DIMS.forEach((d, i) => {
+      const rows = dimResults[i];
+      facets[d.key] = rows
+        .map((r) => ({
+          value: r._id === null || r._id === undefined ? EMPTY_FILTER_VALUE : String(r._id),
+          count: r.count,
+        }))
+        .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+    });
+
+    res.json({ total, facets });
+  },
+});
+
+// Get request status
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
   path: "/api/v1/requests/:id",
   tags: ["Requests"],
   summary: "Get request",
@@ -1054,13 +1183,10 @@ apiRoute(ctx.app, ctx.registry, {
   query: ListRequestsQuerySchema,
   response: z.union([PaginatedRunsResponseSchema, PaginatedRunGroupsResponseSchema]),
   handler: async (req, res) => {
-    const workerFilter = req.query.worker as string;
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
     const submissionIdFilter = req.query.submissionId as string;
-    const profileIdFilter = req.query.profileId as string;
-    const statusFilter = req.query.status as string;
-    const outcomeFilter = req.query.outcome as string;
+    const searchFilter = req.query.search as string | undefined;
     const turnsFilterRaw = req.query.turns as string | undefined;
     const turnsOpFilter = (req.query.turnsOp as string | undefined) ?? "eq";
     const maxIterationsFilterRaw = req.query.maxIterations as string | undefined;
@@ -1072,6 +1198,28 @@ apiRoute(ctx.app, ctx.registry, {
     const beforeParam = req.query.before as string | undefined;
     const lastParam = req.query.last === "true";
 
+    // Multi-value categorical filters: accept a single value, a repeated param,
+    // or a comma list, plus the `__empty__` "(Unknown)" sentinel (issue #1138).
+    const workerValues = parseMulti(req.query.worker).filter(
+      (w) => w === EMPTY_FILTER_VALUE || VALID_WORKERS.includes(w as WorkerType),
+    );
+    const statusValues = parseMulti(req.query.status);
+    const outcomeValues = parseMulti(req.query.outcome);
+    const profileIdValues = parseMulti(req.query.profileId);
+    const modelValues = parseMulti(req.query.model);
+    const osValues = parseMulti(req.query.os);
+    const priorityValues = parseMulti(req.query.priority);
+    const agentVersionValues = parseMulti(req.query.agentVersion);
+
+    // Server-side sort: map sortBy → indexable stored field. The unset default
+    // stays `createdAt desc` so existing in-flight cursors keep working.
+    const sortField = resolveSortField(req.query.sortBy as string | undefined);
+    const sortDir: 1 | -1 = (req.query.sortDir as string | undefined) === "asc" ? 1 : -1;
+
+    // Created-at date/time range (ISO-8601). Adopted from PR #908.
+    const createdAfterRaw = req.query.createdAfter as string | Date | undefined;
+    const createdBeforeRaw = req.query.createdBefore as string | Date | undefined;
+
     if (afterParam && beforeParam) {
       res.status(400).json({ error: "Cannot specify both 'after' and 'before'" });
       return;
@@ -1081,29 +1229,66 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
     
-    const filter: Record<string, unknown> = {};
-    if (workerFilter && VALID_WORKERS.includes(workerFilter as WorkerType)) {
-      filter.workerType = workerFilter;
-    }
-    if (taskPromptIdFilter) {
-      filter.taskPromptId = taskPromptIdFilter;
-    }
-    if (statusFilter) {
-      // Post run-retry-attempts: per-attempt state lives at run.status.
-      filter["run.status"] = statusFilter;
-    }
-    if (outcomeFilter) {
-      filter["run.outcome"] = outcomeFilter;
-    }
-    if (profileIdFilter) {
-      filter.profileId = profileIdFilter;
-    }
+    // ── Build the filter ───────────────────────────────────────────────────
+    // Simple single-field clauses stay top-level (index-friendly, and Cosmos
+    // intersects single-field indexes). Clauses that are `$or` groups
+    // (multi-value-with-(Unknown), free-text search) or that repeat a field
+    // (criteria) go into `$and` so they compose without clobbering each other
+    // or the cursor seek (issue #1138).
+    const flat: Record<string, unknown> = {};
+    const and: Record<string, unknown>[] = [];
+    const pushClause = (clause: Record<string, unknown> | null) => {
+      if (!clause) return;
+      const keys = Object.keys(clause);
+      if (keys.length === 1 && !keys[0].startsWith("$")) {
+        flat[keys[0]] = clause[keys[0]];
+      } else {
+        and.push(clause);
+      }
+    };
+
+    pushClause(buildMultiClause("workerType", workerValues));
+    if (taskPromptIdFilter) flat.taskPromptId = taskPromptIdFilter;
+    // Post run-retry-attempts: per-attempt state lives at run.status / run.outcome.
+    pushClause(buildMultiClause("run.status", statusValues));
+    pushClause(buildMultiClause("run.outcome", outcomeValues));
+    pushClause(buildMultiClause("profileId", profileIdValues));
+    pushClause(buildMultiClause("model", modelValues));
+    pushClause(buildMultiClause("run.os.platform", osValues));
+    pushClause(buildMultiClause("priority", priorityValues, { coerceNumber: true }));
+    pushClause(buildMultiClause("agentVersion", agentVersionValues));
+
     if (submissionIdFilter) {
-      // Prefix-based matching: allow filtering by partial submission ID
-      filter.submissionId = { $regex: `^${submissionIdFilter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` };
+      // Prefix-based matching: allow filtering by partial submission ID.
+      flat.submissionId = { $regex: `^${submissionIdFilter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` };
     }
     if (!includeDeleted) {
-      filter.deletedAt = { $exists: false };
+      flat.deletedAt = { $exists: false };
+    }
+
+    // Free-text search across run id / task / model / worker (Cosmos has no $text).
+    pushClause(buildSearchClause(searchFilter));
+
+    // Created-at date/time range (PR #908).
+    const createdAfter = createdAfterRaw
+      ? (createdAfterRaw instanceof Date ? createdAfterRaw : new Date(createdAfterRaw))
+      : undefined;
+    const createdBefore = createdBeforeRaw
+      ? (createdBeforeRaw instanceof Date ? createdBeforeRaw : new Date(createdBeforeRaw))
+      : undefined;
+    if ((createdAfter && Number.isNaN(createdAfter.getTime())) || (createdBefore && Number.isNaN(createdBefore.getTime()))) {
+      res.status(400).json({ error: "Invalid createdAfter or createdBefore datetime" });
+      return;
+    }
+    if (createdAfter && createdBefore && createdAfter > createdBefore) {
+      res.status(400).json({ error: "createdAfter must be less than or equal to createdBefore" });
+      return;
+    }
+    if (createdAfter || createdBefore) {
+      flat.createdAt = {
+        ...(createdAfter ? { $gte: createdAfter } : {}),
+        ...(createdBefore ? { $lte: createdBefore } : {}),
+      };
     }
 
     // Iteration-count filters. `maxIterations` is a top-level field; `turns`
@@ -1116,7 +1301,7 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(400).json({ error: "Invalid maxIterations or maxIterationsOp" });
         return;
       }
-      filter.maxIterations = { [op]: n };
+      flat.maxIterations = { [op]: n };
     }
     if (turnsFilterRaw !== undefined && turnsFilterRaw !== "") {
       const n = Number(turnsFilterRaw);
@@ -1125,32 +1310,45 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(400).json({ error: "Invalid turns or turnsOp" });
         return;
       }
-      filter.$expr = { [op]: [{ $size: { $ifNull: ["$run.turns", []] } }, n] };
+      flat.$expr = { [op]: [{ $size: { $ifNull: ["$run.turns", []] } }, n] };
     }
 
-    // Filter by MDP criteria state vector (e.g. "has_azure:0|has_cloud:1")
+    // Filter by MDP criteria state vector (e.g. "has_azure:0|has_cloud:1").
     // Matches runs whose LAST turn contains criteria results matching every
     // criterion in the state vector.
     if (criteriaFilter) {
       const criteriaStates = parseStateKey(criteriaFilter);
-      if (criteriaStates.length > 0) {
-        filter.$and = criteriaStates.map((cs) => ({
-          "turns": {
+      for (const cs of criteriaStates) {
+        and.push({
+          turns: {
             $elemMatch: {
-              "criteriaResults": {
-                $elemMatch: {
-                  criterionId: cs.id,
-                  passed: cs.passed,
-                },
-              },
+              criteriaResults: { $elemMatch: { criterionId: cs.id, passed: cs.passed } },
             },
           },
-        }));
+        });
       }
     }
 
-    // O(1) estimated total from collection metadata (unfiltered)
-    const estimatedTotal = await ctx.requestCollection.estimatedDocumentCount();
+    /** Assemble the final filter; `seek` (cursor predicate) is AND-ed in. */
+    const composeFilter = (seek?: Record<string, unknown>): Record<string, unknown> => {
+      const out: Record<string, unknown> = { ...flat };
+      const clauses = seek ? [...and, seek] : and;
+      if (clauses.length > 0) out.$and = clauses;
+      return out;
+    };
+
+    const filter: Record<string, unknown> = composeFilter();
+
+    // Total shown by the portal pager / "N runs total". Unfiltered (and grouped)
+    // requests use the O(1) collection-metadata estimate. When a flat-list filter
+    // is active, return an accurate `countDocuments(filter)` so the page count and
+    // total reflect the filtered dataset, not the whole collection (issue #1138).
+    const hasActiveFilter =
+      and.length > 0 || Object.keys(flat).some((k) => k !== "deletedAt");
+    const estimatedTotal =
+      hasActiveFilter && !groupByParam
+        ? await ctx.requestCollection.countDocuments(filter)
+        : await ctx.requestCollection.estimatedDocumentCount();
 
     // Grouped mode: paginated RunGroup[] via two-phase aggregation
     if (groupByParam) {
@@ -1258,7 +1456,8 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    // Flat mode: paginated runs with cursor on { createdAt, _id }
+    // Flat mode: paginated runs with a cursor seek on { <sortField>, _id }.
+    // `sortField`/`sortDir` are resolved above; the default is createdAt desc.
     let afterCursor: Record<string, string> | undefined;
     let beforeCursor: Record<string, string> | undefined;
     if (afterParam) {
@@ -1272,32 +1471,35 @@ apiRoute(ctx.app, ctx.registry, {
       } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
     }
 
-    // Build cursor filter for seek-based pagination
-    const cursorFilter = { ...filter };
-    let sort: Record<string, 1 | -1> = { createdAt: -1, _id: -1 };
+    const forwardSort = buildSortObject(sortField, sortDir);              // display order
+    const reverseSort = buildSortObject(sortField, (-sortDir) as 1 | -1); // flipped
+
+    let queryFilter: Record<string, unknown>;
+    let sort: Record<string, 1 | -1>;
     let needsReverse = false;
 
     if (lastParam) {
-      // Jump to the last page by querying from oldest first, then reverse for normal UI ordering.
-      sort = { createdAt: 1, _id: 1 };
+      // Jump to the last page: query in reverse, then flip back to display order.
+      sort = reverseSort;
       needsReverse = true;
+      queryFilter = composeFilter();
     } else if (afterCursor) {
-      // Forward: items after this cursor (older, since sort is descending)
-      cursorFilter.$or = [
-        { createdAt: { $lt: new Date(afterCursor.createdAt) } },
-        { createdAt: new Date(afterCursor.createdAt), _id: { $lt: afterCursor.id } },
-      ];
+      // Forward: items after this cursor in display order.
+      sort = forwardSort;
+      const cval = deserializeSortValue(sortField, afterCursor[sortField]);
+      queryFilter = composeFilter(buildSeek(sortField, sortDir, cval, afterCursor.id ?? ""));
     } else if (beforeCursor) {
-      // Backward: flip sort, get items before cursor, then reverse
-      sort = { createdAt: 1, _id: 1 };
+      // Backward: seek in reverse, then flip back to display order.
+      sort = reverseSort;
       needsReverse = true;
-      cursorFilter.$or = [
-        { createdAt: { $gt: new Date(beforeCursor.createdAt) } },
-        { createdAt: new Date(beforeCursor.createdAt), _id: { $gt: beforeCursor.id } },
-      ];
+      const cval = deserializeSortValue(sortField, beforeCursor[sortField]);
+      queryFilter = composeFilter(buildSeek(sortField, (-sortDir) as 1 | -1, cval, beforeCursor.id ?? ""));
+    } else {
+      sort = forwardSort;
+      queryFilter = composeFilter();
     }
 
-    const resources = await ctx.requestCollection.find(cursorFilter).sort(sort).limit(limit).toArray();
+    const resources = await ctx.requestCollection.find(queryFilter).sort(sort).limit(limit).toArray();
 
     if (needsReverse) {
       resources.reverse();
@@ -1327,41 +1529,27 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    // Build cursors from first and last items
+    // Build cursors from first and last items, keyed by the active sort field.
     const first = data[0];
     const last = data[data.length - 1];
-    const firstCreatedAt = new Date(first.createdAt).toISOString();
+    const firstSortRaw = sortValueOf(first, sortField);
+    const lastSortRaw = sortValueOf(last, sortField);
+    const firstSortVal = serializeSortValue(sortField, firstSortRaw);
+    const lastSortVal = serializeSortValue(sortField, lastSortRaw);
     const firstId = String(first._id);
-    const lastCreatedAt = new Date(last.createdAt).toISOString();
     const lastId = String(last._id);
 
-    // Check if there are more results in each direction
+    // Existence probes: anything after `last` (forward) / before `first` (backward).
+    const afterProbe = composeFilter(buildSeek(sortField, sortDir, lastSortRaw, lastId));
+    const beforeProbe = composeFilter(buildSeek(sortField, (-sortDir) as 1 | -1, firstSortRaw, firstId));
     const [hasMoreAfter, hasMoreBefore] = lastParam
       ? await Promise.all([
           Promise.resolve([] as Record<string, unknown>[]),
-          ctx.requestCollection.find({
-            ...filter,
-            $or: [
-              { createdAt: { $gt: new Date(firstCreatedAt) } },
-              { createdAt: new Date(firstCreatedAt), _id: { $gt: firstId } },
-            ],
-          }).sort({ createdAt: 1, _id: 1 }).limit(1).toArray(),
+          ctx.requestCollection.find(beforeProbe).sort(reverseSort).limit(1).toArray(),
         ])
       : await Promise.all([
-          ctx.requestCollection.find({
-            ...filter,
-            $or: [
-              { createdAt: { $lt: new Date(lastCreatedAt) } },
-              { createdAt: new Date(lastCreatedAt), _id: { $lt: lastId } },
-            ],
-          }).sort({ createdAt: -1, _id: -1 }).limit(1).toArray(),
-          ctx.requestCollection.find({
-            ...filter,
-            $or: [
-              { createdAt: { $gt: new Date(firstCreatedAt) } },
-              { createdAt: new Date(firstCreatedAt), _id: { $gt: firstId } },
-            ],
-          }).sort({ createdAt: 1, _id: 1 }).limit(1).toArray(),
+          ctx.requestCollection.find(afterProbe).sort(forwardSort).limit(1).toArray(),
+          ctx.requestCollection.find(beforeProbe).sort(reverseSort).limit(1).toArray(),
         ]);
 
     res.json({
@@ -1369,8 +1557,8 @@ apiRoute(ctx.app, ctx.registry, {
       limit,
       estimatedTotal,
       cursors: {
-        next: lastParam ? null : hasMoreAfter.length > 0 ? encodeCursor({ createdAt: lastCreatedAt, id: lastId }) : null,
-        prev: hasMoreBefore.length > 0 ? encodeCursor({ createdAt: firstCreatedAt, id: firstId }) : null,
+        next: lastParam ? null : hasMoreAfter.length > 0 ? encodeCursor({ [sortField]: lastSortVal, id: lastId }) : null,
+        prev: hasMoreBefore.length > 0 ? encodeCursor({ [sortField]: firstSortVal, id: firstId }) : null,
       },
     });
   },
@@ -2068,6 +2256,11 @@ async function finalizePendingRun(
       ...(runState.harUrl ? { harUrl: runState.harUrl } : {}),
       ...(runState.rawChatUrl ? { rawChatUrl: runState.rawChatUrl } : {}),
       turns,
+      // Denormalize duration so imported finished runs are immediately
+      // sortable by duration (before the backfill migration runs).
+      ...(runDurationMs(runState.startedAt, runState.finishedAt) !== undefined
+        ? { durationMs: runDurationMs(runState.startedAt, runState.finishedAt) }
+        : {}),
     },
   };
 

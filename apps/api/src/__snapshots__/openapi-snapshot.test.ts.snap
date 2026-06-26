@@ -2497,6 +2497,96 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "type": "object",
       },
+      "RunFacetBucket": {
+        "properties": {
+          "count": {
+            "type": "number",
+          },
+          "value": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "value",
+          "count",
+        ],
+        "type": "object",
+      },
+      "RunFacetsResponse": {
+        "properties": {
+          "facets": {
+            "properties": {
+              "agentVersion": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "model": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "os": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "outcome": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "priority": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "profileId": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "status": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "workerType": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+            },
+            "required": [
+              "workerType",
+              "status",
+              "outcome",
+              "model",
+              "os",
+              "priority",
+              "agentVersion",
+              "profileId",
+            ],
+            "type": "object",
+          },
+          "total": {
+            "type": "number",
+          },
+        },
+        "required": [
+          "total",
+          "facets",
+        ],
+        "type": "object",
+      },
       "RunGroup": {
         "properties": {
           "aggregates": {
@@ -2538,6 +2628,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "attemptNumber": {
             "minimum": 1,
             "type": "integer",
+          },
+          "durationMs": {
+            "type": "number",
           },
           "error": {
             "type": "string",
@@ -7195,7 +7288,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "worker",
             "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
             },
           },
           {
@@ -7227,7 +7330,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "profileId",
             "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
             },
           },
           {
@@ -7235,14 +7348,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "status",
             "required": false,
             "schema": {
-              "enum": [
-                "pending",
-                "queued",
-                "processing",
-                "paused",
-                "done",
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
               ],
-              "type": "string",
             },
           },
           {
@@ -7250,11 +7366,96 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "outcome",
             "required": false,
             "schema": {
-              "enum": [
-                "succeeded",
-                "failed",
-                "finished",
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
               ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "os",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "priority",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "agentVersion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
               "type": "string",
             },
           },
@@ -7315,10 +7516,52 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "required": false,
             "schema": {
               "enum": [
-                "createdAt",
+                "created",
+                "updated",
                 "priority",
+                "worker",
+                "status",
+                "id",
+                "duration",
+                "createdAt",
               ],
               "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "sortDir",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "createdAfter",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "createdBefore",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null",
+              ],
             },
           },
           {
@@ -7906,6 +8149,360 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Bulk retry requests (start new attempts)",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/facets": {
+      "get": {
+        "description": "Returns every distinct value and full-dataset count per categorical filter dimension for the Runs list rail. Honors the base filter (deletedAt, search, created-at range, iteration counts) but ignores the categorical selections, so all selectable values stay visible. Computed with parallel $group aggregations (Cosmos has no $facet).",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "taskPromptId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "criteria",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "submissionId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "profileId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "os",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "priority",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "agentVersion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "groupBy",
+            "required": false,
+            "schema": {
+              "enum": [
+                "task",
+                "submissionId",
+                "profile",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer",
+            },
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "last",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "sortBy",
+            "required": false,
+            "schema": {
+              "enum": [
+                "created",
+                "updated",
+                "priority",
+                "worker",
+                "status",
+                "id",
+                "duration",
+                "createdAt",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "sortDir",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "createdAfter",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "createdBefore",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "turns",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "turnsOp",
+            "required": false,
+            "schema": {
+              "enum": [
+                "eq",
+                "gte",
+                "lte",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "maxIterations",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "maxIterationsOp",
+            "required": false,
+            "schema": {
+              "enum": [
+                "eq",
+                "gte",
+                "lte",
+              ],
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunFacetsResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List run filter facets",
         "tags": [
           "Requests",
         ],

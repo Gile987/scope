@@ -647,6 +647,171 @@ describe("API Endpoints", () => {
         }),
       );
     });
+
+    // ── #1138: server-side multi-value / sentinel / search / new dimensions ──
+
+    /** Mock the find().sort().limit().toArray() chain; returns the sort spy. */
+    const mockFindChain = (docs: any[] = []) => {
+      const sortSpy = vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue(docs) }),
+      });
+      (mocks.collection.find as any).mockReturnValue({ sort: sortSpy });
+      return sortSpy;
+    };
+
+    it("turns a multi-value status into an $in clause", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?status=done&status=pending");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ "run.status": { $in: ["done", "pending"] } }),
+      );
+    });
+
+    it("accepts comma-separated multi-value selections", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?outcome=succeeded,failed");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ "run.outcome": { $in: ["succeeded", "failed"] } }),
+      );
+    });
+
+    it("maps the (Unknown) sentinel to a missing-or-null $and clause", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?outcome=__empty__");
+      const filter = (mocks.collection.find as any).mock.calls.at(-1)[0];
+      expect(filter.$and).toEqual(
+        expect.arrayContaining([
+          { $or: [{ "run.outcome": { $exists: false } }, { "run.outcome": null }] },
+        ]),
+      );
+    });
+
+    it("adds a case-insensitive regex $or for free-text search", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?search=gpt-5");
+      const filter = (mocks.collection.find as any).mock.calls.at(-1)[0];
+      const searchClause = (filter.$and as any[]).find((c) => Array.isArray(c.$or) && c.$or.some((o: any) => o.model));
+      expect(searchClause).toBeDefined();
+      expect(searchClause.$or).toEqual(
+        expect.arrayContaining([{ model: { $regex: "gpt-5", $options: "i" } }]),
+      );
+    });
+
+    it("filters by model, os, and agentVersion", async () => {
+      mockFindChain();
+      await request(app).get(
+        "/api/v1/requests?model=gpt-5&os=linux&agentVersion=copilot-0.0.415",
+      );
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "gpt-5",
+          "run.os.platform": "linux",
+          agentVersion: "copilot-0.0.415",
+        }),
+      );
+    });
+
+    it("coerces a priority filter to a number", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?priority=3");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ priority: 3 }),
+      );
+    });
+
+    it("applies a createdAt range for createdAfter/createdBefore", async () => {
+      mockFindChain();
+      await request(app).get(
+        "/api/v1/requests?createdAfter=2026-01-01T00:00:00Z&createdBefore=2026-12-31T00:00:00Z",
+      );
+      const filter = (mocks.collection.find as any).mock.calls.at(-1)[0];
+      expect(filter.createdAt.$gte).toBeInstanceOf(Date);
+      expect(filter.createdAt.$lte).toBeInstanceOf(Date);
+    });
+
+    it("rejects an inverted createdAt range with 400", async () => {
+      mockFindChain();
+      const res = await request(app).get(
+        "/api/v1/requests?createdAfter=2026-12-31T00:00:00Z&createdBefore=2026-01-01T00:00:00Z",
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects an invalid createdAfter datetime with 400", async () => {
+      mockFindChain();
+      const res = await request(app).get("/api/v1/requests?createdAfter=not-a-date");
+      expect(res.status).toBe(400);
+    });
+
+    it("sorts by an allowlisted field and direction over { field, _id }", async () => {
+      const sortSpy = mockFindChain();
+      await request(app).get("/api/v1/requests?sortBy=priority&sortDir=asc");
+      expect(sortSpy).toHaveBeenCalledWith({ priority: 1, _id: 1 });
+    });
+
+    it("defaults to createdAt desc when no sortBy is given", async () => {
+      const sortSpy = mockFindChain();
+      await request(app).get("/api/v1/requests");
+      expect(sortSpy).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
+    });
+
+    it("returns an accurate countDocuments total when a filter is active", async () => {
+      mockFindChain();
+      (mocks.collection.countDocuments as any).mockResolvedValue(7);
+      (mocks.collection.estimatedDocumentCount as any).mockResolvedValue(99);
+      const res = await request(app).get("/api/v1/requests?status=done");
+      expect(res.body.estimatedTotal).toBe(7);
+      expect(mocks.collection.countDocuments).toHaveBeenCalled();
+    });
+
+    it("uses the O(1) estimate when no filter is active", async () => {
+      mockFindChain();
+      (mocks.collection.countDocuments as any).mockResolvedValue(7);
+      (mocks.collection.estimatedDocumentCount as any).mockResolvedValue(99);
+      const res = await request(app).get("/api/v1/requests");
+      expect(res.body.estimatedTotal).toBe(99);
+      expect(mocks.collection.countDocuments).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("GET /api/v1/requests/facets", () => {
+    it("returns a filtered total and per-dimension value counts", async () => {
+      (mocks.collection.countDocuments as any).mockResolvedValue(12);
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([
+          { _id: "coder-acp-copilot", count: 8 },
+          { _id: null, count: 4 },
+        ]),
+      });
+
+      const res = await request(app).get("/api/v1/requests/facets?status=done");
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(12);
+      expect(res.body.facets).toHaveProperty("workerType");
+      expect(res.body.facets).toHaveProperty("status");
+      expect(res.body.facets).toHaveProperty("outcome");
+      expect(res.body.facets).toHaveProperty("model");
+      expect(res.body.facets).toHaveProperty("os");
+      expect(res.body.facets).toHaveProperty("priority");
+      expect(res.body.facets).toHaveProperty("agentVersion");
+      expect(res.body.facets).toHaveProperty("profileId");
+      // null _id buckets map to the (Unknown) sentinel; rows sort by count desc.
+      expect(res.body.facets.workerType).toEqual([
+        { value: "coder-acp-copilot", count: 8 },
+        { value: "__empty__", count: 4 },
+      ]);
+    });
+
+    it("runs one $group aggregation per categorical dimension", async () => {
+      (mocks.collection.countDocuments as any).mockResolvedValue(0);
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      await request(app).get("/api/v1/requests/facets");
+      // 8 categorical dimensions → 8 parallel aggregations (no $facet).
+      expect((mocks.collection.aggregate as any).mock.calls.length).toBe(8);
+    });
   });
 
   describe("GET /api/v1/requests/:id", () => {
