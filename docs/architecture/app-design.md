@@ -130,6 +130,125 @@ Profile fan-out mode is also supported for comparative runs:
 3. Each expanded request resolves configuration from its variation profile; unpinned specs resolve to `latestVersion`
 4. Expanded requests persist `profileId` and `profileVersionId` on each `RequestDocument` for indexing and traceability
 
+## Runs List Query API
+
+`GET /api/v1/requests` powers the Portal **Runs** list and `scope run list`. All
+filtering, sorting, and grouping are evaluated **server-side** so they compose with
+cursor pagination over the whole dataset (not just the loaded page). The CLI exposes the
+same filters and sort controls as the Portal — see CLI↔Portal parity below.
+
+### Filtering
+
+Every categorical dimension accepts **multi-value** input, supplied either as repeated
+query keys (`?status=done&status=processing`) or comma-separated (`?status=done,processing`).
+A single value compiles to an equality clause; multiple values compile to `$in`.
+
+| Query param | Stored field |
+|-------------|--------------|
+| `worker` | `workerType` |
+| `status` | `run.status` |
+| `outcome` | `run.outcome` |
+| `model` | `model` |
+| `os` | `run.os.platform` |
+| `priority` | `priority` (coerced to number) |
+| `agentVersion` | `agentVersion` |
+| `profileId` | `profileId` |
+| `taskPromptId` | `taskPromptId` |
+| `submissionId` | `submissionId` (prefix match) |
+| `criteria` | `scenario.criteria` |
+| `turns` / `maxIterations` | `run.turns` size / `maxIterations` |
+
+Additional cross-cutting filters:
+
+- **`(Unknown)` sentinel** — the literal value `__empty__` (exported as `EMPTY_FILTER_VALUE`)
+  matches rows where the field is missing or null (`{ $or: [{ field: { $exists: false } }, { field: null }] }`),
+  and OR-composes with explicit values selected in the same dimension.
+- **Free-text `search`** — case-insensitive regex `$or` across run id, `taskPromptId`,
+  `scenario.task`, `model`, and `workerType`. Cosmos DB has no `$text` index, so regex is
+  used (the term is regex-escaped).
+- **Date range** — `createdAfter` / `createdBefore` (ISO-8601 datetimes, `z.coerce.date()`)
+  apply a `createdAt` `$gte`/`$lte` window. An invalid datetime or an inverted range
+  (`createdAfter > createdBefore`) returns **400**.
+
+Internally the handler collects clauses into a flat single-field map plus an `$and` array
+(for `$or`/repeated-field groups), so the multi-value, sentinel, search, criteria, and
+cursor-seek groups compose under one `$and` without clobbering each other.
+
+### Sorting
+
+`sortBy` selects an allowlisted, indexable stored field and `sortDir` (`asc`/`desc`, default
+`desc`) the direction:
+
+| `sortBy` | Stored field |
+|----------|--------------|
+| `created` (default) | `createdAt` |
+| `updated` | `updatedAt` |
+| `priority` | `priority` |
+| `worker` | `workerType` |
+| `status` | `run.status` |
+| `id` | `_id` |
+| `duration` | `run.durationMs` |
+
+The cursor seek is generalized to `{ <sortField>, _id }`: the cursor encodes the active
+sort field's value plus the `_id` tiebreaker, and the seek `$or`, `sort` object, and
+`hasMore` probes are all built from `(sortField, dir)`. Rows whose sort field is unset
+(e.g. `run.durationMs` on unfinished runs) sort null-last. **The no-`sortBy` default stays
+byte-for-byte `createdAt desc`, so in-flight cursors keep working.**
+
+`run.durationMs` is a **denormalized** field (`run.finishedAt − run.startedAt`, ms): duration
+is computed, so it can't be sorted/indexed directly. It is stamped on write at every run
+completion site (the queue processors' terminal writes via `durationSetFields`, plus
+`cancel.ts` and the stuck-run reaper) and **backfilled** for existing finished runs by
+migration 022. Unfinished runs leave it unset.
+
+### Facets
+
+`GET /api/v1/requests/facets` drives the filter rail: it returns, per categorical dimension,
+every distinct value with an accurate **full-dataset count**, plus a filtered `total`. Counts
+honor the **base filter** (deletedAt + search + date range + numeric) but are independent of
+the categorical selections, so all values stay visible/selectable even when not on the current
+page. Because Cosmos DB has limited `$facet` support, the endpoint runs one `$group`
+aggregation **per dimension in parallel** (`Promise.all`) rather than a single `$facet`.
+
+### Grouping
+
+When `groupBy` is set (e.g. `task`, `profile`, `submissionId`), the endpoint returns
+`RunGroup[]` (via `buildGroupingPipeline`) using the **same** `filter` object, so all filters
+compose with grouping. The Portal consumes this through `api.listRunGroups` (flat list gated
+on `groupBy === "none"`, groups gated otherwise) and **lazily fetches each expanded group's
+member runs** by passing the group key as an extra filter alongside all active filters. Group
+member runs reuse the flat `sortBy`/`sortDir`; group order stays deterministic by group key.
+
+### Total count
+
+`estimatedTotal` is **filter-aware**: when a flat-list filter is active it uses
+`countDocuments(filter)` for an accurate total; with no active filter it falls back to the
+O(1) `estimatedDocumentCount()`. Grouped mode keeps `estimatedDocumentCount()` to preserve
+group-pagination semantics.
+
+### Indexes (Cosmos-friendly)
+
+Per the [Cosmos DB skill](../../.agents/skills/cosmosdb-mongodb/SKILL.md), filters use
+**single-field** indexes (Cosmos intersects them) and each `ORDER BY` field gets a **2-field**
+compound `{ <field>: 1, _id: 1 }`:
+
+| Migration | Indexes |
+|-----------|---------|
+| `021-add-runs-filter-indexes` | single-field on `model`, `run.os.platform`, `priority`, `agentVersion` (other dimensions already indexed) |
+| `022-add-runs-sort-indexes` | 2-field compound `{ <field>, _id }` for `updatedAt`, `priority`, `workerType`, `run.status`, `run.durationMs` (`{ createdAt, _id }` exists from migration 010); also backfills `run.durationMs` |
+
+Both are registered in `required-migrations.ts`; their `down()` is log-only (non-destructive).
+Because Cosmos silently drops unsupported compound indexes, `getIndexes()` is verified after
+applying them.
+
+### CLI↔Portal parity
+
+`scope run list` exposes every Portal filter and the sort controls, forwarding them to the
+same API params: `--worker` (multi), `--status`, `--outcome`, `--task`, `--profile`,
+`--criteria`, `--model`, `--os`, `--priority`, `--agent-version`, `--search`,
+`--created-after`, `--created-before`, `--sort-by`, `--sort-dir`. (The CLI list stays flat;
+grouping is a Portal view.)
+
 ## Real-Time Log Streaming
 
 Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API subscribes and relays them as Server-Sent Events (SSE) to CLI and Portal clients.
