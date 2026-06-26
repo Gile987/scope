@@ -225,37 +225,30 @@ describe("judge evidence guidance — agent response (issue #1136)", () => {
     expect(sys).not.toContain("## How to Judge");
   });
 
-  // Backward-compat guard: when no agent response is present, the always-on
-  // `## Instructions` text must stay byte-identical to the pre-#1136 prompt, so
-  // criteria that never involved an agent response evaluate exactly as before.
-  // The new wording (which names the response) must appear ONLY when a response
-  // is actually available.
-  it("keeps the static instructions byte-identical when no agent response is present (both strategies)", () => {
-    const originalLine =
-      "1. Gather evidence from both the workspace and the coding agent's captured tool outputs.";
-    const newLineFragment = "the agent's own response for this iteration";
+  // Backward-compat guard: the `## Instructions` step 1 is now a single,
+  // source-agnostic line in EVERY configuration. Because it never names a
+  // specific source, it can't point a criterion at evidence the judge lacks
+  // (the pre-#1136 bug). Source/tool specifics live in the gated evidence
+  // section (buildEvidenceGuidance), which the byte-identical TOOL_OUTPUTS_GUIDANCE
+  // test above still pins for the tool-outputs-only case.
+  it("uses one source-agnostic '## Instructions' step 1 in every configuration (both strategies)", () => {
+    const expected = "1. Gather evidence from every available source.";
+    const step1 = (sys: string) => sys.split("\n").find((l) => l.startsWith("1. "));
 
     for (const hasToolOutputs of [true, false]) {
-      const bundled = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(
-        hasToolOutputs,
-        false
-      );
-      const independent = new TestableStrategy("test-model").publicBuildSystemPrompt(
-        hasToolOutputs,
-        false
-      );
-      expect(bundled).toContain(originalLine);
-      expect(bundled).not.toContain(newLineFragment);
-      expect(independent).toContain(originalLine);
-      expect(independent).not.toContain(newLineFragment);
+      for (const hasAgentResponse of [true, false]) {
+        const bundled = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(
+          hasToolOutputs,
+          hasAgentResponse
+        );
+        const independent = new TestableStrategy("test-model").publicBuildSystemPrompt(
+          hasToolOutputs,
+          hasAgentResponse
+        );
+        expect(step1(bundled)).toBe(expected);
+        expect(step1(independent)).toBe(expected);
+      }
     }
-  });
-
-  it("names the response in the instructions only when a response is present", () => {
-    const bundled = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(false, true);
-    const independent = new TestableStrategy("test-model").publicBuildSystemPrompt(false, true);
-    expect(bundled).toContain("the agent's own response for this iteration");
-    expect(independent).toContain("the agent's own response for this iteration");
   });
 });
 
