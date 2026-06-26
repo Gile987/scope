@@ -3,18 +3,22 @@
 
 import { Navigate } from "react-router-dom";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
+import { useAuth } from "@/auth/AuthContext";
+import type { Permission } from "@/auth/permissions";
 import type { ReactNode } from "react";
 
 interface FeatureRouteProps {
-  featureKey: string;
+  featureKey?: string;
+  permissions?: Permission | Permission[];
   children: ReactNode;
 }
 
-/** Route guard that redirects to /statistics when a feature flag is disabled */
-export function FeatureRoute({ featureKey, children }: FeatureRouteProps) {
+/** UI route guard. The API remains the enforcement boundary. */
+export function FeatureRoute({ featureKey, permissions, children }: FeatureRouteProps) {
   const { isFeatureEnabled } = useFeatureFlags();
+  const { hasEveryPermission } = useAuth();
 
-  if (!isFeatureEnabled(featureKey)) {
+  if ((featureKey && !isFeatureEnabled(featureKey)) || !hasEveryPermission(permissions)) {
     return <Navigate to="/statistics" replace />;
   }
 

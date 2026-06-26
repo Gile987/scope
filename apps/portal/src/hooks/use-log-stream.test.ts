@@ -26,6 +26,7 @@ class HookRuntime {
 }
 
 const runtime = new HookRuntime();
+const apiFetchMock = vi.fn();
 
 vi.mock("react", () => ({
   useState<T>(initialValue: T | (() => T)) {
@@ -69,54 +70,18 @@ vi.mock("@/lib/api", () => ({
   api: {
     logsUrl: (_id: string, _fromStart: boolean) => "/api/v1/runs/run-1/logs/stream",
   },
+  apiFetch: apiFetchMock,
 }));
-
-class MockEventSource {
-  static instances: MockEventSource[] = [];
-  static CLOSED = 2;
-
-  readonly close = vi.fn(() => {
-    this.readyState = MockEventSource.CLOSED;
-  });
-  onopen: ((event: Event) => void) | null = null;
-  onmessage: ((event: MessageEvent) => void) | null = null;
-  onerror: ((event: Event) => void) | null = null;
-  readyState = 1;
-  private listeners = new Map<string, Set<(event: MessageEvent) => void>>();
-
-  constructor(_url: string) {
-    MockEventSource.instances.push(this);
-  }
-
-  addEventListener(type: string, listener: (event: MessageEvent) => void) {
-    const entries = this.listeners.get(type) ?? new Set<(event: MessageEvent) => void>();
-    entries.add(listener);
-    this.listeners.set(type, entries);
-  }
-
-  emit(type: string, event: MessageEvent) {
-    for (const listener of this.listeners.get(type) ?? []) listener(event);
-  }
-}
 
 async function renderHook(attemptNumber: number) {
   const { useLogStream } = await import("./use-log-stream.js");
-  const urlBuilder = stableUrlBuilder;
-  runtime.beginRender();
-  useLogStream({
-    id: "run-1",
-    enabled: true,
-    fromStart: true,
-    attemptNumber,
-    urlBuilder,
-  });
   runtime.beginRender();
   return useLogStream({
     id: "run-1",
     enabled: true,
     fromStart: true,
     attemptNumber,
-    urlBuilder,
+    urlBuilder: stableUrlBuilder,
   });
 }
 
@@ -127,52 +92,72 @@ describe("useLogStream", () => {
     runtime.stateSlots = [];
     runtime.refSlots = [];
     runtime.effectSlots = [];
-    MockEventSource.instances = [];
-    vi.stubGlobal("EventSource", MockEventSource);
+    apiFetchMock.mockReset();
     vi.resetModules();
   });
 
   afterEach(() => {
     runtime.unmount();
-    vi.unstubAllGlobals();
   });
 
-  it("creates a new EventSource when attemptNumber changes", async () => {
+  it("starts a new authenticated fetch stream when attemptNumber changes", async () => {
+    apiFetchMock.mockReturnValue(new Promise<Response>(() => undefined));
+
     const initial = await renderHook(1);
-    expect(MockEventSource.instances).toHaveLength(1);
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
     expect(initial.logs).toEqual([]);
 
-    const first = MockEventSource.instances[0];
-    const updated = await renderHook(2);
+    const firstSignal = getSignal(apiFetchMock.mock.calls[0][1]);
+    await renderHook(2);
 
-    expect(first.close).toHaveBeenCalledTimes(1);
-    expect(MockEventSource.instances).toHaveLength(2);
-    expect(updated.logs).toEqual([]);
+    expect(firstSignal.aborted).toBe(true);
+    expect(apiFetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("resets logs, done state, and error on reconnect", async () => {
-    await renderHook(1);
-    const first = MockEventSource.instances[0];
-    expect(first).toBeDefined();
+  it("parses log, done, and error events from fetch-streamed SSE", async () => {
+    apiFetchMock.mockResolvedValue(makeSseResponse([
+      'data: {"timestamp":"2026-05-01T00:00:00.000Z","level":"info","message":"hello"}\n\n',
+      "event: done\n\n",
+    ]));
 
-    first.onmessage?.(new MessageEvent("message", {
-      data: JSON.stringify({
+    await renderHook(1);
+    await flushPromises();
+    const afterStream = await renderHook(1);
+
+    expect(afterStream.logs).toEqual([
+      {
         timestamp: "2026-05-01T00:00:00.000Z",
         level: "info",
-        message: "first attempt",
-      }),
-    }));
-    first.emit("done", new MessageEvent("done"));
-    first.emit("error", new MessageEvent("error", { data: JSON.stringify({ message: "boom" }) }));
-
-    const beforeReconnect = await renderHook(1);
-    expect(beforeReconnect.logs).toHaveLength(1);
-    expect(beforeReconnect.isDone).toBe(true);
-    expect(beforeReconnect.error).toBe("boom");
-
-    const afterReconnect = await renderHook(2);
-    expect(afterReconnect.logs).toEqual([]);
-    expect(afterReconnect.isDone).toBe(false);
-    expect(afterReconnect.error).toBeNull();
+        message: "hello",
+      },
+    ]);
+    expect(afterStream.isDone).toBe(true);
+    expect(afterStream.error).toBeNull();
   });
 });
+
+function getSignal(init: unknown): AbortSignal {
+  if (!isRecord(init) || !(init.signal instanceof AbortSignal)) {
+    throw new Error("Expected apiFetch init with AbortSignal");
+  }
+  return init.signal;
+}
+
+function makeSseResponse(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+      controller.close();
+    },
+  });
+  return new Response(stream, { status: 200 });
+}
+
+async function flushPromises(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

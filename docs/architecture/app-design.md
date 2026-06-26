@@ -138,6 +138,29 @@ Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API su
 
 The Portal desktop shell uses a persistent left navigation sidebar. It defaults to the compact icon rail, and users can expand it to show navigation labels; the choice is stored in `localStorage` under `scope:layout:sidebar-expanded`. Mobile navigation remains a sheet-based menu with labels always visible.
 
+## Portal Authentication
+
+Portal authentication follows the Authentication & RBAC spec in
+[`docs/architecture/auth-rbac.md`](auth-rbac.md):
+
+- The Portal uses Microsoft Entra ID through MSAL (`@azure/msal-browser` and
+  `@azure/msal-react`) with auth-code + PKCE redirect flow.
+- Auth client settings are build-time Portal configuration; the Portal does not
+  fetch `/api/v1/auth/config`.
+- The API client acquires an access token silently and attaches
+  `Authorization: Bearer <token>` to API requests. `401` responses trigger
+  re-authentication.
+- The Portal loads the signed-in Scope user from `GET /api/v1/users/me` and
+  exposes `{ user, role, permissions }` through `AuthContext`.
+- Navigation and route guards check permissions such as `scope/run:read` and
+  `scope/user:admin`, not role names. UI gating is a convenience layer only; the
+  API remains the authorization enforcement boundary.
+- Live log streaming uses fetch-based SSE parsing so the request can carry the
+  same bearer token as every other API request.
+There is no anonymous Portal experience, no mock role switcher, no dev-user
+header, and no client-side role-policy override mechanism.
+header, and no client-side role-policy override mechanism.
+
 ## Criteria System
 
 Criteria are reusable evaluation rules stored in the database and optionally defined in `config/criteria/*.yaml`. They support:

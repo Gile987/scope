@@ -386,6 +386,11 @@ services:
     build:
       context: .
       dockerfile: apps/portal/Dockerfile
+      args:
+        VITE_AUTH_AUTHORITY: ${AUTH_AUTHORITY:-}
+        VITE_AUTH_CLIENT_ID: ${AUTH_CLIENT_ID:-}
+        VITE_AUTH_SCOPES: ${AUTH_SCOPES:-}
+        VITE_AUTH_AUDIENCE: ${AUTH_API_CLIENT_ID:-}
     profiles: [portal]
     ports:
       - "${PORTAL_PORT:-5100}:80"

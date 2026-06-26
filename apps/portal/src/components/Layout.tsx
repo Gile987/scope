@@ -44,6 +44,9 @@ import {
 } from "@/components/ui/tooltip";
 import { VersionFooter } from "./VersionFooter";
 import { ThemeToggle } from "./ThemeToggle";
+import { AuthMenu } from "@/components/auth/AuthMenu";
+import { useAuth } from "@/auth/AuthContext";
+import type { Permission } from "@/auth/permissions";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 
 interface NavItem {
@@ -52,6 +55,8 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   /** When set, this nav item is only shown if the corresponding feature flag is enabled */
   featureKey?: string;
+  /** Required permission(s) for showing this nav item. */
+  permissions?: Permission | Permission[];
 }
 
 interface NavGroup {
@@ -75,33 +80,33 @@ const navGroups: NavGroup[] = [
     id: "activity",
     label: "Activity",
     items: [
-      { to: "/runs", label: "Runs", icon: List },
-      { to: "/statistics", label: "Statistics", icon: BarChart3 },
-      { to: "/reports", label: "Reports", icon: FileText },
-      { to: "/insights", label: "Insights", icon: Lightbulb },
+      { to: "/runs", label: "Runs", icon: List, featureKey: "runs", permissions: "scope/run:read" },
+      { to: "/statistics", label: "Statistics", icon: BarChart3, permissions: "scope/run:read" },
+      { to: "/reports", label: "Reports", icon: FileText, featureKey: "reports", permissions: "scope/report:read" },
+      { to: "/insights", label: "Insights", icon: Lightbulb, featureKey: "insights", permissions: "scope/insight:read" },
     ],
   },
   {
     id: "library",
     label: "Library",
     items: [
-      { to: "/task-prompts", label: "Tasks", icon: MessageSquareText },
-      { to: "/criteria", label: "Criteria", icon: FlaskConical },
-      { to: "/prompt-features", label: "Features", icon: Tags },
-      { to: "/profiles", label: "Profiles", icon: SlidersHorizontal, featureKey: "profiles" },
-      { to: "/skills", label: "Skills", icon: BookOpen, featureKey: "skills" },
-      { to: "/codebases", label: "Codebases", icon: FolderGit2 },
+      { to: "/task-prompts", label: "Tasks", icon: MessageSquareText, featureKey: "task-prompts", permissions: "scope/task-prompt:read" },
+      { to: "/criteria", label: "Criteria", icon: FlaskConical, featureKey: "criteria", permissions: "scope/criteria:read" },
+      { to: "/prompt-features", label: "Features", icon: Tags, featureKey: "prompt-features", permissions: "scope/prompt-feature:read" },
+      { to: "/profiles", label: "Profiles", icon: SlidersHorizontal, featureKey: "profiles", permissions: "scope/profile:read" },
+      { to: "/skills", label: "Skills", icon: BookOpen, featureKey: "skills", permissions: "scope/skill:read" },
+      { to: "/codebases", label: "Codebases", icon: FolderGit2, permissions: "scope/codebase:read" },
     ],
   },
   {
     id: "resources",
     label: "Resources",
     items: [
-      { to: "/agents", label: "Agents", icon: Bot, featureKey: "agents" },
-      { to: "/models", label: "Models", icon: Cpu, featureKey: "models" },
-      { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },
-      { to: "/extensions", label: "Extensions", icon: Puzzle, featureKey: "extensions" },
-      { to: "/secrets", label: "Secrets", icon: KeyRound, featureKey: "tokens" },
+      { to: "/agents", label: "Agents", icon: Bot, featureKey: "agents", permissions: "scope/agent:read" },
+      { to: "/models", label: "Models", icon: Cpu, featureKey: "models", permissions: "scope/model:read" },
+      { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp", permissions: "scope/mcp-server:read" },
+      { to: "/extensions", label: "Extensions", icon: Puzzle, featureKey: "extensions", permissions: "scope/extension:read" },
+      { to: "/secrets", label: "Secrets", icon: KeyRound, featureKey: "tokens", permissions: "scope/user:admin" },
     ],
   },
 ];
@@ -109,7 +114,7 @@ const navGroups: NavGroup[] = [
 // Dev/diagnostic — pinned at the bottom of the primary nav, kept out of the
 // noun groups above so it doesn't compete with the day-to-day pages.
 const devNavItems: NavItem[] = [
-  { to: "/criteria/mdp", label: "MDP", icon: GitBranch },
+  { to: "/criteria/mdp", label: "MDP", icon: GitBranch, featureKey: "criteria", permissions: "scope/criteria:read" },
 ];
 
 const SIDEBAR_EXPANDED_STORAGE_KEY = "scope:layout:sidebar-expanded";
@@ -216,6 +221,7 @@ function SidebarIconLink({
 export function Layout() {
   const location = useLocation();
   const { isFeatureEnabled } = useFeatureFlags();
+  const { hasEveryPermission } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(() => {
     try {
@@ -234,7 +240,11 @@ export function Layout() {
   }, [sidebarExpanded]);
 
   const filterByFeature = (items: NavItem[]) =>
-    items.filter((item) => !item.featureKey || isFeatureEnabled(item.featureKey));
+    items.filter(
+      (item) =>
+        (!item.featureKey || isFeatureEnabled(item.featureKey)) &&
+        hasEveryPermission(item.permissions),
+    );
 
   const visibleGroups = useMemo(
     () =>
@@ -242,7 +252,7 @@ export function Layout() {
         .map((g) => ({ ...g, items: filterByFeature(g.items) }))
         .filter((g) => g.items.length > 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isFeatureEnabled],
+    [isFeatureEnabled, hasEveryPermission],
   );
   const visibleDevItems = filterByFeature(devNavItems);
 
@@ -255,6 +265,10 @@ export function Layout() {
   );
 
   const adminActive = location.pathname === "/admin";
+  const canSubmitRun = isFeatureEnabled("submit-run") && hasEveryPermission("scope/run:write");
+  const canViewApiDocs = hasEveryPermission("scope/user:admin");
+  const canViewAdmin = isFeatureEnabled("admin") && hasEveryPermission("scope/user:admin");
+  const hasFooterIcons = canViewApiDocs || canViewAdmin;
 
   return (
     <TooltipProvider delayDuration={150} skipDelayDuration={300}>
@@ -270,7 +284,10 @@ export function Layout() {
             <Activity className="h-5 w-5 text-action" />
             <span>Scope</span>
           </Link>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <AuthMenu />
+            <ThemeToggle />
+          </div>
         </header>
 
         <div className="flex min-h-0 flex-1">
@@ -320,18 +337,22 @@ export function Layout() {
               )}
             >
               {/* New Run — emphasized primary CTA */}
-              <SidebarIconLink
-                to="/runs/new"
-                label="New Run"
-                icon={Plus}
-                active={location.pathname === "/runs/new"}
-                expanded={sidebarExpanded}
-                emphasized
-              />
-              <div
-                className={cn("my-1 h-px bg-border/60", sidebarExpanded ? "w-full" : "w-6")}
-                aria-hidden
-              />
+              {canSubmitRun && (
+                <>
+                  <SidebarIconLink
+                    to="/runs/new"
+                    label="New Run"
+                    icon={Plus}
+                    active={location.pathname === "/runs/new"}
+                    expanded={sidebarExpanded}
+                    emphasized
+                  />
+                  <div
+                    className={cn("my-1 h-px bg-border/60", sidebarExpanded ? "w-full" : "w-6")}
+                    aria-hidden
+                  />
+                </>
+              )}
               {visibleGroups.map((group, groupIdx) => (
                 <Fragment key={group.id}>
                   {groupIdx > 0 && (
@@ -393,28 +414,34 @@ export function Layout() {
             </nav>
 
             {/* Footer: API docs + Admin — pinned to bottom when there's room, scrolls with content otherwise */}
-            <div
-              className={cn(
-                "mt-auto flex w-full flex-col gap-1 border-t border-border/60 py-3",
-                sidebarExpanded ? "px-2" : "items-center",
-              )}
-            >
-              <SidebarIconLink
-                to="/api-docs"
-                label="API Documentation"
-                icon={Plug}
-                active={false}
-                expanded={sidebarExpanded}
-                external
-              />
-              <SidebarIconLink
-                to="/admin"
-                label="Admin"
-                icon={Settings}
-                active={adminActive}
-                expanded={sidebarExpanded}
-              />
-            </div>
+            {hasFooterIcons && (
+              <div
+                className={cn(
+                  "mt-auto flex w-full flex-col gap-1 border-t border-border/60 py-3",
+                  sidebarExpanded ? "px-2" : "items-center",
+                )}
+              >
+                {canViewApiDocs && (
+                  <SidebarIconLink
+                    to="/api-docs"
+                    label="API Documentation"
+                    icon={Plug}
+                    active={false}
+                    expanded={sidebarExpanded}
+                    external
+                  />
+                )}
+                {canViewAdmin && (
+                  <SidebarIconLink
+                    to="/admin"
+                    label="Admin"
+                    icon={Settings}
+                    active={adminActive}
+                    expanded={sidebarExpanded}
+                  />
+                )}
+              </div>
+            )}
           </aside>
 
           {/* Main column (mobile header + content + version footer) */}
@@ -431,6 +458,21 @@ export function Layout() {
                 <SheetContent side="left" className="w-64 pt-10">
                   <SheetTitle className="sr-only">Navigation</SheetTitle>
                   <nav className="flex flex-col space-y-1">
+                    {canSubmitRun && (
+                      <Link
+                        to="/runs/new"
+                        onClick={() => setMobileOpen(false)}
+                        className={cn(
+                          "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+                          location.pathname === "/runs/new"
+                            ? "bg-accent text-accent-foreground"
+                            : "text-muted-foreground",
+                        )}
+                      >
+                        <Plus className="h-4 w-4" />
+                        New Run
+                      </Link>
+                    )}
                     {visibleGroups.map((group, groupIdx) => (
                       <Fragment key={group.id}>
                         <div
@@ -488,29 +530,35 @@ export function Layout() {
                         })}
                       </>
                     )}
-                    <div className="my-2 h-px bg-border/60" />
-                    <a
-                      href="/api-docs"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                    >
-                      <Plug className="h-4 w-4" />
-                      API Documentation
-                    </a>
-                    <Link
-                      to="/admin"
-                      onClick={() => setMobileOpen(false)}
-                      className={cn(
-                        "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-                        adminActive
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      <Settings className="h-4 w-4" />
-                      Admin
-                    </Link>
+                    {(canViewApiDocs || canViewAdmin) && (
+                      <div className="my-2 h-px bg-border/60" />
+                    )}
+                    {canViewApiDocs && (
+                      <a
+                        href="/api-docs"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                      >
+                        <Plug className="h-4 w-4" />
+                        API Documentation
+                      </a>
+                    )}
+                    {canViewAdmin && (
+                      <Link
+                        to="/admin"
+                        onClick={() => setMobileOpen(false)}
+                        className={cn(
+                          "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+                          adminActive
+                            ? "bg-accent text-accent-foreground"
+                            : "text-muted-foreground",
+                        )}
+                      >
+                        <Settings className="h-4 w-4" />
+                        Admin
+                      </Link>
+                    )}
                   </nav>
                 </SheetContent>
               </Sheet>
