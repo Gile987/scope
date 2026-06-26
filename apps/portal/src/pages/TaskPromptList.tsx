@@ -79,7 +79,7 @@ export function TaskPromptList() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["task-prompts", state.search, typeFilter],
-    queryFn: () => api.listTaskPrompts({ search: state.search || undefined, type: typeFilter, includeNonGate: true }),
+    queryFn: () => api.listTaskPrompts({ search: state.search || undefined, type: typeFilter }),
   });
 
   const items = data?.items ?? [];

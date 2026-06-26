@@ -30,7 +30,6 @@ taskPrompt
   .description("List all task prompts")
   .option("-s, --search <search>", "Filter by text content")
   .option("--type <type>", "Filter by prompt type/gate (select, build, test, run, deploy, agents.md)")
-  .option("--include-non-gate", "Include non-gate prompt types (e.g. agents.md) in the default list")
   .option("-l, --limit <n>", "Maximum number of results", "50")
   .option("--offset <n>", "Number of results to skip", "0")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
@@ -42,7 +41,6 @@ taskPrompt
       if (options.search) params.set("search", options.search);
       const type = parsePromptTypeOption(options.type);
       if (type) params.set("type", type);
-      if (options.includeNonGate) params.set("includeNonGate", "true");
       if (options.limit) params.set("limit", options.limit);
       if (options.offset) params.set("offset", options.offset);
       const qs = params.toString();

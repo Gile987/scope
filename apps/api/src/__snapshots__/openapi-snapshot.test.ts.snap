@@ -9236,17 +9236,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "$ref": "#/components/schemas/PromptType",
             },
           },
-          {
-            "in": "query",
-            "name": "includeNonGate",
-            "required": false,
-            "schema": {
-              "type": [
-                "boolean",
-                "null",
-              ],
-            },
-          },
         ],
         "responses": {
           "200": {

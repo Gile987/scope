@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import { TaskPromptDocument, PromptFeatureResult, PromptType, NON_GATE_PROMPT_TYPES } from '../types/types.js';
+import { TaskPromptDocument, PromptFeatureResult, PromptType } from '../types/types.js';
 import { computePromptId } from './task-prompt-id.js';
 import type { BlobStorage } from '../storage/blob-storage.js';
 
@@ -151,20 +151,14 @@ export class TaskPromptStore {
    * List active (non-deleted) task prompts.
    * Supports pagination, optional substring search on text, and an optional
    * `type` filter. Pass a `type` (e.g. `'select'` or `'agents.md'`) to scope the
-   * list to a single type.
-   *
-   * With no `type`, the default list shows all gate prompt types and legacy
-   * untyped docs, but hides non-gate types such as `agents.md` (which can be
-   * high-volume when auto-generated). Set `includeNonGate` to also surface those
-   * non-gate types in the unfiltered list — used by the Prompt Library, which
-   * manages AGENTS.md prompts alongside task/gate prompts.
+   * list to a single type. With no `type`, all prompt types are returned — gate
+   * prompts, non-gate types such as `agents.md`, and legacy untyped docs.
    */
   async getAll(opts?: {
     limit?: number;
     offset?: number;
     search?: string;
     type?: PromptType;
-    includeNonGate?: boolean;
   }): Promise<{ items: TaskPromptDocument[]; total: number }> {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
 
@@ -173,12 +167,6 @@ export class TaskPromptStore {
     }
     if (opts?.type) {
       filter.type = opts.type;
-    } else if (!opts?.includeNonGate) {
-      // The default (unfiltered) list shows all gate prompt types and legacy
-      // untyped docs, but hides non-gate types such as auto-generated
-      // 'agents.md' candidates, which can be high-volume noise. `$nin`
-      // also matches docs with no `type` field, so legacy prompts stay visible.
-      filter.type = { $nin: NON_GATE_PROMPT_TYPES };
     }
 
     const total = await this.collection.countDocuments(filter);

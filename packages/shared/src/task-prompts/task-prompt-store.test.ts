@@ -338,28 +338,12 @@ describe("TaskPromptStore", () => {
       expect(items[0].text).toBe("Azure deployment");
     });
 
-    it("defaults to task-typed prompts (and legacy untyped docs)", async () => {
+    it("defaults to all prompt types (including agents.md and legacy untyped docs)", async () => {
       await store.findOrCreate("a task prompt");
       await store.findOrCreate("an agents file", "agents.md");
       const { items, total } = await store.getAll();
-      expect(total).toBe(1);
-      expect(items[0].text).toBe("a task prompt");
-    });
-
-    it("includes non-gate types when includeNonGate is set", async () => {
-      await store.findOrCreate("a task prompt");
-      await store.findOrCreate("an agents file", "agents.md");
-      const { items, total } = await store.getAll({ includeNonGate: true });
       expect(total).toBe(2);
       expect(items.map((i) => i.text).sort()).toEqual(["a task prompt", "an agents file"]);
-    });
-
-    it("ignores includeNonGate when an explicit type is given", async () => {
-      await store.findOrCreate("a task prompt");
-      await store.findOrCreate("an agents file", "agents.md");
-      const { items, total } = await store.getAll({ type: "agents.md", includeNonGate: true });
-      expect(total).toBe(1);
-      expect(items[0].text).toBe("an agents file");
     });
 
     it("filters by agents.md type", async () => {
