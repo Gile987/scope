@@ -1,7 +1,21 @@
-# Stage 1: Build
-FROM node:20-alpine AS builder
+# Shared Portal dependency layer
+FROM node:20-alpine AS deps
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
+WORKDIR /app
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+COPY apps/portal/package.json apps/portal/
+RUN pnpm install --frozen-lockfile --filter portal --prod=false
 
+# --- Dev stage: Vite dev server with HMR ---
+FROM deps AS dev
+ENV NODE_ENV=development
+COPY apps/portal/ apps/portal/
+WORKDIR /app/apps/portal
+EXPOSE 80
+CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "80"]
+
+# Stage 1: Build
+FROM deps AS builder
 # Version information (passed as build args, used by Vite at build time)
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
@@ -20,20 +34,8 @@ ENV VITE_AUTH_SCOPES=$VITE_AUTH_SCOPES
 ENV VITE_AUTH_AUDIENCE=$VITE_AUTH_AUDIENCE
 ENV VITE_AUTH_KNOWN_AUTHORITIES=$VITE_AUTH_KNOWN_AUTHORITIES
 
-WORKDIR /app
-COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
-COPY apps/portal/package.json apps/portal/
-RUN pnpm install --frozen-lockfile --filter portal
-
 COPY apps/portal/ apps/portal/
 RUN pnpm --filter portal build
-
-# --- Dev stage: Vite dev server with HMR ---
-FROM builder AS dev
-ENV NODE_ENV=development
-WORKDIR /app/apps/portal
-EXPOSE 80
-CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "80"]
 
 # Stage 2: Serve with nginx
 FROM nginx:alpine
