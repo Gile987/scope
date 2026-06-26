@@ -157,8 +157,13 @@ Portal authentication follows the Authentication & RBAC spec in
   API remains the authorization enforcement boundary.
 - Live log streaming uses fetch-based SSE parsing so the request can carry the
   same bearer token as every other API request.
+- Local Docker development can use the Entra Local emulator as a configured IdP.
+  Compose starts the emulator with seeded SPA/API app registrations, maps the
+  same `AUTH_*` values into the Portal's `VITE_AUTH_*` variables, and registers
+  the current worktree Portal URL as a redirect URI. This is still the real
+  MSAL/OIDC flow.
+
 There is no anonymous Portal experience, no mock role switcher, no dev-user
-header, and no client-side role-policy override mechanism.
 header, and no client-side role-policy override mechanism.
 
 ## Criteria System

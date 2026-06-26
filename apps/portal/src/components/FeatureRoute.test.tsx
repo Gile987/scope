@@ -22,7 +22,7 @@ vi.mock("@/lib/api", () => ({
 
 afterEach(() => {
   cleanup();
-  localStorage.clear();
+  window.localStorage.clear?.();
 });
 
 const ADMIN_USER: AuthenticatedUser = {

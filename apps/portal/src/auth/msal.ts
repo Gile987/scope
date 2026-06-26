@@ -17,12 +17,12 @@ export interface PortalAuthClientConfig {
   clientId: string;
   scopes: string[];
   audience: string;
+  knownAuthorities: string[];
 }
 
-function readScopes(): string[] {
-  const raw = import.meta.env.VITE_AUTH_SCOPES;
+function readCommaSeparatedEnv(raw: string | undefined): string[] {
   return raw
-    ? raw.split(",").map((scope) => scope.trim()).filter(Boolean)
+    ? raw.split(",").map((value) => value.trim()).filter(Boolean)
     : [];
 }
 
@@ -30,8 +30,9 @@ export const authClientConfig: PortalAuthClientConfig = {
   provider: "entra",
   authority: import.meta.env.VITE_AUTH_AUTHORITY ?? "",
   clientId: import.meta.env.VITE_AUTH_CLIENT_ID ?? "",
-  scopes: readScopes(),
+  scopes: readCommaSeparatedEnv(import.meta.env.VITE_AUTH_SCOPES),
   audience: import.meta.env.VITE_AUTH_AUDIENCE ?? "",
+  knownAuthorities: readCommaSeparatedEnv(import.meta.env.VITE_AUTH_KNOWN_AUTHORITIES),
 };
 
 export const authConfigErrors = [
@@ -53,6 +54,7 @@ const msalConfig: Configuration = {
     authority: authClientConfig.authority || "https://login.microsoftonline.com/common",
     redirectUri: origin,
     postLogoutRedirectUri: origin,
+    knownAuthorities: authClientConfig.knownAuthorities,
   },
   cache: {
     cacheLocation: BrowserCacheLocation.SessionStorage,

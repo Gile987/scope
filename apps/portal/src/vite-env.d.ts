@@ -16,6 +16,8 @@ interface ImportMetaEnv {
   readonly VITE_AUTH_SCOPES?: string;
   /** Expected API audience */
   readonly VITE_AUTH_AUDIENCE?: string;
+  /** Comma-separated trusted authority hosts for non-public-cloud Entra-compatible IdPs */
+  readonly VITE_AUTH_KNOWN_AUTHORITIES?: string;
 }
 
 interface ImportMeta {
