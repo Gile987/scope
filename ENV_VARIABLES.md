@@ -301,9 +301,10 @@ worktree, just like `PORTAL_PORT`.
 
 When the Portal Docker profile is started without explicit `AUTH_*` values,
 Compose starts `ghcr.io/cmaneu/entra-local` and defaults the Portal to the
-emulator's seeded app registrations. The bundled local service disables TLS and
-uses `http://localhost:<ENTRA_LOCAL_PORT>` so browser-based MSAL discovery does
-not require trusting a generated self-signed certificate.
+emulator's seeded app registrations. MSAL requires HTTPS authorities, so the
+bundled local service uses `https://localhost:<ENTRA_LOCAL_PORT>` and writes its
+generated certificate to `.auth/entra-local/tls/cert.pem`. Trust that certificate
+or accept the browser warning for the emulator origin before signing in.
 
 | Purpose | Value |
 | --- | --- |
