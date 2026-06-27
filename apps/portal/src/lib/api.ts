@@ -94,6 +94,8 @@ export const api = {
     agentVersion?: string;
     profileId?: string;
     profileVariations?: string[];
+    agentsMd?: string;
+    agentsMdParentIds?: string[];
     gates?: GateConfig[];
     codebase?: string;
     codebaseRevisionId?: string;
@@ -353,9 +355,10 @@ export const api = {
   // ─── Prompt Features ───────────────────────────────────────────────────────
 
   /** List all prompt features, optionally filtered by search query */
-  listPromptFeatures: (q?: string): Promise<PromptFeatureDocument[]> => {
+  listPromptFeatures: (q?: string, type?: PromptType): Promise<PromptFeatureDocument[]> => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
+    if (type) params.set("type", type);
     const qs = params.toString();
     return request(`/prompt-features${qs ? `?${qs}` : ""}`);
   },
@@ -366,7 +369,7 @@ export const api = {
   },
 
   /** Create a new prompt feature */
-  createPromptFeature: (body: { id: string; prompt: string }): Promise<PromptFeatureDocument> => {
+  createPromptFeature: (body: { id: string; prompt: string; type?: PromptType }): Promise<PromptFeatureDocument> => {
     return request("/prompt-features", {
       method: "POST",
       body: JSON.stringify(body),
@@ -396,7 +399,7 @@ export const api = {
 
   // ─── Task Prompts ──────────────────────────────────────────────────────────
 
-  /** List all task prompts (paginated, optional search) */
+  /** List all task prompts (paginated, optional search + type filter) */
   listTaskPrompts: (opts?: { limit?: number; offset?: number; search?: string; type?: PromptType }): Promise<{ items: TaskPrompt[]; total: number }> => {
     const params = new URLSearchParams();
     if (opts?.limit) params.set("limit", String(opts.limit));
@@ -410,6 +413,11 @@ export const api = {
   /** Get a single task prompt by ID */
   getTaskPrompt: (id: string): Promise<TaskPrompt> => {
     return request(`/task-prompts/${encodeURIComponent(id)}`);
+  },
+
+  /** Resolve a task/AGENTS.md prompt's plain text (downloads blob if blob-backed) */
+  getTaskPromptContent: (id: string): Promise<{ id: string; text: string }> => {
+    return request(`/task-prompts/${encodeURIComponent(id)}/content`);
   },
 
   /** Create (or find existing) task prompt — idempotent */

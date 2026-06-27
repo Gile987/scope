@@ -10,8 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Stepper } from "@/components/Stepper";
-import type { PromptFeatureDocument } from "@/types";
+import type { PromptFeatureDocument, PromptType } from "@/types";
 import {
   ArrowLeft,
   ArrowRight,
@@ -35,6 +36,8 @@ export interface PromptFeatureWizardProps {
   initialId?: string;
   /** Pre-fill detection prompt (skips to step 2 when provided) */
   initialPrompt?: string;
+  /** Pre-select the prompt type this feature applies to (default "select") */
+  initialType?: PromptType;
   /** Called after successful feature creation */
   onCreated?: (feature: PromptFeatureDocument) => void;
   /** Called when user clicks Cancel (step 1) or Back at step 1 */
@@ -45,6 +48,7 @@ export function PromptFeatureWizard({
   initialBehavior = "",
   initialId = "",
   initialPrompt = "",
+  initialType = "select",
   onCreated,
   onCancel,
 }: PromptFeatureWizardProps) {
@@ -58,6 +62,7 @@ export function PromptFeatureWizard({
   const [id, setId] = useState(initialId);
   const [idManuallyEdited, setIdManuallyEdited] = useState(!!initialId);
   const [idEditMode, setIdEditMode] = useState(false);
+  const [type, setType] = useState<PromptType>(initialType);
 
   // Step 2 fields
   const [prompt, setPrompt] = useState(initialPrompt);
@@ -117,6 +122,7 @@ export function PromptFeatureWizard({
     createMutation.mutate({
       id: id.trim(),
       prompt: prompt.trim(),
+      ...(type !== "select" ? { type } : {}),
     });
   };
 
@@ -167,6 +173,22 @@ export function PromptFeatureWizard({
                 />
                 <p className="text-xs text-muted-foreground">
                   Describe what you want to detect in the task prompt given to coding agents
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Applies to</Label>
+                <Select value={type} onValueChange={(v) => setType(v as PromptType)}>
+                  <SelectTrigger className="w-full" aria-label="Prompt type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="select">Task prompts</SelectItem>
+                    <SelectItem value="agents.md">AGENTS.md prompts</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Features are only extracted against prompts of their own type.
                 </p>
               </div>
 

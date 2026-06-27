@@ -4,23 +4,50 @@
 import { Collection } from 'mongodb';
 import { TaskPromptDocument, PromptFeatureResult, PromptType } from '../types/types.js';
 import { computePromptId } from './task-prompt-id.js';
+import type { BlobStorage } from '../storage/blob-storage.js';
+
+/** Default inline-vs-blob threshold (UTF-8 bytes). Bodies larger than this are
+ *  stored in blob storage; smaller bodies stay inline in Mongo. */
+export const DEFAULT_PROMPT_INLINE_MAX_BYTES = 16 * 1024;
+
+/** Hard guard cap on prompt body size (UTF-8 bytes). Bodies larger than this
+ *  are rejected outright, regardless of storage location. */
+export const PROMPT_MAX_BYTES = 256 * 1024;
+
+/** Deterministic blob path for a prompt body that lives in blob storage. */
+export function promptBlobName(id: string): string {
+  return `prompts/${id}.txt`;
+}
 
 /**
  * MongoDB-backed store for task prompt entities.
  *
  * Task prompts are **immutable and content-addressed**: the `_id` is a UUIDv5
- * derived from the trimmed prompt text (and, for non-Select gates, the prompt
- * `type`). The same `(type, text)` always resolves to the same document —
- * `findOrCreate` is idempotent.
+ * derived from the trimmed prompt text (and, for non-Select gates and non-gate
+ * kinds like `agents.md`, the prompt `type`). The same `(type, text)` always
+ * resolves to the same document — `findOrCreate` is idempotent. `type` defaults
+ * to `"select"` so existing task-prompt call sites are unaffected.
  *
- * Prompts carry a `type` discriminator — one literal per gate (the Select gate's
- * prompt is the request's task prompt). `type` defaults to `"select"` so
- * existing task-prompt call sites are unaffected.
+ * The body is stored **inline** (`text`) when small, or in **blob storage**
+ * (`contentBlobUrl`) when it exceeds the configured inline threshold. Storage
+ * location is decided purely by size, independent of the prompt `type`.
  *
  * Documents are soft-deleted (deletedAt) rather than removed.
  */
 export class TaskPromptStore {
-  constructor(private collection: Collection<TaskPromptDocument>) {}
+  private readonly inlineMaxBytes: number;
+
+  constructor(
+    private collection: Collection<TaskPromptDocument>,
+    private blobStorage?: BlobStorage,
+    inlineMaxBytes?: number,
+  ) {
+    this.inlineMaxBytes =
+      inlineMaxBytes ??
+      (process.env.PROMPT_INLINE_MAX_BYTES
+        ? parseInt(process.env.PROMPT_INLINE_MAX_BYTES, 10)
+        : DEFAULT_PROMPT_INLINE_MAX_BYTES);
+  }
 
   /** Get a single task prompt by ID (non-deleted) */
   async get(id: string): Promise<TaskPromptDocument | null> {
@@ -33,9 +60,33 @@ export class TaskPromptStore {
   }
 
   /**
+   * Resolve a prompt document's body to plain text, regardless of storage
+   * location: returns inline `text` when present, otherwise downloads the body
+   * from blob storage. Throws if the document has neither (corrupt) or if blob
+   * storage is needed but not configured.
+   */
+  async resolvePromptText(doc: TaskPromptDocument): Promise<string> {
+    if (doc.text != null) return doc.text;
+    if (doc.contentBlobUrl) {
+      if (!this.blobStorage) {
+        throw new Error(
+          `Task prompt '${doc._id}' body is in blob storage but no BlobStorage is configured`,
+        );
+      }
+      const buf = await this.blobStorage.downloadBlobToBuffer(promptBlobName(doc._id));
+      return buf.toString('utf-8');
+    }
+    throw new Error(`Task prompt '${doc._id}' has neither inline text nor a blob reference`);
+  }
+
+  /**
    * Find an existing task prompt by `(type, text)`, or create a new one.
    * Idempotent — the same `(type, text)` always returns the same document.
    * `type` defaults to `"select"` (the request task prompt).
+   *
+   * Bodies over the inline threshold are uploaded to blob storage on a create
+   * **miss** (and the doc stores only a `contentBlobUrl`); smaller bodies are
+   * stored inline. The dedup/lookup is by content hash and never touches blob.
    */
   async findOrCreate(text: string, type: PromptType = 'select'): Promise<TaskPromptDocument> {
     const trimmed = text.trim();
@@ -62,13 +113,35 @@ export class TaskPromptStore {
       return existing;
     }
 
-    // Create new document
+    // Enforce the hard size cap before storing anywhere.
+    const byteLength = Buffer.byteLength(trimmed, 'utf-8');
+    if (byteLength > PROMPT_MAX_BYTES) {
+      throw new Error(
+        `Prompt body is ${byteLength} bytes, exceeding the maximum of ${PROMPT_MAX_BYTES} bytes`,
+      );
+    }
+
     const doc: TaskPromptDocument = {
       _id: id,
       type,
-      text: trimmed,
       createdAt: new Date(),
     };
+
+    // Size-based storage: large bodies go to blob, small bodies stay inline.
+    if (byteLength > this.inlineMaxBytes) {
+      if (!this.blobStorage) {
+        throw new Error(
+          `Prompt body is ${byteLength} bytes (over the ${this.inlineMaxBytes}-byte inline ` +
+            `threshold) but no BlobStorage is configured to store it`,
+        );
+      }
+      doc.contentBlobUrl = await this.blobStorage.uploadText(
+        promptBlobName(id),
+        trimmed,
+      );
+    } else {
+      doc.text = trimmed;
+    }
 
     await this.collection.insertOne(doc as any);
     return doc;
@@ -77,7 +150,9 @@ export class TaskPromptStore {
   /**
    * List active (non-deleted) task prompts.
    * Supports pagination, optional substring search on text, and an optional
-   * `type` filter (one prompt type per gate).
+   * `type` filter. Pass a `type` (e.g. `'select'` or `'agents.md'`) to scope the
+   * list to a single type. With no `type`, all prompt types are returned — gate
+   * prompts, non-gate types such as `agents.md`, and legacy untyped docs.
    */
   async getAll(opts?: {
     limit?: number;

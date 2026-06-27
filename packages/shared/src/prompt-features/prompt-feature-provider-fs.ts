@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { parse as parseYaml } from 'yaml';
-import { PromptFeatureConfig } from '../types/types.js';
+import { PromptFeatureConfig, PromptType, PROMPT_TYPES } from '../types/types.js';
 import { PromptFeatureProvider } from './prompt-feature-provider.js';
 
 /**
@@ -47,9 +47,17 @@ export class FileSystemPromptFeatureProvider implements PromptFeatureProvider {
           throw new Error(`Missing or invalid 'prompt' field in ${file}`);
         }
 
+        // Normalize legacy 'task' to canonical 'select'; accept any known type.
+        const rawType =
+          typeof data.type === "string" && data.type === "task"
+            ? "select"
+            : data.type;
         const feature: PromptFeatureConfig = {
           id: data.id.trim(),
           prompt: data.prompt.trim(),
+          ...(typeof rawType === "string" && PROMPT_TYPES.includes(rawType as PromptType)
+            ? { type: rawType as PromptType }
+            : {}),
         };
 
         if (this.registry.has(feature.id)) {

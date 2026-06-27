@@ -53,6 +53,43 @@ erDiagram
 - **Codebase** — Mutable first-class project entity in `codebases`, with a unique slug, source type (`git` or `archive`), optional GitHub source/default branch, revision counter, latest revision pointer, and soft-delete metadata.
 - **CodebaseRevision** — Immutable snapshot in `codebase-revisions`. Every Git resolution or archive upload creates a fresh UUID revision with the next per-codebase `revisionNumber` and canonical `{slug}@r{N}` ref.
 
+### Typed prompts, AGENTS.md, and size-based storage
+
+Task prompts live in a single `task-prompts` collection that is now **typed** and
+shared by two prompt kinds:
+
+- `TaskPromptDocument.type?: 'task' | 'agents.md'` — absent ⇒ `'task'` (backward
+  compatible; existing docs are untouched).
+- **`_id` is the content hash.** `computeTaskPromptId(text, type?)` hashes the
+  trimmed text for `task` (or absent) — identical to the legacy hash, so every
+  existing task prompt keeps its `_id` — and namespaces non-task types as
+  `hash(type + '\n' + text)` so an AGENTS.md prompt never collides with a task
+  prompt of the same text. `findOrCreate` deduplicates on this hash.
+- **Body storage is decided by size, not type.** A prompt body at/under
+  `PROMPT_INLINE_MAX_BYTES` (default 16 KB, UTF-8) is stored inline as `text`;
+  larger bodies are uploaded to blob (`prompts/{promptId}.txt`) and the doc carries
+  `contentBlobUrl` with no inline `text`. Exactly one of `text` / `contentBlobUrl`
+  is set. `resolvePromptText(doc)` returns the inline body or downloads the blob, so
+  callers (feature extraction, the worker text endpoint) get plain text regardless
+  of location.
+- **Prompt features are typed the same way.** `PromptFeatureDocument.type?:
+  'task' | 'agents.md'` (absent ⇒ `'task'`); feature extraction selects only
+  features of the prompt's type.
+
+### AGENTS.md delivery
+
+To support submitting an AGENTS.md prompt with a run, the request carries:
+
+- `RequestDocument.agentsMdPromptId?: string` — set when the create-request body
+  includes `agentsMd` (raw text); the API `findOrCreate`s an `agents.md`-typed
+  prompt and stores its id. Before the run starts, the shared queue-processor
+  resolves the text (downloading from blob if needed) and writes
+  `<workspace>/AGENTS.md` once (constant for the whole run). It **fails the run**
+  if the prompt id is set but cannot be resolved — never silently runs the baseline.
+- `RequestDocument.agentsMdParentIds?: string[]` — best-effort lineage edges
+  (`[]`/absent = root, `[p]` = mutation, `[i, j]` = merge) for callers that know
+  parentage at submit time.
+
 ## Judge Pipeline
 
 The judge evaluates coding agent output against criteria. Two strategies are supported:

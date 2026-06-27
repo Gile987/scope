@@ -422,6 +422,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         "options": [
           "--id",
           "--prompt",
+          "--type",
           "--url",
         ],
       },
@@ -458,6 +459,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         "options": [
           "--output",
           "--query",
+          "--type",
           "--url",
         ],
       },
@@ -651,6 +653,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "submit": {
         "options": [
           "--agent-version",
+          "--agents-md",
           "--base-profile",
           "--codebase",
           "--criteria",

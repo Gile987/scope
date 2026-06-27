@@ -136,6 +136,20 @@ Model name / deployment name used by both backends. For Foundry, this must
 match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
 `gpt-4o`, `gpt-4.1-mini`. Put in `.env.local` (see note above).
 
+## Prompt Storage Configuration
+
+### PROMPT_INLINE_MAX_BYTES
+**Default:** `16384` (16 KB)
+**Type:** integer (UTF-8 byte length)
+**Used by:** API (`apps/api`)
+
+Threshold deciding where a task/AGENTS.md prompt body is stored. A body whose
+UTF-8 byte length is at/under this value is stored **inline** in Mongo (`text`);
+a larger body is uploaded to blob storage (`prompts/{promptId}.txt`) and the doc
+references it via `contentBlobUrl` with no inline `text`. The decision is purely
+size-based — independent of the prompt's `type`. Small task prompts stay inline
+(today's behavior); large AGENTS.md bodies go to blob automatically.
+
 ## Judge Strategy Configuration
 
 ### JUDGE_MODEL

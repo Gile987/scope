@@ -786,6 +786,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "prompt": {
             "type": "string",
           },
+          "type": {
+            "$ref": "#/components/schemas/PromptType",
+          },
         },
         "required": [
           "id",
@@ -844,6 +847,15 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       },
       "CreateRequestInput": {
         "properties": {
+          "agentsMd": {
+            "type": "string",
+          },
+          "agentsMdParentIds": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
           "codebaseRevisionId": {
             "type": "string",
           },
@@ -945,14 +957,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "type": {
-            "enum": [
-              "select",
-              "build",
-              "test",
-              "run",
-              "deploy",
-            ],
-            "type": "string",
+            "$ref": "#/components/schemas/PromptType",
           },
         },
         "required": [
@@ -2012,6 +2017,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "prompt": {
             "type": "string",
           },
+          "type": {
+            "$ref": "#/components/schemas/PromptType",
+          },
           "updatedAt": {
             "format": "date-time",
             "type": [
@@ -2045,6 +2053,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "evaluated",
         ],
         "type": "object",
+      },
+      "PromptType": {
+        "enum": [
+          "select",
+          "build",
+          "test",
+          "run",
+          "deploy",
+          "agents.md",
+        ],
+        "type": "string",
       },
       "RegisterAgentVersionInput": {
         "properties": {
@@ -2381,6 +2400,15 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "agentVersion": {
+            "type": "string",
+          },
+          "agentsMdParentIds": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "agentsMdPromptId": {
             "type": "string",
           },
           "codebaseRevisionId": {
@@ -2944,6 +2972,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "_id": {
             "type": "string",
           },
+          "contentBlobUrl": {
+            "type": "string",
+          },
           "createdAt": {
             "format": "date-time",
             "type": [
@@ -2975,19 +3006,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "type": {
-            "enum": [
-              "select",
-              "build",
-              "test",
-              "run",
-              "deploy",
-            ],
-            "type": "string",
+            "$ref": "#/components/schemas/PromptType",
           },
         },
         "required": [
           "_id",
-          "text",
           "createdAt",
         ],
         "type": "object",
@@ -6158,6 +6181,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "enum": [
+                "select",
+                "agents.md",
+              ],
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -6224,6 +6259,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "type": "string",
                   },
                   "text": {
+                    "type": "string",
+                  },
+                  "type": {
+                    "enum": [
+                      "select",
+                      "agents.md",
+                    ],
                     "type": "string",
                   },
                 },
@@ -9191,14 +9233,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "type",
             "required": false,
             "schema": {
-              "enum": [
-                "select",
-                "build",
-                "test",
-                "run",
-                "deploy",
-              ],
-              "type": "string",
+              "$ref": "#/components/schemas/PromptType",
             },
           },
         ],
@@ -9391,6 +9426,51 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Get task prompt",
+        "tags": [
+          "Task Prompts",
+        ],
+      },
+    },
+    "/api/v1/task-prompts/{id}/content": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                    },
+                    "text": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "text",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Task prompt not found",
+          },
+        },
+        "summary": "Get resolved task prompt content",
         "tags": [
           "Task Prompts",
         ],

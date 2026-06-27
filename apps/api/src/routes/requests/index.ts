@@ -168,8 +168,32 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, gates: requestedGates, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, agentsMd: requestedAgentsMd, agentsMdParentIds: requestedAgentsMdParentIds, gates: requestedGates, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId } = req.body;
     let worker = req.query.worker as string | undefined;
+
+    // AGENTS.md body + lineage (for any caller that wants to attach an
+    // AGENTS.md instruction file to a run).
+    const agentsMdText =
+      typeof requestedAgentsMd === "string" && requestedAgentsMd.trim()
+        ? requestedAgentsMd
+        : undefined;
+    const agentsMdParentIds = Array.isArray(requestedAgentsMdParentIds)
+      ? requestedAgentsMdParentIds.filter((x: unknown): x is string => typeof x === "string")
+      : undefined;
+
+    // Resolve the AGENTS.md body to an `agents.md`-typed prompt id (idempotent,
+    // content-addressed; large bodies are offloaded to blob by the store).
+    const resolveAgentsMdPromptId = async (): Promise<string | undefined> => {
+      if (!agentsMdText) return undefined;
+      const p = await ctx.taskPromptStore.findOrCreate(agentsMdText, "agents.md");
+      return p._id;
+    };
+
+    // Common request fields for AGENTS.md delivery + lineage.
+    const buildAgentsMdFields = (agentsMdPromptId?: string) => ({
+      ...(agentsMdPromptId ? { agentsMdPromptId } : {}),
+      ...(agentsMdParentIds && agentsMdParentIds.length ? { agentsMdParentIds } : {}),
+    });
 
     // Resolve the optional per-run codebase selection into a concrete revision id.
     // Accepts an already-resolved `codebaseRevisionId`, or a `codebase` spec
@@ -463,6 +487,8 @@ apiRoute(ctx.app, ctx.registry, {
       const allNewIds: string[] = [];
       const newDocs: RequestDocument[] = [];
       const variationResults: Array<{ profileId: string; label?: string; ids: string[] }> = [];
+      const agentsMdPromptId = await resolveAgentsMdPromptId();
+      const agentsMdFields = buildAgentsMdFields(agentsMdPromptId);
 
       for (const r of resolved) {
         const newIds: string[] = [];
@@ -495,6 +521,7 @@ apiRoute(ctx.app, ctx.registry, {
             profileId: r.profile._id,
             profileVersionId: r.profileVersion._id,
             submissionId,
+            ...agentsMdFields,
             run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
           };
           newDocs.push(requestDoc);
@@ -879,6 +906,10 @@ apiRoute(ctx.app, ctx.registry, {
     const taskPrompt = await ctx.taskPromptStore.findOrCreate(scenario.task);
     const taskPromptId = taskPrompt._id;
 
+    // Resolve AGENTS.md lineage once for this submission (shared across count>1).
+    const agentsMdPromptId = await resolveAgentsMdPromptId();
+    const agentsMdFields = buildAgentsMdFields(agentsMdPromptId);
+
     // Build the persisted gate configs: order canonically and point the Select
     // gate's prompt at the resolved task prompt (docs/design/gates.md §4.3).
     const persistedGates: GateConfig[] | undefined = gatesProvided
@@ -922,6 +953,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(profileVersionId ? { profileVersionId } : {}),
           ...(persistedGates ? { gates: persistedGates } : {}),
           submissionId,
+          ...agentsMdFields,
           // Mint a distinct run id for the first attempt. Blob artifacts
           // are scoped under `{requestId}/runs/{runId}/...` so retries
           // never overwrite a previous attempt's blobs.
@@ -982,6 +1014,7 @@ apiRoute(ctx.app, ctx.registry, {
       ...(profileVersionId ? { profileVersionId } : {}),
       ...(persistedGates ? { gates: persistedGates } : {}),
       submissionId,
+      ...agentsMdFields,
       // Mint a distinct run id for the first attempt. Blob artifacts
       // are scoped under `{requestId}/runs/{runId}/...` so retries
       // never overwrite a previous attempt's blobs.
@@ -1619,6 +1652,9 @@ apiRoute(ctx.app, ctx.registry, {
           ...(original.taskPromptId ? { taskPromptId: original.taskPromptId } : {}),
           ...(effectiveProfileId ? { profileId: effectiveProfileId } : {}),
           ...(effectiveProfileVersionId ? { profileVersionId: effectiveProfileVersionId } : {}),
+          // Preserve AGENTS.md lineage across re-submits.
+          ...(original.agentsMdPromptId ? { agentsMdPromptId: original.agentsMdPromptId } : {}),
+          ...(original.agentsMdParentIds && original.agentsMdParentIds.length > 0 ? { agentsMdParentIds: original.agentsMdParentIds } : {}),
           submissionId,
           // Bulk re-submit creates a brand-new request — mint a distinct
           // run id for the first attempt so blob artifacts live under

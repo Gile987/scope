@@ -6,7 +6,9 @@ import { resolve } from "path";
 import {
   GATES,
   isGateId,
+  isPromptType,
   orderGates,
+  PROMPT_TYPES,
   validateGateConfigs,
   type GateConfig,
   type GateId,
@@ -63,8 +65,8 @@ export function parseGateListOption(raw: string | string[] | undefined): GateId[
 export function parsePromptTypeOption(raw: string | undefined): PromptType | undefined {
   if (raw === undefined) return undefined;
   const trimmed = raw.trim();
-  if (!isGateId(trimmed)) {
-    throw new Error(`Invalid prompt type '${raw}'. Valid types: ${GATES.join(", ")}.`);
+  if (!isPromptType(trimmed)) {
+    throw new Error(`Invalid prompt type '${raw}'. Valid types: ${PROMPT_TYPES.join(", ")}.`);
   }
   return trimmed;
 }

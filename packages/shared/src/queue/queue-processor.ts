@@ -32,6 +32,9 @@ import { McpSecretClient } from "../mcp/mcp-secret-client.js";
 import { SkillClient } from "../skills/skill-client.js";
 import { ExtensionClient } from "../extensions/extension-client.js";
 import { extractSkillsToWorkspace } from "../skills/skill-extractor.js";
+import { PromptClient } from "../task-prompts/prompt-client.js";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { CodebaseClient } from "../codebases/codebase-client.js";
 import { seedCodebaseToWorkspace } from "../codebases/codebase-seeder.js";
 
@@ -411,6 +414,44 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   }
 
   /**
+   * Write the AGENTS.md body into the workspace root before the run starts.
+   *
+   * The body is constant for the whole run, so it is resolved once and written
+   * to `<workspace>/AGENTS.md` before the first turn. The text is resolved via
+   * the API (`GET /api/v1/task-prompts/:id/content`), which downloads from blob
+   * storage when the prompt is blob-backed — the worker never touches blob.
+   *
+   * Fails loudly (throws) when `agentsMdPromptId` is set but `apiBaseUrl` is
+   * missing or the fetch/write fails, so the run is marked failed rather than
+   * silently evaluating the baseline worker (which would corrupt results).
+   */
+  private async writeAgentsMd(
+    requestDoc: RequestDocument,
+    workspacePath: string,
+    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
+  ): Promise<void> {
+    const agentsMdPromptId = requestDoc.agentsMdPromptId;
+    if (!agentsMdPromptId) return;
+
+    const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
+    if (!apiBaseUrl) {
+      throw new Error(
+        `Request has agentsMdPromptId '${agentsMdPromptId}' but no apiBaseUrl is configured; cannot resolve AGENTS.md`,
+      );
+    }
+
+    const promptClient = new PromptClient(apiBaseUrl);
+    const text = await promptClient.getText(agentsMdPromptId);
+    const agentsMdPath = join(workspacePath, "AGENTS.md");
+    await writeFile(agentsMdPath, text, "utf-8");
+    await log("info", `Wrote AGENTS.md to workspace`, {
+      agentsMdPromptId,
+      path: agentsMdPath,
+      bytes: Buffer.byteLength(text, "utf-8"),
+    });
+  }
+
+  /**
    * Resolve a typed prompt entity's text by id via the API. Used for non-Select
    * gates whose prompt is referenced by id on the request's gate config. Throws
    * when the prompt cannot be resolved — a misconfigured gate must fail the run
@@ -595,6 +636,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     // Resolve workspace path after setup
     const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
+
+    // Write AGENTS.md into the workspace once before the run (constant for the
+    // whole run). Throws → run is marked failed (fail loudly, never no-op).
+    await this.writeAgentsMd(requestDoc, workspacePath, log);
 
     // Resolve each gate's prompt text. The Select gate uses the already-resolved
     // scenario task; other gates resolve their typed prompt entity by id via the
