@@ -2565,7 +2565,7 @@ export function RunsList() {
           onPageSizeChange={state.setPageSize}
           hasNext={!!cursors.next}
           hasPrev={state.page > 1}
-          itemLabel="runs"
+          itemLabel={groupBy === "none" ? "runs" : "groups"}
         />
       </div>
 

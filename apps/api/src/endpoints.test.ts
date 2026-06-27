@@ -772,6 +772,24 @@ describe("API Endpoints", () => {
       expect(res.body.estimatedTotal).toBe(99);
       expect(mocks.collection.countDocuments).not.toHaveBeenCalled();
     });
+
+    it("omits estimatedTotal and skips run-count queries in grouped mode", async () => {
+      // Grouped mode is paginated by group cursors, not a run count — the API
+      // must not return estimatedTotal nor run countDocuments/estimatedDocumentCount.
+      (mocks.collection.aggregate as any)
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ _id: "tp-1" }]) }) // keys
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ key: "tp-1", aggregates: { count: 1 }, uniform: {} }]) }) // phase2
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }) // hasMoreAfter
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }); // hasMoreBefore
+      (mocks.collection.countDocuments as any).mockResolvedValue(7);
+      (mocks.collection.estimatedDocumentCount as any).mockResolvedValue(99);
+
+      const res = await request(app).get("/api/v1/requests?groupBy=task");
+      expect(res.status).toBe(200);
+      expect(res.body).not.toHaveProperty("estimatedTotal");
+      expect(mocks.collection.countDocuments).not.toHaveBeenCalled();
+      expect(mocks.collection.estimatedDocumentCount).not.toHaveBeenCalled();
+    });
   });
 
   describe("GET /api/v1/requests/facets", () => {

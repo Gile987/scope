@@ -1339,14 +1339,19 @@ apiRoute(ctx.app, ctx.registry, {
 
     const filter: Record<string, unknown> = composeFilter();
 
-    // Total shown by the portal pager / "N runs total". Unfiltered (and grouped)
-    // requests use the O(1) collection-metadata estimate. When a flat-list filter
-    // is active, return an accurate `countDocuments(filter)` so the page count and
-    // total reflect the filtered dataset, not the whole collection (issue #1138).
+    // Total shown by the portal pager / "~N runs total" banner — flat mode only.
+    // Grouped mode is measured in *groups*, not runs, and the pager is driven
+    // purely by the group cursors below, so we return no run-count total for it
+    // (this also skips a countDocuments/estimatedDocumentCount call per grouped
+    // request). For flat mode: when a filter is active, return an accurate
+    // `countDocuments(filter)` so the page count and total reflect the filtered
+    // dataset, not the whole collection; otherwise use the O(1)
+    // collection-metadata estimate (issue #1138).
     const hasActiveFilter =
       and.length > 0 || Object.keys(flat).some((k) => k !== "deletedAt");
-    const estimatedTotal =
-      hasActiveFilter && !groupByParam
+    const estimatedTotal = groupByParam
+      ? undefined
+      : hasActiveFilter
         ? await ctx.requestCollection.countDocuments(filter)
         : await ctx.requestCollection.estimatedDocumentCount();
 

@@ -150,7 +150,12 @@ export interface Run {
 export interface CursorPaginatedResponse<T> {
   data: T[];
   limit: number;
-  estimatedTotal: number;
+  /**
+   * Run-count total for the flat list pager / "~N runs total" banner. Omitted
+   * in grouped mode, which is measured in groups (not runs) and paginated purely
+   * by cursors — so the client drives Next/Prev off `cursors` without a total.
+   */
+  estimatedTotal?: number;
   cursors: {
     next: string | null;
     prev: string | null;
