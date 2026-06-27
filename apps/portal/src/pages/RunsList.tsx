@@ -651,22 +651,6 @@ export function RunsList() {
   // Stable string of all server filter args, for query keys.
   const runFilterKey = JSON.stringify(runFilterArgs);
 
-  // Base filter for the facets endpoint: the non-categorical part only (search +
-  // created range + numeric), so every categorical value stays visible with an
-  // accurate full-dataset count regardless of the current selection.
-  const facetBaseArgs = useMemo(
-    () => ({
-      search: searchValue,
-      createdAfter,
-      createdBefore,
-      turns: turnsValue,
-      turnsOp: turnsValue !== undefined ? turnsOp : undefined,
-      maxIterations: maxIterValue,
-      maxIterationsOp: maxIterValue !== undefined ? maxIterOp : undefined,
-    }),
-    [searchValue, createdAfter, createdBefore, turnsValue, turnsOp, maxIterValue, maxIterOp],
-  );
-
   // Serialize cursor into a stable string for the query key.
   const cursorKey =
     currentCursor.kind === "first" || currentCursor.kind === "last"
@@ -689,12 +673,14 @@ export function RunsList() {
     refetchInterval: 10_000,
   });
 
-  // Server-computed filter facets (full-dataset counts) drive the filter rail.
+  // Server-computed filter facets drive the filter rail. Counts are absolute over
+  // all non-deleted runs (they ignore every active filter), so this query takes no
+  // arguments — one shared key for all callers, served from a short-TTL server cache.
   const { data: facetsResponse } = useQuery({
-    queryKey: ["run-facets", JSON.stringify(facetBaseArgs)],
-    queryFn: () => api.listRunFacets(facetBaseArgs),
-    staleTime: 10_000,
-    refetchInterval: 30_000,
+    queryKey: ["run-facets"],
+    queryFn: () => api.listRunFacets(),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
   const facets = facetsResponse?.facets;
   const { data: profilesData } = useQuery({

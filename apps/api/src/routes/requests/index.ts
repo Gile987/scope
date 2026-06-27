@@ -70,6 +70,100 @@ import {
 import { insertHistoricalRun, listHistoricalRuns, getHistoricalRun } from "../../runs-repo.js";
 import type { RunState } from "shared";
 
+type RequestCollection = RouteContext["requestCollection"];
+type RunFacetsResponse = z.infer<typeof RunFacetsResponseSchema>;
+type RunFacetKey = (typeof RUN_FACET_DIMS)[number]["key"];
+
+/**
+ * Categorical dimensions exposed by the Runs filter rail. Each has a single-field
+ * index, but Cosmos serves no index-only GROUP BY, so the $group below loads every
+ * matched document regardless — which is why the result is cached (see below).
+ */
+const RUN_FACET_DIMS = [
+  { key: "workerType", field: "workerType" },
+  { key: "status", field: "run.status" },
+  { key: "outcome", field: "run.outcome" },
+  { key: "model", field: "model" },
+  { key: "os", field: "run.os.platform" },
+  { key: "priority", field: "priority" },
+  { key: "agentVersion", field: "agentVersion" },
+  { key: "profileId", field: "profileId" },
+] as const;
+
+/**
+ * Compute the Runs filter-rail facets: every distinct value and its count per
+ * categorical dimension.
+ *
+ * The counts are an **absolute** distribution over all non-deleted runs — they
+ * deliberately ignore the active search, date range, iteration, and categorical
+ * selections. Since the rail already keeps every value visible regardless of the
+ * current selection, scoping the counts to the query would only add cost (each
+ * $group is a full scan on Cosmos — there is no index-only grouping) for an
+ * inconsistent, half-reactive number. Being input-independent also makes the
+ * whole response trivially cacheable process-wide (see {@link getRunFacets}).
+ */
+async function computeRunFacets(col: RequestCollection): Promise<RunFacetsResponse> {
+  const match = { deletedAt: { $exists: false } };
+  const dimResults = await Promise.all(
+    RUN_FACET_DIMS.map((d) =>
+      col
+        .aggregate<{ _id: unknown; count: number }>([
+          { $match: match },
+          { $group: { _id: `$${d.field}`, count: { $sum: 1 } } },
+        ])
+        .toArray(),
+    ),
+  );
+
+  const facets = {
+    workerType: [], status: [], outcome: [], model: [], os: [], priority: [], agentVersion: [], profileId: [],
+  } as Record<RunFacetKey, { value: string; count: number }[]>;
+  RUN_FACET_DIMS.forEach((d, i) => {
+    facets[d.key] = dimResults[i]
+      .map((r) => ({
+        value: r._id === null || r._id === undefined ? EMPTY_FILTER_VALUE : String(r._id),
+        count: r.count,
+      }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+  });
+
+  // Every run lands in exactly one bucket per dimension (null included), so the
+  // counts of any single dimension sum to the run total — no countDocuments needed.
+  const total = dimResults[0].reduce((sum, r) => sum + r.count, 0);
+
+  return { total, facets };
+}
+
+/**
+ * Short TTL for the process-wide facets cache. The facets are an absolute,
+ * input-independent distribution, so one entry serves every caller (all tabs,
+ * the periodic client refetch, rapid filter toggling) and Cosmos recomputes the
+ * 8-way $group fan-out at most once per window per API replica.
+ */
+const RUN_FACETS_CACHE_TTL_MS = 60_000;
+let runFacetsCache: { expiresAt: number; promise: Promise<RunFacetsResponse> } | null = null;
+
+function getRunFacets(col: RequestCollection): Promise<RunFacetsResponse> {
+  const now = Date.now();
+  if (runFacetsCache && runFacetsCache.expiresAt > now) {
+    return runFacetsCache.promise;
+  }
+  // Cache the in-flight promise so concurrent callers on a cold/expired entry
+  // share a single computation rather than stampeding Cosmos.
+  const promise = computeRunFacets(col);
+  runFacetsCache = { expiresAt: now + RUN_FACETS_CACHE_TTL_MS, promise };
+  promise.catch(() => {
+    // Drop a rejected entry so the next request retries instead of serving the error.
+    if (runFacetsCache?.promise === promise) runFacetsCache = null;
+  });
+  return promise;
+}
+
+/** Test-only: reset the process-wide facets cache so each test computes fresh. */
+export function _resetRunFacetsCacheForTests(): void {
+  runFacetsCache = null;
+}
+
 export function registerRequestsRoutes(ctx: RouteContext): void {
 
 const upload = multer({ dest: tmpdir() });
@@ -1025,118 +1119,22 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
-// Get request status
+// List run filter facets for the Runs list rail.
 apiRoute(ctx.app, ctx.registry, {
   method: "get",
   path: "/api/v1/requests/facets",
   tags: ["Requests"],
   summary: "List run filter facets",
   description:
-    "Returns every distinct value and full-dataset count per categorical filter " +
-    "dimension for the Runs list rail. Honors the base filter (deletedAt, search, " +
-    "created-at range, iteration counts) but ignores the categorical selections, so " +
-    "all selectable values stay visible. Computed with parallel $group aggregations " +
-    "(Cosmos has no $facet).",
-  query: ListRequestsQuerySchema,
+    "Returns every distinct value and its full-dataset count per categorical " +
+    "filter dimension for the Runs list rail. Counts are absolute over all " +
+    "non-deleted runs: they intentionally ignore the active search, date range, " +
+    "iteration, and categorical selections so every selectable value stays visible " +
+    "with a stable count. Computed with parallel $group aggregations (Cosmos has " +
+    "no $facet) and cached process-wide for a short TTL.",
   response: RunFacetsResponseSchema,
-  handler: async (req, res) => {
-    const searchFilter = req.query.search as string | undefined;
-    const includeDeleted = req.query.includeDeleted === "true";
-    const createdAfterRaw = req.query.createdAfter as string | Date | undefined;
-    const createdBeforeRaw = req.query.createdBefore as string | Date | undefined;
-    const turnsFilterRaw = req.query.turns as string | undefined;
-    const turnsOpFilter = (req.query.turnsOp as string | undefined) ?? "eq";
-    const maxIterationsFilterRaw = req.query.maxIterations as string | undefined;
-    const maxIterationsOpFilter = (req.query.maxIterationsOp as string | undefined) ?? "eq";
-
-    const flat: Record<string, unknown> = {};
-    const and: Record<string, unknown>[] = [];
-    if (!includeDeleted) flat.deletedAt = { $exists: false };
-
-    const search = buildSearchClause(searchFilter);
-    if (search) and.push(search);
-
-    const createdAfter = createdAfterRaw
-      ? (createdAfterRaw instanceof Date ? createdAfterRaw : new Date(createdAfterRaw))
-      : undefined;
-    const createdBefore = createdBeforeRaw
-      ? (createdBeforeRaw instanceof Date ? createdBeforeRaw : new Date(createdBeforeRaw))
-      : undefined;
-    if ((createdAfter && Number.isNaN(createdAfter.getTime())) || (createdBefore && Number.isNaN(createdBefore.getTime()))) {
-      res.status(400).json({ error: "Invalid createdAfter or createdBefore datetime" });
-      return;
-    }
-    if (createdAfter && createdBefore && createdAfter > createdBefore) {
-      res.status(400).json({ error: "createdAfter must be less than or equal to createdBefore" });
-      return;
-    }
-    if (createdAfter || createdBefore) {
-      flat.createdAt = {
-        ...(createdAfter ? { $gte: createdAfter } : {}),
-        ...(createdBefore ? { $lte: createdBefore } : {}),
-      };
-    }
-
-    const OP_MAP: Record<string, "$eq" | "$gte" | "$lte"> = { eq: "$eq", gte: "$gte", lte: "$lte" };
-    if (maxIterationsFilterRaw !== undefined && maxIterationsFilterRaw !== "") {
-      const n = Number(maxIterationsFilterRaw);
-      const op = OP_MAP[maxIterationsOpFilter];
-      if (!Number.isFinite(n) || n < 0 || !op) {
-        res.status(400).json({ error: "Invalid maxIterations or maxIterationsOp" });
-        return;
-      }
-      flat.maxIterations = { [op]: n };
-    }
-    if (turnsFilterRaw !== undefined && turnsFilterRaw !== "") {
-      const n = Number(turnsFilterRaw);
-      const op = OP_MAP[turnsOpFilter];
-      if (!Number.isFinite(n) || n < 0 || !op) {
-        res.status(400).json({ error: "Invalid turns or turnsOp" });
-        return;
-      }
-      flat.$expr = { [op]: [{ $size: { $ifNull: ["$run.turns", []] } }, n] };
-    }
-
-    const baseFilter: Record<string, unknown> = { ...flat, ...(and.length ? { $and: and } : {}) };
-
-    type FacetKey = "workerType" | "status" | "outcome" | "model" | "os" | "priority" | "agentVersion" | "profileId";
-    const DIMS: { key: FacetKey; field: string }[] = [
-      { key: "workerType", field: "workerType" },
-      { key: "status", field: "run.status" },
-      { key: "outcome", field: "run.outcome" },
-      { key: "model", field: "model" },
-      { key: "os", field: "run.os.platform" },
-      { key: "priority", field: "priority" },
-      { key: "agentVersion", field: "agentVersion" },
-      { key: "profileId", field: "profileId" },
-    ];
-
-    const [total, ...dimResults] = await Promise.all([
-      ctx.requestCollection.countDocuments(baseFilter),
-      ...DIMS.map((d) =>
-        ctx.requestCollection
-          .aggregate<{ _id: unknown; count: number }>([
-            { $match: baseFilter },
-            { $group: { _id: `$${d.field}`, count: { $sum: 1 } } },
-          ])
-          .toArray(),
-      ),
-    ]);
-
-    const facets: Record<FacetKey, { value: string; count: number }[]> = {
-      workerType: [], status: [], outcome: [], model: [], os: [], priority: [], agentVersion: [], profileId: [],
-    };
-    DIMS.forEach((d, i) => {
-      const rows = dimResults[i];
-      facets[d.key] = rows
-        .map((r) => ({
-          value: r._id === null || r._id === undefined ? EMPTY_FILTER_VALUE : String(r._id),
-          count: r.count,
-        }))
-        .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
-    });
-
-    res.json({ total, facets });
+  handler: async (_req, res) => {
+    res.json(await getRunFacets(ctx.requestCollection));
   },
 });
 

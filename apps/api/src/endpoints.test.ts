@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import request from "supertest";
 import { app, _injectTestDependencies } from "./index.js";
+import { _resetRunFacetsCacheForTests } from "./routes/requests/index.js";
 import { createAllMockDependencies, createMockCollection } from "./test-helpers.js";
 
 // Stub checkMigrations before it can be imported by index.ts
@@ -43,6 +44,8 @@ describe("API Endpoints", () => {
     // Re-inject after clearAllMocks so the mock implementations are fresh
     mocks = createAllMockDependencies();
     _injectTestDependencies(mocks);
+    // Facets are memoized in a module-level cache; clear it so each test starts cold
+    _resetRunFacetsCacheForTests();
   });
 
   // ===================================================================
@@ -793,8 +796,7 @@ describe("API Endpoints", () => {
   });
 
   describe("GET /api/v1/requests/facets", () => {
-    it("returns a filtered total and per-dimension value counts", async () => {
-      (mocks.collection.countDocuments as any).mockResolvedValue(12);
+    it("returns absolute per-dimension counts with a derived total", async () => {
       (mocks.collection.aggregate as any).mockReturnValue({
         toArray: vi.fn().mockResolvedValue([
           { _id: "coder-acp-copilot", count: 8 },
@@ -802,9 +804,13 @@ describe("API Endpoints", () => {
         ]),
       });
 
-      const res = await request(app).get("/api/v1/requests/facets?status=done");
+      const res = await request(app).get("/api/v1/requests/facets");
       expect(res.status).toBe(200);
+      // total is derived by summing a single dimension's buckets (8 + 4), not a
+      // separate count query.
       expect(res.body.total).toBe(12);
+      expect(mocks.collection.countDocuments as any).not.toHaveBeenCalled();
+      expect(mocks.collection.estimatedDocumentCount as any).not.toHaveBeenCalled();
       expect(res.body.facets).toHaveProperty("workerType");
       expect(res.body.facets).toHaveProperty("status");
       expect(res.body.facets).toHaveProperty("outcome");
@@ -821,13 +827,42 @@ describe("API Endpoints", () => {
     });
 
     it("runs one $group aggregation per categorical dimension", async () => {
-      (mocks.collection.countDocuments as any).mockResolvedValue(0);
       (mocks.collection.aggregate as any).mockReturnValue({
         toArray: vi.fn().mockResolvedValue([]),
       });
 
       await request(app).get("/api/v1/requests/facets");
       // 8 categorical dimensions → 8 parallel aggregations (no $facet).
+      expect((mocks.collection.aggregate as any).mock.calls.length).toBe(8);
+    });
+
+    it("ignores search, date, iteration, and categorical query params (absolute counts)", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      await request(app).get(
+        "/api/v1/requests/facets?search=foo&status=done&model=gpt-4&createdAfter=2024-01-01T00:00:00Z&turns=3&turnsOp=gte",
+      );
+      // Every aggregation matches only the constant non-deleted predicate; no
+      // search regex / date / numeric / categorical clause leaks into $match.
+      const calls = (mocks.collection.aggregate as any).mock.calls;
+      expect(calls.length).toBe(8);
+      for (const [pipeline] of calls) {
+        expect(pipeline[0]).toEqual({ $match: { deletedAt: { $exists: false } } });
+      }
+    });
+
+    it("serves repeated requests from a single cached computation", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([{ _id: "x", count: 1 }]),
+      });
+
+      const first = await request(app).get("/api/v1/requests/facets");
+      const second = await request(app).get("/api/v1/requests/facets");
+      expect(first.status).toBe(200);
+      expect(second.body).toEqual(first.body);
+      // Second call hits the in-memory cache → no additional aggregations.
       expect((mocks.collection.aggregate as any).mock.calls.length).toBe(8);
     });
   });

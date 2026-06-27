@@ -204,11 +204,17 @@ migration 022. Unfinished runs leave it unset.
 ### Facets
 
 `GET /api/v1/requests/facets` drives the filter rail: it returns, per categorical dimension,
-every distinct value with an accurate **full-dataset count**, plus a filtered `total`. Counts
-honor the **base filter** (deletedAt + search + date range + numeric) but are independent of
-the categorical selections, so all values stay visible/selectable even when not on the current
-page. Because Cosmos DB has limited `$facet` support, the endpoint runs one `$group`
-aggregation **per dimension in parallel** (`Promise.all`) rather than a single `$facet`.
+every distinct value with a **full-dataset count**, plus a `total`. Counts are **absolute over
+all non-deleted runs** — they intentionally ignore every active filter (search, date range,
+numeric, and categorical selections), so all values stay visible/selectable even when not on the
+current page and the numbers don't shift as the user narrows the query. Because the response is
+input-independent, it is served from a process-wide in-memory cache (short TTL, in-flight
+de-duplicated) so the underlying scan runs at most once per window per API replica. `total` is
+derived for free by summing any one dimension's bucket counts (every run lands in exactly one
+bucket, `(Unknown)` included), avoiding a separate count query. Because Cosmos DB has limited
+`$facet` support — and serves no index-only `GROUP BY`, so each `$group` scans the matched set —
+the endpoint runs one `$group` aggregation **per dimension in parallel** (`Promise.all`) rather
+than a single `$facet`.
 
 ### Grouping
 

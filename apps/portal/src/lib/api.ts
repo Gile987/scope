@@ -109,20 +109,14 @@ export const api = {
   },
 
   /**
-   * Fetch server-computed filter facets for the Runs list rail. Honors the base
-   * filter (search, created-at range, iteration counts) but ignores categorical
-   * selections so every value stays visible with an accurate full-dataset count.
+   * Fetch server-computed filter facets for the Runs list rail. Counts are
+   * absolute over all non-deleted runs and intentionally ignore the active
+   * search, date, iteration, and categorical selections, so every value stays
+   * visible with a stable full-dataset count. Being input-independent, the
+   * response is shared (one query key) and cached server-side for a short TTL.
    */
-  listRunFacets: (opts?: Pick<RunFilterParams, "search" | "createdAfter" | "createdBefore" | "turns" | "turnsOp" | "maxIterations" | "maxIterationsOp">): Promise<RunFacetsResponse> => {
-    return request(`/requests/facets${qs({
-      search: opts?.search,
-      createdAfter: opts?.createdAfter,
-      createdBefore: opts?.createdBefore,
-      turns: opts?.turns !== undefined ? String(opts.turns) : undefined,
-      turnsOp: opts?.turns !== undefined ? opts?.turnsOp : undefined,
-      maxIterations: opts?.maxIterations !== undefined ? String(opts.maxIterations) : undefined,
-      maxIterationsOp: opts?.maxIterations !== undefined ? opts?.maxIterationsOp : undefined,
-    })}`);
+  listRunFacets: (): Promise<RunFacetsResponse> => {
+    return request(`/requests/facets`);
   },
 
   /** Get a single run by ID */
