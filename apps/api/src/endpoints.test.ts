@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import request from "supertest";
 import { app, _injectTestDependencies } from "./index.js";
+import { _resetRunFacetsCacheForTests } from "./routes/requests/index.js";
 import { createAllMockDependencies, createMockCollection } from "./test-helpers.js";
 
 // Stub checkMigrations before it can be imported by index.ts
@@ -43,6 +44,8 @@ describe("API Endpoints", () => {
     // Re-inject after clearAllMocks so the mock implementations are fresh
     mocks = createAllMockDependencies();
     _injectTestDependencies(mocks);
+    // Facets are memoized in a module-level cache; clear it so each test starts cold
+    _resetRunFacetsCacheForTests();
   });
 
   // ===================================================================
@@ -646,6 +649,221 @@ describe("API Endpoints", () => {
           workerType: "coder-acp-copilot",
         }),
       );
+    });
+
+    // ── #1138: server-side multi-value / sentinel / search / new dimensions ──
+
+    /** Mock the find().sort().limit().toArray() chain; returns the sort spy. */
+    const mockFindChain = (docs: any[] = []) => {
+      const sortSpy = vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue(docs) }),
+      });
+      (mocks.collection.find as any).mockReturnValue({ sort: sortSpy });
+      return sortSpy;
+    };
+
+    it("turns a multi-value status into an $in clause", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?status=done&status=pending");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ "run.status": { $in: ["done", "pending"] } }),
+      );
+    });
+
+    it("accepts comma-separated multi-value selections", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?outcome=succeeded,failed");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ "run.outcome": { $in: ["succeeded", "failed"] } }),
+      );
+    });
+
+    it("maps the (Unknown) sentinel to a missing-or-null $and clause", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?outcome=__empty__");
+      const filter = (mocks.collection.find as any).mock.calls.at(-1)[0];
+      expect(filter.$and).toEqual(
+        expect.arrayContaining([
+          { $or: [{ "run.outcome": { $exists: false } }, { "run.outcome": null }] },
+        ]),
+      );
+    });
+
+    it("adds a case-insensitive regex $or for free-text search", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?search=gpt-5");
+      const filter = (mocks.collection.find as any).mock.calls.at(-1)[0];
+      const searchClause = (filter.$and as any[]).find((c) => Array.isArray(c.$or) && c.$or.some((o: any) => o.model));
+      expect(searchClause).toBeDefined();
+      expect(searchClause.$or).toEqual(
+        expect.arrayContaining([{ model: { $regex: "gpt-5", $options: "i" } }]),
+      );
+    });
+
+    it("filters by model, os, and agentVersion", async () => {
+      mockFindChain();
+      await request(app).get(
+        "/api/v1/requests?model=gpt-5&os=linux&agentVersion=copilot-0.0.415",
+      );
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "gpt-5",
+          "run.os.platform": "linux",
+          agentVersion: "copilot-0.0.415",
+        }),
+      );
+    });
+
+    it("coerces a priority filter to a number", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?priority=3");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ priority: 3 }),
+      );
+    });
+
+    it("applies a createdAt range for createdAfter/createdBefore", async () => {
+      mockFindChain();
+      await request(app).get(
+        "/api/v1/requests?createdAfter=2026-01-01T00:00:00Z&createdBefore=2026-12-31T00:00:00Z",
+      );
+      const filter = (mocks.collection.find as any).mock.calls.at(-1)[0];
+      expect(filter.createdAt.$gte).toBeInstanceOf(Date);
+      expect(filter.createdAt.$lte).toBeInstanceOf(Date);
+    });
+
+    it("rejects an inverted createdAt range with 400", async () => {
+      mockFindChain();
+      const res = await request(app).get(
+        "/api/v1/requests?createdAfter=2026-12-31T00:00:00Z&createdBefore=2026-01-01T00:00:00Z",
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects an invalid createdAfter datetime with 400", async () => {
+      mockFindChain();
+      const res = await request(app).get("/api/v1/requests?createdAfter=not-a-date");
+      expect(res.status).toBe(400);
+    });
+
+    it("sorts by an allowlisted field and direction over { field, _id }", async () => {
+      const sortSpy = mockFindChain();
+      await request(app).get("/api/v1/requests?sortBy=priority&sortDir=asc");
+      expect(sortSpy).toHaveBeenCalledWith({ priority: 1, _id: 1 });
+    });
+
+    it("defaults to createdAt desc when no sortBy is given", async () => {
+      const sortSpy = mockFindChain();
+      await request(app).get("/api/v1/requests");
+      expect(sortSpy).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
+    });
+
+    it("returns an accurate countDocuments total when a filter is active", async () => {
+      mockFindChain();
+      (mocks.collection.countDocuments as any).mockResolvedValue(7);
+      (mocks.collection.estimatedDocumentCount as any).mockResolvedValue(99);
+      const res = await request(app).get("/api/v1/requests?status=done");
+      expect(res.body.estimatedTotal).toBe(7);
+      expect(mocks.collection.countDocuments).toHaveBeenCalled();
+    });
+
+    it("uses the O(1) estimate when no filter is active", async () => {
+      mockFindChain();
+      (mocks.collection.countDocuments as any).mockResolvedValue(7);
+      (mocks.collection.estimatedDocumentCount as any).mockResolvedValue(99);
+      const res = await request(app).get("/api/v1/requests");
+      expect(res.body.estimatedTotal).toBe(99);
+      expect(mocks.collection.countDocuments).not.toHaveBeenCalled();
+    });
+
+    it("omits estimatedTotal and skips run-count queries in grouped mode", async () => {
+      // Grouped mode is paginated by group cursors, not a run count — the API
+      // must not return estimatedTotal nor run countDocuments/estimatedDocumentCount.
+      (mocks.collection.aggregate as any)
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ _id: "tp-1" }]) }) // keys
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ key: "tp-1", aggregates: { count: 1 }, uniform: {} }]) }) // phase2
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }) // hasMoreAfter
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }); // hasMoreBefore
+      (mocks.collection.countDocuments as any).mockResolvedValue(7);
+      (mocks.collection.estimatedDocumentCount as any).mockResolvedValue(99);
+
+      const res = await request(app).get("/api/v1/requests?groupBy=task");
+      expect(res.status).toBe(200);
+      expect(res.body).not.toHaveProperty("estimatedTotal");
+      expect(mocks.collection.countDocuments).not.toHaveBeenCalled();
+      expect(mocks.collection.estimatedDocumentCount).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("GET /api/v1/requests/facets", () => {
+    it("returns absolute per-dimension counts with a derived total", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([
+          { _id: "coder-acp-copilot", count: 8 },
+          { _id: null, count: 4 },
+        ]),
+      });
+
+      const res = await request(app).get("/api/v1/requests/facets");
+      expect(res.status).toBe(200);
+      // total is derived by summing a single dimension's buckets (8 + 4), not a
+      // separate count query.
+      expect(res.body.total).toBe(12);
+      expect(mocks.collection.countDocuments as any).not.toHaveBeenCalled();
+      expect(mocks.collection.estimatedDocumentCount as any).not.toHaveBeenCalled();
+      expect(res.body.facets).toHaveProperty("workerType");
+      expect(res.body.facets).toHaveProperty("status");
+      expect(res.body.facets).toHaveProperty("outcome");
+      expect(res.body.facets).toHaveProperty("model");
+      expect(res.body.facets).toHaveProperty("os");
+      expect(res.body.facets).toHaveProperty("priority");
+      expect(res.body.facets).toHaveProperty("agentVersion");
+      expect(res.body.facets).toHaveProperty("profileId");
+      // null _id buckets map to the (Unknown) sentinel; rows sort by count desc.
+      expect(res.body.facets.workerType).toEqual([
+        { value: "coder-acp-copilot", count: 8 },
+        { value: "__empty__", count: 4 },
+      ]);
+    });
+
+    it("runs one $group aggregation per categorical dimension", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      await request(app).get("/api/v1/requests/facets");
+      // 8 categorical dimensions → 8 parallel aggregations (no $facet).
+      expect((mocks.collection.aggregate as any).mock.calls.length).toBe(8);
+    });
+
+    it("ignores search, date, iteration, and categorical query params (absolute counts)", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      await request(app).get(
+        "/api/v1/requests/facets?search=foo&status=done&model=gpt-4&createdAfter=2024-01-01T00:00:00Z&turns=3&turnsOp=gte",
+      );
+      // Every aggregation matches only the constant non-deleted predicate; no
+      // search regex / date / numeric / categorical clause leaks into $match.
+      const calls = (mocks.collection.aggregate as any).mock.calls;
+      expect(calls.length).toBe(8);
+      for (const [pipeline] of calls) {
+        expect(pipeline[0]).toEqual({ $match: { deletedAt: { $exists: false } } });
+      }
+    });
+
+    it("serves repeated requests from a single cached computation", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([{ _id: "x", count: 1 }]),
+      });
+
+      const first = await request(app).get("/api/v1/requests/facets");
+      const second = await request(app).get("/api/v1/requests/facets");
+      expect(first.status).toBe(200);
+      expect(second.body).toEqual(first.body);
+      // Second call hits the in-memory cache → no additional aggregations.
+      expect((mocks.collection.aggregate as any).mock.calls.length).toBe(8);
     });
   });
 

@@ -24,3 +24,4 @@ export * from "./har/index.js";
 export * from "./utils/index.js";
 export * from "./schemas/index.js";
 export * from "./cursor.js";
+export * from "./run-duration.js";

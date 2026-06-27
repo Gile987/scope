@@ -3,6 +3,7 @@
 
 import { Collection } from "mongodb";
 import type { HeartbeatStore, RequestDocument } from "shared";
+import { durationSetFields } from "shared";
 
 /**
  * StuckRunReaper — authoritative backstop that fails runs permanently stuck
@@ -318,6 +319,7 @@ export class StuckRunReaper {
 
     // Atomic claim: gate on the *current* run.worker.instanceId so a peer
     // takeover / retry between our read and write makes this a no-op.
+    const reapFinishedAt = new Date();
     const claim = await this.collection.findOneAndUpdate(
       {
         _id: c._id,
@@ -332,7 +334,9 @@ export class StuckRunReaper {
           "run.status": "done",
           "run.outcome": "failed",
           "run.error": errorMsg,
-          "run.finishedAt": new Date(),
+          "run.finishedAt": reapFinishedAt,
+          // Denormalize duration for server-side sort.
+          ...durationSetFields(c.startedAt, reapFinishedAt),
           "run.updatedAt": new Date(),
           updatedAt: new Date(),
         },

@@ -23,6 +23,7 @@ import type { VisibilityHeartbeat } from "./visibility-heartbeat.js";
 import { HEARTBEAT_VISIBILITY_SECONDS } from "./visibility-heartbeat.js";
 import { BlobStorage } from "../storage/blob-storage.js";
 import { withRetry } from "../utils/retry.js";
+import { durationSetFields } from "../run-duration.js";
 import { sanitizeHarFile } from "../har/har-parser.js";
 import { JudgeClient } from "../judge/judge-client.js";
 import { runGatedLoop, ResolvedGate } from "../judge/gated-loop.js";
@@ -235,6 +236,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       // peer worker has already taken over (rewrote run.worker.instanceId)
       // between our read and write, our filter no-ops and we drop the dupe.
       const currentOwnerId = workerInfo?.instanceId;
+      const staleFinishedAt = new Date();
       const claim = await withRetry(() => this.collection.findOneAndUpdate(
         {
           _id: requestDoc._id,
@@ -249,7 +251,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
             "run.status": "done",
             "run.outcome": "failed",
             "run.error": errorMsg,
-            "run.finishedAt": new Date(),
+            "run.finishedAt": staleFinishedAt,
+            ...durationSetFields(requestDoc.run?.startedAt, staleFinishedAt),
             "run.updatedAt": new Date(),
             updatedAt: new Date(),
             ...(this.postProcessorQueueClient ? { "run.postProcessorStatus": "queued" } : {}),
@@ -744,6 +747,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     // Guard final write: only update if the run is still "processing" for this
     // specific run._id. If a cancel already set status="done", this no-ops.
+    const finishedAt = new Date();
     const finalWrite = await withRetry(() => this.collection.updateOne(
       { _id: requestId, "run._id": runId, "run.status": "processing" },
       {
@@ -751,7 +755,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           "run.status": finalStatus,
           "run.outcome": finalOutcome,
           "run.result": result.finalResult,
-          "run.finishedAt": new Date(),
+          "run.finishedAt": finishedAt,
+          // Denormalize duration (finishedAt − startedAt) for server-side sort.
+          // `now` is this attempt's startedAt (set at pickup above).
+          ...durationSetFields(now, finishedAt),
           "run.updatedAt": new Date(),
           updatedAt: new Date(),
           ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),

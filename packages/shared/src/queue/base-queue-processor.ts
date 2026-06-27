@@ -10,6 +10,7 @@ import { LogPublisher } from "../logging/log-publisher.js";
 import { BlobStorage } from "../storage/blob-storage.js";
 import { cancelExit } from "./cancel-exit.js";
 import { withRetry } from "../utils/retry.js";
+import { durationSetFields } from "../run-duration.js";
 import {
   startVisibilityHeartbeat,
   type VisibilityHeartbeat,
@@ -217,6 +218,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
     let currentPopReceipt = message.popReceipt;
     let payload: Record<string, unknown> | undefined;
     let heartbeat: VisibilityHeartbeat | undefined;
+    let runStartedAt: Date | string | undefined;
 
     try {
       const decodedContent = Buffer.from(message.messageText, "base64").toString("utf-8");
@@ -241,6 +243,9 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
       const docRunId = typeof (doc as any)?.run?._id === "string" ? (doc as any).run._id : undefined;
       const logRunId = payloadRunId ?? docRunId ?? documentId!;
       runId = logRunId;
+      // Capture this attempt's startedAt so the error-path failure write can
+      // denormalize run.durationMs in a single $set (doc is out of scope there).
+      runStartedAt = (doc as any)?.run?.startedAt as Date | string | undefined;
 
       // Create log function for this document
       const log = async (
@@ -329,6 +334,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
           const errMsg = error instanceof Error ? error.message : String(error);
           const errorCode = (error as any)?.errorCode as string | undefined;
           if (runId) {
+            const finishedAt = new Date();
             const result = await withRetry(() => this.collection.updateOne(
               { _id: documentId, "run._id": runId, "run.status": "processing" } as any,
               {
@@ -337,7 +343,10 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
                   "run.outcome": "failed",
                   "run.error": errMsg,
                   ...(errorCode ? { "run.errorCode": errorCode } : {}),
-                  "run.finishedAt": new Date(),
+                  "run.finishedAt": finishedAt,
+                  // Denormalize run.durationMs in the same write (issue #1138).
+                  // No-ops when startedAt is unknown; the backfill covers misses.
+                  ...durationSetFields(runStartedAt, finishedAt),
                   "run.updatedAt": new Date(),
                   updatedAt: new Date(),
                 },

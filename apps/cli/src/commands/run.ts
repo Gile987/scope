@@ -414,10 +414,24 @@ run
   .command("list")
   .description("List all requests")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-  .option("-w, --worker <worker>", "Filter by worker")
+  .option("-w, --worker <worker...>", "Filter by worker (repeatable)")
+  .option("--status <status...>", "Filter by run status (repeatable; '__empty__' = unknown)")
+  .option("--outcome <outcome...>", "Filter by run outcome (repeatable; '__empty__' = unknown)")
+  .option("--task <taskPromptId>", "Filter by task prompt ID")
+  .option("--profile <id...>", "Filter by profile ID (repeatable; '__empty__' = unknown)")
+  .option("--criteria <id>", "Filter by criteria ID")
+  .option("--model <model...>", "Filter by model (repeatable; '__empty__' = unknown)")
+  .option("--os <platform...>", "Filter by OS platform (repeatable; '__empty__' = unknown)")
+  .option("--priority <priority...>", "Filter by priority (repeatable; '__empty__' = unknown)")
+  .option("--agent-version <version...>", "Filter by agent version (repeatable; '__empty__' = unknown)")
+  .option("--search <text>", "Free-text search over id, task, model, and worker")
+  .option("--created-after <iso>", "Only runs created at/after this ISO-8601 datetime")
+  .option("--created-before <iso>", "Only runs created at/before this ISO-8601 datetime")
   .option("--submission-id <id>", "Filter by submission ID")
   .option("--turns <expr>", "Filter by actual turns (e.g. '>=5', '<=10', '=3')")
   .option("--max-iterations <expr>", "Filter by configured maxIterations (e.g. '>=5', '<=10', '=3')")
+  .option("--sort-by <field>", "Sort field: created, updated, priority, worker, status, id, duration")
+  .option("--sort-dir <dir>", "Sort direction: asc or desc")
   .option("--include-deleted", "Include soft-deleted runs")
 )
   .action(async (options) => {
@@ -425,8 +439,33 @@ run
     try {
       let url = `${normalizeUrl(options.url)}/api/v1/requests`;
       const params = new URLSearchParams();
-      if (options.worker) {
-        params.set("worker", options.worker);
+      const appendMulti = (key: string, vals?: string[] | string) => {
+        if (vals == null) return;
+        const arr = Array.isArray(vals) ? vals : [vals];
+        for (const v of arr) params.append(key, String(v));
+      };
+      appendMulti("worker", options.worker);
+      appendMulti("status", options.status);
+      appendMulti("outcome", options.outcome);
+      appendMulti("profileId", options.profile);
+      appendMulti("model", options.model);
+      appendMulti("os", options.os);
+      appendMulti("priority", options.priority);
+      appendMulti("agentVersion", options.agentVersion);
+      if (options.task) {
+        params.set("taskPromptId", options.task);
+      }
+      if (options.criteria) {
+        params.set("criteria", options.criteria);
+      }
+      if (options.search) {
+        params.set("search", options.search);
+      }
+      if (options.createdAfter) {
+        params.set("createdAfter", options.createdAfter);
+      }
+      if (options.createdBefore) {
+        params.set("createdBefore", options.createdBefore);
       }
       if (options.submissionId) {
         params.set("submissionId", options.submissionId);
@@ -452,6 +491,12 @@ run
       }
       if (options.includeDeleted) {
         params.set("includeDeleted", "true");
+      }
+      if (options.sortBy) {
+        params.set("sortBy", options.sortBy);
+      }
+      if (options.sortDir) {
+        params.set("sortDir", options.sortDir);
       }
       const qs = params.toString();
       if (qs) url += `?${qs}`;
