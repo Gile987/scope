@@ -45,6 +45,7 @@ import {
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
+import { useDebounce } from "@/hooks/useDebounce";
 import { useModelCapabilities, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { formatDate, formatId, formatDuration, truncate, cn } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
@@ -584,7 +585,13 @@ export function RunsList() {
   // arrays — including the `__empty__`/"(Unknown)" sentinel — are forwarded as-is;
   // an empty array means "no filter" for that dimension.
   const asArray = (vals: string[]): string[] | undefined => (vals.length ? vals : undefined);
-  const searchValue = state.search.trim() || undefined;
+  // Debounce the free-text search that drives the runs + facets queries. Search
+  // is server-side now (issue #1138), so firing on every keystroke would issue a
+  // request (plus the 9-way facets fan-out) per character. The input stays bound
+  // to the immediate URL state below, so typing and the address bar stay
+  // responsive; only the data fetch waits for a ~300ms pause.
+  const debouncedSearch = useDebounce(state.search, 300);
+  const searchValue = debouncedSearch.trim() || undefined;
   // The Created filter is date-level; translate it to an inclusive server-side
   // createdAt range (start-of-day .. end-of-day) so it composes with pagination
   // instead of filtering the loaded page client-side.
