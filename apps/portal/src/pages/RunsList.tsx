@@ -2141,7 +2141,9 @@ export function RunsList() {
                     case "profile":
                       return run.profileId ?? "no-profile";
                     case "task":
-                      return run.taskPromptId ?? run.scenario?.task ?? "";
+                      // `taskPromptId` is always materialized server-side, so it
+                      // matches the server group key 1:1 (no raw-text fallback).
+                      return run.taskPromptId ?? "";
                     case "submissionId":
                       return run.submissionId ?? "no-submission";
                     default:
