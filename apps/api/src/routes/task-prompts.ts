@@ -122,6 +122,14 @@ apiRoute(ctx.app, ctx.registry, {
 
 // GET /api/v1/task-prompts/:id/content — get the resolved plain-text body
 // (inline or downloaded from blob). Used by workers to fetch AGENTS.md / task text.
+//
+// NOTE: This returns any prompt body by ID with no authorization check. That is
+// consistent with the rest of the API, which has no auth/tenancy model today
+// (see index.ts: just cors() + express.json()). Because prompts are globally
+// content-addressed and deduplicated via taskPromptStore.findOrCreate, this route
+// implicitly assumes a trusted-network, single-tenant deployment. If auth or
+// multi-tenancy is ever introduced, revisit this: the dedup store is NOT tenant-safe
+// and this endpoint would leak prompt bodies across tenants.
 apiRoute(ctx.app, ctx.registry, {
   method: "get",
   path: "/api/v1/task-prompts/:id/content",
