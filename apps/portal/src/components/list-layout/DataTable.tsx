@@ -92,6 +92,13 @@ export interface DataTableGrouping<T> {
    * expanded groups' members. Used for server-side grouping (issue #1138).
    */
   sectionKeys?: readonly string[];
+  /**
+   * Optional footer row rendered after an expanded section's loaded member rows.
+   * Used to surface a lazy-loading affordance (e.g. "Showing X of N" + Load more)
+   * when a group's members are paged in on demand (issue #1138). Return
+   * `null`/`undefined` to render no footer for a given section.
+   */
+  renderSectionFooter?: (groupKey: string, items: readonly T[]) => ReactNode;
 }
 
 export interface DataTableProps<T> {
@@ -635,6 +642,24 @@ export function DataTable<T>({
                       )}
                     </TableRow>
                     {expanded ? section.items.map((item) => renderDataRow(item)) : null}
+                    {expanded && grouping.renderSectionFooter
+                      ? (() => {
+                          const footer = grouping.renderSectionFooter(
+                            section.key,
+                            section.items,
+                          );
+                          return footer ? (
+                            <TableRow
+                              key={`group-footer-${section.key}`}
+                              className="bg-background hover:bg-background"
+                            >
+                              <TableCell colSpan={colSpan} className="p-0">
+                                {footer}
+                              </TableCell>
+                            </TableRow>
+                          ) : null;
+                        })()
+                      : null}
                   </Fragment>
                 );
               })
@@ -703,6 +728,9 @@ export function DataTable<T>({
                 <div key={`group-card-${section.key}`} className="flex flex-col gap-2">
                   {grouping.renderGroupHeader(section.key, section.items, expanded)}
                   {expanded ? section.items.map((item) => renderCard(item)) : null}
+                  {expanded && grouping.renderSectionFooter
+                    ? grouping.renderSectionFooter(section.key, section.items)
+                    : null}
                 </div>
               );
             })

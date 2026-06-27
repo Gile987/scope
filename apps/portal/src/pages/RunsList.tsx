@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useMemo, useState, useEffect, useCallback, Fragment, type Key, type ReactNode } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams, useSearchParams } from "react-router-dom";
 import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, ArrowUpDown, FileText, Download, Lock, Eye } from "lucide-react";
 import { FaLinux } from "react-icons/fa";
@@ -117,6 +117,12 @@ function dynamicFacetOptions(
   if (empty && empty.count > 0) out.push({ value: EMPTY_FILTER_VALUE, label: "(Unknown)", count: empty.count });
   return out;
 }
+
+/**
+ * Page size for lazily-loaded group member runs (issue #1138). The list API caps
+ * `limit` at 100, so larger groups are paged in via the cursor on "Load more".
+ */
+const GROUP_MEMBER_PAGE = 100;
 
 /**
  * Map a server group key (issue #1138 server-side grouping) to the extra
@@ -485,6 +491,9 @@ export function RunsList() {
   });
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(new Set());
+  // Per-group count of 100-row member pages to load (issue #1138 load-more).
+  // Absent key ⇒ 1 page; "Load more" bumps the entry, collapsing drops it.
+  const [groupMemberPages, setGroupMemberPages] = useState<Record<string, number>>({});
   
   // Get groupBy from URL state
   const groupBy = (state.getFilter("groupBy") ?? "none") as "none" | "profile" | "task" | "submissionId";
@@ -745,25 +754,43 @@ export function RunsList() {
     () => groupSectionKeys.filter((k) => expandedGroupKeys.has(k)),
     [groupSectionKeys, expandedGroupKeys],
   );
-  const expandedKeysKey = expandedKeyList.join("|");
-  const { data: groupMembersData } = useQuery({
+  const expandedKeysKey = expandedKeyList
+    .map((k) => `${k}:${groupMemberPages[k] ?? 1}`)
+    .join("|");
+  const { data: groupMembersData, isFetching: isMembersFetching } = useQuery({
     queryKey: ["group-members", groupBy, runFilterKey, sortBy, sortDir, expandedKeysKey],
     enabled: groupBy !== "none" && expandedKeyList.length > 0,
+    // Keep the already-loaded member rows visible while a "Load more" refetch runs.
+    placeholderData: keepPreviousData,
     queryFn: async () => {
       const gb = groupBy as "task" | "submissionId" | "profile";
       const entries = await Promise.all(
         expandedKeyList.map(async (key) => {
-          const resp = await api.listRuns({
-            ...runFilterArgs,
-            ...groupKeyExtraFilter(gb, key),
-            sortBy,
-            sortDir,
-            limit: 100,
-          });
-          return [key, resp.data] as const;
+          // Walk the list cursor up to the group's requested page count. The list
+          // API caps `limit` at 100, so members beyond the first page are reached
+          // by following `cursors.next` rather than a larger limit.
+          const pagesWanted = groupMemberPages[key] ?? 1;
+          const runs: Run[] = [];
+          let after: string | undefined;
+          let hasMore = false;
+          for (let page = 0; page < pagesWanted; page++) {
+            const resp = await api.listRuns({
+              ...runFilterArgs,
+              ...groupKeyExtraFilter(gb, key),
+              sortBy,
+              sortDir,
+              limit: GROUP_MEMBER_PAGE,
+              after,
+            });
+            runs.push(...resp.data);
+            after = resp.cursors?.next ?? undefined;
+            hasMore = Boolean(after);
+            if (!after) break;
+          }
+          return [key, { runs, hasMore }] as const;
         }),
       );
-      return Object.fromEntries(entries) as Record<string, Run[]>;
+      return Object.fromEntries(entries) as Record<string, { runs: Run[]; hasMore: boolean }>;
     },
     refetchInterval: 10_000,
   });
@@ -774,7 +801,7 @@ export function RunsList() {
   const groupedTableItems = useMemo(
     () =>
       serverGroups.flatMap((g) =>
-        expandedGroupKeys.has(g.key) ? (groupMembers[g.key] ?? []) : [],
+        expandedGroupKeys.has(g.key) ? (groupMembers[g.key]?.runs ?? []) : [],
       ),
     [serverGroups, expandedGroupKeys, groupMembers],
   );
@@ -976,7 +1003,26 @@ export function RunsList() {
       else next.add(groupKey);
       return next;
     });
+    // Reset the group's load-more depth when it is collapsed, so re-expanding it
+    // starts from the first page again.
+    setGroupMemberPages((prev) => {
+      if (!(groupKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[groupKey];
+      return next;
+    });
   }, []);
+
+  // Bump a group's loaded page count so the member query walks one more cursor page.
+  const loadMoreGroupMembers = useCallback((groupKey: string) => {
+    setGroupMemberPages((prev) => ({ ...prev, [groupKey]: (prev[groupKey] ?? 1) + 1 }));
+  }, []);
+
+  // Any change to the filter/sort/grouping invalidates the per-group load-more
+  // depth, so reset it to avoid re-fetching many pages against a new result set.
+  useEffect(() => {
+    setGroupMemberPages({});
+  }, [runFilterKey, sortBy, sortDir, groupBy]);
 
   const selectedRunsList = useMemo(
     () => allRuns.filter((r) => selectedIds.has(r._id)),
@@ -2139,6 +2185,35 @@ export function RunsList() {
                 sectionKeys: groupSectionKeys,
                 expandedGroupKeys,
                 onToggleGroup: toggleGroupExpansion,
+                renderSectionFooter: (groupKey, items) => {
+                  // Surface the lazy-load cap: the header shows the full-dataset
+                  // count, but only the loaded pages render. The member cursor's
+                  // `hasMore` is the authoritative "another page exists" signal
+                  // (the count comes from a separate aggregation and can be
+                  // transiently stale), so it gates the Load more button.
+                  const member = groupMembers[groupKey];
+                  if (!member?.hasMore) return null;
+                  const total = groupByKey.get(groupKey)?.aggregates?.count;
+                  const loaded = items.length;
+                  return (
+                    <div className="flex items-center gap-3 py-2 pl-9 pr-3 text-xs text-muted-foreground">
+                      <span>
+                        Showing {loaded}
+                        {total != null ? ` of ${total}` : ""}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        disabled={isMembersFetching}
+                        onClick={() => loadMoreGroupMembers(groupKey)}
+                      >
+                        {isMembersFetching ? "Loading…" : "Load more"}
+                      </Button>
+                    </div>
+                  );
+                },
                 renderGroupCell: (column, groupKey, runs, expanded) => {
                   const group = groupByKey.get(groupKey);
                   const agg = group?.aggregates;

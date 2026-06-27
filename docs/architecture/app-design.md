@@ -225,6 +225,12 @@ on `groupBy === "none"`, groups gated otherwise) and **lazily fetches each expan
 member runs** by passing the group key as an extra filter alongside all active filters. Group
 member runs reuse the flat `sortBy`/`sortDir`; group order stays deterministic by group key.
 
+Member runs are **cursor-paged** rather than capped: the list API limits `limit` to 100, so
+an expanded group fetches one 100-run page at a time and the group footer surfaces
+`Showing X of N` (N = the group's full-dataset `aggregates.count`) with a **Load more**
+button that walks `cursors.next` for one more page. Collapsing a group or changing the
+filter/sort/grouping resets a group's loaded depth back to the first page.
+
 ### Total count
 
 `estimatedTotal` is **filter-aware**: when a flat-list filter is active it uses
