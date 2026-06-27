@@ -41,10 +41,11 @@ Respond with ONLY a JSON object in this exact format (no markdown, no code fence
  * tool-output gates whose evidence is the captured command output + exit status.
  */
 const GATE_EVIDENCE: Partial<Record<GateId, string>> = {
+  select: "the codebase files the agent produced (its implementation)",
   build: "the captured output and exit status of the build/compile command",
   test: "the captured output and exit status of the test command",
   run: "the captured output of running or serving the app (startup logs, HTTP responses, exit status)",
-  deploy: "the captured output and exit status of the deploy command",
+  deploy: "the captured output and exit status of the deploy command, or the captured output of the deployed app",
 };
 
 /**
@@ -57,10 +58,11 @@ const GATE_EVIDENCE: Partial<Record<GateId, string>> = {
 function authorGateHint(gates?: GateId[]): string {
   if (!gates || gates.length === 0) return "";
   const toolEvidence = gates
+    .filter((g) => g !== "select")
     .map((g) => (GATE_EVIDENCE[g] ? `the ${g} gate (evidence: ${GATE_EVIDENCE[g]})` : null))
     .filter((x): x is string => x !== null);
   if (toolEvidence.length === 0) {
-    return "\n\nThis criterion targets the select gate (the agent's implementation); judge it from the codebase files the agent produced.";
+    return `\n\nThis criterion targets the select gate (evidence: ${GATE_EVIDENCE.select}); judge it from the codebase files the agent produced.`;
   }
   return `\n\nThis criterion targets ${toolEvidence.join(" and ")}. Phrase the evaluation prompt around that captured tool output and exit status rather than file inspection.`;
 }
