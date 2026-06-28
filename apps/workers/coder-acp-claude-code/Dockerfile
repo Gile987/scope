@@ -61,6 +61,15 @@ RUN apt-get update && apt-get install -y \
 
 ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
 
+# Disable Claude Code "policy skills" (auto-loaded, Anthropic-managed Agent Skills).
+# As of claude-agent-acp 0.52.0 / claude-agent-sdk 0.3.191 the bundled agent auto-invokes
+# a "claude-api" policy skill on ordinary coding prompts; its injected payload overflows the
+# context window available to Claude subscription OAuth tokens, so the turn fails with
+# "Internal error: Prompt is too long". Earlier agent versions never loaded it. Setting this
+# at the container level (so the worker, claude-agent-acp, and the bundled `claude` binary it
+# spawns all inherit it) restores the prior behavior and keeps benchmark runs reproducible.
+ENV CLAUDE_CODE_DISABLE_POLICY_SKILLS=1
+
 # --- Builder stage: compile TypeScript ---
 FROM base AS builder
 
