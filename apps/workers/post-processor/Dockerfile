@@ -15,7 +15,10 @@ COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
 COPY apps/workers/post-processor/tsconfig.json ./apps/workers/post-processor/
 COPY apps/workers/post-processor/src ./apps/workers/post-processor/src/
-COPY apps/workers/post-processor/handler.yaml ./apps/workers/post-processor/
+# Copy every handler manifest (handler.yaml = pp-atif, handler.taxonomy.yaml =
+# pp-taxonomy, plus any future handlers). The registration jobs read these by
+# HANDLER_YAML_PATH, so all must be present in the image.
+COPY apps/workers/post-processor/handler*.yaml ./apps/workers/post-processor/
 
 RUN pnpm --filter shared build && pnpm --filter post-processor build
 
@@ -44,7 +47,7 @@ RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder /app/apps/workers/post-processor/dist ./apps/workers/post-processor/dist/
-COPY --from=builder /app/apps/workers/post-processor/handler.yaml ./apps/workers/post-processor/handler.yaml
+COPY --from=builder /app/apps/workers/post-processor/handler*.yaml ./apps/workers/post-processor/
 
 WORKDIR /app/apps/workers/post-processor
 
