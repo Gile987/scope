@@ -962,7 +962,7 @@ export function RunDetail() {
           {hasVideoData && <TabsTrigger value="video"><Video className="h-3.5 w-3.5 mr-1" />Videos ({videoCount})</TabsTrigger>}
           {(hasConfiguredObservations || hasObservationResults) && (
             <TabsTrigger value="observations">
-              Observations {hasObservationResults ? `(${activeRun?.turns?.reduce((count, turn) => count + (turn.observationResults?.length ?? 0), 0) ?? 0})` : ""}
+              Taxonomy {hasObservationResults ? `(${activeRun?.turns?.reduce((count, turn) => count + (turn.observationResults?.length ?? 0), 0) ?? 0})` : ""}
             </TabsTrigger>
           )}
           <TabsTrigger value="logs">Logs</TabsTrigger>
@@ -1061,8 +1061,16 @@ export function RunDetail() {
         )}
 
         {(hasConfiguredObservations || hasObservationResults) && (
-          <TabsContent value="observations" className="mt-4">
-            <ObservationResultsPanel turns={activeRun?.turns} criteria={observationCriteria} />
+          <TabsContent value="observations" className="mt-4 space-y-6">
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-lg font-medium">Observations</h3>
+                <p className="text-sm text-muted-foreground">
+                  Per-iteration boolean observations recorded over the codebase and agent trajectory, grouped by taxonomy dimension. Non-gating — they never steer the agent.
+                </p>
+              </div>
+              <ObservationResultsPanel turns={activeRun?.turns} criteria={observationCriteria} />
+            </section>
           </TabsContent>
         )}
 
