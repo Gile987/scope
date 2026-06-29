@@ -253,9 +253,21 @@ No manual configuration is needed — just run `pnpm docker:dev:copilot` from an
 Worker containers mount the host Docker socket by default, enabling agents to run Docker commands during Build/Test gate scenarios. This is the local development equivalent of the kubedock sidecar used in Kubernetes.
 
 **How it works:**
-- The host's `/var/run/docker.sock` is mounted into the worker container
+- The host's Docker socket is mounted into the worker container
 - `DOCKER_HOST=unix:///var/run/docker.sock` is set automatically
-- The `node` user is granted socket access via `group_add: ["0"]`
+- The `node` user is granted socket access via `group_add`
+
+**Platform configuration:**
+
+| Platform | Configuration | Notes |
+|----------|--------------|-------|
+| Docker Desktop (macOS/Windows) | Works out of the box | Default socket path and GID 0 |
+| Docker Engine (Linux) | Set `DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)` | Socket GID varies by distro |
+| Podman (macOS) | Set `DOCKER_SOCK=/run/podman/podman.sock` | Socket path inside Podman VM |
+
+Environment variables (set in `.env` or inline):
+- `DOCKER_SOCK` — Path to Docker-compatible socket (default: `/var/run/docker.sock`)
+- `DOCKER_GID` — GID of the socket file for group access (default: `0`)
 
 **Example: Submit a gated run with Docker operations:**
 
