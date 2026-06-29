@@ -31,7 +31,21 @@ describe("TaxonomyHandler", () => {
   });
 
   it("no-ops when no observations are selected", async () => {
-    const ctx = makeCtx({ _id: "req-1", run: { observations: [], turns: [{ iteration: 1, snapshotUrl: "s://1" }] } });
+    const ctx = makeCtx({ _id: "req-1", observations: [], run: { turns: [{ iteration: 1, snapshotUrl: "s://1" }] } });
+    await new TaxonomyHandler(judge as unknown as JudgeClient).process(msg, ctx);
+    expect(judge.evaluate).not.toHaveBeenCalled();
+    expect(ctx.collection.updateOne).not.toHaveBeenCalled();
+  });
+
+  it("reads observations from the request top-level, not run.observations (#1156 regression)", async () => {
+    // The API persists selected observation ids at the request top-level
+    // (RequestDocument.observations). A doc that only carries the legacy
+    // run.observations must be treated as "none selected" → no-op, proving the
+    // handler reads the canonical location the submit path actually writes.
+    const ctx = makeCtx({
+      _id: "req-1",
+      run: { observations: ["dep_removed"], turns: [{ iteration: 1, snapshotUrl: "s://1", atifUrl: "a://1" }] },
+    });
     await new TaxonomyHandler(judge as unknown as JudgeClient).process(msg, ctx);
     expect(judge.evaluate).not.toHaveBeenCalled();
     expect(ctx.collection.updateOne).not.toHaveBeenCalled();
@@ -45,8 +59,8 @@ describe("TaxonomyHandler", () => {
     });
     const ctx = makeCtx({
       _id: "req-1",
+      observations: ["dep_removed"],
       run: {
-        observations: ["dep_removed"],
         turns: [{ iteration: 1, snapshotUrl: "s://1", atifUrl: "a://1" }],
       },
     });
@@ -67,14 +81,14 @@ describe("TaxonomyHandler", () => {
 
   it("skips iterations without a snapshotUrl", async () => {
     judge.evaluate.mockResolvedValue({ passed: true, feedback: "", criteriaResults: [] });
-    const ctx = makeCtx({ _id: "req-1", run: { observations: ["c1"], turns: [{ iteration: 1 }] } });
+    const ctx = makeCtx({ _id: "req-1", observations: ["c1"], run: { turns: [{ iteration: 1 }] } });
     await new TaxonomyHandler(judge as unknown as JudgeClient).process(msg, ctx);
     expect(judge.evaluate).not.toHaveBeenCalled();
   });
 
   it("throws on judge infrastructure error so the handler is marked failed", async () => {
     judge.evaluate.mockRejectedValue(new JudgeInfrastructureError("down", { httpStatus: 503 }));
-    const ctx = makeCtx({ _id: "req-1", run: { observations: ["c1"], turns: [{ iteration: 1, snapshotUrl: "s://1" }] } });
+    const ctx = makeCtx({ _id: "req-1", observations: ["c1"], run: { turns: [{ iteration: 1, snapshotUrl: "s://1" }] } });
     await expect(new TaxonomyHandler(judge as unknown as JudgeClient).process(msg, ctx)).rejects.toThrow("down");
   });
 });

@@ -5,11 +5,14 @@ import { JudgeClient, isRetryableJudgeError } from "shared";
 import type { ConversationTurn, CriterionResult } from "shared";
 import type { PostProcessHandler, PostProcessorMessage, HandlerContext } from "../types.js";
 
-/** Minimal shape of the run document fields this handler reads/writes. */
-interface RunDoc {
+/** Minimal shape of the request document fields this handler reads/writes. */
+interface RequestDoc {
+  /** Observation-criteria ids selected at submit. Stored at the request
+   *  top-level by the API (see RequestDocument.observations / issue #1156),
+   *  NOT under `run` — the run subdocument only carries per-turn results. */
+  observations?: string[];
   run?: {
     _id?: string;
-    observations?: string[];
     turns?: ConversationTurn[];
   };
 }
@@ -18,11 +21,11 @@ interface RunDoc {
  * Taxonomy Handler (pp-taxonomy): records per-iteration boolean observations.
  *
  * For each iteration turn with a `snapshotUrl`, reuses the judge service to
- * evaluate the run's selected observation criteria (`run.observations`) against
- * the codebase snapshot AND the agent trajectory (ATIF) — sending `atifUrl` in
- * place of `toolCallsUrl`. Results are written to `turn.observationResults`,
- * mirroring gate `criteriaResults`. Never gates, never steers the agent.
- * Empty/absent `observations` → no-op. See issue #1156.
+ * evaluate the run's selected observation criteria (top-level
+ * `request.observations`) against the codebase snapshot AND the agent
+ * trajectory (ATIF) — sending `atifUrl` in place of `toolCallsUrl`. Results are
+ * written to `turn.observationResults`, mirroring gate `criteriaResults`. Never
+ * gates, never steers the agent. Empty/absent `observations` → no-op. #1156.
  */
 export class TaxonomyHandler implements PostProcessHandler {
   readonly type = "taxonomy";
@@ -35,8 +38,8 @@ export class TaxonomyHandler implements PostProcessHandler {
   async process(message: PostProcessorMessage, ctx: HandlerContext): Promise<void> {
     const { requestId, iteration } = message;
 
-    const doc = (await ctx.collection.findOne({ _id: requestId } as any)) as RunDoc | null;
-    const observations = doc?.run?.observations ?? [];
+    const doc = (await ctx.collection.findOne({ _id: requestId } as any)) as RequestDoc | null;
+    const observations = doc?.observations ?? [];
     const turns = doc?.run?.turns ?? [];
 
     if (observations.length === 0) {
