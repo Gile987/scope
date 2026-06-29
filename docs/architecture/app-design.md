@@ -75,6 +75,14 @@ shared by two prompt kinds:
 - **Prompt features are typed the same way.** `PromptFeatureDocument.type?:
   'task' | 'agents.md'` (absent ⇒ `'task'`); feature extraction selects only
   features of the prompt's type.
+- **Server-side filtering + pagination.** `GET /api/v1/task-prompts` accepts
+  `search`, `type`, and `features` (CSV of feature ids) plus `limit`/`offset`.
+  `TaskPromptStore.getAll` builds one Mongo filter — `features` becomes
+  `$and: [{ features: { $elemMatch: { featureId, detected: true } } }, …]` (AND,
+  detected-only) — and pages via skip/limit, returning a server `total`. The portal
+  and CLI (`--feature` repeatable) pass these through; no client-side filtering. All
+  equality filters (`type`, `features.featureId`, `deletedAt`) have single-field
+  indexes (migration 024) so Cosmos intersects them; sort uses `createdAt:-1`.
 
 ### AGENTS.md delivery
 

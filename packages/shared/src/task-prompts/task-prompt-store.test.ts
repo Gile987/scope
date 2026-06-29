@@ -68,6 +68,7 @@ function createMockCollection() {
           const regex = new RegExp(filter.text.$regex, filter.text.$options);
           if (!regex.test(doc.text ?? "")) continue;
         }
+        if (!matchesFeatures(filter, doc)) continue;
         count++;
       }
       return count;
@@ -82,6 +83,7 @@ function createMockCollection() {
           const regex = new RegExp(filter.text.$regex, filter.text.$options);
           if (!regex.test(doc.text ?? "")) continue;
         }
+        if (!matchesFeatures(filter, doc)) continue;
         results.push({ ...doc });
       }
       return mockCursor(results);
@@ -108,6 +110,18 @@ function matchesType(filter: any, doc: TaskPromptDocument): boolean {
     return doc.type === cond;
   }
   return true;
+}
+
+/** Replicates the store's `$and` of `features.$elemMatch{featureId,detected}` filter. */
+function matchesFeatures(filter: any, doc: TaskPromptDocument): boolean {
+  if (!Array.isArray(filter.$and)) return true;
+  return filter.$and.every((clause: any) => {
+    const em = clause.features?.$elemMatch;
+    if (!em) return true;
+    return (doc.features ?? []).some(
+      (f) => f.featureId === em.featureId && f.detected === em.detected,
+    );
+  });
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -352,6 +366,52 @@ describe("TaskPromptStore", () => {
       const { items, total } = await store.getAll({ type: "agents.md" });
       expect(total).toBe(1);
       expect(items[0].text).toBe("an agents file");
+    });
+
+    it("filters by a single detected feature", async () => {
+      const a = await store.findOrCreate("has node");
+      await store.attachFeatures(a._id, [{ featureId: "has_node", detected: true, evaluated: true }]);
+      const b = await store.findOrCreate("no node");
+      await store.attachFeatures(b._id, [{ featureId: "has_node", detected: false, evaluated: true }]);
+
+      const { items, total } = await store.getAll({ features: ["has_node"] });
+      expect(total).toBe(1);
+      expect(items[0].text).toBe("has node");
+    });
+
+    it("requires ALL features detected (AND semantics)", async () => {
+      const both = await store.findOrCreate("node and react");
+      await store.attachFeatures(both._id, [
+        { featureId: "has_node", detected: true, evaluated: true },
+        { featureId: "has_react", detected: true, evaluated: true },
+      ]);
+      const nodeOnly = await store.findOrCreate("node only");
+      await store.attachFeatures(nodeOnly._id, [
+        { featureId: "has_node", detected: true, evaluated: true },
+        { featureId: "has_react", detected: false, evaluated: true },
+      ]);
+
+      const { items, total } = await store.getAll({ features: ["has_node", "has_react"] });
+      expect(total).toBe(1);
+      expect(items[0].text).toBe("node and react");
+    });
+
+    it("ignores prompts where the feature is evaluated but not detected", async () => {
+      const a = await store.findOrCreate("not detected");
+      await store.attachFeatures(a._id, [{ featureId: "has_node", detected: false, evaluated: true }]);
+      const { total } = await store.getAll({ features: ["has_node"] });
+      expect(total).toBe(0);
+    });
+
+    it("combines type, search and features", async () => {
+      const a = await store.findOrCreate("Azure node deployment", "agents.md");
+      await store.attachFeatures(a._id, [{ featureId: "has_node", detected: true, evaluated: true }]);
+      const b = await store.findOrCreate("Azure react deployment", "agents.md");
+      await store.attachFeatures(b._id, [{ featureId: "has_node", detected: false, evaluated: true }]);
+
+      const { items, total } = await store.getAll({ type: "agents.md", search: "azure", features: ["has_node"] });
+      expect(total).toBe(1);
+      expect(items[0].text).toBe("Azure node deployment");
     });
   });
 

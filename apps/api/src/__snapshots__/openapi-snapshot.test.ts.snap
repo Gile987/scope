@@ -9500,6 +9500,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "$ref": "#/components/schemas/PromptType",
             },
           },
+          {
+            "in": "query",
+            "name": "features",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {

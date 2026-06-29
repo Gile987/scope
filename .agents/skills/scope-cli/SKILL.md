@@ -135,6 +135,8 @@ In order to get the full updated reference, run `pnpm cli --help` or `pnpm cli <
 |--------|---------|
 | List task prompts | `pnpm cli task-prompt list` |
 | Search prompts | `pnpm cli task-prompt list -s "search text"` |
+| Filter by type | `pnpm cli task-prompt list --type agents.md` |
+| Filter by feature (AND, repeatable) | `pnpm cli task-prompt list --feature <id> --feature <id>` |
 | Get prompt | `pnpm cli task-prompt get -i <uuid>` |
 | Create prompt | `pnpm cli task-prompt create -t "prompt text"` |
 | Create from file | `pnpm cli task-prompt create -f <path>` |

@@ -149,16 +149,24 @@ export class TaskPromptStore {
 
   /**
    * List active (non-deleted) task prompts.
-   * Supports pagination, optional substring search on text, and an optional
-   * `type` filter. Pass a `type` (e.g. `'select'` or `'agents.md'`) to scope the
-   * list to a single type. With no `type`, all prompt types are returned — gate
-   * prompts, non-gate types such as `agents.md`, and legacy untyped docs.
+   * Supports pagination, optional substring search on text, an optional
+   * `type` filter, and an optional `features` filter. Pass a `type` (e.g.
+   * `'select'` or `'agents.md'`) to scope the list to a single type. With no
+   * `type`, all prompt types are returned — gate prompts, non-gate types such as
+   * `agents.md`, and legacy untyped docs.
+   *
+   * `features` matches prompts where **every** listed feature id is present and
+   * `detected`. Each id becomes its own `$elemMatch` so AND semantics hold (a
+   * single `$elemMatch` with `$in` would be OR). Filtering and pagination both
+   * run in MongoDB/CosmosDB; single-field indexes on `type`, `features.featureId`
+   * and `deletedAt` let Cosmos intersect the equality filters.
    */
   async getAll(opts?: {
     limit?: number;
     offset?: number;
     search?: string;
     type?: PromptType;
+    features?: string[];
   }): Promise<{ items: TaskPromptDocument[]; total: number }> {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
 
@@ -167,6 +175,11 @@ export class TaskPromptStore {
     }
     if (opts?.type) {
       filter.type = opts.type;
+    }
+    if (opts?.features && opts.features.length > 0) {
+      filter.$and = opts.features.map((featureId) => ({
+        features: { $elemMatch: { featureId, detected: true } },
+      }));
     }
 
     const total = await this.collection.countDocuments(filter);

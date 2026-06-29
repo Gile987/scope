@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useMemo, useState, useCallback, type Key } from "react";
+import { useState, useCallback, type Key } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -46,7 +46,7 @@ import {
 import { HelpTooltip } from "@/components/HelpTooltip";
 
 const DIALOG_STEPS = ["Task Text", "Features"];
-const FILTER_KEYS = ["type"] as const;
+const FILTER_KEYS = ["type", "features"] as const;
 
 const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "id", label: "ID", required: true },
@@ -76,13 +76,27 @@ export function TaskPromptList() {
 
   const selectedTypes = state.getFilterList("type") as PromptType[];
   const typeFilter = selectedTypes.length === 1 ? selectedTypes[0] : undefined;
+  const selectedFeatures = state.getFilterList("features");
+
+  const { data: allPromptFeatures = [] } = useQuery({
+    queryKey: ["prompt-features"],
+    queryFn: () => api.listPromptFeatures(),
+  });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["task-prompts", state.search, typeFilter],
-    queryFn: () => api.listTaskPrompts({ search: state.search || undefined, type: typeFilter }),
+    queryKey: ["task-prompts", state.search, typeFilter, selectedFeatures, state.page, state.pageSize],
+    queryFn: () =>
+      api.listTaskPrompts({
+        search: state.search || undefined,
+        type: typeFilter,
+        features: selectedFeatures.length ? selectedFeatures : undefined,
+        limit: state.pageSize,
+        offset: (state.page - 1) * state.pageSize,
+      }),
   });
 
   const items = data?.items ?? [];
+  const total = data?.total ?? 0;
 
   const deleteMutation = useMutation({
     mutationFn: api.deleteTaskPrompt,
@@ -120,23 +134,7 @@ export function TaskPromptList() {
     createMutation.reset();
   };
 
-  const sortedItems = useMemo(() => {
-    if (!state.sort) return items;
-    const sorted = [...items];
-    sorted.sort((a, b) => {
-      const av = sortKey(a, state.sort!);
-      const bv = sortKey(b, state.sort!);
-      if (av < bv) return -1;
-      if (av > bv) return 1;
-      return 0;
-    });
-    if (state.sortDir === "desc") sorted.reverse();
-    return sorted;
-  }, [items, state.sort, state.sortDir]);
-
-  const total = sortedItems.length;
-  const pageStart = (state.page - 1) * state.pageSize;
-  const pageItems = sortedItems.slice(pageStart, pageStart + state.pageSize);
+  const pageItems = items;
 
   const toggleRow = useCallback((id: Key) => {
     setSelectedIds((prev) => {
@@ -162,7 +160,6 @@ export function TaskPromptList() {
     {
       id: "id",
       header: "ID",
-      sortable: true,
       width: "140px",
       hidden: visibility.isHidden("id"),
       cell: (tp) => (
@@ -208,7 +205,6 @@ export function TaskPromptList() {
     {
       id: "created",
       header: "Created",
-      sortable: true,
       width: "160px",
       hidden: visibility.isHidden("created"),
       cell: (tp) => (
@@ -408,6 +404,13 @@ export function TaskPromptList() {
               onToggle={(value) => state.setFilter("type", selectedTypes.includes(value as PromptType) ? [] : [value])}
             />
           </FilterSection>
+          <FilterSection title="Features" defaultOpen>
+            <CheckboxFilterGroup
+              options={allPromptFeatures.map((f) => ({ value: f.id, label: f.id }))}
+              selected={selectedFeatures}
+              onToggle={(value) => state.toggleFilterValue("features", value)}
+            />
+          </FilterSection>
         </FilterRail>
       }
       secondaryPanel={
@@ -458,14 +461,11 @@ export function TaskPromptList() {
             onToggle: toggleRow,
             onToggleAll: toggleAll,
           }}
-          sort={state.sort}
-          sortDir={state.sortDir}
-          onSortChange={state.toggleSort}
           loading={isLoading}
           loadingRows={state.pageSize}
           emptyState={
-            state.search
-              ? "No task prompts match your search"
+            state.hasActiveFilters
+              ? "No task prompts match your filters"
               : "No task prompts registered yet"
           }
         />
@@ -505,15 +505,4 @@ export function TaskPromptList() {
       </AlertDialog>
     </ListLayout>
   );
-}
-
-function sortKey(a: TaskPrompt, col: string): string | number {
-  switch (col) {
-    case "id":
-      return a._id;
-    case "created":
-      return new Date(a.createdAt).getTime();
-    default:
-      return "";
-  }
 }
