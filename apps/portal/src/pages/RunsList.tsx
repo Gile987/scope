@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
+import { TaskPromptBadge } from "@/components/TaskPromptBadge";
 import {
   ListLayout,
   FilterRail,
@@ -1293,14 +1294,11 @@ export function RunsList() {
       hidden: columnVisibility.isHidden("task"),
       cell: (r) =>
         r.scenario?.task ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="text-sm cursor-default">{truncate(r.scenario.task, 60)}</span>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-sm whitespace-pre-wrap text-xs">
-              {r.scenario.task}
-            </TooltipContent>
-          </Tooltip>
+          <TaskPromptBadge taskPromptId={r.taskPromptId} className="block truncate">
+            <span className="text-sm cursor-pointer hover:underline">
+              {truncate(r.scenario.task, 60)}
+            </span>
+          </TaskPromptBadge>
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
         ),

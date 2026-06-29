@@ -306,6 +306,33 @@ Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API su
 
 The Portal desktop shell uses a persistent left navigation sidebar. It defaults to the compact icon rail, and users can expand it to show navigation labels; the choice is stored in `localStorage` under `scope:layout:sidebar-expanded`. Mobile navigation remains a sheet-based menu with labels always visible.
 
+### Hover-preview + navigate badges
+
+Criteria and task prompts appear across many surfaces (Run Detail, Runs list, Statistics,
+Criteria list/graph, Task Prompt list, report-template triggers). Wherever one is shown, two
+reusable badge components provide a consistent **hover-to-preview + click-to-navigate** affordance:
+
+| Component | Entity | Links to | Hover preview |
+|-----------|--------|----------|---------------|
+| `components/CriteriaBadge.tsx` | Criterion | `/criteria/:id` | Criterion prompt snippet |
+| `components/TaskPromptBadge.tsx` | Task prompt (any type) | `/task-prompts/:id` | Type label, text snippet, feature count, created date |
+
+Both follow the same rules:
+
+- **Self-contained tooltip.** Each wraps its trigger in a Radix `Tooltip` (a local
+  `TooltipProvider`, mirroring `StatusBadge`) and a React Router `Link`. The link calls
+  `e.stopPropagation()` so a badge inside a clickable table row navigates to the detail page
+  without also firing the row's `onRowClick`.
+- **No request fan-out.** Callers that already have the object/text pass it via props
+  (`prompt`) and **no** request fires. Otherwise the entity is fetched lazily via React Query
+  **only when the tooltip opens** (gated on an internal `open` state), so dense lists never
+  issue one request per row on mount. Blob-backed task prompts (no inline `text`) additionally
+  lazy-load their body via `getTaskPromptContent` on open.
+- **`TaskPromptBadge` is type-agnostic.** Gate prompts (`select`/`build`/`test`/`run`/`deploy`),
+  `agents.md`, and legacy untyped prompts all render the same hover + the same
+  `/task-prompts/:id` navigation; only the human label differs (via `promptTypeLabel`). It also
+  renders content plainly (no link/tooltip) when no `taskPromptId` is available.
+
 ## Criteria System
 
 Criteria are reusable evaluation rules stored in the database and optionally defined in `config/criteria/*.yaml`. They support:

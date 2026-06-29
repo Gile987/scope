@@ -35,6 +35,7 @@ import {
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
 import { HelpTooltip } from "@/components/HelpTooltip";
+import { CriteriaBadge } from "@/components/CriteriaBadge";
 
 const FILTER_KEYS = ["gate"] as const;
 
@@ -148,7 +149,7 @@ export function CriteriaList() {
       width: "200px",
       hidden: visibility.isHidden("id"),
       cell: (c) => (
-        <span className="font-mono text-sm font-medium">{c.id}</span>
+        <CriteriaBadge criterionId={c.id} prompt={c.prompt} />
       ),
     },
     {
