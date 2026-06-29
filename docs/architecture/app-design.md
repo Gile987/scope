@@ -308,8 +308,9 @@ The Portal desktop shell uses a persistent left navigation sidebar. It defaults 
 
 ### Hover-preview + navigate badges
 
-Criteria and task prompts appear across many surfaces (Run Detail, Runs list, Statistics,
-Criteria list/graph, Task Prompt list, report-template triggers). Wherever one is shown, two
+Criteria and task prompts appear across many surfaces (Run Detail, Runs list and its
+right-hand preview panel, Statistics, Criteria list/graph, Task Prompt list,
+report-template triggers). Wherever one is shown, two
 reusable badge components provide a consistent **hover-to-preview + click-to-navigate** affordance:
 
 | Component | Entity | Links to | Hover preview |
