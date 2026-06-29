@@ -160,6 +160,10 @@ bypassed or drift between callers:
 - **Gate-compatibility invariant** — enforced from both sides: a child's gates must
   be a subset of every parent's gates, and narrowing a parent may not strand an
   existing dependent.
+- **Same-kind dependency partition** — a criterion's `dependsOn` may only reference
+  criteria of the same `kind`. This keeps the gate DAG closed under
+  `resolveWithAncestors` (observations never leak into a gate's evaluation set) and
+  lets `kind:"observation"` criteria form their own optional dependency chains.
 - **Referential integrity on delete** — deleting a criterion that still has
   dependents is rejected.
 

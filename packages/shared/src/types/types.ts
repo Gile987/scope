@@ -63,6 +63,42 @@ export function isGateId(value: unknown): value is GateId {
 }
 
 /**
+ * Discriminator for what a criterion is used for. `"gate"` (default) gates the
+ * coding-agent session via the DAG; `"observation"` is record-only — it produces
+ * a per-iteration boolean + evidence and never feeds back, never pass/fails a
+ * gate, and never enters the gate DAG. See issue #1156.
+ */
+export type CriterionKind = "gate" | "observation";
+
+/** The hard-coded set of criterion kinds. */
+export const CRITERION_KINDS = ["gate", "observation"] as const;
+
+/** True when `value` is a valid criterion kind. */
+export function isCriterionKind(value: unknown): value is CriterionKind {
+  return typeof value === "string" && (CRITERION_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Hard-coded taxonomy elements for observation criteria — the three quality
+ * dimensions from the R&A Readout design. Gates (select/build/test/run/deploy)
+ * are excluded as they live in the criterion `gates` field. Namespaced ids keep
+ * a future first-class taxonomy a clean migration. See issue #1156.
+ */
+export const TAXONOMY_ELEMENT_IDS = [
+  "dimension:idiomatic-use",
+  "dimension:dependency-currency",
+  "dimension:configuration-correctness",
+] as const;
+
+/** A single taxonomy element id. */
+export type TaxonomyElementId = (typeof TAXONOMY_ELEMENT_IDS)[number];
+
+/** True when `value` is a valid taxonomy element id. */
+export function isTaxonomyElementId(value: unknown): value is TaxonomyElementId {
+  return typeof value === "string" && (TAXONOMY_ELEMENT_IDS as readonly string[]).includes(value);
+}
+
+/**
  * A prompt's type discriminator — one literal per gate. The prompt that drives
  * a gate must have a `type` equal to that gate's id.
  */
@@ -132,6 +168,10 @@ export interface ConversationTurn {
   passed: boolean;
   timestamp: Date;
   criteriaResults?: CriterionResult[];  // Per-criterion breakdown from DAG evaluation
+  /** Per-iteration observation results (kind:"observation" criteria), recorded
+   *  by the pp-taxonomy post-processor. Same shape as criteriaResults but never
+   *  gates the agent. Empty/absent when no observations were selected. #1156. */
+  observationResults?: CriterionResult[];
   harUrl?: string;         // Blob storage URL to the HAR file for this turn
   videoUrls?: string[];    // Blob storage URLs to session recording videos for this turn
   tokenUsage?: TokenUsage;  // LLM token usage for this iteration
@@ -284,6 +324,13 @@ export interface RequestDocument {
    * docs/design/gates.md §4.3). Gates run in `GATE_ORDER`.
    */
   gates?: GateConfig[];
+  /**
+   * Observation-criteria ids (kind:"observation") selected at submit. The
+   * pp-taxonomy post-processor evaluates exactly this set after the run
+   * completes and writes per-turn `observationResults`. Empty/absent = none.
+   * See issue #1156.
+   */
+  observations?: string[];
   /**
    * Per-gate execution summary, populated as the run progresses. Derived
    * from `run.turns` but stored explicitly for cheap querying.
@@ -597,6 +644,13 @@ export interface CriteriaConfig {
    *  (applies only to NEW criteria; legacy rows are backfilled to ["select"]
    *  by migration 018). See docs/design/gates.md §4.2. */
   gates?: GateId[];
+  /** Whether this criterion gates the agent or is a record-only observation.
+   *  Default "gate" applied at store/schema layer; legacy rows backfilled to
+   *  "gate" by migration. See issue #1156. */
+  kind?: CriterionKind;
+  /** Design-time classification under a hard-coded taxonomy element. Only set
+   *  on observation criteria. Static — never stored per run. See issue #1156. */
+  taxonomyElementId?: TaxonomyElementId;
 }
 
 // Per-criterion result from judge evaluation

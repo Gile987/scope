@@ -31,6 +31,7 @@
 | **coder-acp-copilot** | GitHub Copilot agent worker (ACP SDK) |
 | **coder-acp-claude-code** | Claude Code agent worker (ACP SDK) |
 | **report-generator** | Post-run evaluation report generator (Copilot SDK) |
+| **post-processor** | DAG post-run handlers: `pp-atif` (ATIF trajectory) + `pp-taxonomy` (boolean observations via judge) |
 | **model-scanners** | Feature detection for Copilot and Anthropic models |
 | **version-checkers** | Poll for new releases of agents/tools (`acp-copilot`, `claude-code`, `vscode-electron`) |
 

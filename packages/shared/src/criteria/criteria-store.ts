@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import { CriteriaConfig, CriteriaDocument, GateId } from '../types/types.js';
+import { CriteriaConfig, CriteriaDocument, CriterionKind, GateId, TaxonomyElementId } from '../types/types.js';
 import { DependencyGraph } from '../graph/dependency-graph.js';
 import { gatesSatisfyInvariant } from '../gates/gates.js';
 import {
@@ -40,13 +40,23 @@ export class CriteriaStore {
     prompt: string;
     dependsOn?: string[];
     gates?: GateId[];
+    kind?: CriterionKind;
+    taxonomyElementId?: TaxonomyElementId;
   }): Promise<CriteriaDocument> {
-    const { id, prompt, dependsOn = [], gates } = input;
+    const { id, prompt, dependsOn = [], gates, taxonomyElementId } = input;
+    const kind: CriterionKind = input.kind ?? 'gate';
 
     // Validate ID format
     if (!/^[a-z][a-z0-9_]*$/.test(id)) {
       throw new CriteriaValidationError(
         `Invalid criteria ID '${id}'. Must match [a-z][a-z0-9_]*`
+      );
+    }
+
+    // taxonomyElementId only applies to observation criteria.
+    if (taxonomyElementId !== undefined && kind !== 'observation') {
+      throw new CriteriaValidationError(
+        `taxonomyElementId can only be set on observation criteria (got kind '${kind}')`
       );
     }
 
@@ -72,6 +82,11 @@ export class CriteriaStore {
       await this.validateNoCycles(id, dependsOn);
     }
 
+    // Validate same-kind dependencies (gate↔gate, observation↔observation).
+    if (dependsOn.length > 0) {
+      await this.validateSameKindDependencies(id, dependsOn, kind);
+    }
+
     // Validate the downward-closed gate-compatibility invariant.
     await this.validateGateCompatibility(id, dependsOn, gates);
 
@@ -80,6 +95,8 @@ export class CriteriaStore {
       prompt: prompt.trim(),
       dependsOn,
       ...(gates !== undefined && { gates }),
+      kind,
+      ...(taxonomyElementId !== undefined && { taxonomyElementId }),
       createdAt: new Date(),
     };
 
@@ -121,7 +138,7 @@ export class CriteriaStore {
   /** Update a criterion's prompt, dependencies and/or gate compatibility */
   async update(
     id: string,
-    patch: { prompt?: string; dependsOn?: string[]; gates?: GateId[] }
+    patch: { prompt?: string; dependsOn?: string[]; gates?: GateId[]; kind?: CriterionKind; taxonomyElementId?: TaxonomyElementId }
   ): Promise<CriteriaDocument> {
     const existing = await this.get(id);
     if (!existing) {
@@ -147,10 +164,28 @@ export class CriteriaStore {
       await this.validateDependentsRemainCompatible(id, effectiveGates);
     }
 
+    // Validate same-kind dependencies against the resulting kind + dependsOn.
+    const effectiveKind: CriterionKind = patch.kind ?? existing.kind ?? 'gate';
+    const resultingDependsOn = patch.dependsOn ?? existing.dependsOn ?? [];
+    if (resultingDependsOn.length > 0) {
+      await this.validateSameKindDependencies(id, resultingDependsOn, effectiveKind);
+    }
+
+    // taxonomyElementId only applies to observation criteria.
+    const effectiveTaxonomy =
+      patch.taxonomyElementId !== undefined ? patch.taxonomyElementId : existing.taxonomyElementId;
+    if (effectiveTaxonomy !== undefined && effectiveKind !== 'observation') {
+      throw new CriteriaValidationError(
+        `taxonomyElementId can only be set on observation criteria (got kind '${effectiveKind}')`
+      );
+    }
+
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (patch.prompt !== undefined) update.prompt = patch.prompt.trim();
     if (patch.dependsOn !== undefined) update.dependsOn = patch.dependsOn;
     if (patch.gates !== undefined) update.gates = patch.gates;
+    if (patch.kind !== undefined) update.kind = patch.kind;
+    if (patch.taxonomyElementId !== undefined) update.taxonomyElementId = patch.taxonomyElementId;
 
     await this.collection.updateOne(
       { id, deletedAt: { $exists: false } },
@@ -213,7 +248,14 @@ export class CriteriaStore {
         );
       }
 
-      collected.set(id, { id: doc.id, prompt: doc.prompt, dependsOn: doc.dependsOn, ...(doc.gates !== undefined && { gates: doc.gates }) });
+      collected.set(id, {
+        id: doc.id,
+        prompt: doc.prompt,
+        dependsOn: doc.dependsOn,
+        ...(doc.gates !== undefined && { gates: doc.gates }),
+        ...(doc.kind !== undefined && { kind: doc.kind }),
+        ...(doc.taxonomyElementId !== undefined && { taxonomyElementId: doc.taxonomyElementId }),
+      });
 
       if (doc.dependsOn) {
         for (const parentId of doc.dependsOn) {
@@ -240,6 +282,8 @@ export class CriteriaStore {
       prompt: c.prompt,
       dependsOn: c.dependsOn,
       ...(c.gates !== undefined && { gates: c.gates }),
+      ...(c.kind !== undefined && { kind: c.kind }),
+      ...(c.taxonomyElementId !== undefined && { taxonomyElementId: c.taxonomyElementId }),
     }));
 
     const edges: { from: string; to: string }[] = [];
@@ -268,6 +312,8 @@ export class CriteriaStore {
           prompt: config.prompt,
           dependsOn: config.dependsOn || [],
           ...(config.gates !== undefined && { gates: config.gates }),
+          kind: config.kind ?? 'gate',
+          ...(config.taxonomyElementId !== undefined && { taxonomyElementId: config.taxonomyElementId }),
           createdAt: new Date(),
         } as any);
         inserted++;
@@ -286,6 +332,52 @@ export class CriteriaStore {
         throw new CriteriaValidationError(`Dependency '${depId}' does not exist`);
       }
     }
+  }
+
+  /**
+   * Validate that every dependency shares the criterion's kind. Keeps the gate
+   * DAG closed under resolveWithAncestors and lets observation criteria form
+   * their own dependency chains. Missing parents are caught by
+   * validateDependencies, so they are skipped here. See issue #1156.
+   */
+  private async validateSameKindDependencies(
+    criterionId: string,
+    dependsOn: string[],
+    kind: CriterionKind,
+  ): Promise<void> {
+    for (const parentId of dependsOn) {
+      const parent = await this.get(parentId);
+      if (!parent) continue;
+      const parentKind = parent.kind ?? 'gate';
+      if (parentKind !== kind) {
+        throw new CriteriaValidationError(
+          `'${criterionId}' (kind '${kind}') cannot depend on '${parentId}' (kind '${parentKind}'). ` +
+            `A criterion may only depend on same-kind criteria.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Resolve observation-criteria ids, asserting each is an active
+   * kind:"observation" criterion. Used by submit validation + pp-taxonomy.
+   * Throws CriteriaValidationError on a missing or non-observation id.
+   */
+  async resolveObservations(ids: string[]): Promise<CriteriaDocument[]> {
+    const resolved: CriteriaDocument[] = [];
+    for (const id of ids) {
+      const doc = await this.get(id);
+      if (!doc) {
+        throw new CriteriaValidationError(`Observation criterion '${id}' does not exist`);
+      }
+      if ((doc.kind ?? 'gate') !== 'observation') {
+        throw new CriteriaValidationError(
+          `Criterion '${id}' is not an observation (kind '${doc.kind ?? 'gate'}')`
+        );
+      }
+      resolved.push(doc);
+    }
+    return resolved;
   }
 
   /** Validate that adding edges would not introduce a cycle */

@@ -512,6 +512,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "judgeFeedback": {
             "type": "string",
           },
+          "observationResults": {
+            "items": {
+              "$ref": "#/components/schemas/CriterionResult",
+            },
+            "type": "array",
+          },
           "passed": {
             "type": "boolean",
           },
@@ -653,7 +659,23 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "pattern": "^[a-z][a-z0-9_]*$",
             "type": "string",
           },
+          "kind": {
+            "default": "gate",
+            "enum": [
+              "gate",
+              "observation",
+            ],
+            "type": "string",
+          },
           "prompt": {
+            "type": "string",
+          },
+          "taxonomyElementId": {
+            "enum": [
+              "dimension:idiomatic-use",
+              "dimension:dependency-currency",
+              "dimension:configuration-correctness",
+            ],
             "type": "string",
           },
         },
@@ -873,6 +895,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "model": {
             "type": "string",
           },
+          "observations": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
           "persona": {
             "$ref": "#/components/schemas/Persona",
           },
@@ -1020,7 +1048,22 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "id": {
             "type": "string",
           },
+          "kind": {
+            "enum": [
+              "gate",
+              "observation",
+            ],
+            "type": "string",
+          },
           "prompt": {
+            "type": "string",
+          },
+          "taxonomyElementId": {
+            "enum": [
+              "dimension:idiomatic-use",
+              "dimension:dependency-currency",
+              "dimension:configuration-correctness",
+            ],
             "type": "string",
           },
         },
@@ -1068,7 +1111,22 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "id": {
             "type": "string",
           },
+          "kind": {
+            "enum": [
+              "gate",
+              "observation",
+            ],
+            "type": "string",
+          },
           "prompt": {
+            "type": "string",
+          },
+          "taxonomyElementId": {
+            "enum": [
+              "dimension:idiomatic-use",
+              "dimension:dependency-currency",
+              "dimension:configuration-correctness",
+            ],
             "type": "string",
           },
           "updatedAt": {
@@ -2430,6 +2488,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "model": {
             "type": "string",
           },
+          "observations": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
           "persona": {
             "$ref": "#/components/schemas/Persona",
           },
@@ -3087,7 +3151,22 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "kind": {
+            "enum": [
+              "gate",
+              "observation",
+            ],
+            "type": "string",
+          },
           "prompt": {
+            "type": "string",
+          },
+          "taxonomyElementId": {
+            "enum": [
+              "dimension:idiomatic-use",
+              "dimension:dependency-currency",
+              "dimension:configuration-correctness",
+            ],
             "type": "string",
           },
         },
@@ -4128,6 +4207,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "enum": [
                 "true",
                 "false",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "description": "Filter by criterion kind",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "description": "Filter by criterion kind",
+              "enum": [
+                "gate",
+                "observation",
               ],
               "type": "string",
             },

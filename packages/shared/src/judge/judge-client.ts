@@ -17,6 +17,10 @@ export interface JudgeEvaluateRequest {
   gate?: GateId;
   /** Blob URL of this iteration's captured tool calls/outputs (build/test/run output). */
   toolCallsUrl?: string;
+  /** Blob URL of this iteration's ATIF trajectory JSON. Normalized superset of
+   *  tool calls; sent by pp-taxonomy in place of toolCallsUrl so observations
+   *  can be evaluated against the full agent trajectory. See issue #1156. */
+  atifUrl?: string;
 }
 
 /**

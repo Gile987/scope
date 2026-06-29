@@ -70,6 +70,7 @@ export const ConversationTurnSchema = z
     passed: z.boolean(),
     timestamp: z.coerce.date(),
     criteriaResults: z.array(CriterionResultSchema).optional(),
+    observationResults: z.array(CriterionResultSchema).optional(),
     harUrl: z.string().optional(),
     videoUrls: z.array(z.string()).optional(),
     tokenUsage: TokenUsageSchema.optional(),
@@ -130,6 +131,7 @@ export const CreateRequestInputSchema = z
     profileVariations: z.array(z.string()).optional(),
     priority: z.number().int().optional(),
     gates: z.array(GateConfigSchema).optional(),
+    observations: z.array(z.string()).optional(),
   })
   .openapi("CreateRequestInput");
 
@@ -157,6 +159,7 @@ export const RequestResponseSchema = z
     submissionId: z.string().optional(),
     priority: z.number().int().default(0),
     gates: z.array(GateConfigSchema).optional(),
+    observations: z.array(z.string()).optional(),
     gateSummaries: z.array(GateRunSummarySchema).optional(),
     // Per-attempt state lives in the run sub-document.
     run: z

@@ -5,7 +5,7 @@
  * Action handler for `run get` subcommand — extracted for testability.
  */
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon } from "./utils/style.js";
-import { GATE_METADATA, GATE_ORDER, type ConversationTurn, type GateId, type GateRunSummary, type RequestDocument } from "shared";
+import { GATE_METADATA, GATE_ORDER, TAXONOMY_ELEMENT_METADATA, type ConversationTurn, type GateId, type GateRunSummary, type RequestDocument, type TaxonomyElementId } from "shared";
 import { formatData, isMachineReadable } from "./utils/formatters.js";
 import type { OutputFormat, DisplayField } from "./utils/types.js";
 
@@ -169,6 +169,49 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
           : '';
         console.log(`    ${label(`Iteration ${turn.iteration}:`)} ${passIcon}${criteriaStr}`);
       });
+    }
+  }
+
+  // Observations (kind:"observation" criteria), grouped by taxonomy dimension.
+  const turnsWithObs = (rs?.turns ?? []).filter((t) => (t.observationResults?.length ?? 0) > 0);
+  if (turnsWithObs.length > 0) {
+    // Build criterionId → taxonomyElementId map from the criteria store (best effort).
+    const taxById = new Map<string, TaxonomyElementId | undefined>();
+    try {
+      const cr = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria?kind=observation`);
+      if (cr.ok) {
+        const obs = await cr.json() as Array<{ id: string; taxonomyElementId?: TaxonomyElementId }>;
+        for (const o of obs) taxById.set(o.id, o.taxonomyElementId);
+      }
+    } catch { /* grouping is best-effort */ }
+
+    // detected/evaluated tally per criterion id across iterations.
+    const tally = new Map<string, { detected: number; evaluated: number }>();
+    for (const t of turnsWithObs) {
+      for (const r of t.observationResults ?? []) {
+        const e = tally.get(r.criterionId) ?? { detected: 0, evaluated: 0 };
+        e.evaluated += 1;
+        if (r.passed) e.detected += 1;
+        tally.set(r.criterionId, e);
+      }
+    }
+
+    const byDim = new Map<string, string[]>();
+    for (const id of tally.keys()) {
+      const dim = taxById.get(id) ?? "unclassified";
+      const arr = byDim.get(dim) ?? [];
+      arr.push(id);
+      byDim.set(dim, arr);
+    }
+
+    console.log(`\n${banner('─── Observations ───')}`);
+    for (const [dim, ids] of byDim) {
+      const dimLabel = dim === "unclassified" ? "Unclassified" : (TAXONOMY_ELEMENT_METADATA[dim as TaxonomyElementId]?.label ?? dim);
+      console.log(`  ${label(dimLabel)}`);
+      for (const id of ids.sort()) {
+        const { detected, evaluated } = tally.get(id)!;
+        console.log(`    ${value(id)} — ${detected}/${evaluated} iterations detected`);
+      }
     }
   }
 

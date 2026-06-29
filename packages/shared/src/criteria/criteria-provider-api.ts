@@ -203,10 +203,14 @@ export class RestApiCriteriaProvider implements CriteriaProvider {
 function mapToCriteriaConfig(data: Record<string, unknown>): CriteriaConfig {
   const dependsOn = (data.dependsOn as string[] | undefined) ?? [];
   const gates = data.gates as CriteriaConfig["gates"] | undefined;
+  const kind = data.kind as CriteriaConfig["kind"] | undefined;
+  const taxonomyElementId = data.taxonomyElementId as CriteriaConfig["taxonomyElementId"] | undefined;
   return {
     id: String(data.id),
     prompt: String(data.prompt),
     dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
     ...(gates && gates.length > 0 ? { gates } : {}),
+    ...(kind ? { kind } : {}),
+    ...(taxonomyElementId ? { taxonomyElementId } : {}),
   };
 }

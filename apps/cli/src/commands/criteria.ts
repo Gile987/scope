@@ -46,7 +46,7 @@ criteria
         process.exit(1);
       }
 
-      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[]; gates?: GateId[] }>;
+      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[]; gates?: GateId[]; kind?: string; taxonomyElementId?: string }>;
       if (items.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner("No criteria found."));
         return;
@@ -60,6 +60,7 @@ criteria
         { key: 'id', label: 'ID',
           tableFormatter: (c: any) => value(c.id),
         },
+        { key: 'kind', label: 'Kind', formatter: (c: any) => c.kind ?? 'gate' },
         { key: 'dependsOn', label: 'Deps', formatter: (c: any) => String((c.dependsOn ?? []).length) },
         { key: 'gates', label: 'Gates', formatter: (c: any) => formatGateList(c.gates) },
         { key: 'prompt', label: 'Prompt', tableFormatter: (c: any) => {
@@ -96,6 +97,7 @@ criteria
 
       const c = await response.json() as {
         id: string; prompt: string; dependsOn?: string[]; gates?: GateId[];
+        kind?: string; taxonomyElementId?: string;
         dependents: string[]; createdAt: string; updatedAt?: string;
       };
 
@@ -103,6 +105,8 @@ criteria
         const fields: DisplayField[] = [
           { key: 'id', label: 'ID' },
           { key: 'prompt', label: 'Prompt' },
+          { key: 'kind', label: 'Kind', formatter: (item: any) => item.kind ?? 'gate' },
+          { key: 'taxonomyElementId', label: 'Taxonomy', formatter: (item: any) => item.taxonomyElementId ?? '(none)' },
           { key: 'dependsOn', label: 'Depends On', formatter: (item: any) => (item.dependsOn ?? []).join(', ') || '(none)' },
           { key: 'gates', label: 'Gates', formatter: (item: any) => formatGateList(item.gates) },
           { key: 'dependents', label: 'Dependents', formatter: (item: any) => (item.dependents ?? []).join(', ') || '(none)' },
@@ -124,6 +128,10 @@ criteria
         console.log(`${label('Depends on:')} ${dimTimestamp('(none — root criterion)')}`);
       }
       console.log(`${label('Gates:')}      ${value(formatGateList(c.gates))}`);
+      console.log(`${label('Kind:')}       ${value(c.kind ?? 'gate')}`);
+      if (c.taxonomyElementId) {
+        console.log(`${label('Taxonomy:')}   ${value(c.taxonomyElementId)}`);
+      }
       if (c.dependents.length > 0) {
         console.log(`${label('Dependents:')} ${c.dependents.map(d => value(d)).join(', ')}`);
       }
@@ -142,6 +150,8 @@ criteria
   .requiredOption("--prompt <prompt>", "Evaluation prompt for the judge")
   .option("-d, --depends-on <ids...>", "IDs of parent criteria")
   .option("--gates <gates...>", "Compatible gates (space/comma separated), or all/* for unrestricted")
+  .option("--kind <kind>", "Criterion kind: gate (default) or observation")
+  .option("--taxonomy <id>", "Taxonomy element id (observation only), e.g. dimension:dependency-currency")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
@@ -154,6 +164,8 @@ criteria
       }
       const gates = parseGateListOption(options.gates);
       if (gates !== undefined) body.gates = gates;
+      if (options.kind) body.kind = options.kind;
+      if (options.taxonomy) body.taxonomyElementId = options.taxonomy;
 
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria`, {
         method: "POST",
@@ -182,6 +194,8 @@ criteria
   .option("--prompt <prompt>", "New evaluation prompt")
   .option("-d, --depends-on <ids...>", "New parent criteria IDs (replaces all)")
   .option("--gates <gates...>", "New compatible gates (space/comma separated), or all/* for unrestricted")
+  .option("--kind <kind>", "Criterion kind: gate or observation")
+  .option("--taxonomy <id>", "Taxonomy element id (observation only)")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
@@ -190,9 +204,11 @@ criteria
       if (options.dependsOn !== undefined) body.dependsOn = options.dependsOn;
       const gates = parseGateListOption(options.gates);
       if (gates !== undefined) body.gates = gates;
+      if (options.kind) body.kind = options.kind;
+      if (options.taxonomy) body.taxonomyElementId = options.taxonomy;
 
       if (Object.keys(body).length === 0) {
-        console.error(errorText("Error: provide --prompt, --depends-on, and/or --gates"));
+        console.error(errorText("Error: provide --prompt, --depends-on, --gates, --kind, and/or --taxonomy"));
         process.exit(1);
       }
 
@@ -347,7 +363,7 @@ criteria
         process.exit(1);
       }
 
-      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
+      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[]; gates?: GateId[]; kind?: string; taxonomyElementId?: string }>;
 
       if (items.length === 0) {
         console.error(errorText("No criteria found to export."));
@@ -382,6 +398,15 @@ criteria
         };
         if (c.dependsOn && c.dependsOn.length > 0) {
           doc.depends_on = c.dependsOn;
+        }
+        if (c.gates && c.gates.length > 0) {
+          doc.gates = c.gates;
+        }
+        if (c.kind && c.kind !== 'gate') {
+          doc.kind = c.kind;
+        }
+        if (c.taxonomyElementId) {
+          doc.taxonomy_element_id = c.taxonomyElementId;
         }
         return doc;
       });
@@ -435,7 +460,7 @@ criteria
       }
 
       // Parse all criteria from files (supports multi-document YAML)
-      const allCriteria: Array<{ id: string; prompt: string; dependsOn?: string[]; gates?: GateId[] }> = [];
+      const allCriteria: Array<{ id: string; prompt: string; dependsOn?: string[]; gates?: GateId[]; kind?: string; taxonomyElementId?: string }> = [];
       const parseErrors: string[] = [];
 
       for (const file of yamlFiles) {
@@ -480,7 +505,8 @@ criteria
         const deps = (c.dependsOn ?? []).length;
         const depsStr = deps > 0 ? ` ${dimTimestamp(`(${deps} dep${deps > 1 ? 's' : ''})`)}` : '';
         const gatesStr = c.gates ? ` ${dimTimestamp(`[${formatGateList(c.gates)}]`)}` : '';
-        console.log(`  ${value(c.id)}${depsStr}${gatesStr}`);
+        const kindStr = c.kind === 'observation' ? ` ${dimTimestamp(`<observation${c.taxonomyElementId ? `:${c.taxonomyElementId}` : ''}>`)}` : '';
+        console.log(`  ${value(c.id)}${depsStr}${gatesStr}${kindStr}`);
       }
 
       if (options.dryRun) {

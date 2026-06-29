@@ -659,6 +659,23 @@ services:
     restart: "no"
     entrypoint: ["npx", "tsx", "packages/shared/src/scripts/register-handler.ts"]
 
+  # Registers the pp-taxonomy handler (observation evaluator) — shares the
+  # post-processor worker + post-processor-queue, depends on pp-atif. Issue #1156.
+  register-handler-taxonomy:
+    build:
+      context: .
+      dockerfile: apps/workers/post-processor/Dockerfile
+    profiles: [post-processor]
+    environment:
+      <<: *common-env
+      HANDLER_YAML_PATH: apps/workers/post-processor/handler.taxonomy.yaml
+      SCHEDULER_URL: http://scheduler:8080
+    depends_on:
+      scheduler:
+        condition: service_started
+    restart: "no"
+    entrypoint: ["npx", "tsx", "packages/shared/src/scripts/register-handler.ts"]
+
   post-processor:
     build:
       context: .
@@ -680,6 +697,8 @@ services:
       api:
         condition: service_started
       register-handler-post-processor:
+        condition: service_completed_successfully
+      register-handler-taxonomy:
         condition: service_completed_successfully
 
 volumes:

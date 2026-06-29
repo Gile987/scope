@@ -52,7 +52,7 @@ app.post(
     const startTime = Date.now();
 
     try {
-      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl } = req.body;
+      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, atifUrl } = req.body;
 
       // Validate required fields
       if (!snapshotUrl || typeof snapshotUrl !== "string") {
@@ -102,6 +102,31 @@ app.post(
           } catch (err) {
             console.warn(
               `[judge] Failed to load tool calls from ${toolCallsUrl}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+
+        // Load the ATIF trajectory (normalized superset of tool calls) when
+        // provided — used by pp-taxonomy to evaluate observations against the
+        // full agent trajectory, not just the end-state snapshot. Exposed to the
+        // judge as a synthetic tool output so trajectory-only observations (e.g.
+        // a dependency added then removed mid-run) are detectable. Issue #1156.
+        if (atifUrl && typeof atifUrl === "string") {
+          try {
+            const atif = await blobStorage.downloadJson(atifUrl);
+            toolCalls = [
+              ...toolCalls,
+              {
+                id: "atif-trajectory",
+                name: "agent_trajectory_atif",
+                arguments: {},
+                response: typeof atif === "string" ? atif : JSON.stringify(atif),
+              },
+            ];
+            console.log(`[judge] Loaded ATIF trajectory from ${atifUrl}`);
+          } catch (err) {
+            console.warn(
+              `[judge] Failed to load ATIF from ${atifUrl}: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
         }

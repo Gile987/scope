@@ -56,6 +56,24 @@ Two paths trigger post-processing:
 
 The `iteration` query parameter is mandatory for the ATIF endpoints. ATIF files are also included in archive exports as `iteration-{N}.atif.trajectory.json`.
 
+## Taxonomy Observations (`pp-taxonomy`)
+
+The `pp-taxonomy` handler records **observation criteria** — per-iteration boolean
+outcomes + evidence about the codebase and the agent's trajectory, **without gating
+or steering** the coding agent (issue #1156). It is a DAG node `dependsOn: [pp-atif]`,
+because some observations are only derivable from the trajectory (ATIF), not the
+final snapshot.
+
+### Flow
+
+1. Reads the run's `observations: string[]` (observation-criteria ids chosen at submit). Empty/absent ⇒ no-op, handler `done`.
+2. For each iteration with a `snapshotUrl`, calls the existing judge via the shared `JudgeClient` (`POST /api/v1/evaluate`) with `snapshotUrl` + `atifUrl` + the observation-criteria ids — no persona, no gate, no taxonomyElementId (the classifier lives on the criterion). ATIF supersedes per-turn `toolCallsUrl`, so only ATIF is sent.
+3. Writes the returned per-criterion `{criterionId, passed, feedback}` to that turn's **`observationResults`** — same shape/storage as gate `criteriaResults`. No new blob, no `run.taxonomyUrl`.
+4. Stamps `run.handlerStatus["pp-taxonomy"] = { status: "done", version: N }` and notifies the scheduler.
+
+Dimension grouping is **derived at read time** by joining each result's `criterionId` → criterion `taxonomyElementId` (the three R&A Readout dimensions; unset = unclassified). It never feeds back to the agent and never affects pass/fail. (#1053 later extends this worker with a richer scorecard artifact.)
+
+
 ## Handler Interface
 
 The post-processor uses a registry pattern for extensibility:
@@ -85,6 +103,7 @@ Handlers are registered at startup in `index.ts`:
 ```typescript
 const processor = new PostProcessor(config);
 processor.registerHandler(new AtifHandler());
+processor.registerHandler(new TaxonomyHandler());
 processor.start();
 ```
 
@@ -140,7 +159,7 @@ flowchart LR
 **Where it runs:**
 
 - **Docker Compose:** one `register-handler-<worker>` init service per handler (e.g. `pp-atif`) runs the generic script via `tsx`, gated on the scheduler being up. The worker waits for its registration service to complete.
-- **Kubernetes:** a `register-handler-post-processor` Job runs the compiled script (`node packages/shared/dist/scripts/register-handler.js`) on each deploy. Only `pp-atif` is registered in K8s today because it is the only post-process handler deployed to the cluster. The scheduler exposes a `Service` (`scheduler.scoped.svc.cluster.local:8080`) so Jobs and workers can reach `/handlers/register` and the notify endpoints.
+- **Kubernetes:** a `register-handler-post-processor` Job runs the compiled script (`node packages/shared/dist/scripts/register-handler.js`) on each deploy. `pp-atif` and `pp-taxonomy` are registered in K8s via their respective registration Jobs (`register-handler-taxonomy` points its `HANDLER_YAML_PATH` at `handler.taxonomy.yaml`). The scheduler exposes a `Service` (`scheduler.scoped.svc.cluster.local:8080`) so Jobs and workers can reach `/handlers/register` and the notify endpoints.
 
 To **add or change a handler**, edit its `handler.yaml` (bump `version`, adjust `dependsOn`, etc.) — no code or migration changes are needed for registration.
 

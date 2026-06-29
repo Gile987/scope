@@ -311,3 +311,62 @@ describe("CriteriaStore revives soft-deleted ids on re-create", () => {
   });
 });
 
+
+describe("CriteriaStore kind + taxonomy (issue #1156)", () => {
+  it("defaults kind to 'gate' on create when absent", async () => {
+    const store = new CriteriaStore(fakeCollection());
+    const created = await store.create({ id: "g1", prompt: "p" });
+    expect(created.kind).toBe("gate");
+    expect(created.taxonomyElementId).toBeUndefined();
+  });
+
+  it("persists kind:'observation' + taxonomyElementId", async () => {
+    const store = new CriteriaStore(fakeCollection());
+    const created = await store.create({
+      id: "obs1",
+      prompt: "p",
+      kind: "observation",
+      taxonomyElementId: "dimension:idiomatic-use",
+    });
+    expect(created.kind).toBe("observation");
+    expect(created.taxonomyElementId).toBe("dimension:idiomatic-use");
+  });
+
+  it("rejects taxonomyElementId on a gate criterion", async () => {
+    const store = new CriteriaStore(fakeCollection());
+    await expect(
+      store.create({ id: "g2", prompt: "p", kind: "gate", taxonomyElementId: "dimension:idiomatic-use" }),
+    ).rejects.toThrow(CriteriaValidationError);
+  });
+
+  it("rejects a gate depending on an observation (same-kind rule)", async () => {
+    const col = fakeCollection([
+      { id: "obs", prompt: "o", dependsOn: [], kind: "observation", createdAt: new Date() },
+    ]);
+    const store = new CriteriaStore(col);
+    await expect(
+      store.create({ id: "g3", prompt: "p", kind: "gate", dependsOn: ["obs"] }),
+    ).rejects.toThrow(CriteriaValidationError);
+  });
+
+  it("allows an observation depending on an observation", async () => {
+    const col = fakeCollection([
+      { id: "obs_parent", prompt: "o", dependsOn: [], kind: "observation", createdAt: new Date() },
+    ]);
+    const store = new CriteriaStore(col);
+    await expect(
+      store.create({ id: "obs_child", prompt: "c", kind: "observation", dependsOn: ["obs_parent"] }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("resolveObservations accepts observation ids and rejects gate ids", async () => {
+    const col = fakeCollection([
+      { id: "obs", prompt: "o", dependsOn: [], kind: "observation", createdAt: new Date() },
+      { id: "gate", prompt: "g", dependsOn: [], kind: "gate", createdAt: new Date() },
+    ]);
+    const store = new CriteriaStore(col);
+    const resolved = await store.resolveObservations(["obs"]);
+    expect(resolved.map((c) => c.id)).toEqual(["obs"]);
+    await expect(store.resolveObservations(["gate"])).rejects.toThrow(CriteriaValidationError);
+  });
+});
