@@ -27,6 +27,40 @@ export interface ToolCall {
   timestamp?: string;
 }
 
+export type CriterionKind = "gate" | "observation";
+
+export const TAXONOMY_ELEMENT_IDS = [
+  "dimension:idiomatic-use",
+  "dimension:dependency-currency",
+  "dimension:configuration-correctness",
+] as const;
+
+export type TaxonomyElementId = (typeof TAXONOMY_ELEMENT_IDS)[number];
+
+export interface TaxonomyElementMetadata {
+  id: TaxonomyElementId;
+  label: string;
+  description: string;
+}
+
+export const TAXONOMY_ELEMENT_METADATA: Record<TaxonomyElementId, TaxonomyElementMetadata> = {
+  "dimension:idiomatic-use": {
+    id: "dimension:idiomatic-use",
+    label: "Idiomatic use",
+    description: "Did the agent follow recommended patterns and best practices?",
+  },
+  "dimension:dependency-currency": {
+    id: "dimension:dependency-currency",
+    label: "Dependency currency",
+    description: "Did the agent use current versions, packages, and namespaces?",
+  },
+  "dimension:configuration-correctness": {
+    id: "dimension:configuration-correctness",
+    label: "Configuration correctness",
+    description: "Are auth, connection, environment, and deployment settings configured properly?",
+  },
+};
+
 export interface ConversationTurn {
   iteration: number;
   gate?: GateId;
@@ -36,6 +70,7 @@ export interface ConversationTurn {
   passed: boolean;
   timestamp: string;
   criteriaResults?: CriterionResult[];
+  observationResults?: CriterionResult[];
   harUrl?: string;
   videoUrls?: string[];
   tokenUsage?: TokenUsage;
@@ -144,6 +179,7 @@ export interface Run {
   profileId?: string;
   profileVersionId?: string;
   gates?: GateConfig[];
+  observations?: string[];
   gateSummaries?: GateRunSummary[];
 }
 
@@ -206,6 +242,8 @@ export interface CriteriaConfig {
   prompt: string;
   dependsOn?: string[];
   gates?: GateId[];
+  kind?: CriterionKind;
+  taxonomyElementId?: TaxonomyElementId;
 }
 
 export interface CriteriaDocument extends CriteriaConfig {
@@ -215,7 +253,7 @@ export interface CriteriaDocument extends CriteriaConfig {
 }
 
 export interface CriteriaGraphData {
-  nodes: Array<{ id: string; prompt: string; dependsOn: string[]; gates?: GateId[] }>;
+  nodes: Array<{ id: string; prompt: string; dependsOn: string[]; gates?: GateId[]; kind?: CriterionKind; taxonomyElementId?: TaxonomyElementId }>;
   edges: Array<{ source: string; target: string }>;
 }
 

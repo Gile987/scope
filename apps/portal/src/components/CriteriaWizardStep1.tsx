@@ -4,7 +4,9 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { GateCompatibilityPicker } from "@/components/GateCompatibilityPicker";
+import { ObservationTaxonomySelect } from "@/components/ObservationTaxonomySelect";
 import type { CriteriaWizardState } from "@/hooks/useCriteriaWizard";
 
 interface CriteriaWizardStep1Props {
@@ -26,6 +28,10 @@ export function CriteriaWizardStep1({ wizard, idPrefix = "" }: CriteriaWizardSte
     gates,
     setGates,
     lockedGates,
+    kind,
+    setKind,
+    taxonomyElementId,
+    setTaxonomyElementId,
   } = wizard;
 
   return (
@@ -89,15 +95,42 @@ export function CriteriaWizardStep1({ wizard, idPrefix = "" }: CriteriaWizardSte
         </p>
       </div>
 
-      {/* Gate compatibility */}
+      {/* Criteria kind */}
       <div className="space-y-2">
-        <Label className="text-sm font-semibold">Gate compatibility</Label>
-        <GateCompatibilityPicker value={gates} onChange={setGates} lockedGates={lockedGates} />
+        <Label htmlFor={`${idPrefix}criteria-kind`} className="text-sm font-semibold">
+          Criteria kind
+        </Label>
+        <Select value={kind} onValueChange={(value) => setKind(value as typeof kind)}>
+          <SelectTrigger id={`${idPrefix}criteria-kind`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="gate">Gate — controls pass/fail iteration flow</SelectItem>
+            <SelectItem value="observation">Observation — records per-iteration evidence</SelectItem>
+          </SelectContent>
+        </Select>
         <p className="text-xs text-muted-foreground">
-          Select the gates this criterion applies to. Parents must be compatible with every
-          selected gate. This drives the gate-aware parent/child suggestions on the next step.
+          Gate criteria drive judge feedback. Observations are recorded after each iteration and never gate the agent.
         </p>
       </div>
+
+      {/* Gate compatibility */}
+      {kind === "gate" ? (
+        <div className="space-y-2">
+          <Label className="text-sm font-semibold">Gate compatibility</Label>
+          <GateCompatibilityPicker value={gates} onChange={setGates} lockedGates={lockedGates} />
+          <p className="text-xs text-muted-foreground">
+            Select the gates this criterion applies to. Parents must be compatible with every
+            selected gate. This drives the gate-aware parent/child suggestions on the next step.
+          </p>
+        </div>
+      ) : (
+        <ObservationTaxonomySelect
+          id={`${idPrefix}taxonomy`}
+          value={taxonomyElementId}
+          onChange={setTaxonomyElementId}
+        />
+      )}
     </div>
   );
 }

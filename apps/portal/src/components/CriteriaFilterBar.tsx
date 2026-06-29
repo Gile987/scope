@@ -4,6 +4,7 @@
 import { Filter, X } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import type { CriterionKind } from "@/types";
 
 interface CriteriaFilterBarProps {
   availableCriteria: string[];
@@ -16,6 +17,10 @@ interface CriteriaFilterBarProps {
   emptyDescription?: string;
   /** Override the description template when criteria are selected (receives count) */
   selectedDescription?: (count: number) => string;
+  /** Optional kind metadata for rendering gate/observation filter chips. */
+  criteriaKinds?: Record<string, CriterionKind | undefined>;
+  selectedKinds?: CriterionKind[];
+  onToggleKind?: (kind: CriterionKind) => void;
 }
 
 export function CriteriaFilterBar({
@@ -27,12 +32,22 @@ export function CriteriaFilterBar({
   emptyDescription = "Click criteria to filter runs and redefine success. Default: all criteria in each run must pass.",
   selectedDescription = (count: number) =>
     `Success = all ${count} selected criteria pass. Runs without these criteria are excluded.`,
+  criteriaKinds,
+  selectedKinds = [],
+  onToggleKind,
 }: CriteriaFilterBarProps) {
   if (availableCriteria.length === 0) {
     return null;
   }
 
   const selectedSet = new Set(selectedCriteria);
+  const selectedKindSet = new Set(selectedKinds);
+  const kindCounts = criteriaKinds
+    ? {
+        gate: availableCriteria.filter((id) => (criteriaKinds[id] ?? "gate") === "gate").length,
+        observation: availableCriteria.filter((id) => criteriaKinds[id] === "observation").length,
+      }
+    : undefined;
 
   return (
     <Card>
@@ -58,6 +73,20 @@ export function CriteriaFilterBar({
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {kindCounts && onToggleKind && (
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {(["gate", "observation"] as const).map((kind) => (
+              <Badge
+                key={kind}
+                variant={selectedKindSet.has(kind) ? "default" : "outline"}
+                className="cursor-pointer capitalize transition-colors hover:bg-muted"
+                onClick={() => onToggleKind(kind)}
+              >
+                {kind} ({kindCounts[kind]})
+              </Badge>
+            ))}
+          </div>
+        )}
         <div className="flex flex-wrap gap-1.5">
           {availableCriteria.map((id) => {
             const isSelected = selectedSet.has(id);

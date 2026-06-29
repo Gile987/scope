@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { gatesSatisfyInvariant, GATE_METADATA, orderGateIds } from "@/lib/gates";
+import { TAXONOMY_ELEMENT_METADATA } from "@/types";
 import { Loader2, Check, RefreshCw } from "lucide-react";
 import type { CriteriaWizardState } from "@/hooks/useCriteriaWizard";
 
@@ -22,6 +23,8 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
     dependsOn,
     setDependsOn,
     gates,
+    kind = "gate",
+    taxonomyElementId,
     prompt,
     setPrompt,
     aiGenerated,
@@ -57,6 +60,15 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
         </div>
         <div>
           <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+            Kind
+          </p>
+          <Badge variant={kind === "observation" ? "outline" : "secondary"}>
+            {kind === "observation" ? "Observation" : "Gate"}
+          </Badge>
+        </div>
+        {kind === "gate" ? (
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
             Gate compatibility
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -71,6 +83,16 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
             )}
           </div>
         </div>
+        ) : (
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+              Observation dimension
+            </p>
+            <Badge variant="outline">
+              {taxonomyElementId ? TAXONOMY_ELEMENT_METADATA[taxonomyElementId].label : "Unclassified"}
+            </Badge>
+          </div>
+        )}
       </div>
 
       <Separator />
@@ -84,11 +106,14 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
           selected={dependsOn}
           onChange={setDependsOn}
           aiSuggested={suggestedParents}
-          filter={(c) => gatesSatisfyInvariant(c.gates, gates) && !acceptedChildren.includes(c.id)}
+          filter={(c) =>
+            (c.kind ?? "gate") === kind &&
+            (kind === "observation" || gatesSatisfyInvariant(c.gates, gates)) &&
+            !acceptedChildren.includes(c.id)
+          }
         />
         <p className="text-xs text-muted-foreground">
-          Criteria that must pass before this one is evaluated. Only criteria compatible with
-          every selected gate are shown. List only direct parents —
+          Criteria that must pass before this one is evaluated. {kind === "gate" ? "Only criteria compatible with every selected gate are shown." : "Only observation criteria are shown."} List only direct parents —
           the judge automatically evaluates all transitive ancestors in topological order,
           so you don't need to repeat a parent's own dependencies here.
         </p>
@@ -105,11 +130,15 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
           selected={acceptedChildren}
           onChange={setAcceptedChildren}
           aiSuggested={suggestedChildren}
-          filter={(c) => gatesSatisfyInvariant(gates, c.gates) && !dependsOn.includes(c.id)}
+          filter={(c) =>
+            (c.kind ?? "gate") === kind &&
+            (kind === "observation" || gatesSatisfyInvariant(gates, c.gates)) &&
+            !dependsOn.includes(c.id)
+          }
         />
         <p className="text-xs text-muted-foreground">
           These criteria will be updated to depend on <span className="font-mono">{id || "this criterion"}</span> after creation.
-          Only criteria compatible with a subset of the selected gates are shown.
+          {kind === "gate" ? " Only criteria compatible with a subset of the selected gates are shown." : " Only observation criteria are shown."}
         </p>
       </div>
 

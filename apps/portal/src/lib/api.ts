@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType } from "@/types";
+import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType, CriterionKind, TaxonomyElementId } from "@/types";
 
 import { qs } from "./url";
 import { recordServerDate } from "./serverClock";
@@ -81,6 +81,7 @@ export const api = {
   /** Submit a new run (or multiple runs if count > 1) */
   submitRun: (body: {
     scenario: { task: string; criteria: string[]; version?: "v1" | "v2" };
+    observations?: string[];
     worker?: string;
     model?: string;
     reasoningEffort?: string;
@@ -317,7 +318,7 @@ export const api = {
   },
 
   /** Create a new criterion */
-  createCriterion: (body: { id: string; prompt: string; dependsOn?: string[]; gates?: GateId[] }): Promise<CriteriaDocument> => {
+  createCriterion: (body: { id: string; prompt: string; dependsOn?: string[]; gates?: GateId[]; kind?: CriterionKind; taxonomyElementId?: TaxonomyElementId }): Promise<CriteriaDocument> => {
     return request("/criteria", {
       method: "POST",
       body: JSON.stringify(body),
@@ -325,7 +326,7 @@ export const api = {
   },
 
   /** Update an existing criterion */
-  updateCriterion: (id: string, body: { prompt?: string; dependsOn?: string[]; gates?: GateId[] }): Promise<CriteriaDocument> => {
+  updateCriterion: (id: string, body: { prompt?: string; dependsOn?: string[]; gates?: GateId[]; kind?: CriterionKind; taxonomyElementId?: TaxonomyElementId }): Promise<CriteriaDocument> => {
     return request(`/criteria/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
