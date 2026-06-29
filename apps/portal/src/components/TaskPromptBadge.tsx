@@ -4,7 +4,10 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
+import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
@@ -71,8 +74,7 @@ export function TaskPromptBadge({
 
   const typeLabel = promptTypeLabel(resolved?.type);
   const snippet = resolved?.text ?? content?.text;
-  const detected = resolved?.features?.filter((f) => f.detected).length ?? 0;
-  const total = resolved?.features?.length ?? 0;
+  const detectedFeatures = resolved?.features?.filter((f) => f.detected) ?? [];
 
   // Without an id there is nothing to preview or link to — render content plainly.
   if (!taskPromptId) {
@@ -103,36 +105,65 @@ export function TaskPromptBadge({
     <TooltipProvider delayDuration={200}>
       <Tooltip open={open} onOpenChange={setOpen}>
         <TooltipTrigger asChild>{wrapper}</TooltipTrigger>
-        <TooltipContent side="top" className="max-w-sm">
-          <div className="space-y-1.5 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="font-medium">{typeLabel}</span>
-              <span className="font-mono text-muted-foreground">{formatId(taskPromptId)}</span>
+        <TooltipPrimitive.Portal>
+          <TooltipContent side="top" collisionPadding={8} className="max-w-sm">
+            <div className="space-y-1.5 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">{typeLabel}</span>
+                <span className="font-mono text-muted-foreground">{formatId(taskPromptId)}</span>
+              </div>
+              {loadingPrompt && !resolved ? (
+                <Skeleton className="h-10 w-52" />
+              ) : (
+                <>
+                  {snippet !== undefined ? (
+                    <p className="max-h-40 overflow-hidden whitespace-pre-wrap break-words text-muted-foreground">
+                      {truncate(snippet, SNIPPET_LEN)}
+                    </p>
+                  ) : resolved?.text === undefined ? (
+                    <p className="italic text-muted-foreground">Open to view the full body.</p>
+                  ) : null}
+                  {detectedFeatures.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="font-medium">Detected features</div>
+                      <div className="flex flex-wrap gap-1">
+                        {detectedFeatures.map((f) => (
+                          <Badge
+                            key={f.featureId}
+                            variant="secondary"
+                            className="gap-1 font-mono text-[10px]"
+                          >
+                            <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                            {f.featureId}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {resolved?.createdAt && (
+                    <div className="text-muted-foreground">Created {formatDate(resolved.createdAt)}</div>
+                  )}
+                </>
+              )}
+              {link && (
+                <Button
+                  asChild
+                  size="sm"
+                  variant="secondary"
+                  className="mt-0.5 h-7 w-full justify-center gap-1"
+                >
+                  <Link
+                    to={`/task-prompts/${encodeURIComponent(taskPromptId)}`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Open details
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </Button>
+              )}
             </div>
-            {loadingPrompt && !resolved ? (
-              <Skeleton className="h-10 w-52" />
-            ) : (
-              <>
-                {snippet !== undefined ? (
-                  <p className="max-h-40 overflow-hidden whitespace-pre-wrap break-words text-muted-foreground">
-                    {truncate(snippet, SNIPPET_LEN)}
-                  </p>
-                ) : resolved?.text === undefined ? (
-                  <p className="italic text-muted-foreground">Open to view the full body.</p>
-                ) : null}
-                {total > 0 && (
-                  <div className="text-muted-foreground">
-                    Features: {detected}/{total} detected
-                  </div>
-                )}
-                {resolved?.createdAt && (
-                  <div className="text-muted-foreground">Created {formatDate(resolved.createdAt)}</div>
-                )}
-              </>
-            )}
-            {link && <div className="text-muted-foreground">Click to open details →</div>}
-          </div>
-        </TooltipContent>
+          </TooltipContent>
+        </TooltipPrimitive.Portal>
       </Tooltip>
     </TooltipProvider>
   );
