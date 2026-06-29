@@ -439,6 +439,28 @@ export class BlobStorage {
   }
 
   /**
+   * Uploads an in-memory UTF-8 text body to the snapshots container as a single
+   * block blob. Overwrites if the blob already exists. Returns the blob URL.
+   *
+   * Use this for plain-text/markdown bodies (e.g. large prompt or AGENTS.md
+   * content) where the JSON content-type from `uploadJson` would be misleading.
+   */
+  async uploadText(
+    blobName: string,
+    text: string,
+    contentType: string = "text/plain; charset=utf-8",
+  ): Promise<string> {
+    await this.ensureContainer();
+
+    const buf = Buffer.from(text, "utf-8");
+    const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
+    await blockBlobClient.uploadData(buf, {
+      blobHTTPHeaders: { blobContentType: contentType },
+    });
+    return blockBlobClient.url;
+  }
+
+  /**
    * Downloads a snapshot from blob storage and extracts it to the target directory.
    */
   async downloadAndExtractSnapshot(

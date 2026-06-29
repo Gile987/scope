@@ -1,13 +1,63 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType } from "@/types";
+import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, RunFacetsResponse, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType, RunSortField, RunSortDir } from "@/types";
 
 import { qs } from "./url";
 import { recordServerDate } from "./serverClock";
 import { MAX_ARCHIVE_UPLOAD_LABEL } from "./codebaseUpload";
 
 const BASE = "/api/v1";
+
+/**
+ * Categorical + range filter params shared by the Runs list, grouped list, and
+ * facets endpoints (issue #1138). Categorical dimensions accept a single value
+ * or an array (multi-select); the `__empty__` sentinel matches missing values.
+ */
+export interface RunFilterParams {
+  worker?: string | string[];
+  status?: string | string[];
+  outcome?: string | string[];
+  model?: string | string[];
+  os?: string | string[];
+  priority?: string | string[];
+  agentVersion?: string | string[];
+  profileId?: string | string[];
+  taskPromptId?: string;
+  criteria?: string;
+  submissionId?: string;
+  search?: string;
+  createdAfter?: string;
+  createdBefore?: string;
+  turns?: number;
+  turnsOp?: IterationOp;
+  maxIterations?: number;
+  maxIterationsOp?: IterationOp;
+}
+
+/** Map RunFilterParams to a qs() params object (arrays become repeated keys). */
+function runFilterQs(f: RunFilterParams): Record<string, string | string[] | undefined> {
+  return {
+    worker: f.worker,
+    status: f.status,
+    outcome: f.outcome,
+    model: f.model,
+    os: f.os,
+    priority: f.priority,
+    agentVersion: f.agentVersion,
+    profileId: f.profileId,
+    taskPromptId: f.taskPromptId,
+    criteria: f.criteria,
+    submissionId: f.submissionId,
+    search: f.search,
+    createdAfter: f.createdAfter,
+    createdBefore: f.createdBefore,
+    turns: f.turns !== undefined ? String(f.turns) : undefined,
+    turnsOp: f.turns !== undefined ? f.turnsOp : undefined,
+    maxIterations: f.maxIterations !== undefined ? String(f.maxIterations) : undefined,
+    maxIterationsOp: f.maxIterations !== undefined ? f.maxIterationsOp : undefined,
+  };
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -31,20 +81,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  /** List runs with cursor-based pagination */
-  listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; profileId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<Run>> => {
+  /** List runs with cursor-based pagination, server-side filtering and sorting */
+  listRuns: (opts?: RunFilterParams & { sortBy?: RunSortField; sortDir?: RunSortDir; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<Run>> => {
     return request(`/requests${qs({
-      worker: opts?.worker,
-      taskPromptId: opts?.taskPromptId,
-      status: opts?.status,
-      outcome: opts?.outcome,
-      criteria: opts?.criteria,
-      submissionId: opts?.submissionId,
-      profileId: opts?.profileId,
-      turns: opts?.turns !== undefined ? String(opts.turns) : undefined,
-      turnsOp: opts?.turns !== undefined ? opts?.turnsOp : undefined,
-      maxIterations: opts?.maxIterations !== undefined ? String(opts.maxIterations) : undefined,
-      maxIterationsOp: opts?.maxIterations !== undefined ? opts?.maxIterationsOp : undefined,
+      ...runFilterQs(opts ?? {}),
+      sortBy: opts?.sortBy,
+      sortDir: opts?.sortDir,
       limit: opts?.limit ? String(opts.limit) : undefined,
       after: opts?.after,
       before: opts?.before,
@@ -52,25 +94,29 @@ export const api = {
     })}`);
   },
 
-  /** List runs grouped by task or submissionId, with cursor-based pagination */
-  listRunGroups: (opts: { groupBy: "task" | "submissionId" | "profile"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<RunGroup>> => {
+  /** List runs grouped by task/profile/submissionId, with cursor pagination and server-side filtering */
+  listRunGroups: (opts: RunFilterParams & { groupBy: "task" | "submissionId" | "profile"; sortBy?: RunSortField; sortDir?: RunSortDir; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<RunGroup>> => {
     return request(`/requests${qs({
       groupBy: opts.groupBy,
-      worker: opts.worker,
-      taskPromptId: opts.taskPromptId,
-      status: opts.status,
-      outcome: opts.outcome,
-      criteria: opts.criteria,
-      submissionId: opts.submissionId,
-      turns: opts.turns !== undefined ? String(opts.turns) : undefined,
-      turnsOp: opts.turns !== undefined ? opts.turnsOp : undefined,
-      maxIterations: opts.maxIterations !== undefined ? String(opts.maxIterations) : undefined,
-      maxIterationsOp: opts.maxIterations !== undefined ? opts.maxIterationsOp : undefined,
+      ...runFilterQs(opts),
+      sortBy: opts.sortBy,
+      sortDir: opts.sortDir,
       limit: opts.limit ? String(opts.limit) : undefined,
       after: opts.after,
       before: opts.before,
       last: opts.last ? "true" : undefined,
     })}`);
+  },
+
+  /**
+   * Fetch server-computed filter facets for the Runs list rail. Counts are
+   * absolute over all non-deleted runs and intentionally ignore the active
+   * search, date, iteration, and categorical selections, so every value stays
+   * visible with a stable full-dataset count. Being input-independent, the
+   * response is shared (one query key) and cached server-side for a short TTL.
+   */
+  listRunFacets: (): Promise<RunFacetsResponse> => {
+    return request(`/requests/facets`);
   },
 
   /** Get a single run by ID */
@@ -94,6 +140,8 @@ export const api = {
     agentVersion?: string;
     profileId?: string;
     profileVariations?: string[];
+    agentsMd?: string;
+    agentsMdParentIds?: string[];
     gates?: GateConfig[];
     codebase?: string;
     codebaseRevisionId?: string;
@@ -353,9 +401,10 @@ export const api = {
   // ─── Prompt Features ───────────────────────────────────────────────────────
 
   /** List all prompt features, optionally filtered by search query */
-  listPromptFeatures: (q?: string): Promise<PromptFeatureDocument[]> => {
+  listPromptFeatures: (q?: string, type?: PromptType): Promise<PromptFeatureDocument[]> => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
+    if (type) params.set("type", type);
     const qs = params.toString();
     return request(`/prompt-features${qs ? `?${qs}` : ""}`);
   },
@@ -366,7 +415,7 @@ export const api = {
   },
 
   /** Create a new prompt feature */
-  createPromptFeature: (body: { id: string; prompt: string }): Promise<PromptFeatureDocument> => {
+  createPromptFeature: (body: { id: string; prompt: string; type?: PromptType }): Promise<PromptFeatureDocument> => {
     return request("/prompt-features", {
       method: "POST",
       body: JSON.stringify(body),
@@ -396,7 +445,7 @@ export const api = {
 
   // ─── Task Prompts ──────────────────────────────────────────────────────────
 
-  /** List all task prompts (paginated, optional search) */
+  /** List all task prompts (paginated, optional search + type filter) */
   listTaskPrompts: (opts?: { limit?: number; offset?: number; search?: string; type?: PromptType }): Promise<{ items: TaskPrompt[]; total: number }> => {
     const params = new URLSearchParams();
     if (opts?.limit) params.set("limit", String(opts.limit));
@@ -410,6 +459,11 @@ export const api = {
   /** Get a single task prompt by ID */
   getTaskPrompt: (id: string): Promise<TaskPrompt> => {
     return request(`/task-prompts/${encodeURIComponent(id)}`);
+  },
+
+  /** Resolve a task/AGENTS.md prompt's plain text (downloads blob if blob-backed) */
+  getTaskPromptContent: (id: string): Promise<{ id: string; text: string }> => {
+    return request(`/task-prompts/${encodeURIComponent(id)}/content`);
   },
 
   /** Create (or find existing) task prompt — idempotent */

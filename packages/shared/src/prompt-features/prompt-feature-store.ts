@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { Collection } from 'mongodb';
-import { PromptFeatureConfig, PromptFeatureDocument } from '../types/types.js';
+import { Collection, Filter } from 'mongodb';
+import { PromptFeatureConfig, PromptFeatureDocument, PromptType } from '../types/types.js';
 
 /**
  * MongoDB-backed prompt feature store for CRUD operations on prompt feature definitions.
@@ -13,10 +13,19 @@ import { PromptFeatureConfig, PromptFeatureDocument } from '../types/types.js';
 export class PromptFeatureStore {
   constructor(private collection: Collection<PromptFeatureDocument>) {}
 
-  /** List all active (non-deleted) prompt features */
-  async getAll(): Promise<PromptFeatureDocument[]> {
+  /** List all active (non-deleted) prompt features, optionally filtered by type */
+  async getAll(opts?: { type?: PromptType }): Promise<PromptFeatureDocument[]> {
+    const filter: Filter<PromptFeatureDocument> = { deletedAt: { $exists: false } };
+    if (opts?.type) {
+      // Absent `type` is treated as 'select' for backward compatibility
+      // (legacy prompt features predate typing and target the scenario task).
+      filter.$or =
+        opts.type === "select"
+          ? [{ type: "select" }, { type: { $exists: false } }]
+          : [{ type: opts.type }];
+    }
     return this.collection
-      .find({ deletedAt: { $exists: false } })
+      .find(filter)
       .sort({ id: 1 })
       .toArray();
   }
@@ -30,8 +39,9 @@ export class PromptFeatureStore {
   async create(input: {
     id: string;
     prompt: string;
+    type?: PromptType;
   }): Promise<PromptFeatureDocument> {
-    const { id, prompt } = input;
+    const { id, prompt, type } = input;
 
     // Validate ID format
     if (!/^[a-z0-9_-]+$/.test(id)) {
@@ -49,6 +59,7 @@ export class PromptFeatureStore {
     const doc: PromptFeatureDocument = {
       id,
       prompt: prompt.trim(),
+      ...(type ? { type } : {}),
       createdAt: new Date(),
     };
 
@@ -102,6 +113,7 @@ export class PromptFeatureStore {
         await this.collection.insertOne({
           id: config.id,
           prompt: config.prompt,
+          ...(config.type ? { type: config.type } : {}),
           createdAt: new Date(),
         } as any);
         inserted++;

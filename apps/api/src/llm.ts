@@ -14,22 +14,58 @@ export type SuggestDirection = "parents" | "children";
  */
 const SYSTEM_PROMPT_AUTHOR = `You are an expert at writing evaluation criteria for AI coding agent benchmarks.
 
-Given a natural-language description of a behavior or pattern to detect in a codebase, you must:
+Given a natural-language description of a behavior or pattern to detect, you must:
 
-1. Write a concise evaluation prompt (1-3 sentences) that a judge LLM will use to decide whether a codebase exhibits that behavior. The prompt should be specific about what files, patterns, or configurations to look for. Keep it factual and objective.
+1. Write a concise evaluation prompt (1-3 sentences) that a judge LLM will use to decide whether the behavior is present. The judge weighs TWO complementary, equally authoritative sources of evidence:
+   - The codebase — the resulting files, patterns, and configuration the agent produced.
+   - The agent's captured tool outputs — the logs, results, and exit status of the build, test, run, and deploy commands the agent actually executed.
+   Pick whichever source best fits the behavior and phrase the prompt around it. Behaviors about whether something builds, compiles, tests, runs, serves, or deploys are best judged from the captured command output and exit status, NOT from inspecting files. Behaviors about how the code is written or structured are best judged from the codebase. The judge cannot run any commands itself, so never instruct it to run, execute, or re-run anything — judge from evidence that already exists. Keep it factual and objective.
 
 2. Suggest a short, descriptive snake_case identifier for this criterion. The ID must:
    - Start with a lowercase letter
    - Contain only lowercase letters, digits, and underscores
-   - Be concise but descriptive (e.g., has_unit_tests, uses_typescript, has_docker_config)
+   - Be concise but descriptive (e.g., has_unit_tests, uses_typescript, build_succeeds)
 
 Here are examples of good criteria prompts:
-- "The project uses Azure Bicep for infrastructure as code. Look for *.bicep files, bicepconfig.json, or main.bicep entry points."
-- "The project uses React framework. Look for react dependency in package.json, .jsx or .tsx files with React components."
-- "The project uses Node.js as its runtime environment. Look for package.json file or Node.js-specific configuration files."
+- Codebase evidence: "The project uses the React framework. Look for a react dependency in package.json and .jsx or .tsx files containing React components."
+- Codebase evidence: "The project uses Azure Bicep for infrastructure as code. Look for *.bicep files, bicepconfig.json, or a main.bicep entry point."
+- Tool-output evidence: "The project builds successfully. The captured output of the build command (e.g. npm run build) finishes with a zero exit status and no compilation errors."
+- Tool-output evidence: "The unit tests pass. The captured output of the test command shows the suite running with no failing tests and a successful exit status."
 
 Respond with ONLY a JSON object in this exact format (no markdown, no code fences):
 {"prompt": "your evaluation prompt here", "suggestedId": "your_suggested_id"}`;
+
+/**
+ * Per-gate description of the evidence a criterion compatible with that gate is
+ * judged against. `select` is implementation/codebase evidence; the rest are
+ * tool-output gates whose evidence is the captured command output + exit status.
+ */
+const GATE_EVIDENCE: Partial<Record<GateId, string>> = {
+  select: "the codebase files the agent produced (its implementation)",
+  build: "the captured output and exit status of the build/compile command",
+  test: "the captured output and exit status of the test command",
+  run: "the captured output of running or serving the app (startup logs, HTTP responses, exit status)",
+  deploy: "the captured output and exit status of the deploy command, or the captured output of the deployed app",
+};
+
+/**
+ * Builds a short, gate-aware steering note appended to the author user message.
+ * When the criterion targets any tool-output gate (build/test/run/deploy) it
+ * directs the prompt toward captured command output; when it only targets
+ * `select` it directs the prompt toward the codebase. Omitted/empty gates add no
+ * note so generic authoring (and backward-compatible callers) is unaffected.
+ */
+function authorGateHint(gates?: GateId[]): string {
+  if (!gates || gates.length === 0) return "";
+  const toolEvidence = gates
+    .filter((g) => g !== "select")
+    .map((g) => (GATE_EVIDENCE[g] ? `the ${g} gate (evidence: ${GATE_EVIDENCE[g]})` : null))
+    .filter((x): x is string => x !== null);
+  if (toolEvidence.length === 0) {
+    return `\n\nThis criterion targets the select gate (evidence: ${GATE_EVIDENCE.select}); judge it from the codebase files the agent produced.`;
+  }
+  return `\n\nThis criterion targets ${toolEvidence.join(" and ")}. Phrase the evaluation prompt around that captured tool output and exit status rather than file inspection.`;
+}
 
 interface SuggestDirectionCopy {
   /** One-line definition of the relationship being asked for. */
@@ -169,8 +205,14 @@ async function author(
   llm: ChatClient,
   model: string,
   behavior: string,
+  gates?: GateId[],
 ): Promise<{ prompt: string; suggestedId: string }> {
-  const content = await chat(llm, model, SYSTEM_PROMPT_AUTHOR, `NEW CRITERION TO CREATE:\n${behavior}`);
+  const content = await chat(
+    llm,
+    model,
+    SYSTEM_PROMPT_AUTHOR,
+    `NEW CRITERION TO CREATE:\n${behavior}${authorGateHint(gates)}`,
+  );
   const parsed = parseJson(content);
   if (!parsed.prompt) {
     throw new Error("Missing required field: prompt");
@@ -264,7 +306,7 @@ export async function generateCriteriaPrompt(
     : existingCriteria;
 
   const [authored, suggestedParents, suggestedChildren] = await Promise.all([
-    author(llm, modelName, behavior),
+    author(llm, modelName, behavior, newGates),
     suggestDeps("parents", llm, modelName, behavior, parentPool),
     suggestDeps("children", llm, modelName, behavior, childPool),
   ]);

@@ -134,6 +134,39 @@ describe("useCriteriaWizard generation passes target gates", () => {
   });
 });
 
+describe("useCriteriaWizard preserves the id across generation", () => {
+  afterEach(() => {
+    generateCriteriaPrompt.mockResolvedValue({
+      prompt: "generated",
+      suggestedId: "",
+      suggestedParents: [],
+      suggestedChildren: [],
+    });
+  });
+
+  it("does not overwrite the slugified id with the AI's suggestedId", async () => {
+    generateCriteriaPrompt.mockResolvedValue({
+      prompt: "generated",
+      suggestedId: "ai_invented_id",
+      suggestedParents: [],
+      suggestedChildren: [],
+    });
+
+    const { result } = renderHook(() => useCriteriaWizard({ onSuccess: () => {} }), { wrapper });
+
+    act(() => result.current.handleBehaviorChange("Project builds"));
+    expect(result.current.id).toBe("project_builds");
+
+    act(() => result.current.handleContinue());
+
+    // Wait until the generated prompt lands (generation resolved).
+    await waitFor(() => expect(result.current.aiGenerated).toBe(true));
+
+    // The id must remain the slugified behavior name, not the AI's suggestion.
+    expect(result.current.id).toBe("project_builds");
+  });
+});
+
 describe("useCriteriaWizard gate-compatibility pruning", () => {
   it("prunes a pre-selected parent incompatible with the chosen gates", async () => {
     // Parent applies only to 'select'; the new criterion applies to 'build', so the
