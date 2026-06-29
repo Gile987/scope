@@ -315,7 +315,7 @@ reusable badge components provide a consistent **hover-to-preview + click-to-nav
 | Component | Entity | Links to | Hover preview |
 |-----------|--------|----------|---------------|
 | `components/CriteriaBadge.tsx` | Criterion | `/criteria/:id` | Criterion prompt snippet |
-| `components/TaskPromptBadge.tsx` | Task prompt (any type) | `/task-prompts/:id` | Type label, text snippet, feature count, created date |
+| `components/TaskPromptBadge.tsx` | Task prompt (any type) | `/task-prompts/:id` | Type label, text snippet, list of detected features, created date, **Open details** button |
 
 Both follow the same rules:
 
@@ -332,6 +332,12 @@ Both follow the same rules:
   `agents.md`, and legacy untyped prompts all render the same hover + the same
   `/task-prompts/:id` navigation; only the human label differs (via `promptTypeLabel`). It also
   renders content plainly (no link/tooltip) when no `taskPromptId` is available.
+- **Detected-features list + explicit navigate button.** `TaskPromptBadge`'s preview lists only
+  the prompt's **detected** features by id (it never shows undetected features or an `x/y` count)
+  and ends with an obvious button-styled **Open details** `Link` (not plain text). Because the
+  popup is interactive (hoverable feature badges + a clickable button), its `TooltipContent` is
+  wrapped in a Radix `Tooltip.Portal` with `collisionPadding` so it can't be clipped by an
+  overflow container (e.g. a table cell) — the same portaling `ShortId` uses.
 
 A sibling affordance, `components/ShortId.tsx`, applies the same hoverable-tooltip pattern to
 **identifiers**: the Runs list renders run and submission IDs truncated to 8 chars
