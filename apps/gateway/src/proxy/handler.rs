@@ -39,6 +39,44 @@ use crate::proxy::body::{
 };
 use crate::session::SessionManager;
 
+/// Bounded timeouts for the upstream MITM relay legs (#1198).
+///
+/// Without these, a stalled DNS/egress (connect), TLS handshake, mint
+/// (`on_request`), or upstream that never sends response headers
+/// (`send_request`) blocks a proxied request indefinitely — the gateway-side
+/// cause of the prod model-discovery hang. Each is env-overridable.
+#[derive(Debug, Clone)]
+pub struct UpstreamTimeouts {
+    /// TCP connect to the upstream host.
+    pub connect: std::time::Duration,
+    /// TLS handshake + HTTP/1.1 handshake with the upstream.
+    pub tls_handshake: std::time::Duration,
+    /// Plugin `on_request` hook (covers token minting).
+    pub on_request: std::time::Duration,
+    /// Time to upstream response headers (body still streams unbounded after).
+    pub request_headers: std::time::Duration,
+}
+
+impl UpstreamTimeouts {
+    fn env_duration(key: &str, default_ms: u64) -> std::time::Duration {
+        let ms = std::env::var(key)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default_ms);
+        std::time::Duration::from_millis(ms)
+    }
+
+    /// Read from env vars, falling back to defaults.
+    pub fn from_env() -> Self {
+        Self {
+            connect: Self::env_duration("GATEWAY_UPSTREAM_CONNECT_TIMEOUT_MS", 10_000),
+            tls_handshake: Self::env_duration("GATEWAY_UPSTREAM_TLS_TIMEOUT_MS", 10_000),
+            on_request: Self::env_duration("GATEWAY_UPSTREAM_ON_REQUEST_TIMEOUT_MS", 120_000),
+            request_headers: Self::env_duration("GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS", 120_000),
+        }
+    }
+}
+
 /// Shared state for the proxy handler.
 pub struct ProxyState {
     pub session_manager: Arc<SessionManager>,
@@ -51,6 +89,8 @@ pub struct ProxyState {
     /// Pre-built TLS config for upstream connections (MITM relay).
     /// Contains Mozilla roots + any additional CA certs from config.
     pub upstream_tls_config: Arc<rustls::ClientConfig>,
+    /// Bounded timeouts for the upstream relay legs (#1198).
+    pub upstream_timeouts: UpstreamTimeouts,
     /// Axum router for the REST API, served on the same port.
     pub api_router: axum::Router,
 }

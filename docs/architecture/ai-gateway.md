@@ -146,6 +146,19 @@ Within intercepted TLS connections, the gateway detects and handles three protoc
 | **SSE streaming** | `Content-Type: text/event-stream` in response | Same as HTTPS but body is streamed frame-by-frame to client |
 | **WebSocket** | `Connection: Upgrade` + `Upgrade: websocket` headers | Forward upgrade, bidirectional frame relay, record `_webSocketMessages` |
 
+### Upstream relay timeouts (#1198)
+
+Every outbound leg of the MITM relay is bounded so a silently-stalling upstream (TCP connected but headers never arrive) fails fast with a classifiable error instead of hanging until the worker's own client timeout fires (~602s in prod, the cause of `model_discovery_failed`). All knobs are env-overridable (built once in `main.rs` via `UpstreamTimeouts::from_env()`):
+
+| Leg | Env var | Default | Notes |
+|-----|---------|---------|-------|
+| Plugin `on_request` (token mint) | `GATEWAY_UPSTREAM_ON_REQUEST_TIMEOUT_MS` | 120000 | Bounds a hung mint so it can't block forwarding |
+| Upstream TCP connect | `GATEWAY_UPSTREAM_CONNECT_TIMEOUT_MS` | 10000 | DNS/egress stall |
+| Upstream TLS handshake | `GATEWAY_UPSTREAM_TLS_TIMEOUT_MS` | 10000 | — |
+| Time-to-response-headers | `GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS` | 120000 | Bounds time to headers only; the response **body still streams unbounded**, so SSE/large responses are unaffected |
+
+A timed-out leg returns an `anyhow` error (surfaced as a 502 to the client) rather than blocking. The mint path is additionally bounded inside the plugin's HTTP client (see Copilot Token Plugin) and those timeouts are classified retriable, so a transient stall is retried with backoff.
+
 All three protocols share the same cross-cutting features:
 
 | Feature | HTTPS/SSE | WebSocket | Notes |
@@ -316,6 +329,7 @@ The Token Manager URL is **not** a session setting — it comes from the `TOKEN_
 - **Cache with buffer**: A cached token is considered expired `refreshBufferSecs` before its actual expiry, ensuring a fresh token is always in flight
 - **Max session duration**: If the session age exceeds `maxSessionDurationSecs`, `on_request` returns a hard error (prevents indefinite token churn for stale sessions)
 - **Retry with backoff**: Both Token Manager and GitHub API calls are retried independently using exponential backoff. Defaults: 3 retries, 500ms initial backoff (configurable via `COPILOT_TOKEN_MINT_RETRIES`, `COPILOT_TOKEN_MINT_BACKOFF_MS`)
+- **Bounded mint timeouts (#1198)**: The token-minting HTTP client has a connect timeout (`COPILOT_TOKEN_MINT_CONNECT_TIMEOUT_MS`, default 5000) and a total per-call timeout (`COPILOT_TOKEN_MINT_TIMEOUT_MS`, default 10000). A Token Manager or GitHub endpoint that accepts the TCP connection but never sends response headers therefore surfaces as a **retriable timeout** rather than blocking `on_request` indefinitely. Timeouts are classified as retriable by `is_retriable`, so a transient stall is retried with backoff.
 - **Plugin-only**: The plugin is enabled per-session. Workers that don't pass `copilotToken` settings are unaffected
 
 **Example session create with token minting:**

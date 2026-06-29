@@ -415,6 +415,57 @@ How far the queue-processor pushes out a duplicate message's visibility when the
 
 TTL applied to per-run liveness heartbeat keys in Redis (`run-heartbeat:<runId>`). The TTL is refreshed on every beat (every 15s), so the key only expires when the worker stops beating. Set comfortably above `SCOPE_RUN_HEARTBEAT_STALE_MS` so a brief beat delay never causes premature TTL expiry; the default gives 2.5× the staleness threshold.
 
+## AI Gateway Configuration
+
+The AI gateway (`apps/gateway`) is a shared TLS-intercepting proxy. Most of its
+plugin/relay knobs are documented in [docs/architecture/ai-gateway.md](docs/architecture/ai-gateway.md);
+the outbound-timeout knobs below exist so a silently-stalling upstream fails fast
+with a classifiable error instead of hanging until the worker's own client
+timeout fires (#1198).
+
+### COPILOT_TOKEN_MINT_CONNECT_TIMEOUT_MS
+**Default:** `5000`
+**Type:** integer (milliseconds)
+
+Connect timeout for the Copilot-token minting HTTP client (Token Manager + GitHub
+mint calls). Bounds DNS/egress stalls when establishing the connection.
+
+### COPILOT_TOKEN_MINT_TIMEOUT_MS
+**Default:** `10000`
+**Type:** integer (milliseconds)
+
+Total per-call timeout for the minting HTTP client. A Token Manager or GitHub
+endpoint that accepts the TCP connection but never returns headers surfaces as a
+**retriable** timeout (classified by `is_retriable`) rather than blocking
+`on_request` indefinitely.
+
+### GATEWAY_UPSTREAM_CONNECT_TIMEOUT_MS
+**Default:** `10000`
+**Type:** integer (milliseconds)
+
+TCP connect timeout for the MITM relay's upstream connection.
+
+### GATEWAY_UPSTREAM_TLS_TIMEOUT_MS
+**Default:** `10000`
+**Type:** integer (milliseconds)
+
+TLS + HTTP/1.1 handshake timeout for the MITM relay's upstream connection.
+
+### GATEWAY_UPSTREAM_ON_REQUEST_TIMEOUT_MS
+**Default:** `120000`
+**Type:** integer (milliseconds)
+
+Bounds the plugin `on_request` hook (which performs token minting) so a hung mint
+can't block request forwarding indefinitely.
+
+### GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS
+**Default:** `120000`
+**Type:** integer (milliseconds)
+
+Time-to-response-headers timeout for the upstream request. Bounds **only** the wait
+for response headers — the response body still streams unbounded afterward, so SSE
+and large responses are unaffected.
+
 ## Token Manager Configuration
 
 ### TOKEN_MANAGER_URL

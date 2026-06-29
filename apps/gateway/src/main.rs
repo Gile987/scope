@@ -30,7 +30,7 @@ use gateway::filters::UrlFilter;
 use gateway::iteration_store::{IterationStore, LocalIterationStore, RedisIterationStore};
 use gateway::plugin::PluginRegistry;
 use gateway::plugins::har::plugin::HarPlugin;
-use gateway::proxy::handler::{handle_client, ProxyState};
+use gateway::proxy::handler::{handle_client, ProxyState, UpstreamTimeouts};
 use gateway::session::SessionManager;
 use gateway::session_store::SessionStore;
 
@@ -267,6 +267,7 @@ async fn main() -> anyhow::Result<()> {
         url_filter,
         http_client,
         upstream_tls_config,
+        upstream_timeouts: UpstreamTimeouts::from_env(),
         api_router,
     });
 

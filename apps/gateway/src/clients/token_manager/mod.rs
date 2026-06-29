@@ -147,6 +147,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn acquire_stalled_server_times_out_as_retriable_error() {
+        // Regression test for #1198: a token-manager that accepts the
+        // connection but stalls before sending response headers must surface a
+        // bounded timeout error (retriable) instead of hanging forever.
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/keys/acquire"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_secs(30))
+                    .set_body_json(json!({
+                        "value": "token-xyz",
+                        "keyId": "k1",
+                        "keyType": "generic-keytype",
+                        "capability": "test"
+                    })),
+            )
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(200))
+            .build()
+            .unwrap();
+
+        let start = std::time::Instant::now();
+        let result = acquire_github_token(&client, &server.uri(), "test").await;
+        let elapsed = start.elapsed();
+
+        let err = result.unwrap_err();
+        // Bounded well below the 30s server delay.
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "expected fast timeout, took {:?}",
+            elapsed
+        );
+        // The underlying reqwest timeout must be preserved in the error chain so
+        // `is_retriable` can classify it as transient.
+        assert!(
+            err.chain()
+                .filter_map(|c| c.downcast_ref::<reqwest::Error>())
+                .any(|e| e.is_timeout()),
+            "expected a reqwest timeout in the error chain: {err:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn acquire_trims_trailing_slash_from_url() {
         let server = MockServer::start().await;
 

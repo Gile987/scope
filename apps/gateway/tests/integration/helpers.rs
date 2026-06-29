@@ -88,6 +88,7 @@ impl TestGateway {
             url_filter,
             http_client,
             upstream_tls_config,
+            upstream_timeouts: gateway::proxy::handler::UpstreamTimeouts::from_env(),
             api_router: axum::Router::new(),
         });
 

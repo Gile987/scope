@@ -164,19 +164,56 @@ async fn relay_request_inner(
     );
     let upstream_uri: hyper::Uri = uri_str.parse()?;
 
-    // Give plugins a chance to mutate headers (e.g. refresh auth tokens)
-    state
-        .registry
-        .on_request(session_id, &upstream_uri, &mut req_headers)
-        .await?;
+    // Give plugins a chance to mutate headers (e.g. refresh auth tokens).
+    // Bounded so a stalled token mint (#1198) can't block the request forever.
+    let on_request_timeout = state.upstream_timeouts.on_request;
+    match tokio::time::timeout(
+        on_request_timeout,
+        state
+            .registry
+            .on_request(session_id, &upstream_uri, &mut req_headers),
+    )
+    .await
+    {
+        Ok(result) => result?,
+        Err(_) => anyhow::bail!(
+            "plugin on_request timed out after {:?} for {} (likely a stalled token mint)",
+            on_request_timeout,
+            domain
+        ),
+    }
 
     // Phase 2: Connect to the real upstream with genuine TLS.
-    let upstream_tcp = TcpStream::connect(format!("{}:{}", domain, port)).await?;
+    let connect_timeout = state.upstream_timeouts.connect;
+    let upstream_tcp = match tokio::time::timeout(
+        connect_timeout,
+        TcpStream::connect(format!("{}:{}", domain, port)),
+    )
+    .await
+    {
+        Ok(result) => result?,
+        Err(_) => anyhow::bail!(
+            "upstream TCP connect to {}:{} timed out after {:?}",
+            domain,
+            port,
+            connect_timeout
+        ),
+    };
 
     let connector = TlsConnector::from(state.upstream_tls_config.clone());
 
     let server_name = rustls::pki_types::ServerName::try_from(domain.to_string())?;
-    let upstream_tls = connector.connect(server_name, upstream_tcp).await?;
+    let tls_timeout = state.upstream_timeouts.tls_handshake;
+    let upstream_tls =
+        match tokio::time::timeout(tls_timeout, connector.connect(server_name, upstream_tcp)).await
+        {
+            Ok(result) => result?,
+            Err(_) => anyhow::bail!(
+                "upstream TLS handshake with {} timed out after {:?}",
+                domain,
+                tls_timeout
+            ),
+        };
 
     let io = TokioIo::new(upstream_tls);
     let (mut sender, conn) = hyper::client::conn::http1::Builder::new()
@@ -211,8 +248,19 @@ async fn relay_request_inner(
     // Start timing from request send (after connect/TLS handshake)
     let request_instant = std::time::Instant::now();
 
-    // Send to upstream
-    let upstream_resp = sender.send_request(upstream_req).await?;
+    // Send to upstream, bounded to the time-to-response-headers (#1198).
+    // The body still streams unbounded after headers arrive, so this does not
+    // break long-lived chat streaming responses.
+    let request_timeout = state.upstream_timeouts.request_headers;
+    let upstream_resp =
+        match tokio::time::timeout(request_timeout, sender.send_request(upstream_req)).await {
+            Ok(result) => result?,
+            Err(_) => anyhow::bail!(
+                "upstream {} did not send response headers within {:?}",
+                domain,
+                request_timeout
+            ),
+        };
     let wait_ms = request_instant.elapsed().as_millis() as u64;
 
     let resp_status = upstream_resp.status();
@@ -299,18 +347,55 @@ async fn handle_websocket_in_tls(
 
     info!("WebSocket upgrade: {} session={}", uri_str, session_id);
 
-    // Give plugins a chance to mutate headers (e.g. refresh auth tokens)
+    // Give plugins a chance to mutate headers (e.g. refresh auth tokens).
+    // Bounded so a stalled token mint (#1198) can't block the upgrade forever.
     let upstream_uri: hyper::Uri = uri_str.parse()?;
-    state
-        .registry
-        .on_request(session_id, &upstream_uri, &mut req_headers)
-        .await?;
+    let on_request_timeout = state.upstream_timeouts.on_request;
+    match tokio::time::timeout(
+        on_request_timeout,
+        state
+            .registry
+            .on_request(session_id, &upstream_uri, &mut req_headers),
+    )
+    .await
+    {
+        Ok(result) => result?,
+        Err(_) => anyhow::bail!(
+            "plugin on_request timed out after {:?} for {} (likely a stalled token mint)",
+            on_request_timeout,
+            domain
+        ),
+    }
 
-    // Connect to upstream via TLS
-    let upstream_tcp = TcpStream::connect(format!("{}:{}", domain, port)).await?;
+    // Connect to upstream via TLS (each leg bounded — #1198).
+    let connect_timeout = state.upstream_timeouts.connect;
+    let upstream_tcp = match tokio::time::timeout(
+        connect_timeout,
+        TcpStream::connect(format!("{}:{}", domain, port)),
+    )
+    .await
+    {
+        Ok(result) => result?,
+        Err(_) => anyhow::bail!(
+            "upstream TCP connect to {}:{} timed out after {:?}",
+            domain,
+            port,
+            connect_timeout
+        ),
+    };
     let connector = TlsConnector::from(state.upstream_tls_config.clone());
     let server_name = rustls::pki_types::ServerName::try_from(domain.to_string())?;
-    let upstream_tls = connector.connect(server_name, upstream_tcp).await?;
+    let tls_timeout = state.upstream_timeouts.tls_handshake;
+    let upstream_tls =
+        match tokio::time::timeout(tls_timeout, connector.connect(server_name, upstream_tcp)).await
+        {
+            Ok(result) => result?,
+            Err(_) => anyhow::bail!(
+                "upstream TLS handshake with {} timed out after {:?}",
+                domain,
+                tls_timeout
+            ),
+        };
 
     // Build the WebSocket URI for the upstream connection
     let ws_uri = format!(
@@ -347,10 +432,23 @@ async fn handle_websocket_in_tls(
 
     let request_instant = std::time::Instant::now();
 
-    // Perform the WebSocket handshake with upstream
-    let (upstream_ws, _ws_response) = tokio_tungstenite::client_async(ws_request, upstream_tls)
-        .await
-        .map_err(|e| anyhow::anyhow!("WebSocket upstream handshake failed: {}", e))?;
+    // Perform the WebSocket handshake with upstream (bounded — #1198).
+    let ws_handshake_timeout = state.upstream_timeouts.request_headers;
+    let (upstream_ws, _ws_response) = match tokio::time::timeout(
+        ws_handshake_timeout,
+        tokio_tungstenite::client_async(ws_request, upstream_tls),
+    )
+    .await
+    {
+        Ok(result) => {
+            result.map_err(|e| anyhow::anyhow!("WebSocket upstream handshake failed: {}", e))?
+        }
+        Err(_) => anyhow::bail!(
+            "WebSocket upstream handshake with {} did not complete within {:?}",
+            domain,
+            ws_handshake_timeout
+        ),
+    };
 
     let wait_ms = request_instant.elapsed().as_millis() as u64;
 
