@@ -540,6 +540,15 @@ export function CriteriaMdpView() {
     setSearchParams(searchParams, { replace: true });
   };
 
+  const handleSelectAllCriteria = (ids: string[]) => {
+    if (ids.length === 0) {
+      searchParams.delete("criteria");
+    } else {
+      searchParams.set("criteria", ids.join(","));
+    }
+    setSearchParams(searchParams, { replace: true });
+  };
+
   // Feature filter handlers
   const handleToggleFeature = (id: string) => {
     const newSelected = selectedFeatures.includes(id)
@@ -556,6 +565,15 @@ export function CriteriaMdpView() {
 
   const handleClearFeatures = () => {
     searchParams.delete("features");
+    setSearchParams(searchParams, { replace: true });
+  };
+
+  const handleSelectAllFeatures = (ids: string[]) => {
+    if (ids.length === 0) {
+      searchParams.delete("features");
+    } else {
+      searchParams.set("features", ids.join(","));
+    }
     setSearchParams(searchParams, { replace: true });
   };
 
@@ -599,6 +617,7 @@ export function CriteriaMdpView() {
           selectedCriteria={selectedCriteria}
           onToggle={handleToggleCriterion}
           onClear={handleClearCriteria}
+          onSelectAll={handleSelectAllCriteria}
           title="Criteria Projection"
           emptyDescription="Select criteria to project the MDP to a sub-state-space. All criteria included by default."
           selectedDescription={(count) =>
@@ -614,11 +633,13 @@ export function CriteriaMdpView() {
           selectedCriteria={selectedFeatures}
           onToggle={handleToggleFeature}
           onClear={handleClearFeatures}
+          onSelectAll={handleSelectAllFeatures}
           title="Task Features Filter"
           emptyDescription="Select prompt features to filter runs by task characteristics. Runs must have all selected features."
           selectedDescription={(count) =>
             `Filtering by ${count} prompt feature${count !== 1 ? "s" : ""}. Only runs with all selected features are included.`
           }
+          itemLabel="features"
         />
       )}
 

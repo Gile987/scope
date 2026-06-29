@@ -747,6 +747,15 @@ export function Statistics() {
     setSearchParams(searchParams, { replace: true });
   };
 
+  const handleSelectAllCriteria = (ids: string[]) => {
+    if (ids.length === 0) {
+      searchParams.delete("criteria");
+    } else {
+      searchParams.set("criteria", ids.join(","));
+    }
+    setSearchParams(searchParams, { replace: true });
+  };
+
   const hasData = !!data && data.summary.totalRuns > 0;
   const showPassAtK = import.meta.env.VITE_SHOW_PASS_AT_K === "true";
 
@@ -785,6 +794,7 @@ export function Statistics() {
               selectedCriteria={selectedCriteria}
               onToggle={handleToggleCriterion}
               onClear={handleClearCriteria}
+              onSelectAll={handleSelectAllCriteria}
             />
           )}
 
