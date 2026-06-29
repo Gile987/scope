@@ -51,6 +51,7 @@ import {
 } from "@/types";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { getRetryButtonState } from "@/components/RetryButton";
+import { deriveEnrichmentStatus } from "@/lib/enrichment";
 
 /** A compact labeled stat: a micro uppercase label above its value. */
 function MetaItem({ label, value, title }: { label: string; value: ReactNode; title?: string }) {
@@ -314,10 +315,10 @@ export function RunDetail() {
     refetchInterval: (query) => {
       const data = query.state.data;
       const status = data?.run?.status;
-      const ppStatus = data?.run?.postProcessorStatus;
       // Keep polling while run is in progress OR post-processing is pending/in-progress
       if (status !== "done") return 5_000;
-      if (ppStatus && ppStatus !== "done" && ppStatus !== "failed") return 5_000;
+      const enrichment = deriveEnrichmentStatus(data?.run, (data?.observations?.length ?? 0) > 0);
+      if (enrichment && enrichment !== "done" && enrichment !== "failed") return 5_000;
       return false;
     },
   });
@@ -353,6 +354,16 @@ export function RunDetail() {
     return attempts?.find((a) => a._id === selectedRunId) ?? run?.run;
   }, [selectedRunId, run?.run, attempts]);
   const isViewingHistorical = !!selectedRunId && selectedRunId !== run?.run?._id;
+
+  // The "observations" tab was renamed to "taxonomy". Map the legacy slug to the
+  // new one for tab selection, and rewrite stale `/observations` URLs in place
+  // so deep-links and bookmarks keep working.
+  const normalizedTab = tab === "observations" ? "taxonomy" : tab;
+  useEffect(() => {
+    if (tab === "observations") {
+      navigate(`/runs/${id}/taxonomy${selectedRunId ? `?runId=${selectedRunId}` : ""}`, { replace: true });
+    }
+  }, [tab, id, selectedRunId, navigate]);
 
   const isActive = activeRun?.status === "pending" || activeRun?.status === "processing";
   // Note: "done" is terminal — not active, no log streaming needed
@@ -394,6 +405,12 @@ export function RunDetail() {
 
   const hasObservationResults = (activeRun?.turns ?? []).some((turn) => (turn.observationResults?.length ?? 0) > 0);
   const hasConfiguredObservations = (run?.observations?.length ?? 0) > 0;
+  // Aggregate enrichment status across the whole post-processing DAG so the
+  // "Enriched" badge waits for pp-taxonomy instead of flipping after pp-atif.
+  const enrichmentStatus = useMemo(
+    () => deriveEnrichmentStatus(activeRun, hasConfiguredObservations),
+    [activeRun, hasConfiguredObservations],
+  );
   const { data: observationCriteria = [] } = useQuery({
     queryKey: ["criteria", "observations", run?.observations],
     queryFn: () => api.listCriteria(undefined, run?.observations?.length ? { ids: run.observations } : undefined),
@@ -673,7 +690,7 @@ export function RunDetail() {
               />
               {activeRun?.status === "done" && <OutcomeBadge outcome={activeRun?.outcome} />}
               {activeRun?.status === "done" && (
-                <EnrichmentBadge status={activeRun.postProcessorStatus} version={activeRun.postProcessorVersion} />
+                <EnrichmentBadge status={enrichmentStatus} version={activeRun.postProcessorVersion} />
               )}
             </div>
 
@@ -947,7 +964,7 @@ export function RunDetail() {
 
       {/* Tabs */}
       <Tabs
-        value={tab || (activeRun?.status === "done" && activeRun?.turns && activeRun.turns.length > 0 ? "turns" : "logs")}
+        value={normalizedTab || (activeRun?.status === "done" && activeRun?.turns && activeRun.turns.length > 0 ? "turns" : "logs")}
         onValueChange={(value) => navigate(`/runs/${id}/${value}${selectedRunId ? `?runId=${selectedRunId}` : ""}`)}
       >
         <TabsList>
@@ -961,7 +978,7 @@ export function RunDetail() {
           {hasHarData && <TabsTrigger value="tool-calls">Tool Calls</TabsTrigger>}
           {hasVideoData && <TabsTrigger value="video"><Video className="h-3.5 w-3.5 mr-1" />Videos ({videoCount})</TabsTrigger>}
           {(hasConfiguredObservations || hasObservationResults) && (
-            <TabsTrigger value="observations">
+            <TabsTrigger value="taxonomy">
               Taxonomy {hasObservationResults ? `(${activeRun?.turns?.reduce((count, turn) => count + (turn.observationResults?.length ?? 0), 0) ?? 0})` : ""}
             </TabsTrigger>
           )}
@@ -1061,7 +1078,7 @@ export function RunDetail() {
         )}
 
         {(hasConfiguredObservations || hasObservationResults) && (
-          <TabsContent value="observations" className="mt-4 space-y-6">
+          <TabsContent value="taxonomy" className="mt-4 space-y-6">
             <section className="space-y-3">
               <div>
                 <h3 className="text-lg font-medium">Observations</h3>
@@ -1447,7 +1464,7 @@ export function RunDetail() {
                 <CardContent className="space-y-2 text-sm">
                   <div>
                     <span className="text-muted-foreground">Status:</span>{" "}
-                    <EnrichmentBadge status={activeRun.postProcessorStatus} version={activeRun.postProcessorVersion} />
+                    <EnrichmentBadge status={enrichmentStatus} version={activeRun.postProcessorVersion} />
                   </div>
                   {activeRun.postProcessorVersion !== undefined && (
                     <div>

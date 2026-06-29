@@ -115,6 +115,17 @@ export interface OsInfo {
 }
 
 /**
+ * Per-handler post-processing status in the DAG (issue #1147). Keys in
+ * `RunState.handlerStatus` are handler IDs (e.g. "pp-atif", "pp-taxonomy").
+ */
+export interface HandlerRunStatus {
+  status: "queued" | "processing" | "done" | "failed";
+  version?: number;
+  updatedAt?: string;
+  error?: string;
+}
+
+/**
  * Per-attempt mutable state (nested under `Run.run` in API responses since
  * migration 014). Fields here change as a single attempt progresses; fields
  * on the parent `Run` are immutable across attempts.
@@ -148,6 +159,14 @@ export interface RunState {
   resumedAt?: string;
   postProcessorVersion?: number;
   postProcessorStatus?: "queued" | "processing" | "done" | "failed";
+  /**
+   * Per-handler post-processing status keyed by handler ID (e.g. "pp-atif",
+   * "pp-taxonomy"). Drives the aggregate "Enriched" badge so it only flips to
+   * done once every handler in the DAG is terminal — not after the first
+   * handler (pp-atif) completes. The legacy `postProcessorStatus` scalar only
+   * tracks pp-atif and is kept for backward compatibility.
+   */
+  handlerStatus?: Record<string, HandlerRunStatus>;
 }
 
 export interface Run {
