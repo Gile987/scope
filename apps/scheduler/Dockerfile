@@ -13,14 +13,12 @@ RUN pnpm install --frozen-lockfile
 
 COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
-RUN pnpm --filter shared build \
- && test -d /app/packages/shared/dist
+RUN pnpm --filter shared build
 
 COPY apps/scheduler/tsconfig.json ./apps/scheduler/
 COPY apps/scheduler/src ./apps/scheduler/src/
 
-RUN pnpm --filter scheduler build \
- && test -d /app/apps/scheduler/dist
+RUN pnpm --filter scheduler build
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev
