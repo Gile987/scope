@@ -333,6 +333,12 @@ Both follow the same rules:
   `/task-prompts/:id` navigation; only the human label differs (via `promptTypeLabel`). It also
   renders content plainly (no link/tooltip) when no `taskPromptId` is available.
 
+A sibling affordance, `components/ShortId.tsx`, applies the same hoverable-tooltip pattern to
+**identifiers**: the Runs list renders run and submission IDs truncated to 8 chars
+(`formatId`), and on hover the tooltip reveals the full ID plus a copy-to-clipboard button. The
+trigger stays an inline `<span>` (not a link) so the row click still navigates to the run; the
+copy button calls `e.stopPropagation()` so copying never triggers row navigation.
+
 ## Criteria System
 
 Criteria are reusable evaluation rules stored in the database and optionally defined in `config/criteria/*.yaml`. They support:

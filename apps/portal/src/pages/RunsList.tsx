@@ -26,6 +26,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import { TaskPromptBadge } from "@/components/TaskPromptBadge";
+import { ShortId } from "@/components/ShortId";
 import {
   ListLayout,
   FilterRail,
@@ -1274,7 +1275,7 @@ export function RunsList() {
       width: "120px",
       sticky: "left",
       stickyOffset: "40px",
-      cell: (r) => <span className="font-mono text-xs">{formatId(r._id)}</span>,
+      cell: (r) => <ShortId id={r._id} label="run ID" />,
     },
     {
       id: "submission",
@@ -1283,7 +1284,7 @@ export function RunsList() {
       hidden: columnVisibility.isHidden("submission"),
       cell: (r) =>
         r.submissionId ? (
-          <span className="font-mono text-xs">{formatId(r.submissionId)}</span>
+          <ShortId id={r.submissionId} label="submission ID" />
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
         ),
