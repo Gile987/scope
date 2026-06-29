@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { useState } from "react";
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { Check, Copy } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, formatId } from "@/lib/utils";
@@ -57,22 +58,24 @@ export function ShortId({ id, length, className, label = "ID" }: ShortIdProps) {
         <TooltipTrigger asChild>
           <span className={cn("font-mono text-xs", className)}>{short}</span>
         </TooltipTrigger>
-        <TooltipContent side="top" className="flex items-center gap-2">
-          <code className="select-all font-mono text-xs">{id}</code>
-          <button
-            type="button"
-            onClick={copy}
-            aria-label={copied ? `Copied ${label}` : `Copy ${label}`}
-            title={copied ? "Copied" : "Copy"}
-            className="text-muted-foreground transition-colors hover:text-foreground"
-          >
-            {copied ? (
-              <Check className="h-3.5 w-3.5 text-emerald-500" />
-            ) : (
-              <Copy className="h-3.5 w-3.5" />
-            )}
-          </button>
-        </TooltipContent>
+        <TooltipPrimitive.Portal>
+          <TooltipContent side="top" collisionPadding={8} className="flex items-center gap-2">
+            <code className="select-all font-mono text-xs">{id}</code>
+            <button
+              type="button"
+              onClick={copy}
+              aria-label={copied ? `Copied ${label}` : `Copy ${label}`}
+              title={copied ? "Copied" : "Copy"}
+              className="text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {copied ? (
+                <Check className="h-3.5 w-3.5 text-emerald-500" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </TooltipContent>
+        </TooltipPrimitive.Portal>
       </Tooltip>
     </TooltipProvider>
   );

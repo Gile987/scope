@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent } from "storybook/test";
+import { expect, screen, userEvent } from "storybook/test";
 import { ShortId } from "./ShortId";
 
 const FULL_ID = "abcdef1234567890fedcba";
@@ -35,9 +35,12 @@ export const CustomLength: Story = {
 export const HoverRevealsFullIdAndCopy: Story = {
   play: async ({ canvas }) => {
     await userEvent.hover(canvas.getByText("abcdef12"));
-    // The full id and a copy button appear in the hoverable tooltip content.
-    const button = await canvas.findByRole("button", { name: /copy/i });
+    // The tooltip content is portaled to the document body (so it is never
+    // clipped by an overflow ancestor such as a table), so query it via
+    // `screen` rather than the container-scoped `canvas`. Radix renders the
+    // content twice (visible + a11y copy), so match all and take the first.
+    const [button] = await screen.findAllByRole("button", { name: /copy/i });
     await expect(button).toBeVisible();
-    await expect(canvas.getAllByText(FULL_ID).length).toBeGreaterThan(0);
+    await expect(screen.getAllByText(FULL_ID).length).toBeGreaterThan(0);
   },
 };
