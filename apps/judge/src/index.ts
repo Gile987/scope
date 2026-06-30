@@ -5,7 +5,7 @@ import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
 import { evaluateWorkspace } from "./judge-agent.js";
 import { verifyCopilotProtocol } from "./protocol-check.js";
-import { type AgentTrajectory, fromAtif, fromToolCalls } from "./agent-trajectory.js";
+import { type AgentTrajectory, fromAtif, fromAtifList, fromToolCalls } from "./agent-trajectory.js";
 import { BlobStorage, RedisLogPublisher } from "shared";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -53,7 +53,7 @@ app.post(
     const startTime = Date.now();
 
     try {
-      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, atifUrl } = req.body;
+      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, atifUrl, atifUrls } = req.body;
 
       // Validate required fields
       if (!snapshotUrl || typeof snapshotUrl !== "string") {
@@ -100,7 +100,23 @@ app.post(
         // Failures are non-fatal — the judge can still evaluate the workspace
         // files. See apps/judge/src/agent-trajectory.ts.
         let trajectory: AgentTrajectory | undefined;
-        if (atifUrl && typeof atifUrl === "string") {
+        if (Array.isArray(atifUrls) && atifUrls.length > 0) {
+          // Run-subject observations (#1156): merge every iteration's ATIF into
+          // one whole-run trajectory so cross-iteration behavior (e.g. a dep added
+          // in one turn and removed in another) is visible in a single evaluation.
+          const urls = atifUrls.filter((u: unknown): u is string => typeof u === "string");
+          try {
+            const atifs = await Promise.all(urls.map((u) => blobStorage.downloadJson(u)));
+            trajectory = fromAtifList(atifs);
+            console.log(
+              `[judge] Loaded merged ATIF trajectory from ${urls.length} iteration(s): ${trajectory.calls.length} call(s), ${trajectory.toolDefinitions.length} tool definition(s)`,
+            );
+          } catch (err) {
+            console.warn(
+              `[judge] Failed to load merged ATIF from ${urls.length} url(s): ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        } else if (atifUrl && typeof atifUrl === "string") {
           try {
             const atif = await blobStorage.downloadJson(atifUrl);
             trajectory = fromAtif(atif);

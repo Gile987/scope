@@ -364,6 +364,89 @@ export function fromAtif(input: unknown): AgentTrajectory {
   };
 }
 
+/**
+ * Merge several {@link AgentTrajectory}s (e.g. one per iteration) into a single
+ * whole-run trajectory for `subject:"run"` observation evaluation (#1156).
+ *
+ * - `calls` are concatenated in iteration order. Colliding `toolCallId`s (the
+ *   ATIF synthesizes step-local ids like `atif-3-0` that restart each iteration)
+ *   are re-keyed `it<n>:<id>` so every call stays addressable via
+ *   `get_agent_tool_calls`.
+ * - `toolDefinitions` are unioned by name (first wins).
+ * - `steps` are concatenated, each tagged with its source iteration.
+ *
+ * A list of length 0 yields an empty trajectory; length 1 is returned as-is.
+ */
+export function mergeTrajectories(list: AgentTrajectory[]): AgentTrajectory {
+  const items = (list ?? []).filter((t): t is AgentTrajectory => Boolean(t));
+  if (items.length === 0) {
+    return {
+      source: "atif",
+      calls: [],
+      byId: new Map(),
+      toolDefinitions: [],
+      toolDefsByName: new Map(),
+    };
+  }
+  if (items.length === 1) return items[0];
+
+  const calls: AgentToolCall[] = [];
+  const seen = new Set<string>();
+  items.forEach((traj, t) => {
+    for (const call of traj.calls) {
+      let uid = call.toolCallId;
+      if (seen.has(uid)) {
+        uid = `it${t + 1}:${call.toolCallId}`;
+        let k = 1;
+        while (seen.has(uid)) uid = `it${t + 1}:${call.toolCallId}-${k++}`;
+      }
+      seen.add(uid);
+      calls.push(uid === call.toolCallId ? call : { ...call, toolCallId: uid });
+    }
+  });
+
+  const toolDefinitions: AgentToolDefinition[] = [];
+  const toolDefsByName = new Map<string, AgentToolDefinition>();
+  for (const traj of items) {
+    for (const def of traj.toolDefinitions) {
+      if (!toolDefsByName.has(def.name)) {
+        toolDefsByName.set(def.name, def);
+        toolDefinitions.push(def);
+      }
+    }
+  }
+
+  const steps: StepOverview[] = [];
+  items.forEach((traj, t) => {
+    for (const s of traj.steps ?? []) {
+      steps.push({ ...s, source: `it${t + 1}:${s.source}` });
+    }
+  });
+
+  const first = items[0];
+  const anyAtif = items.some((x) => x.source === "atif");
+  return {
+    source: anyAtif ? "atif" : "tool-calls",
+    agent: first.agent,
+    model: first.model,
+    calls,
+    byId: buildById(calls),
+    toolDefinitions,
+    toolDefsByName,
+    steps: steps.length > 0 ? steps : undefined,
+    finalMetrics: items[items.length - 1]?.finalMetrics,
+  };
+}
+
+/**
+ * Normalize a list of raw ATIF payloads (one per iteration) into a single
+ * merged whole-run {@link AgentTrajectory}. Convenience over
+ * {@link mergeTrajectories} ∘ {@link fromAtif}.
+ */
+export function fromAtifList(inputs: unknown[]): AgentTrajectory {
+  return mergeTrajectories((inputs ?? []).map((x) => fromAtif(x)));
+}
+
 // ---------------------------------------------------------------------------
 // Tools
 // ---------------------------------------------------------------------------

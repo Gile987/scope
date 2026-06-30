@@ -27,7 +27,7 @@ import { mkdtempSync, writeFileSync, rmSync, realpathSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { resetCriteriaProvider } from "shared/criteria-provider-factory";
-import { fromAtif } from "./agent-trajectory.js";
+import { fromAtif, fromAtifList } from "./agent-trajectory.js";
 import { evaluateWorkspace } from "./judge-agent.js";
 
 const hasToken = !!process.env.GITHUB_TOKEN;
@@ -228,4 +228,94 @@ describe("judge ATIF-trajectory observation (integration)", () => {
     }
     expect(true).toBe(true);
   });
+
+  // The run-subject "killer" test (#1156): the add-then-remove is split ACROSS
+  // iterations — iteration 1 installs left-pad, iteration 2 uninstalls it. Each
+  // per-iteration ATIF alone is `false` (one only adds, the other only removes),
+  // but the MERGED whole-run trajectory reveals the add-then-remove → `true`.
+  // This is exactly the cross-iteration property the `subject:"run"` path exists
+  // to evaluate, and the false-negative the user flagged.
+  const ATIF_INSTALL = {
+    schema_version: "atif/1",
+    session_id: "atif-it1-install",
+    agent: { name: "copilot", version: "1.0.0", model_name: "claude-opus-4.6", tool_definitions: [] },
+    steps: [
+      { step_id: 1, source: "system" },
+      {
+        step_id: 2,
+        source: "agent",
+        model_name: "claude-opus-4.6",
+        reasoning_content: "Add left-pad to pad output.",
+        tool_calls: [{ tool_call_id: "i1-c1", function_name: "bash", arguments: { command: "npm install left-pad" } }],
+        observation: { results: [{ source_call_id: "i1-c1", content: "added 1 package\n+ left-pad@1.3.0" }] },
+      },
+    ],
+  };
+
+  const ATIF_UNINSTALL = {
+    schema_version: "atif/1",
+    session_id: "atif-it2-uninstall",
+    agent: { name: "copilot", version: "1.0.0", model_name: "claude-opus-4.6", tool_definitions: [] },
+    steps: [
+      { step_id: 1, source: "system" },
+      {
+        step_id: 2,
+        source: "agent",
+        model_name: "claude-opus-4.6",
+        reasoning_content: "Remove left-pad; not needed.",
+        tool_calls: [{ tool_call_id: "i2-c1", function_name: "bash", arguments: { command: "npm uninstall left-pad" } }],
+        observation: { results: [{ source_call_id: "i2-c1", content: "removed 1 package\nfound 0 vulnerabilities" }] },
+      },
+    ],
+  };
+
+  it.skipIf(!hasToken)(
+    "run-subject: false per-iteration but true on the MERGED whole-run trajectory",
+    { timeout: 600_000 },
+    async () => {
+      // (1) Iteration 1 alone (install only) → no add-then-remove → false.
+      const it1 = await evaluateWorkspace({
+        workspacePath: workspaceDir,
+        criteria: ["dependency_added_then_removed"],
+        conversationHistory: [],
+        trajectory: fromAtif(ATIF_INSTALL),
+      });
+      const it1Obs = it1.criteriaResults.find((r) => r.criterionId === "dependency_added_then_removed");
+      expect(it1Obs!.evaluated).toBe(true);
+      expect(
+        it1Obs!.passed,
+        `iteration 1 (install only) should be false. Feedback: ${it1Obs!.feedback}`,
+      ).toBe(false);
+
+      // (2) Iteration 2 alone (uninstall only) → no add-then-remove → false.
+      const it2 = await evaluateWorkspace({
+        workspacePath: workspaceDir,
+        criteria: ["dependency_added_then_removed"],
+        conversationHistory: [],
+        trajectory: fromAtif(ATIF_UNINSTALL),
+      });
+      const it2Obs = it2.criteriaResults.find((r) => r.criterionId === "dependency_added_then_removed");
+      expect(it2Obs!.evaluated).toBe(true);
+      expect(
+        it2Obs!.passed,
+        `iteration 2 (uninstall only) should be false. Feedback: ${it2Obs!.feedback}`,
+      ).toBe(false);
+
+      // (3) MERGED whole-run trajectory (install in it1 + uninstall in it2) →
+      // the add-then-remove is now visible → true. This is what subject:"run"
+      // sends the judge as `atifUrls` and is the false-negative the feature fixes.
+      const merged = await evaluateWorkspace({
+        workspacePath: workspaceDir,
+        criteria: ["dependency_added_then_removed"],
+        conversationHistory: [],
+        trajectory: fromAtifList([ATIF_INSTALL, ATIF_UNINSTALL]),
+      });
+      const mergedObs = merged.criteriaResults.find((r) => r.criterionId === "dependency_added_then_removed");
+      expect(mergedObs!.evaluated).toBe(true);
+      expect(
+        mergedObs!.passed,
+        `merged whole-run trajectory should be true (add in it1, remove in it2). Feedback: ${mergedObs!.feedback}`,
+      ).toBe(true);
+    },
+  );
 });

@@ -17,7 +17,9 @@ import { join, sep } from "path";
 import type { ToolCall } from "shared";
 import {
   fromAtif,
+  fromAtifList,
   fromToolCalls,
+  mergeTrajectories,
   createTrajectoryTools,
   summarizeArgs,
   safeId,
@@ -442,5 +444,85 @@ describe("helpers", () => {
   it("previewOf truncates with an ellipsis marker", () => {
     expect(previewOf("abcdef", 3)).toBe("abc…");
     expect(previewOf("abc", 10)).toBe("abc");
+  });
+});
+
+describe("mergeTrajectories / fromAtifList (run-subject whole-run path #1156)", () => {
+  it("returns an empty trajectory for an empty list", () => {
+    const merged = mergeTrajectories([]);
+    expect(merged.calls).toEqual([]);
+    expect(merged.toolDefinitions).toEqual([]);
+    expect(merged.byId.size).toBe(0);
+  });
+
+  it("returns the single trajectory unchanged for a length-1 list", () => {
+    const only = fromAtif(REALISTIC_ATIF);
+    expect(mergeTrajectories([only])).toBe(only);
+  });
+
+  it("concatenates calls in iteration order and preserves both iterations' work", () => {
+    const it1 = fromToolCalls([
+      { id: "a", name: "bash", arguments: { command: "npm install left-pad" }, response: "added 1 package", timestamp: "" },
+    ]);
+    const it2 = fromToolCalls([
+      { id: "b", name: "bash", arguments: { command: "npm uninstall left-pad" }, response: "removed 1 package", timestamp: "" },
+    ]);
+    const merged = mergeTrajectories([it1, it2]);
+    expect(merged.calls.map((c) => c.toolCallId)).toEqual(["a", "b"]);
+    expect(merged.calls[0].response).toContain("added");
+    expect(merged.calls[1].response).toContain("removed");
+    // Both addressable by id.
+    expect(merged.byId.get("a")?.summary).toBe("npm install left-pad");
+    expect(merged.byId.get("b")?.summary).toBe("npm uninstall left-pad");
+  });
+
+  it("re-keys colliding tool-call ids so every call stays addressable", () => {
+    const it1 = fromToolCalls([{ id: "dup", name: "bash", arguments: { command: "first" }, response: "r1", timestamp: "" }]);
+    const it2 = fromToolCalls([{ id: "dup", name: "bash", arguments: { command: "second" }, response: "r2", timestamp: "" }]);
+    const merged = mergeTrajectories([it1, it2]);
+    expect(merged.calls).toHaveLength(2);
+    const ids = merged.calls.map((c) => c.toolCallId);
+    expect(ids[0]).toBe("dup");
+    expect(ids[1]).toBe("it2:dup");
+    expect(new Set(ids).size).toBe(2);
+    expect(merged.byId.get("dup")?.summary).toBe("first");
+    expect(merged.byId.get("it2:dup")?.summary).toBe("second");
+  });
+
+  it("unions tool definitions by name (first wins)", () => {
+    const a = fromAtif(REALISTIC_ATIF); // has a populated catalog
+    const b = fromAtif(REALISTIC_ATIF);
+    const merged = mergeTrajectories([a, b]);
+    // Deduplicated, not doubled.
+    expect(merged.toolDefinitions.length).toBe(a.toolDefinitions.length);
+    expect(merged.toolDefsByName.size).toBe(a.toolDefsByName.size);
+  });
+
+  it("tags merged step overviews with their source iteration", () => {
+    const merged = mergeTrajectories([fromAtif(REALISTIC_ATIF), fromAtif(REALISTIC_ATIF)]);
+    expect(merged.steps?.some((s) => s.source.startsWith("it1:"))).toBe(true);
+    expect(merged.steps?.some((s) => s.source.startsWith("it2:"))).toBe(true);
+  });
+
+  it("fromAtifList normalizes + merges raw ATIF payloads", () => {
+    const merged = fromAtifList([REALISTIC_ATIF, REALISTIC_ATIF]);
+    expect(merged.source).toBe("atif");
+    // Twice the agent calls of a single ATIF.
+    const single = fromAtif(REALISTIC_ATIF);
+    expect(merged.calls.length).toBe(single.calls.length * 2);
+  });
+
+  it("merged trajectory is navigable via createTrajectoryTools across iterations", async () => {
+    const it1 = fromToolCalls([{ id: "x", name: "bash", arguments: { command: "npm install left-pad" }, response: "added", timestamp: "" }]);
+    const it2 = fromToolCalls([{ id: "y", name: "bash", arguments: { command: "npm uninstall left-pad" }, response: "removed", timestamp: "" }]);
+    const spillDir = mkdtempSync(join(tmpdir(), "judge-merge-spill-"));
+    try {
+      const tools = createTrajectoryTools(mergeTrajectories([it1, it2]), spillDir);
+      const res = await call(tools, "list_agent_tool_calls");
+      expect(res.count).toBe(2);
+      expect(res.calls.map((c: any) => c.toolCallId)).toEqual(["x", "y"]);
+    } finally {
+      rmSync(spillDir, { recursive: true, force: true });
+    }
   });
 });
