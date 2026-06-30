@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
@@ -46,6 +46,8 @@ import {
   Repeat,
   FilterX,
   Filter,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
 import { HelpTooltip } from "@/components/HelpTooltip";
@@ -938,7 +940,31 @@ export function Statistics() {
   const hasData = !!data && data.summary.totalRuns > 0;
   const hasActiveFilter =
     selectedCriteria.length > 0 || selectedFeatures.length > 0;
+  const activeFilterCount = selectedCriteria.length + selectedFeatures.length;
   const showPassAtK = import.meta.env.VITE_SHOW_PASS_AT_K === "true";
+
+  // Foldable filters: collapse the card to reclaim vertical space. The open
+  // state is persisted to localStorage so a user's preference sticks across
+  // visits. When collapsed we still surface an "N active" badge so folding
+  // never hides the fact that data is filtered.
+  const FILTERS_OPEN_KEY = "scope:statistics:filters-open";
+  const [filtersOpen, setFiltersOpen] = useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem(FILTERS_OPEN_KEY);
+      if (raw === "1") return true;
+      if (raw === "0") return false;
+    } catch {
+      /* ignore */
+    }
+    return true;
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILTERS_OPEN_KEY, filtersOpen ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [filtersOpen]);
 
   // Condensed filters: a single card holds both pickers side by side. Each
   // compact CriteriaFilterBar renders null when its option list is empty, so a
@@ -949,81 +975,111 @@ export function Statistics() {
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Filter className="h-4 w-4 text-muted-foreground" />
+            <button
+              type="button"
+              onClick={() => setFiltersOpen((v) => !v)}
+              aria-expanded={filtersOpen}
+              aria-label={filtersOpen ? "Collapse filters" : "Expand filters"}
+              className="flex min-w-0 items-center gap-2 text-left transition-colors hover:text-foreground"
+            >
+              <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
               <CardTitle className="text-base">Filters</CardTitle>
-            </div>
-            {hasActiveFilter && (
+              {!filtersOpen && activeFilterCount > 0 && (
+                <Badge variant="secondary" className="ml-1">
+                  {activeFilterCount} active
+                </Badge>
+              )}
+            </button>
+            <div className="flex items-center gap-3">
+              {hasActiveFilter && (
+                <button
+                  onClick={handleClearAllFilters}
+                  className="text-xs text-muted-foreground underline hover:text-foreground"
+                >
+                  Clear all
+                </button>
+              )}
               <button
-                onClick={handleClearAllFilters}
-                className="text-xs text-muted-foreground underline hover:text-foreground"
+                type="button"
+                onClick={() => setFiltersOpen((v) => !v)}
+                aria-expanded={filtersOpen}
+                aria-label={filtersOpen ? "Collapse filters" : "Expand filters"}
+                className="text-muted-foreground transition-colors hover:text-foreground"
               >
-                Clear all
+                {filtersOpen ? (
+                  <ChevronDown className="h-4 w-4 shrink-0" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 shrink-0" />
+                )}
               </button>
-            )}
+            </div>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
-            {data.availableCriteria.length > 0 && (
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm font-medium">Success criteria</span>
-                  <HelpTooltip
-                    docs="criteria"
-                    ariaLabel="About the success criteria filter"
-                    text={
-                      <>
-                        Keep only runs where <strong>every</strong> selected
-                        success criterion passed. Adding more criteria narrows
-                        the results (AND).
-                      </>
-                    }
+        {filtersOpen && (
+          <CardContent>
+            <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+              {data.availableCriteria.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-medium">
+                      Success criteria
+                    </span>
+                    <HelpTooltip
+                      docs="criteria"
+                      ariaLabel="About the success criteria filter"
+                      text={
+                        <>
+                          Keep only runs where <strong>every</strong> selected
+                          success criterion passed. Adding more criteria narrows
+                          the results (AND).
+                        </>
+                      }
+                    />
+                  </div>
+                  <CriteriaFilterBar
+                    compact
+                    availableCriteria={data.availableCriteria}
+                    selectedCriteria={selectedCriteria}
+                    onToggle={handleToggleCriterion}
+                    onClear={handleClearCriteria}
+                    onSelectAll={handleSelectAllCriteria}
+                    itemLabel="criteria"
                   />
                 </div>
-                <CriteriaFilterBar
-                  compact
-                  availableCriteria={data.availableCriteria}
-                  selectedCriteria={selectedCriteria}
-                  onToggle={handleToggleCriterion}
-                  onClear={handleClearCriteria}
-                  onSelectAll={handleSelectAllCriteria}
-                  itemLabel="criteria"
-                />
-              </div>
-            )}
-            {data.availableFeatures.length > 0 && (
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm font-medium">
-                    Task prompt features
-                  </span>
-                  <HelpTooltip
-                    docs="promptFeatures"
-                    ariaLabel="About the task prompt feature filter"
-                    text={
-                      <>
-                        Keep only runs whose task prompt was{" "}
-                        <strong>detected</strong> to request every selected
-                        feature (e.g. <code>asks_for_azure</code>). Adding more
-                        features narrows the results (AND).
-                      </>
-                    }
+              )}
+              {data.availableFeatures.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-medium">
+                      Task prompt features
+                    </span>
+                    <HelpTooltip
+                      docs="promptFeatures"
+                      ariaLabel="About the task prompt feature filter"
+                      text={
+                        <>
+                          Keep only runs whose task prompt was{" "}
+                          <strong>detected</strong> to request every selected
+                          feature (e.g. <code>asks_for_azure</code>). Adding
+                          more features narrows the results (AND).
+                        </>
+                      }
+                    />
+                  </div>
+                  <CriteriaFilterBar
+                    compact
+                    availableCriteria={data.availableFeatures}
+                    selectedCriteria={selectedFeatures}
+                    onToggle={handleToggleFeature}
+                    onClear={handleClearFeatures}
+                    onSelectAll={handleSelectAllFeatures}
+                    itemLabel="features"
                   />
                 </div>
-                <CriteriaFilterBar
-                  compact
-                  availableCriteria={data.availableFeatures}
-                  selectedCriteria={selectedFeatures}
-                  onToggle={handleToggleFeature}
-                  onClear={handleClearFeatures}
-                  onSelectAll={handleSelectAllFeatures}
-                  itemLabel="features"
-                />
-              </div>
-            )}
-          </div>
-        </CardContent>
+              )}
+            </div>
+          </CardContent>
+        )}
       </Card>
     ) : null;
 
