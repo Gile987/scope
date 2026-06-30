@@ -49,7 +49,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
-import { MultiSelectFilter } from "@/components/MultiSelectFilter";
+import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { formatDuration, cn } from "@/lib/utils";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
@@ -968,7 +968,7 @@ export function Statistics() {
   }, [filtersOpen]);
 
   // Condensed filters: a single card holds both pickers side by side. Each
-  // compact MultiSelectFilter renders null when its option list is empty, so a
+  // compact CriteriaFilterBar renders null when its option list is empty, so a
   // missing feature bar simply lets the criteria picker take the full width.
   const filterBars =
     data &&
@@ -1043,7 +1043,7 @@ export function Statistics() {
                       }
                     />
                   </div>
-                  <MultiSelectFilter
+                  <CriteriaFilterBar
                     compact
                     availableCriteria={data.availableFeatures}
                     selectedCriteria={selectedFeatures}
@@ -1072,7 +1072,7 @@ export function Statistics() {
                       }
                     />
                   </div>
-                  <MultiSelectFilter
+                  <CriteriaFilterBar
                     compact
                     availableCriteria={data.availableCriteria}
                     selectedCriteria={selectedCriteria}

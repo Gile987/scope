@@ -23,7 +23,7 @@ import dagre from "dagre";
 import { RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { mergeMdpResponses, topologyHash } from "@/lib/mdp-utils";
-import { MultiSelectFilter } from "@/components/MultiSelectFilter";
+import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
 import { cn } from "@/lib/utils";
 import {
   type MdpNodeData,
@@ -612,7 +612,7 @@ export function CriteriaMdpView() {
 
       {/* Criteria filter */}
       {mdpData && (
-        <MultiSelectFilter
+        <CriteriaFilterBar
           availableCriteria={mdpData.availableCriteria}
           selectedCriteria={selectedCriteria}
           onToggle={handleToggleCriterion}
@@ -628,7 +628,7 @@ export function CriteriaMdpView() {
 
       {/* Prompt feature filter */}
       {mdpData && mdpData.availablePromptFeatures && mdpData.availablePromptFeatures.length > 0 && (
-        <MultiSelectFilter
+        <CriteriaFilterBar
           availableCriteria={mdpData.availablePromptFeatures}
           selectedCriteria={selectedFeatures}
           onToggle={handleToggleFeature}

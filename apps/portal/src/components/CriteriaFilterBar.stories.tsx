@@ -4,7 +4,7 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, screen } from "storybook/test";
-import { MultiSelectFilter } from "./MultiSelectFilter";
+import { CriteriaFilterBar } from "./CriteriaFilterBar";
 
 const FEW = [
   "hello_world_express",
@@ -23,7 +23,7 @@ const MANY = Array.from({ length: 120 }, (_, i) => `criteria_node_${String(i + 1
  * Stateful wrapper so the catalog (and play functions) can toggle selection just
  * like the real Statistics / MDP pages do via URL params.
  */
-function MultiSelectFilterHarness({
+function FilterBarHarness({
   availableCriteria,
   initialSelected = [],
   ...rest
@@ -38,7 +38,7 @@ function MultiSelectFilterHarness({
   const [selected, setSelected] = useState<string[]>(initialSelected);
   return (
     <div className="max-w-3xl">
-      <MultiSelectFilter
+      <CriteriaFilterBar
         availableCriteria={availableCriteria}
         selectedCriteria={selected}
         onToggle={(id) =>
@@ -53,7 +53,7 @@ function MultiSelectFilterHarness({
 }
 
 const meta = {
-  component: MultiSelectFilter,
+  component: CriteriaFilterBar,
   // Default args satisfy the component's required props at the meta level; every
   // story overrides `render` with the stateful harness, so these are unused.
   args: {
@@ -63,22 +63,22 @@ const meta = {
     onClear: () => {},
   },
   tags: ["ai-generated", "needs-work"],
-} satisfies Meta<typeof MultiSelectFilter>;
+} satisfies Meta<typeof CriteriaFilterBar>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
-  render: () => <MultiSelectFilterHarness availableCriteria={FEW} />,
+  render: () => <FilterBarHarness availableCriteria={FEW} />,
 };
 
 export const ManyCriteria: Story = {
-  render: () => <MultiSelectFilterHarness availableCriteria={MANY} />,
+  render: () => <FilterBarHarness availableCriteria={MANY} />,
 };
 
 export const PreSelected: Story = {
   render: () => (
-    <MultiSelectFilterHarness
+    <FilterBarHarness
       availableCriteria={FEW}
       initialSelected={["hello_world_express", "data_integrity_tests_pass"]}
     />
@@ -92,7 +92,7 @@ export const PreSelected: Story = {
  */
 export const Compact: Story = {
   render: () => (
-    <MultiSelectFilterHarness
+    <FilterBarHarness
       availableCriteria={FEW}
       compact
       initialSelected={["uses_azure_cosmos_package"]}
@@ -110,7 +110,7 @@ export const CompactSideBySide: Story = {
     <div className="grid max-w-3xl gap-x-6 gap-y-4 sm:grid-cols-2">
       <div className="space-y-1.5">
         <span className="text-sm font-medium">Success criteria</span>
-        <MultiSelectFilterHarness
+        <FilterBarHarness
           availableCriteria={FEW}
           compact
           itemLabel="criteria"
@@ -119,7 +119,7 @@ export const CompactSideBySide: Story = {
       </div>
       <div className="space-y-1.5">
         <span className="text-sm font-medium">Task prompt features</span>
-        <MultiSelectFilterHarness
+        <FilterBarHarness
           availableCriteria={[
             "asks_for_azure",
             "asks_for_database",
@@ -134,7 +134,7 @@ export const CompactSideBySide: Story = {
 };
 
 export const Interactive: Story = {
-  render: () => <MultiSelectFilterHarness availableCriteria={MANY} />,
+  render: () => <FilterBarHarness availableCriteria={MANY} />,
   play: async ({ canvas }) => {
     // Open the popover from the compact trigger button. (Query by text rather
     // than accessible name: the label is nested under a span with icons.)
