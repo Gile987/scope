@@ -18,7 +18,7 @@ to use a shared dev CosmosDB account while keeping local MongoDB as the default.
 - [Azure Developer CLI (azd)](https://aka.ms/azd) installed
 - Logged in: `azd auth login`
 
-## One-Time Setup (per team)
+## One-Time Setup (per user)
 
 Deploy the shared CosmosDB account:
 

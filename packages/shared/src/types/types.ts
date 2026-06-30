@@ -32,7 +32,7 @@ export interface GateMetadata {
 export const GATE_METADATA: Record<GateId, GateMetadata> = {
   select: {
     id: "select",
-    label: "Select",
+    label: "Requirements",
     description: "Agent implements the task (current behaviour).",
   },
   build: {
