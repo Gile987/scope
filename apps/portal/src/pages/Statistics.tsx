@@ -943,8 +943,9 @@ export function Statistics() {
   const activeFilterCount = selectedCriteria.length + selectedFeatures.length;
   const showPassAtK = import.meta.env.VITE_SHOW_PASS_AT_K === "true";
 
-  // Foldable filters: collapse the card to reclaim vertical space. The open
-  // state is persisted to localStorage so a user's preference sticks across
+  // Foldable filters: collapse the card to reclaim vertical space. It is
+  // folded by default to keep the KPIs above the fold; the open/closed state
+  // is then persisted to localStorage so a user's preference sticks across
   // visits. When collapsed we still surface an "N active" badge so folding
   // never hides the fact that data is filtered.
   const FILTERS_OPEN_KEY = "scope:statistics:filters-open";
@@ -956,7 +957,7 @@ export function Statistics() {
     } catch {
       /* ignore */
     }
-    return true;
+    return false;
   });
   useEffect(() => {
     try {
