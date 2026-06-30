@@ -48,6 +48,7 @@ import {
   Filter,
 } from "lucide-react";
 import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
+import { HelpTooltip } from "@/components/HelpTooltip";
 import { formatDuration, cn } from "@/lib/utils";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 import type { AnalysisResponse, TaskWorkerGroup } from "@/types";
@@ -966,11 +967,19 @@ export function Statistics() {
           <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
             {data.availableCriteria.length > 0 && (
               <div className="space-y-1.5">
-                <div className="flex items-baseline justify-between gap-2">
+                <div className="flex items-center gap-1.5">
                   <span className="text-sm font-medium">Success criteria</span>
-                  <span className="text-xs text-muted-foreground">
-                    All selected must pass
-                  </span>
+                  <HelpTooltip
+                    docs="criteria"
+                    ariaLabel="About the success criteria filter"
+                    text={
+                      <>
+                        Keep only runs where <strong>every</strong> selected
+                        success criterion passed. Adding more criteria narrows
+                        the results (AND).
+                      </>
+                    }
+                  />
                 </div>
                 <CriteriaFilterBar
                   compact
@@ -985,13 +994,22 @@ export function Statistics() {
             )}
             {data.availableFeatures.length > 0 && (
               <div className="space-y-1.5">
-                <div className="flex items-baseline justify-between gap-2">
+                <div className="flex items-center gap-1.5">
                   <span className="text-sm font-medium">
                     Task prompt features
                   </span>
-                  <span className="text-xs text-muted-foreground">
-                    All selected must be detected
-                  </span>
+                  <HelpTooltip
+                    docs="promptFeatures"
+                    ariaLabel="About the task prompt feature filter"
+                    text={
+                      <>
+                        Keep only runs whose task prompt was{" "}
+                        <strong>detected</strong> to request every selected
+                        feature (e.g. <code>asks_for_azure</code>). Adding more
+                        features narrows the results (AND).
+                      </>
+                    }
+                  />
                 </div>
                 <CriteriaFilterBar
                   compact
