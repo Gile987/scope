@@ -12,7 +12,7 @@ export function mapYamlCriterion(
   filename: string,
   _docIndex: number,
   options: { includeGates?: boolean } = {},
-): { id: string; prompt: string; dependsOn?: string[]; gates?: GateId[]; kind?: string; taxonomyElementId?: string } | null {
+): { id: string; prompt: string; dependsOn?: string[]; gates?: GateId[]; kind?: string; taxonomyElementId?: string; subject?: string } | null {
   const id = doc.id as string | undefined;
   const prompt = doc.prompt as string | undefined;
   if (!id || !prompt) return null;
@@ -28,6 +28,8 @@ export function mapYamlCriterion(
   const kind = kindRaw ? String(kindRaw).trim() : undefined;
   const taxRaw = (doc.taxonomy_element_id ?? doc.taxonomyElementId) as string | undefined;
   const taxonomyElementId = taxRaw ? String(taxRaw).trim() : undefined;
+  const subjectRaw = doc.subject as string | undefined;
+  const subject = subjectRaw ? String(subjectRaw).trim() : undefined;
 
   return {
     id: id.trim(),
@@ -36,6 +38,7 @@ export function mapYamlCriterion(
     ...(gates !== undefined ? { gates } : {}),
     ...(kind ? { kind } : {}),
     ...(taxonomyElementId ? { taxonomyElementId } : {}),
+    ...(subject ? { subject } : {}),
   };
 }
 
