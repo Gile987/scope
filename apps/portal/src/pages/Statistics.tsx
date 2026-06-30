@@ -1024,35 +1024,6 @@ export function Statistics() {
         {filtersOpen && (
           <CardContent>
             <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
-              {data.availableCriteria.length > 0 && (
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm font-medium">
-                      Success criteria
-                    </span>
-                    <HelpTooltip
-                      docs="criteria"
-                      ariaLabel="About the success criteria filter"
-                      text={
-                        <>
-                          Keep only runs where <strong>every</strong> selected
-                          success criterion passed. Adding more criteria narrows
-                          the results (AND).
-                        </>
-                      }
-                    />
-                  </div>
-                  <CriteriaFilterBar
-                    compact
-                    availableCriteria={data.availableCriteria}
-                    selectedCriteria={selectedCriteria}
-                    onToggle={handleToggleCriterion}
-                    onClear={handleClearCriteria}
-                    onSelectAll={handleSelectAllCriteria}
-                    itemLabel="criteria"
-                  />
-                </div>
-              )}
               {data.availableFeatures.length > 0 && (
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-1.5">
@@ -1080,6 +1051,35 @@ export function Statistics() {
                     onClear={handleClearFeatures}
                     onSelectAll={handleSelectAllFeatures}
                     itemLabel="features"
+                  />
+                </div>
+              )}
+              {data.availableCriteria.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-medium">
+                      Requirements gate criteria
+                    </span>
+                    <HelpTooltip
+                      docs="criteria"
+                      ariaLabel="About the requirements gate criteria filter"
+                      text={
+                        <>
+                          Keep only runs where <strong>every</strong> selected
+                          success criterion passed. Adding more criteria narrows
+                          the results (AND).
+                        </>
+                      }
+                    />
+                  </div>
+                  <CriteriaFilterBar
+                    compact
+                    availableCriteria={data.availableCriteria}
+                    selectedCriteria={selectedCriteria}
+                    onToggle={handleToggleCriterion}
+                    onClear={handleClearCriteria}
+                    onSelectAll={handleSelectAllCriteria}
+                    itemLabel="criteria"
                   />
                 </div>
               )}
