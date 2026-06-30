@@ -8,10 +8,10 @@ import {
   DetailedEvaluationResult,
   DependencyGraph,
   GateId,
-  ToolCall,
 } from "shared";
 import { getCriteriaProvider } from "shared/criteria-provider-factory";
 import { createJudgeStrategy } from "./judge-strategies.js";
+import type { AgentTrajectory } from "./agent-trajectory.js";
 import { FeedbackGenerator } from "./feedback-generator.js";
 
 export interface EvaluationInput {
@@ -23,8 +23,10 @@ export interface EvaluationInput {
   onProgress?: (result: CriterionResult) => void;
   /** Which gate is being evaluated. Defaults to select. */
   gate?: GateId;
-  /** This iteration's captured tool calls/outputs, exposed to the judge via read_tool_outputs. */
-  toolCalls?: ToolCall[];
+  /** The coding agent's captured trajectory (normalized from the HAR tool calls
+   * for gates, or the ATIF for observations), exposed to the judge via the
+   * unified trajectory tools. */
+  trajectory?: AgentTrajectory;
 }
 
 export interface EvaluationResult {
@@ -102,7 +104,7 @@ export async function evaluateWorkspace(
       personaInstructions: input.personaInstructions,
       onProgress: input.onProgress,
       gate: input.gate,
-      toolCalls: input.toolCalls,
+      trajectory: input.trajectory,
     });
 
     console.log(

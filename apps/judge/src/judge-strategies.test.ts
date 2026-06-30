@@ -8,8 +8,9 @@ import { join } from "path";
 import {
   IndependentStrategy,
   BundledStrategy,
-  TOOL_OUTPUTS_GUIDANCE,
+  TRAJECTORY_GUIDANCE,
   isWithinWorkspace,
+  isWithinAnyRoot,
   JUDGE_AVAILABLE_TOOLS,
   JUDGE_EXCLUDED_TOOLS,
 } from "./judge-strategies.js";
@@ -20,17 +21,17 @@ import {
  * Copilot session.
  */
 class TestableStrategy extends IndependentStrategy {
-  publicCreateFileTools(workspacePath: string) {
-    return this.createFileTools(workspacePath);
-  }
-  publicCreateToolOutputTools(toolCalls: any[]) {
-    return this.createToolOutputTools(toolCalls);
+  publicCreateFileTools(
+    workspacePath: string,
+    opts?: { extraReadRoots?: string[] }
+  ) {
+    return this.createFileTools(workspacePath, opts);
   }
   publicBuildSessionConfig(tools: any[], systemPrompt: string) {
     return this.buildSessionConfig(tools, systemPrompt);
   }
-  publicBuildSystemPrompt(hasToolOutputs: boolean) {
-    return (this as any).buildSystemPrompt(undefined, hasToolOutputs);
+  publicBuildSystemPrompt(hasTrajectory: boolean) {
+    return (this as any).buildSystemPrompt(undefined, hasTrajectory);
   }
   publicBuildUserPrompt(
     criterion: { id: string; prompt: string },
@@ -40,9 +41,12 @@ class TestableStrategy extends IndependentStrategy {
   }
 }
 
-function toolMap(workspacePath: string) {
+function toolMap(
+  workspacePath: string,
+  opts?: { extraReadRoots?: string[] }
+) {
   const strategy = new TestableStrategy("test-model");
-  const tools = strategy.publicCreateFileTools(workspacePath);
+  const tools = strategy.publicCreateFileTools(workspacePath, opts);
   return new Map(tools.map((t) => [t.name, t]));
 }
 
@@ -56,9 +60,10 @@ const stubInvocation = {
 async function callTool(
   workspacePath: string,
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  opts?: { extraReadRoots?: string[] }
 ): Promise<unknown> {
-  const tool = toolMap(workspacePath).get(name);
+  const tool = toolMap(workspacePath, opts).get(name);
   if (!tool?.handler) throw new Error(`tool ${name} has no handler`);
   return (tool.handler as (a: unknown, b: unknown) => unknown)(args, stubInvocation);
 }
@@ -86,37 +91,6 @@ describe("judge file tools", () => {
   });
 });
 
-describe("judge tool-output tools (issue #1125)", () => {
-  const strategy = new TestableStrategy("test-model");
-  const toolCalls = [
-    {
-      id: "1",
-      name: "bash",
-      arguments: { command: "npm run build" },
-      response: "build ok",
-      timestamp: "",
-    },
-  ];
-  const tools = strategy.publicCreateToolOutputTools(toolCalls);
-
-  it("exposes read_tool_outputs and get_tool_output", () => {
-    const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["get_tool_output", "read_tool_outputs"]);
-  });
-
-  // Regression guard for scope #1125: headless, any tool without skipPermission
-  // is denied at execution time ("could not request permission from user"). When
-  // this affected read_tool_outputs/get_tool_output, the judge could never see
-  // the coding agent's captured build/test output and wrongly demanded on-disk
-  // proof files, forcing the build gate to loop for many iterations.
-  it("marks every tool-output tool to skip the permission prompt", () => {
-    expect(tools.length).toBeGreaterThan(0);
-    for (const tool of tools) {
-      expect(tool.skipPermission, `${tool.name} must skip the permission prompt`).toBe(true);
-    }
-  });
-});
-
 describe("isWithinWorkspace", () => {
   it("accepts the root itself and nested paths", () => {
     expect(isWithinWorkspace("/tmp/ws", "/tmp/ws")).toBe(true);
@@ -134,6 +108,21 @@ describe("isWithinWorkspace", () => {
     expect(isWithinWorkspace("/tmp/ws", "/tmp/ws/../ws2/secret")).toBe(false);
     expect(isWithinWorkspace("/tmp/ws", "/tmp")).toBe(false);
     expect(isWithinWorkspace("/tmp/ws", "/etc/passwd")).toBe(false);
+  });
+});
+
+describe("isWithinAnyRoot", () => {
+  it("accepts a path inside any of the roots", () => {
+    expect(isWithinAnyRoot(["/tmp/ws", "/tmp/spill"], "/tmp/ws/src/a.ts")).toBe(true);
+    expect(isWithinAnyRoot(["/tmp/ws", "/tmp/spill"], "/tmp/spill/out.txt")).toBe(true);
+    expect(isWithinAnyRoot(["/tmp/ws", "/tmp/spill"], "/tmp/spill")).toBe(true);
+  });
+
+  it("rejects a path outside every root (guard preserved per-root)", () => {
+    expect(isWithinAnyRoot(["/tmp/ws", "/tmp/spill"], "/tmp/ws2/secret")).toBe(false);
+    expect(isWithinAnyRoot(["/tmp/ws", "/tmp/spill"], "/etc/passwd")).toBe(false);
+    // sibling-prefix of an allowed root must not slip through
+    expect(isWithinAnyRoot(["/tmp/ws", "/tmp/spill"], "/tmp/spill2/x")).toBe(false);
   });
 });
 
@@ -201,6 +190,85 @@ describe("judge file tool handlers (workspace scoping)", () => {
   });
 });
 
+describe("judge file tools — extraReadRoots (P10 trajectory spill dir)", () => {
+  // The trajectory tools spill oversized outputs to a dir OUTSIDE the workspace
+  // and return its absolute path; read_file/file_exists must be able to open it
+  // (via extraReadRoots) WITHOUT widening list_directory/search_files, so the
+  // codebase view other criteria inspect is never polluted by spill files.
+  let parent: string;
+  let workspace: string;
+  let spill: string;
+
+  beforeAll(() => {
+    parent = mkdtempSync(join(tmpdir(), "judge-spill-"));
+    workspace = join(parent, "ws");
+    spill = join(parent, "spill");
+    mkdirSync(workspace, { recursive: true });
+    mkdirSync(spill, { recursive: true });
+    writeFileSync(join(workspace, "inside.txt"), "in-workspace");
+    writeFileSync(join(spill, "big-output.txt"), "SPILLED OUTPUT");
+  });
+
+  afterAll(() => {
+    rmSync(parent, { recursive: true, force: true });
+  });
+
+  it("read_file opens an absolute path under an extra read root", async () => {
+    const result = (await callTool(
+      workspace,
+      "read_file",
+      { path: join(spill, "big-output.txt") },
+      { extraReadRoots: [spill] }
+    )) as { content?: string; error?: string };
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe("SPILLED OUTPUT");
+  });
+
+  it("file_exists confirms a file under an extra read root", async () => {
+    const result = (await callTool(
+      workspace,
+      "file_exists",
+      { path: join(spill, "big-output.txt") },
+      { extraReadRoots: [spill] }
+    )) as { exists?: boolean; error?: string };
+    expect(result.error).toBeUndefined();
+    expect(result.exists).toBe(true);
+  });
+
+  it("read_file still rejects an absolute path outside the workspace AND the extra roots", async () => {
+    const outside = join(parent, "other", "secret.txt");
+    mkdirSync(join(parent, "other"), { recursive: true });
+    writeFileSync(outside, "SECRET");
+    const result = (await callTool(
+      workspace,
+      "read_file",
+      { path: outside },
+      { extraReadRoots: [spill] }
+    )) as { content?: string; error?: string };
+    expect(result.error).toBe("Path traversal not allowed");
+    expect(result.content).toBeUndefined();
+  });
+
+  it("read_file without extraReadRoots rejects the spill path (default behaviour unchanged)", async () => {
+    const result = (await callTool(workspace, "read_file", {
+      path: join(spill, "big-output.txt"),
+    })) as { content?: string; error?: string };
+    expect(result.error).toBe("Path traversal not allowed");
+  });
+
+  it("list_directory stays workspace-only — it cannot reveal an extra read root's contents", async () => {
+    const result = (await callTool(
+      workspace,
+      "list_directory",
+      { path: spill },
+      { extraReadRoots: [spill] }
+    )) as { entries?: { name: string }[]; error?: string };
+    // Whether it errors or resolves the absolute path back under the workspace,
+    // it must never surface the spilled file — list_directory ignores extraReadRoots.
+    expect(result.entries?.some((e) => e.name === "big-output.txt") ?? false).toBe(false);
+  });
+});
+
 describe("judge session tool restriction (scope #1117)", () => {
   const strategy = new TestableStrategy("test-model");
   const config = strategy.publicBuildSessionConfig([], "system prompt");
@@ -243,8 +311,8 @@ describe("judge session tool restriction (scope #1117)", () => {
  * without running a real Copilot session.
  */
 class TestableBundledStrategy extends BundledStrategy {
-  publicBuildSystemPrompt(hasToolOutputs: boolean) {
-    return (this as any).buildSystemPrompt(undefined, hasToolOutputs);
+  publicBuildSystemPrompt(hasTrajectory: boolean) {
+    return (this as any).buildSystemPrompt(undefined, hasTrajectory);
   }
   publicBuildUserPrompt(
     criteria: { id: string; prompt: string }[] = [
@@ -256,51 +324,59 @@ class TestableBundledStrategy extends BundledStrategy {
   }
 }
 
-describe("judge tool-outputs guidance (issue #1125)", () => {
+describe("judge trajectory guidance (issue #1125 / #1156)", () => {
   // The headless judge cannot run commands; it must decide from the codebase
-  // plus the coding agent's captured tool outputs. The guidance must be generic
+  // plus the coding agent's captured trajectory. The guidance must be generic
   // (not build/test specific) and must tell the judge to treat captured output
   // as authoritative instead of demanding the agent redo or re-prove the work.
   it("is generic, not tied to any one command type", () => {
-    const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
+    const g = TRAJECTORY_GUIDANCE.toLowerCase();
     expect(g).not.toMatch(/build\.log|build_proof|\bnpm run build\b/);
   });
 
   it("tells the judge it cannot run commands itself", () => {
-    expect(TOOL_OUTPUTS_GUIDANCE.toLowerCase()).toContain("cannot run any commands");
+    expect(TRAJECTORY_GUIDANCE.toLowerCase()).toContain("cannot run any commands");
   });
 
-  it("names the judge's own read-only tools and disambiguates them from the agent's", () => {
-    expect(TOOL_OUTPUTS_GUIDANCE).toContain("## Your Tools");
-    expect(TOOL_OUTPUTS_GUIDANCE).toContain("read_file");
-    expect(TOOL_OUTPUTS_GUIDANCE).toContain("read_tool_outputs");
-    expect(TOOL_OUTPUTS_GUIDANCE).toContain("get_tool_output");
-    expect(TOOL_OUTPUTS_GUIDANCE.toLowerCase()).toContain("codebase");
+  it("names the judge's own read-only tools and the unified trajectory tools", () => {
+    expect(TRAJECTORY_GUIDANCE).toContain("## Your Tools");
+    expect(TRAJECTORY_GUIDANCE).toContain("read_file");
+    expect(TRAJECTORY_GUIDANCE).toContain("list_agent_tool_calls");
+    expect(TRAJECTORY_GUIDANCE).toContain("get_agent_tool_calls");
+    expect(TRAJECTORY_GUIDANCE).toContain("list_agent_tools");
+    expect(TRAJECTORY_GUIDANCE).toContain("get_agent_tools");
+    expect(TRAJECTORY_GUIDANCE.toLowerCase()).toContain("codebase");
   });
 
-  it("frames the codebase and captured outputs as equally authoritative and to be examined together", () => {
-    expect(TOOL_OUTPUTS_GUIDANCE).toContain("## How to Judge");
-    const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
+  it("tells the judge to open spilled outputs (responseFile/descriptionFile) with read_file", () => {
+    expect(TRAJECTORY_GUIDANCE).toContain("responseFile");
+    expect(TRAJECTORY_GUIDANCE).toContain("descriptionFile");
+    expect(TRAJECTORY_GUIDANCE.toLowerCase()).toMatch(/open .*with read_file|read_file/);
+  });
+
+  it("frames the codebase and captured trajectory as equally authoritative and to be examined together", () => {
+    expect(TRAJECTORY_GUIDANCE).toContain("## How to Judge");
+    const g = TRAJECTORY_GUIDANCE.toLowerCase();
     expect(g).toContain("equally authoritative");
     expect(g).toContain("examine both");
   });
 
   it("treats captured output as the record of what happened and forbids redundant re-proving", () => {
-    const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
+    const g = TRAJECTORY_GUIDANCE.toLowerCase();
     expect(g).toContain("record of what happened");
     expect(g).toMatch(/redo or re-prove/);
   });
 
   it("overrides criteria wording that asks the judge to run commands", () => {
-    const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
+    const g = TRAJECTORY_GUIDANCE.toLowerCase();
     expect(g).toContain("criterion");
     expect(g).toMatch(/run, execute, or re-run/);
     expect(g).toContain("ignore that instruction");
   });
 
-  it("includes the guidance in the system prompt when tool outputs are present", () => {
+  it("includes the guidance in the system prompt when a trajectory is present", () => {
     const prompt = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(true);
-    expect(prompt).toContain(TOOL_OUTPUTS_GUIDANCE);
+    expect(prompt).toContain(TRAJECTORY_GUIDANCE);
   });
 
   it("frames What to Evaluate around the agent's work and points at the user message", () => {
@@ -310,9 +386,9 @@ describe("judge tool-outputs guidance (issue #1125)", () => {
     expect(prompt).toMatch(/each criterion provided in the user message/);
   });
 
-  it("omits the guidance when no tool outputs were captured", () => {
+  it("omits the guidance when no trajectory was captured", () => {
     const prompt = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(false);
-    expect(prompt).not.toContain(TOOL_OUTPUTS_GUIDANCE);
+    expect(prompt).not.toContain(TRAJECTORY_GUIDANCE);
   });
 });
 

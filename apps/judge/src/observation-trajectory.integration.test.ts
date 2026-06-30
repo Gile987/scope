@@ -6,14 +6,15 @@
  *
  * Proves the judge resolves a trajectory-only observation — one whose answer is
  * NOT derivable from the final workspace snapshot — by consuming the agent's
- * ATIF trajectory that pp-taxonomy forwards as a synthetic `agent_trajectory_atif`
- * tool call (see apps/judge/src/index.ts). The canonical case is
- * `dependency_added_then_removed`: a package is installed then uninstalled mid-run,
- * so it is invisible in the end-state snapshot and only the trajectory reveals it.
+ * ATIF trajectory normalized into an {@link AgentTrajectory} and navigated via
+ * the unified trajectory tools (list_agent_tool_calls / get_agent_tool_calls).
+ * The canonical case is `dependency_added_then_removed`: a package is installed
+ * then uninstalled mid-run, so it is invisible in the end-state snapshot and
+ * only the trajectory reveals it.
  *
  * Two assertions form the acceptance:
- *   1. WITH the trajectory tool call → criterion resolves passed:true (the judge
- *      actually consumed the ATIF).
+ *   1. WITH the trajectory → criterion resolves passed:true (the judge actually
+ *      consumed the ATIF via the navigation tools).
  *   2. WITHOUT the trajectory (snapshot only) → the same criterion flips to
  *      passed:false, proving the verdict comes from the trajectory, not the files.
  *
@@ -26,31 +27,95 @@ import { mkdtempSync, writeFileSync, rmSync, realpathSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { resetCriteriaProvider } from "shared/criteria-provider-factory";
-import type { ToolCall } from "shared";
+import { fromAtif } from "./agent-trajectory.js";
 import { evaluateWorkspace } from "./judge-agent.js";
 
 const hasToken = !!process.env.GITHUB_TOKEN;
 const JUDGE_MODEL = process.env.JUDGE_MODEL || "gpt-5.4-mini";
 
 /**
- * Synthetic ATIF trajectory mirroring what pp-taxonomy forwards: the agent
- * installs `left-pad`, uses it, then uninstalls it before finishing. The final
- * package.json (below) therefore does NOT list left-pad.
+ * Realistic ATIF trajectory (the exact shape pp-taxonomy downloads and forwards
+ * via `fromAtif`): a system + user step, then agent steps that install
+ * `left-pad`, use it, and uninstall it before finishing. Each agent step pairs
+ * its `tool_calls[]` with the matching same-step `observation.results[]` by
+ * `source_call_id === tool_call_id`. The final package.json (below) therefore
+ * does NOT list left-pad — the add-then-remove is only in the trajectory.
  */
-const ATIF_TRAJECTORY = {
-  schema: "atif/1",
+const REALISTIC_ATIF = {
+  schema_version: "atif/1",
+  session_id: "atif-trajectory-test",
+  agent: {
+    name: "copilot",
+    version: "1.0.0",
+    model_name: "claude-opus-4.6",
+    tool_definitions: [
+      {
+        type: "function",
+        function: {
+          name: "bash",
+          description: "Run a shell command in the workspace.",
+          parameters: {
+            type: "object",
+            properties: { command: { type: "string" } },
+            required: ["command"],
+          },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "edit",
+          description: "Edit a file in the workspace.",
+          parameters: {
+            type: "object",
+            properties: { path: { type: "string" } },
+            required: ["path"],
+          },
+        },
+      },
+    ],
+  },
   steps: [
-    { type: "tool_call", name: "run_in_terminal", arguments: { command: "npm install left-pad" }, response: "+ left-pad@1.3.0\nadded 1 package" },
-    { type: "tool_call", name: "edit_file", arguments: { path: "index.js" }, response: "require('left-pad')" },
-    { type: "tool_call", name: "run_in_terminal", arguments: { command: "npm uninstall left-pad" }, response: "removed 1 package" },
+    { step_id: 1, source: "system" },
+    { step_id: 2, source: "user" },
+    {
+      step_id: 3,
+      source: "agent",
+      model_name: "claude-opus-4.6",
+      reasoning_content: "I'll add left-pad to pad the output.",
+      tool_calls: [
+        { tool_call_id: "call-1", function_name: "bash", arguments: { command: "npm install left-pad" } },
+      ],
+      observation: {
+        results: [
+          { source_call_id: "call-1", content: "added 1 package\n+ left-pad@1.3.0\nfound 0 vulnerabilities" },
+        ],
+      },
+    },
+    {
+      step_id: 4,
+      source: "agent",
+      model_name: "claude-opus-4.6",
+      tool_calls: [
+        { tool_call_id: "call-2", function_name: "edit", arguments: { path: "index.js" } },
+      ],
+      observation: {
+        results: [{ source_call_id: "call-2", content: "File index.js edited: now requires('left-pad')" }],
+      },
+    },
+    {
+      step_id: 5,
+      source: "agent",
+      model_name: "claude-opus-4.6",
+      reasoning_content: "On reflection I don't need left-pad; removing it.",
+      tool_calls: [
+        { tool_call_id: "call-3", function_name: "bash", arguments: { command: "npm uninstall left-pad" } },
+      ],
+      observation: {
+        results: [{ source_call_id: "call-3", content: "removed 1 package\nfound 0 vulnerabilities" }],
+      },
+    },
   ],
-};
-
-const TRAJECTORY_TOOL_CALL: ToolCall = {
-  id: "atif-trajectory",
-  name: "agent_trajectory_atif",
-  arguments: {},
-  response: JSON.stringify(ATIF_TRAJECTORY),
 };
 
 describe("judge ATIF-trajectory observation (integration)", () => {
@@ -87,8 +152,9 @@ describe("judge ATIF-trajectory observation (integration)", () => {
         "  removed it before finishing (e.g. added left-pad then removed it). This",
         "  is only derivable from the agent's trajectory (mid-run tool calls), not",
         "  from the final codebase snapshot, because the dependency is absent in the",
-        "  end state. Inspect the agent_trajectory_atif tool output to detect a",
-        "  transient add-then-remove.",
+        "  end state. Use list_agent_tool_calls to scan the agent's tool calls and",
+        "  get_agent_tool_calls to inspect the relevant ones, detecting a transient",
+        "  add-then-remove of a dependency.",
         "",
       ].join("\n"),
     );
@@ -114,13 +180,13 @@ describe("judge ATIF-trajectory observation (integration)", () => {
     "resolves a trajectory-only observation true WITH the ATIF, false WITHOUT it",
     { timeout: 600_000 },
     async () => {
-      // (1) WITH the ATIF trajectory tool call → the agent's add-then-remove is
-      // visible, so the observation must resolve true.
+      // (1) WITH the ATIF trajectory → the agent's add-then-remove is visible via
+      // the navigation tools, so the observation must resolve true.
       const withAtif = await evaluateWorkspace({
         workspacePath: workspaceDir,
         criteria: ["dependency_added_then_removed"],
         conversationHistory: [],
-        toolCalls: [TRAJECTORY_TOOL_CALL],
+        trajectory: fromAtif(REALISTIC_ATIF),
       });
 
       const obsWith = withAtif.criteriaResults.find(

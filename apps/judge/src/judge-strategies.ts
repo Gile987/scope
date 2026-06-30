@@ -2,8 +2,9 @@
 // Licensed under the MIT License.
 
 import { CopilotClient, defineTool, SessionEvent } from "@github/copilot-sdk";
-import { readFileSync, readdirSync, statSync, existsSync } from "fs";
-import { join, resolve, sep } from "path";
+import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { isAbsolute, join, resolve, sep } from "path";
 import { execFileSync } from "child_process";
 import {
   CriteriaConfig,
@@ -12,10 +13,13 @@ import {
   ConversationTurn,
   DependencyGraph,
   GateId,
-  ToolCall,
   TokenManagerClient,
   withRetry,
 } from "shared";
+import {
+  type AgentTrajectory,
+  createTrajectoryTools,
+} from "./agent-trajectory.js";
 
 export interface JudgeStrategyContext {
   workspacePath: string;
@@ -28,8 +32,9 @@ export interface JudgeStrategyContext {
   onProgress?: (result: CriterionResult) => void;
   /** Which gate is being evaluated. Defaults to select. */
   gate?: GateId;
-  /** This iteration's captured tool calls/outputs (build/test/run output). */
-  toolCalls?: ToolCall[];
+  /** The coding agent's captured trajectory (normalized from the HAR tool calls
+   * for gates, or the ATIF for observations). */
+  trajectory?: AgentTrajectory;
 }
 
 /**
@@ -54,11 +59,16 @@ const DEFAULT_JUDGE_RETRIES = 3;
  * its decision on actual evidence instead of demanding the agent re-prove work
  * it has already done. It is intentionally generic across all criteria.
  */
-export const TOOL_OUTPUTS_GUIDANCE = `## Your Tools
-You have read-only tools to gather evidence: read_file, list_directory, search_files and file_exists to inspect the workspace, and read_tool_outputs / get_tool_output to review the tool calls the coding agent ran while doing the task. You yourself cannot run any commands or coding-agent tools — you can only read what the agent already did.
+export const TRAJECTORY_GUIDANCE = `## Your Tools
+You have read-only tools to gather evidence — you cannot run any commands or coding-agent tools yourself, you can only read what the agent already did:
+- Inspect the resulting codebase: read_file, list_directory, search_files, file_exists.
+- See what tools the agent HAD available (its catalog): list_agent_tools, then get_agent_tools(toolNames) for a tool's full description and parameter schema.
+- See what the agent DID: list_agent_tool_calls to triage its invocations (id, name, a short summary and a preview of each output), then get_agent_tool_calls(toolCallIds) for the full arguments and captured output of the calls you care about.
+- get_trajectory_overview gives a high-level orientation (agent, model, steps) without the raw system prompt.
+When get_agent_tool_calls or get_agent_tools returns a responseFile or descriptionFile (large outputs are spilled to a file instead of inlined), open that path with read_file.
 
 ## How to Judge
-The codebase and the agent's captured tool outputs are two complementary, equally authoritative sources of evidence — examine both. The files show the resulting state of the code; the captured outputs (logs, results, exit status) show what actually happened when the agent ran a command, which the files alone may not reveal. When a criterion concerns something the agent did or ran, take the agent's captured output and exit status as the record of what happened, rather than asking the agent to redo or re-prove work the evidence already shows. If a criterion's wording tells you to run, execute, or re-run a command, ignore that instruction and judge the outcome from the captured outputs together with the codebase.`;
+The resulting codebase and the agent's captured trajectory are two complementary, equally authoritative sources of evidence — examine both. The files show the resulting state of the code; the captured tool calls and their outputs show what actually happened while the agent worked, including intermediate actions the final files no longer reveal (for example a dependency added and then later removed within the run). Start with list_agent_tool_calls to see what the agent did, then drill into the relevant calls with get_agent_tool_calls. When a criterion concerns something the agent did or ran, take the agent's captured output and exit status as the record of what happened, rather than asking the agent to redo or re-prove work the evidence already shows. If a criterion's wording tells you to run, execute, or re-run a command, ignore that instruction and judge the outcome from the captured trajectory together with the codebase.`;
 
 /**
  * Tool filter applied to every judge session.
@@ -66,11 +76,11 @@ The codebase and the agent's captured tool outputs are two complementary, equall
  * The Copilot SDK's `CopilotClient` defaults to `mode: "copilot-cli"`, which
  * injects the full set of built-in CLI tools (bash, edit, view, ...) into the
  * session alongside the read-only `custom:*` tools we register in
- * `createFileTools`/`createToolOutputTools`. Those built-ins are NOT
+ * `createFileTools`/`createTrajectoryTools`. Those built-ins are NOT
  * `skipPermission`, and the judge runs headless (no TUI to answer prompts).
  *
  * The failure mode this guards against: instead of reading the coder's captured
- * output via `read_tool_outputs`/`get_tool_output`, the judge model decides to
+ * output via `list_agent_tool_calls`/`get_agent_tool_calls`, the judge model decides to
  * "verify" a build/test by running the command itself through the built-in
  * `bash` tool. Headless, that call is denied with "could not request permission
  * from user". The judge then mis-reports this as the coder's result ("execution
@@ -103,6 +113,17 @@ export function isWithinWorkspace(root: string, target: string): boolean {
   );
 }
 
+/**
+ * Returns true if `target` resolves inside (or equal to) ANY of `roots`. Used so
+ * read_file/file_exists may read both the workspace and a judge-created spill dir
+ * (created OUTSIDE the workspace for oversized trajectory tool outputs) without
+ * weakening the per-root traversal guard — each root is still checked with the
+ * exact-or-separator-boundary rule of `isWithinWorkspace`.
+ */
+export function isWithinAnyRoot(roots: string[], target: string): boolean {
+  return roots.some((root) => isWithinWorkspace(root, target));
+}
+
 export abstract class JudgeStrategy {
   protected model: string;
   protected timeout: number;
@@ -126,11 +147,21 @@ export abstract class JudgeStrategy {
   /**
    * Create filesystem inspection tools scoped to the workspace
    */
-  protected createFileTools(workspacePath: string) {
+  protected createFileTools(
+    workspacePath: string,
+    opts?: { extraReadRoots?: string[] },
+  ) {
     const workspaceRoot = resolve(workspacePath);
+    // Additional roots (OUTSIDE the workspace) that read_file/file_exists may
+    // read by ABSOLUTE path — used for the trajectory spill dir so the judge can
+    // open oversized tool outputs returned as responseFile/descriptionFile.
+    // list_directory/search_files stay workspace-only so the codebase view the
+    // judge inspects is never polluted by spill files.
+    const extraReadRoots = (opts?.extraReadRoots ?? []).map((r) => resolve(r));
+    const readRoots = [workspaceRoot, ...extraReadRoots];
     const readFile = defineTool("read_file", {
       description:
-        "Read the contents of a file in the workspace. Returns the full text content. Use relative paths from the workspace root.",
+        "Read the contents of a file. Returns the full text content. Use a relative path from the workspace root, or an absolute path returned as responseFile/descriptionFile by the agent-trajectory tools.",
       // Read-only, workspace-scoped, traversal-guarded tools must run without a
       // permission prompt: the judge is headless (no TUI), so the v3 runtime
       // would otherwise deny every call with "could not request permission from
@@ -147,8 +178,10 @@ export abstract class JudgeStrategy {
         required: ["path"],
       },
       handler: async (args: { path: string }) => {
-        const fullPath = join(workspaceRoot, args.path);
-        if (!isWithinWorkspace(workspaceRoot, fullPath)) {
+        const fullPath = isAbsolute(args.path)
+          ? resolve(args.path)
+          : join(workspaceRoot, args.path);
+        if (!isWithinAnyRoot(readRoots, fullPath)) {
           return { error: "Path traversal not allowed" };
         }
         if (!existsSync(fullPath)) {
@@ -318,8 +351,10 @@ export abstract class JudgeStrategy {
         required: ["path"],
       },
       handler: async (args: { path: string }) => {
-        const fullPath = join(workspaceRoot, args.path);
-        if (!isWithinWorkspace(workspaceRoot, fullPath)) {
+        const fullPath = isAbsolute(args.path)
+          ? resolve(args.path)
+          : join(workspaceRoot, args.path);
+        if (!isWithinAnyRoot(readRoots, fullPath)) {
           return { error: "Path traversal not allowed" };
         }
         const exists = existsSync(fullPath);
@@ -336,128 +371,67 @@ export abstract class JudgeStrategy {
   }
 
   /**
-   * Create tools that expose the tool calls/outputs captured during the gate
-   * iteration being judged (e.g. a build/test command's stdout/stderr/exit
-   * code). `read_tool_outputs` lists calls with truncated previews;
-   * `get_tool_output` returns the full output for a given index on demand.
-   */
-  protected createToolOutputTools(toolCalls: ToolCall[]) {
-    const PREVIEW_LIMIT = 2_000;
-    const FULL_LIMIT = 100_000;
-
-    const readToolOutputs = defineTool("read_tool_outputs", {
-      description:
-        "List the tool calls the coding agent made during this iteration (e.g. shell/bash commands and their output). Returns each call's index, name, arguments and a truncated response preview. Use get_tool_output(index) to fetch the full output of a specific call. Consult these to decide whether a command (build, test, run) actually succeeded.",
-      // Read-only in-memory inspection of already-captured tool calls. Like the
-      // file tools above, this MUST run without a permission prompt: the judge is
-      // headless (no TUI), so the v3 runtime would otherwise deny every call with
-      // "could not request permission from user" — which silently blocks the judge
-      // from ever seeing the coding agent's build/test output and forces it to
-      // demand on-disk proof files instead. See scope #1125.
-      skipPermission: true,
-      parameters: {
-        type: "object",
-        properties: {},
-        required: [],
-      },
-      handler: async () => {
-        if (toolCalls.length === 0) {
-          return { count: 0, calls: [], message: "No tool calls were captured for this iteration." };
-        }
-        const calls = toolCalls.map((tc, index) => {
-          const response = tc.response ?? "";
-          return {
-            index,
-            name: tc.name,
-            arguments: tc.arguments,
-            responsePreview:
-              response.length > PREVIEW_LIMIT
-                ? response.substring(0, PREVIEW_LIMIT) + "\n…(truncated, use get_tool_output)"
-                : response,
-            responseTruncated: response.length > PREVIEW_LIMIT,
-            responseLength: response.length,
-          };
-        });
-        return { count: calls.length, calls };
-      },
-    });
-
-    const getToolOutput = defineTool("get_tool_output", {
-      description:
-        "Return the full captured output (response) of a single tool call by its index, as listed by read_tool_outputs.",
-      // Read-only; same headless permission rationale as read_tool_outputs. See scope #1125.
-      skipPermission: true,
-      parameters: {
-        type: "object",
-        properties: {
-          index: {
-            type: "number",
-            description: "Zero-based index of the tool call from read_tool_outputs",
-          },
-        },
-        required: ["index"],
-      },
-      handler: async (args: { index: number }) => {
-        const tc = toolCalls[args.index];
-        if (!tc) {
-          return { error: `No tool call at index ${args.index} (have ${toolCalls.length})` };
-        }
-        const response = tc.response ?? "";
-        if (response.length > FULL_LIMIT) {
-          return {
-            index: args.index,
-            name: tc.name,
-            arguments: tc.arguments,
-            response: response.substring(0, FULL_LIMIT),
-            truncated: true,
-            totalLength: response.length,
-          };
-        }
-        return { index: args.index, name: tc.name, arguments: tc.arguments, response };
-      },
-    });
-
-    return [readToolOutputs, getToolOutput];
-  }
-
-  /**
    * Run a Copilot session with given prompt and tools, retrying on timeout.
+   *
+   * When a trajectory with at least one captured call is supplied, the unified
+   * trajectory navigation tools are registered (mirroring the previous
+   * `toolCalls.length > 0` gate) and a per-evaluation spill dir is created
+   * OUTSIDE the workspace for oversized tool outputs; read_file is granted that
+   * dir as an extra read root so the judge can open spilled files. The spill dir
+   * is best-effort removed when the session finishes.
    */
   protected async runCopilotSession(
     workspacePath: string,
     systemPrompt: string,
     userPrompt: string,
-    toolCalls?: ToolCall[]
+    trajectory?: AgentTrajectory
   ): Promise<string> {
+    const hasTrajectory = !!trajectory && trajectory.calls.length > 0;
+    const spillDir = hasTrajectory
+      ? mkdtempSync(join(tmpdir(), "judge-trajectory-"))
+      : undefined;
     const tools = [
-      ...this.createFileTools(workspacePath),
-      ...(toolCalls && toolCalls.length > 0 ? this.createToolOutputTools(toolCalls) : []),
+      ...this.createFileTools(
+        workspacePath,
+        spillDir ? { extraReadRoots: [spillDir] } : undefined,
+      ),
+      ...(hasTrajectory ? createTrajectoryTools(trajectory!, spillDir!) : []),
     ];
 
-    return withRetry(
-      () => this.doRunCopilotSession(tools, systemPrompt, userPrompt),
-      {
-        maxRetries: this.maxRetries,
-        baseDelayMs: 10_000,
-        maxDelayMs: 30_000,
-        isRetryable: (error) => {
-          const msg = error instanceof Error ? error.message : String(error);
-          return (
-            msg.includes("timeout") ||
-            msg.includes("Timeout") ||
-            msg.includes("aborted") ||
-            msg.includes("ECONNRESET") ||
-            msg.includes("socket hang up")
-          );
-        },
-        onRetry: (error, attempt) => {
-          const msg = error instanceof Error ? error.message : String(error);
-          console.warn(
-            `[judge-strategy] sendAndWait attempt ${attempt} failed (retrying in ≤30s): ${msg.substring(0, 200)}`
-          );
-        },
+    try {
+      return await withRetry(
+        () => this.doRunCopilotSession(tools, systemPrompt, userPrompt),
+        {
+          maxRetries: this.maxRetries,
+          baseDelayMs: 10_000,
+          maxDelayMs: 30_000,
+          isRetryable: (error) => {
+            const msg = error instanceof Error ? error.message : String(error);
+            return (
+              msg.includes("timeout") ||
+              msg.includes("Timeout") ||
+              msg.includes("aborted") ||
+              msg.includes("ECONNRESET") ||
+              msg.includes("socket hang up")
+            );
+          },
+          onRetry: (error, attempt) => {
+            const msg = error instanceof Error ? error.message : String(error);
+            console.warn(
+              `[judge-strategy] sendAndWait attempt ${attempt} failed (retrying in ≤30s): ${msg.substring(0, 200)}`
+            );
+          },
+        }
+      );
+    } finally {
+      if (spillDir) {
+        try {
+          rmSync(spillDir, { recursive: true, force: true });
+        } catch {
+          // best-effort cleanup of the out-of-workspace spill dir
+        }
       }
-    );
+    }
   }
 
   /**
@@ -526,12 +500,12 @@ export class BundledStrategy extends JudgeStrategy {
       criteria,
       conversationHistory,
       personaInstructions,
-      toolCalls,
+      trajectory,
     } = context;
 
     const systemPrompt = this.buildSystemPrompt(
       personaInstructions,
-      toolCalls && toolCalls.length > 0
+      !!trajectory && trajectory.calls.length > 0
     );
 
     const userPrompt = this.buildUserPrompt(criteria, conversationHistory);
@@ -540,7 +514,7 @@ export class BundledStrategy extends JudgeStrategy {
       workspacePath,
       systemPrompt,
       userPrompt,
-      toolCalls
+      trajectory
     );
 
     return this.parseJsonResponse(response, criteria, context.onProgress);
@@ -555,14 +529,14 @@ export class BundledStrategy extends JudgeStrategy {
    */
   private buildSystemPrompt(
     personaInstructions?: string,
-    hasToolOutputs?: boolean
+    hasTrajectory?: boolean
   ): string {
     const personaSection = personaInstructions
       ? `\n## Persona\n${personaInstructions}\n`
       : "";
 
-    const toolOutputsSection = hasToolOutputs
-      ? `\n${TOOL_OUTPUTS_GUIDANCE}\n`
+    const toolOutputsSection = hasTrajectory
+      ? `\n${TRAJECTORY_GUIDANCE}\n`
       : "";
 
     return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent.
@@ -729,7 +703,7 @@ export class IndependentStrategy extends JudgeStrategy {
       personaInstructions,
       onProgress,
       gate,
-      toolCalls,
+      trajectory,
     } = context;
 
     // Get topological order
@@ -795,7 +769,7 @@ export class IndependentStrategy extends JudgeStrategy {
             personaInstructions,
             evalIndex++,
             gate,
-            toolCalls
+            trajectory
           )
         );
 
@@ -836,11 +810,11 @@ export class IndependentStrategy extends JudgeStrategy {
     personaInstructions: string | undefined,
     index: number,
     gate?: GateId,
-    toolCalls?: ToolCall[]
+    trajectory?: AgentTrajectory
   ): Promise<CriterionResult> {
     const systemPrompt = this.buildSystemPrompt(
       personaInstructions,
-      toolCalls && toolCalls.length > 0
+      !!trajectory && trajectory.calls.length > 0
     );
 
     const userPrompt = this.buildUserPrompt(criterion, conversationHistory);
@@ -850,7 +824,7 @@ export class IndependentStrategy extends JudgeStrategy {
         workspacePath,
         systemPrompt,
         userPrompt,
-        toolCalls
+        trajectory
       );
 
       const passed = this.detectPassFail(response);
@@ -884,14 +858,14 @@ export class IndependentStrategy extends JudgeStrategy {
    */
   protected buildSystemPrompt(
     personaInstructions?: string,
-    hasToolOutputs?: boolean
+    hasTrajectory?: boolean
   ): string {
     const personaSection = personaInstructions
       ? `\n## Persona\n${personaInstructions}\n`
       : "";
 
-    const toolOutputsSection = hasToolOutputs
-      ? `\n${TOOL_OUTPUTS_GUIDANCE}\n`
+    const toolOutputsSection = hasTrajectory
+      ? `\n${TRAJECTORY_GUIDANCE}\n`
       : "";
 
     return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent against ONE specific criterion.

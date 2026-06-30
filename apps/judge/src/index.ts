@@ -5,6 +5,7 @@ import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
 import { evaluateWorkspace } from "./judge-agent.js";
 import { verifyCopilotProtocol } from "./protocol-check.js";
+import { type AgentTrajectory, fromAtif, fromToolCalls } from "./agent-trajectory.js";
 import { BlobStorage, RedisLogPublisher } from "shared";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -89,44 +90,38 @@ app.post(
 
         console.log(`[judge] Snapshot extracted to ${workDir}`);
 
-        // Download this iteration's captured tool calls/outputs (build/test/run
-        // output), if provided. Failures are non-fatal — the judge can still
-        // evaluate the workspace files.
-        let toolCalls: import("shared").ToolCall[] = [];
-        if (toolCallsUrl && typeof toolCallsUrl === "string") {
+        // Build the agent's captured trajectory from whichever channel was
+        // provided, normalized into ONE source-agnostic model the judge navigates
+        // with the unified trajectory tools (list/get_agent_tool_calls,
+        // list/get_agent_tools, get_trajectory_overview). Gates send the HAR
+        // ToolCall[] via toolCallsUrl; observations (#1156) send the full ATIF via
+        // atifUrl — the normalized superset that also carries the agent's tool
+        // catalog and per-step reasoning. ATIF wins if both ever arrive (superset).
+        // Failures are non-fatal — the judge can still evaluate the workspace
+        // files. See apps/judge/src/agent-trajectory.ts.
+        let trajectory: AgentTrajectory | undefined;
+        if (atifUrl && typeof atifUrl === "string") {
           try {
-            toolCalls = await blobStorage.getToolCalls(toolCallsUrl);
+            const atif = await blobStorage.downloadJson(atifUrl);
+            trajectory = fromAtif(atif);
             console.log(
-              `[judge] Loaded ${toolCalls.length} tool call(s) for gate '${gate ?? "select"}'`,
+              `[judge] Loaded ATIF trajectory from ${atifUrl}: ${trajectory.calls.length} call(s), ${trajectory.toolDefinitions.length} tool definition(s)`,
+            );
+          } catch (err) {
+            console.warn(
+              `[judge] Failed to load ATIF from ${atifUrl}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        } else if (toolCallsUrl && typeof toolCallsUrl === "string") {
+          try {
+            const toolCalls = await blobStorage.getToolCalls(toolCallsUrl);
+            trajectory = fromToolCalls(toolCalls);
+            console.log(
+              `[judge] Loaded ${trajectory.calls.length} tool call(s) for gate '${gate ?? "select"}'`,
             );
           } catch (err) {
             console.warn(
               `[judge] Failed to load tool calls from ${toolCallsUrl}: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-        }
-
-        // Load the ATIF trajectory (normalized superset of tool calls) when
-        // provided — used by pp-taxonomy to evaluate observations against the
-        // full agent trajectory, not just the end-state snapshot. Exposed to the
-        // judge as a synthetic tool output so trajectory-only observations (e.g.
-        // a dependency added then removed mid-run) are detectable. Issue #1156.
-        if (atifUrl && typeof atifUrl === "string") {
-          try {
-            const atif = await blobStorage.downloadJson(atifUrl);
-            toolCalls = [
-              ...toolCalls,
-              {
-                id: "atif-trajectory",
-                name: "agent_trajectory_atif",
-                arguments: {},
-                response: typeof atif === "string" ? atif : JSON.stringify(atif),
-              },
-            ];
-            console.log(`[judge] Loaded ATIF trajectory from ${atifUrl}`);
-          } catch (err) {
-            console.warn(
-              `[judge] Failed to load ATIF from ${atifUrl}: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
         }
@@ -153,7 +148,7 @@ app.post(
           personaInstructions,
           onProgress,
           gate,
-          toolCalls,
+          trajectory,
         });
 
         const elapsed = Date.now() - startTime;
