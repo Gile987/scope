@@ -974,24 +974,29 @@ export function Statistics() {
     data &&
     (data.availableCriteria.length > 0 || data.availableFeatures.length > 0) ? (
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className={cn(filtersOpen ? "pb-3" : "py-3")}>
           <div className="flex items-center justify-between gap-2">
             <button
               type="button"
               onClick={() => setFiltersOpen((v) => !v)}
               aria-expanded={filtersOpen}
               aria-label={filtersOpen ? "Collapse filters" : "Expand filters"}
-              className="flex min-w-0 items-center gap-2 text-left transition-colors hover:text-foreground"
+              className="group -ml-2 flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted/50"
             >
               <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
               <CardTitle className="text-base">Filters</CardTitle>
-              {!filtersOpen && activeFilterCount > 0 && (
-                <Badge variant="secondary" className="ml-1">
-                  {activeFilterCount} active
-                </Badge>
-              )}
+              {!filtersOpen &&
+                (activeFilterCount > 0 ? (
+                  <Badge variant="secondary" className="ml-1 shrink-0">
+                    {activeFilterCount} active
+                  </Badge>
+                ) : (
+                  <span className="ml-1 truncate text-sm font-normal text-muted-foreground">
+                    No filters applied
+                  </span>
+                ))}
             </button>
-            <div className="flex items-center gap-3">
+            <div className="flex shrink-0 items-center gap-3">
               {hasActiveFilter && (
                 <button
                   onClick={handleClearAllFilters}
