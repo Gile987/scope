@@ -52,6 +52,14 @@ export interface AnalysisResponse {
   availableFeatures: string[];
   /** Task-prompt feature IDs used to filter runs (empty = no feature filter) */
   selectedFeatures: string[];
+  /**
+   * True when the analyzed run set was capped to a most-recent-N window to bound
+   * memory (see ANALYSIS_MAX_RUNS). Older runs are excluded from the metrics;
+   * the portal surfaces this as a banner. Absent/false = the full set was analyzed.
+   */
+  truncated?: boolean;
+  /** The configured run cap (max runs analyzed) — only meaningful when `truncated`. */
+  runLimit?: number;
 }
 
 /** Per-criterion result stored on each turn */
@@ -171,6 +179,19 @@ function getPassedIteration(run: AnalyzableRun, selectedCriteria?: string[]): nu
  */
 function isPassedRun(run: AnalyzableRun, selectedCriteria?: string[]): boolean {
   return getPassedIteration(run, selectedCriteria) !== null;
+}
+
+/**
+ * Cap a run list to a maximum size, reporting whether truncation occurred.
+ *
+ * The analysis endpoint fetches the most-recent `max + 1` runs so it can detect
+ * "there are more than `max`" in a single query; this helper trims back to `max`
+ * and flags truncation. Bounding the in-memory run set is what keeps the analysis
+ * pass from loading an unbounded number of documents.
+ */
+export function capRunsToLimit<T>(runs: T[], max: number): { runs: T[]; truncated: boolean } {
+  if (runs.length <= max) return { runs, truncated: false };
+  return { runs: runs.slice(0, max), truncated: true };
 }
 
 /**

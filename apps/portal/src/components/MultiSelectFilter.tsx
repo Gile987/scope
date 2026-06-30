@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-interface CriteriaFilterBarProps {
+interface MultiSelectFilterProps {
   availableCriteria: string[];
   selectedCriteria: string[];
   onToggle: (id: string) => void;
@@ -50,7 +50,7 @@ interface CriteriaFilterBarProps {
   compact?: boolean;
 }
 
-export function CriteriaFilterBar({
+export function MultiSelectFilter({
   availableCriteria,
   selectedCriteria,
   onToggle,
@@ -62,7 +62,7 @@ export function CriteriaFilterBar({
     `Success = all ${count} selected criteria pass. Runs without these criteria are excluded.`,
   itemLabel = "criteria",
   compact = false,
-}: CriteriaFilterBarProps) {
+}: MultiSelectFilterProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 

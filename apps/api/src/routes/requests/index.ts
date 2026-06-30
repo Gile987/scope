@@ -48,7 +48,7 @@ import type {
   RouteContext,
   WorkerType,
 } from "../../route-context.js";
-import { computeAnalysis } from "../../analysis.js";
+import { computeAnalysis, capRunsToLimit } from "../../analysis.js";
 import type { AnalysisResponse, AnalyzableRun } from "../../analysis.js";
 import { parseStateKey } from "../../criteria-mdp.js";
 import { buildGroupingPipeline } from "../../grouping.js";
@@ -1601,6 +1601,14 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
+// Cap how many runs a single analysis pass loads into memory. We fetch the
+// most-recent-N done runs (sorted by createdAt, served by the existing createdAt
+// index from migration 010) rather than the entire collection, so memory stays
+// bounded as the run history grows. Override via ANALYSIS_MAX_RUNS. When the cap
+// is hit the response sets truncated=true and the portal shows a "most recent N"
+// banner instead of silently dropping data or breaking the page.
+const ANALYSIS_MAX_RUNS = Math.max(1, Number(process.env.ANALYSIS_MAX_RUNS) || 5000);
+
 // Analysis endpoint - compute pass@k, success@T, and iteration stats
 apiRoute(ctx.app, ctx.registry, {
   method: "get",
@@ -1633,9 +1641,15 @@ apiRoute(ctx.app, ctx.registry, {
       ? featuresParam.split(",").map(f => f.trim()).filter(Boolean)
       : undefined;
 
-    // Fetch all done runs (exclude pending/processing, exclude deleted).
-    // Per-attempt state lives at run.* (run-retry-attempts).
-    const runs = await ctx.requestCollection
+    // Fetch the most-recent done runs (exclude pending/processing and deleted),
+    // capped to ANALYSIS_MAX_RUNS to bound memory. Sorted by createdAt desc using
+    // the existing createdAt index. The projection is slimmed to only the fields
+    // the analysis actually reads: the heavy per-turn payloads (agent transcripts
+    // `codingAgentResponse`, `judgeFeedback`, legacy inline `toolCalls`, HAR/video
+    // URLs, etc.) are excluded — a single run can otherwise approach Cosmos's 2 MB
+    // document limit. Per-attempt state lives at run.* (run-retry-attempts).
+    // Fetch one extra (limit + 1) so we can detect "more exist" without a count.
+    const runDocs = await ctx.requestCollection
       .find({
         "run.status": "done",
         deletedAt: { $exists: false },
@@ -1644,10 +1658,21 @@ apiRoute(ctx.app, ctx.registry, {
         _id: 1,
         scenario: 1,
         workerType: 1,
-        run: 1,
         taskPromptId: 1,
+        "run.status": 1,
+        "run.outcome": 1,
+        "run.turns.iteration": 1,
+        "run.turns.passed": 1,
+        "run.turns.durationMs": 1,
+        "run.turns.criteriaResults": 1,
       })
+      .sort({ createdAt: -1 })
+      .limit(ANALYSIS_MAX_RUNS + 1)
       .toArray();
+
+    // Trim back to the cap; `truncated` tells the portal to show a "most recent N"
+    // banner so capped metrics are never presented as if they covered everything.
+    const { runs, truncated } = capRunsToLimit(runDocs, ANALYSIS_MAX_RUNS);
 
     // Effective task-prompt id per run: stored taskPromptId, else derived from the
     // task text (legacy runs). Used to join task-prompt features for filtering.
@@ -1689,7 +1714,7 @@ apiRoute(ctx.app, ctx.registry, {
     });
 
     const analysis: AnalysisResponse = computeAnalysis(analyzableRuns, kValues, selectedCriteria, selectedFeatures);
-    res.json(analysis);
+    res.json({ ...analysis, truncated, runLimit: ANALYSIS_MAX_RUNS });
   },
 });
 

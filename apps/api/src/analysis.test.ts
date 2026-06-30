@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect } from "vitest";
-import { computeAnalysis, type AnalyzableRun } from "./analysis.js";
+import { computeAnalysis, capRunsToLimit, type AnalyzableRun } from "./analysis.js";
 import { computeTaskPromptId } from "shared";
 
 describe("computeAnalysis – taskPromptId grouping", () => {
@@ -232,5 +232,33 @@ describe("computeAnalysis – task prompt feature filtering", () => {
     const result = computeAnalysis(runs, kValues);
     expect(result.selectedFeatures).toEqual([]);
     expect(result.availableFeatures).toEqual(["asks_for_azure"]);
+  });
+});
+
+describe("capRunsToLimit – memory bound", () => {
+  it("returns the list untouched when at or below the cap", () => {
+    const runs = [1, 2, 3];
+    const atCap = capRunsToLimit(runs, 3);
+    expect(atCap.truncated).toBe(false);
+    expect(atCap.runs).toBe(runs); // same reference, no copy
+
+    const belowCap = capRunsToLimit(runs, 10);
+    expect(belowCap.truncated).toBe(false);
+    expect(belowCap.runs).toEqual([1, 2, 3]);
+  });
+
+  it("trims to the cap and flags truncation when exceeded", () => {
+    // The route fetches cap+1 to detect "more exist"; simulate that here.
+    const fetched = [1, 2, 3, 4]; // cap+1 for a cap of 3
+    const { runs, truncated } = capRunsToLimit(fetched, 3);
+    expect(truncated).toBe(true);
+    expect(runs).toEqual([1, 2, 3]); // keeps the most-recent N (already sorted)
+    expect(runs).toHaveLength(3);
+  });
+
+  it("handles an empty list", () => {
+    const { runs, truncated } = capRunsToLimit([], 5);
+    expect(truncated).toBe(false);
+    expect(runs).toEqual([]);
   });
 });

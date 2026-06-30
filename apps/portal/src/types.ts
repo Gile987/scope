@@ -337,6 +337,13 @@ export interface AnalysisResponse {
   availableFeatures: string[];
   /** Task-prompt feature IDs used to filter runs (empty = no feature filter) */
   selectedFeatures: string[];
+  /**
+   * True when the analyzed run set was capped to a most-recent-N window to bound
+   * server memory. Older runs are excluded from the metrics; the UI shows a banner.
+   */
+  truncated?: boolean;
+  /** The configured run cap (max runs analyzed) — only meaningful when `truncated`. */
+  runLimit?: number;
 }
 
 // MDP state-transition graph types

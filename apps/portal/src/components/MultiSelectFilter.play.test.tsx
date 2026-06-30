@@ -5,9 +5,9 @@
 import { describe, it, afterEach } from "vitest";
 import { cleanup, render, within } from "@testing-library/react";
 
-import * as criteriaFilterBar from "./CriteriaFilterBar.stories";
+import * as multiSelectFilter from "./MultiSelectFilter.stories";
 
-const modules: Record<string, Record<string, unknown>> = { criteriaFilterBar };
+const modules: Record<string, Record<string, unknown>> = { multiSelectFilter };
 
 afterEach(() => cleanup());
 

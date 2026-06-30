@@ -49,7 +49,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
-import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
+import { MultiSelectFilter } from "@/components/MultiSelectFilter";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { formatDuration, cn } from "@/lib/utils";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
@@ -968,7 +968,7 @@ export function Statistics() {
   }, [filtersOpen]);
 
   // Condensed filters: a single card holds both pickers side by side. Each
-  // compact CriteriaFilterBar renders null when its option list is empty, so a
+  // compact MultiSelectFilter renders null when its option list is empty, so a
   // missing feature bar simply lets the criteria picker take the full width.
   const filterBars =
     data &&
@@ -1043,7 +1043,7 @@ export function Statistics() {
                       }
                     />
                   </div>
-                  <CriteriaFilterBar
+                  <MultiSelectFilter
                     compact
                     availableCriteria={data.availableFeatures}
                     selectedCriteria={selectedFeatures}
@@ -1072,7 +1072,7 @@ export function Statistics() {
                       }
                     />
                   </div>
-                  <CriteriaFilterBar
+                  <MultiSelectFilter
                     compact
                     availableCriteria={data.availableCriteria}
                     selectedCriteria={selectedCriteria}
@@ -1111,6 +1111,20 @@ export function Statistics() {
           )}
         </div>
       </div>
+
+      {!isLoading && data?.truncated && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-4 py-3 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+          <span className="text-muted-foreground">
+            Showing stats for the most recent{" "}
+            <span className="font-medium text-foreground">
+              {(data.runLimit ?? data.summary.totalRuns).toLocaleString()}
+            </span>{" "}
+            runs. Older runs are excluded to keep this page responsive — narrow the
+            range with filters to analyze a specific slice.
+          </span>
+        </div>
+      )}
 
       {isLoading || !data ? (
         <StatisticsSkeleton />
