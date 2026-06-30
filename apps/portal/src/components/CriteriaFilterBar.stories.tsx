@@ -33,6 +33,7 @@ function FilterBarHarness({
   title?: string;
   emptyDescription?: string;
   itemLabel?: string;
+  compact?: boolean;
 }) {
   const [selected, setSelected] = useState<string[]>(initialSelected);
   return (
@@ -81,6 +82,54 @@ export const PreSelected: Story = {
       availableCriteria={FEW}
       initialSelected={["hello_world_express", "data_integrity_tests_pass"]}
     />
+  ),
+};
+
+/**
+ * Compact variant: no surrounding Card/header/description, just the picker
+ * trigger and selected chips. Lets callers compose several filters into one
+ * dense container.
+ */
+export const Compact: Story = {
+  render: () => (
+    <FilterBarHarness
+      availableCriteria={FEW}
+      compact
+      initialSelected={["uses_azure_cosmos_package"]}
+    />
+  ),
+};
+
+/**
+ * Two compact bars composed side by side, mirroring how the Statistics page
+ * packs the Success Criteria and Task Prompt Feature pickers into one "Filters"
+ * card instead of two stacked cards.
+ */
+export const CompactSideBySide: Story = {
+  render: () => (
+    <div className="grid max-w-3xl gap-x-6 gap-y-4 sm:grid-cols-2">
+      <div className="space-y-1.5">
+        <span className="text-sm font-medium">Success criteria</span>
+        <FilterBarHarness
+          availableCriteria={FEW}
+          compact
+          itemLabel="criteria"
+          initialSelected={["hello_world_express"]}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <span className="text-sm font-medium">Task prompt features</span>
+        <FilterBarHarness
+          availableCriteria={[
+            "asks_for_azure",
+            "asks_for_database",
+            "asks_for_frontend",
+          ]}
+          compact
+          itemLabel="features"
+        />
+      </div>
+    </div>
   ),
 };
 

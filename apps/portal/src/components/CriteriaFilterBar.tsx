@@ -3,12 +3,22 @@
 
 import { useMemo, useState } from "react";
 import { ChevronsUpDown, Filter, Search, X } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface CriteriaFilterBarProps {
@@ -32,6 +42,12 @@ interface CriteriaFilterBarProps {
   selectedDescription?: (count: number) => string;
   /** Override the noun used in the trigger/search controls (default: "criteria") */
   itemLabel?: string;
+  /**
+   * Render inline without the surrounding Card, header, or description — just the
+   * picker trigger and selected chips. Lets callers compose several filters into
+   * a single dense container (e.g. the Statistics "Filters" card).
+   */
+  compact?: boolean;
 }
 
 export function CriteriaFilterBar({
@@ -45,11 +61,15 @@ export function CriteriaFilterBar({
   selectedDescription = (count: number) =>
     `Success = all ${count} selected criteria pass. Runs without these criteria are excluded.`,
   itemLabel = "criteria",
+  compact = false,
 }: CriteriaFilterBarProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
-  const selectedSet = useMemo(() => new Set(selectedCriteria), [selectedCriteria]);
+  const selectedSet = useMemo(
+    () => new Set(selectedCriteria),
+    [selectedCriteria],
+  );
   const selectedCount = selectedCriteria.length;
 
   const query = search.trim().toLowerCase();
@@ -70,6 +90,132 @@ export function CriteriaFilterBar({
     onSelectAll(Array.from(new Set([...selectedCriteria, ...filtered])));
   };
 
+  const body = (
+    <div className="flex flex-col gap-3">
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) setSearch("");
+        }}
+      >
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            role="combobox"
+            aria-expanded={open}
+            className="w-full justify-between sm:w-auto sm:min-w-[16rem]"
+          >
+            <span className="flex items-center gap-2">
+              <Filter className="h-3.5 w-3.5" />
+              {selectedCount > 0
+                ? `Filtering by ${itemLabel}`
+                : `Filter ${itemLabel}`}
+              {selectedCount > 0 && (
+                <Badge variant="secondary" className="ml-1">
+                  {selectedCount}
+                </Badge>
+              )}
+            </span>
+            <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[22rem] max-w-[90vw] p-0">
+          <div className="flex items-center gap-2 border-b px-3 py-2">
+            <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <Input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={`Search ${itemLabel}…`}
+              className="h-8 border-0 bg-transparent px-0 py-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs text-muted-foreground">
+            <span>
+              {selectedCount} of {availableCriteria.length} selected
+            </span>
+            <div className="flex items-center gap-3">
+              {onSelectAll && filtered.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleSelectAll}
+                  className="hover:text-foreground underline"
+                >
+                  {query
+                    ? `Select ${filtered.length} result${filtered.length === 1 ? "" : "s"}`
+                    : "Select all"}
+                </button>
+              )}
+              {selectedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={onClear}
+                  className="hover:text-foreground underline"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
+          </div>
+
+          <ScrollArea className="max-h-72">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                No {itemLabel} match “{search}”.
+              </div>
+            ) : (
+              <ul className="p-1">
+                {filtered.map((id) => {
+                  const isSelected = selectedSet.has(id);
+                  return (
+                    <li key={id}>
+                      <button
+                        type="button"
+                        onClick={() => onToggle(id)}
+                        className="flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                      >
+                        <Checkbox
+                          checked={isSelected}
+                          tabIndex={-1}
+                          aria-hidden
+                          className="pointer-events-none mt-0.5"
+                        />
+                        <span className="break-all">{id}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </ScrollArea>
+        </PopoverContent>
+      </Popover>
+
+      {selectedCount > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selectedCriteria.map((id) => (
+            <Badge
+              key={id}
+              variant="default"
+              className="cursor-pointer bg-primary transition-colors hover:bg-primary/80"
+              onClick={() => onToggle(id)}
+            >
+              {id}
+              <X className="ml-1 h-3 w-3" />
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  if (compact) {
+    return body;
+  }
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -88,128 +234,12 @@ export function CriteriaFilterBar({
           )}
         </div>
         <CardDescription>
-          {selectedCount === 0 ? emptyDescription : selectedDescription(selectedCount)}
+          {selectedCount === 0
+            ? emptyDescription
+            : selectedDescription(selectedCount)}
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="flex flex-col gap-3">
-          <Popover
-            open={open}
-            onOpenChange={(next) => {
-              setOpen(next);
-              if (!next) setSearch("");
-            }}
-          >
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                role="combobox"
-                aria-expanded={open}
-                className="w-full justify-between sm:w-auto sm:min-w-[16rem]"
-              >
-                <span className="flex items-center gap-2">
-                  <Filter className="h-3.5 w-3.5" />
-                  {selectedCount > 0 ? `Filtering by ${itemLabel}` : `Filter ${itemLabel}`}
-                  {selectedCount > 0 && (
-                    <Badge variant="secondary" className="ml-1">
-                      {selectedCount}
-                    </Badge>
-                  )}
-                </span>
-                <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-[22rem] max-w-[90vw] p-0">
-              <div className="flex items-center gap-2 border-b px-3 py-2">
-                <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <Input
-                  autoFocus
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder={`Search ${itemLabel}…`}
-                  className="h-8 border-0 bg-transparent px-0 py-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
-                />
-              </div>
-
-              <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs text-muted-foreground">
-                <span>
-                  {selectedCount} of {availableCriteria.length} selected
-                </span>
-                <div className="flex items-center gap-3">
-                  {onSelectAll && filtered.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleSelectAll}
-                      className="hover:text-foreground underline"
-                    >
-                      {query
-                        ? `Select ${filtered.length} result${filtered.length === 1 ? "" : "s"}`
-                        : "Select all"}
-                    </button>
-                  )}
-                  {selectedCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={onClear}
-                      className="hover:text-foreground underline"
-                    >
-                      Clear all
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <ScrollArea className="max-h-72">
-                {filtered.length === 0 ? (
-                  <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-                    No {itemLabel} match “{search}”.
-                  </div>
-                ) : (
-                  <ul className="p-1">
-                    {filtered.map((id) => {
-                      const isSelected = selectedSet.has(id);
-                      return (
-                        <li key={id}>
-                          <button
-                            type="button"
-                            onClick={() => onToggle(id)}
-                            className="flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                          >
-                            <Checkbox
-                              checked={isSelected}
-                              tabIndex={-1}
-                              aria-hidden
-                              className="pointer-events-none mt-0.5"
-                            />
-                            <span className="break-all">{id}</span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </ScrollArea>
-            </PopoverContent>
-          </Popover>
-
-          {selectedCount > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {selectedCriteria.map((id) => (
-                <Badge
-                  key={id}
-                  variant="default"
-                  className="cursor-pointer bg-primary transition-colors hover:bg-primary/80"
-                  onClick={() => onToggle(id)}
-                >
-                  {id}
-                  <X className="ml-1 h-3 w-3" />
-                </Badge>
-              ))}
-            </div>
-          )}
-        </div>
-      </CardContent>
+      <CardContent>{body}</CardContent>
     </Card>
   );
 }
