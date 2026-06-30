@@ -427,9 +427,9 @@ apiRoute(ctx.app, ctx.registry, {
     409: { description: "Criterion already exists" },
   },
   handler: async (req, res) => {
-    const { id, prompt, dependsOn = [], gates, kind, taxonomyElementId } = req.body;
+    const { id, prompt, dependsOn = [], gates, kind, taxonomyElementId, subject } = req.body;
     try {
-      const doc = await getCriteriaStore().create({ id, prompt, dependsOn, gates, kind, taxonomyElementId });
+      const doc = await getCriteriaStore().create({ id, prompt, dependsOn, gates, kind, taxonomyElementId, subject });
       res.status(201).json(doc);
     } catch (err) {
       if (!sendStoreError(res, err)) throw err;
@@ -452,9 +452,9 @@ apiRoute(ctx.app, ctx.registry, {
   },
   handler: async (req, res) => {
     const { id } = req.params;
-    const { prompt, dependsOn, gates, kind, taxonomyElementId } = req.body;
+    const { prompt, dependsOn, gates, kind, taxonomyElementId, subject } = req.body;
     try {
-      const updated = await getCriteriaStore().update(id, { prompt, dependsOn, gates, kind, taxonomyElementId });
+      const updated = await getCriteriaStore().update(id, { prompt, dependsOn, gates, kind, taxonomyElementId, subject });
       res.json(updated);
     } catch (err) {
       if (!sendStoreError(res, err)) throw err;

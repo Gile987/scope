@@ -670,6 +670,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "prompt": {
             "type": "string",
           },
+          "subject": {
+            "enum": [
+              "run",
+              "iteration",
+            ],
+            "type": "string",
+          },
           "taxonomyElementId": {
             "enum": [
               "dimension:idiomatic-use",
@@ -1058,6 +1065,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "prompt": {
             "type": "string",
           },
+          "subject": {
+            "enum": [
+              "run",
+              "iteration",
+            ],
+            "type": "string",
+          },
           "taxonomyElementId": {
             "enum": [
               "dimension:idiomatic-use",
@@ -1119,6 +1133,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "prompt": {
+            "type": "string",
+          },
+          "subject": {
+            "enum": [
+              "run",
+              "iteration",
+            ],
             "type": "string",
           },
           "taxonomyElementId": {
@@ -2626,6 +2647,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "logsUrl": {
             "type": "string",
           },
+          "observationResults": {
+            "items": {
+              "$ref": "#/components/schemas/CriterionResult",
+            },
+            "type": "array",
+          },
           "os": {
             "properties": {
               "arch": {
@@ -3159,6 +3186,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "prompt": {
+            "type": "string",
+          },
+          "subject": {
+            "enum": [
+              "run",
+              "iteration",
+            ],
             "type": "string",
           },
           "taxonomyElementId": {

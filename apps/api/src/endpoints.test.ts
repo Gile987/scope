@@ -220,6 +220,38 @@ describe("API Endpoints", () => {
 
       expect(res.status).toBe(400);
     });
+
+    it("defaults an observation's subject to 'run'", async () => {
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post("/api/v1/criteria")
+        .send({ id: "obs_subj", prompt: "Did the agent add then remove a dep?", dependsOn: [], kind: "observation" });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("subject", "run");
+    });
+
+    it("creates an observation with an explicit subject:'iteration' override", async () => {
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post("/api/v1/criteria")
+        .send({ id: "obs_iter", prompt: "x", dependsOn: [], kind: "observation", subject: "iteration" });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("subject", "iteration");
+    });
+
+    it("rejects subject:'run' on a gate criterion", async () => {
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post("/api/v1/criteria")
+        .send({ id: "gate_run", prompt: "x", dependsOn: [], kind: "gate", subject: "run" });
+
+      expect(res.status).toBe(400);
+    });
   });
 
   describe("POST /api/v1/criteria/seed", () => {

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { isUnexpected } from "@azure-rest/ai-inference";
-import { gatesSatisfyInvariant, type GateId } from "shared";
+import { gatesSatisfyInvariant, type GateId, type CriterionSubject } from "shared";
 import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
 
 export type SuggestDirection = "parents" | "children";
@@ -23,13 +23,18 @@ Given a natural-language description of a behavior or pattern to detect in a cod
    - Contain only lowercase letters, digits, and underscores
    - Be concise but descriptive (e.g., has_unit_tests, uses_typescript, has_docker_config)
 
+3. Classify the evaluation SUBJECT — whether the behavior must be judged across the WHOLE run or within a SINGLE iteration in isolation:
+   - "run": the behavior spans multiple steps/iterations or describes a transition over the course of the session — phrasing like "at any point", "ever", "then later", "added then removed", "during the run", or anything only confirmable by viewing the entire run together.
+   - "iteration": the behavior is a single end-state fact or a per-step property judgeable from one iteration alone (e.g., "uses TypeScript", "has a Dockerfile", "ran the test suite this turn").
+   When unsure, prefer "run".
+
 Here are examples of good criteria prompts:
 - "The project uses Azure Bicep for infrastructure as code. Look for *.bicep files, bicepconfig.json, or main.bicep entry points."
 - "The project uses React framework. Look for react dependency in package.json, .jsx or .tsx files with React components."
 - "The project uses Node.js as its runtime environment. Look for package.json file or Node.js-specific configuration files."
 
 Respond with ONLY a JSON object in this exact format (no markdown, no code fences):
-{"prompt": "your evaluation prompt here", "suggestedId": "your_suggested_id"}`;
+{"prompt": "your evaluation prompt here", "suggestedId": "your_suggested_id", "suggestedSubject": "run"}`;
 
 interface SuggestDirectionCopy {
   /** One-line definition of the relationship being asked for. */
@@ -103,6 +108,10 @@ export interface GenerateResult {
   suggestedId: string;
   suggestedParents: string[];
   suggestedChildren: string[];
+  /** Suggested evaluation granularity for observation criteria. Defaults to
+   *  "run"; "iteration" only when the model clearly detects an end-state /
+   *  per-step property. Ignored by gate criteria (always per-iteration). #1156. */
+  suggestedSubject: CriterionSubject;
 }
 
 export function isLlmAvailable(): boolean {
@@ -120,6 +129,12 @@ function sanitizeId(suggestedId: unknown): string {
     .replace(/_+/g, "_")
     .replace(/_$/, "");
   return sanitized || "new_criterion";
+}
+
+/** Coerce a model-suggested subject. Defaults to "run" — "iteration" is only
+ *  honored when the model returns it exactly (matching "prefer run when unsure"). */
+function sanitizeSubject(value: unknown): CriterionSubject {
+  return value === "iteration" ? "iteration" : "run";
 }
 
 function parseJson(content: string): any {
@@ -169,7 +184,7 @@ async function author(
   llm: ChatClient,
   model: string,
   behavior: string,
-): Promise<{ prompt: string; suggestedId: string }> {
+): Promise<{ prompt: string; suggestedId: string; suggestedSubject: CriterionSubject }> {
   const content = await chat(llm, model, SYSTEM_PROMPT_AUTHOR, `NEW CRITERION TO CREATE:\n${behavior}`);
   const parsed = parseJson(content);
   if (!parsed.prompt) {
@@ -178,6 +193,7 @@ async function author(
   return {
     prompt: String(parsed.prompt).trim(),
     suggestedId: sanitizeId(parsed.suggestedId),
+    suggestedSubject: sanitizeSubject(parsed.suggestedSubject),
   };
 }
 
@@ -274,5 +290,6 @@ export async function generateCriteriaPrompt(
     suggestedId: authored.suggestedId,
     suggestedParents,
     suggestedChildren,
+    suggestedSubject: authored.suggestedSubject,
   };
 }
