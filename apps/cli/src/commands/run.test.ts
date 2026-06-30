@@ -185,10 +185,9 @@ describe("run submit", () => {
     vi.restoreAllMocks();
   });
 
-  function captureSubmit(args: string[]): { url: string; body: Record<string, unknown> } {
-    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-    const [url, init] = fetchMock.mock.calls[0];
-    return { url: url as string, body: JSON.parse((init as { body: string }).body) };
+  function captureSubmit(): { url: string; body: Record<string, unknown> } {
+    if (!lastRequest) throw new Error("No request was captured");
+    return { url: lastRequest.url, body: JSON.parse(lastRequest.body) as Record<string, unknown> };
   }
 
   it("includes agentsMd in the submit body", async () => {
@@ -211,7 +210,7 @@ describe("run submit", () => {
       logSpy.mockRestore();
     }
 
-    const { url, body } = captureSubmit([]);
+    const { url, body } = captureSubmit();
     expect(url).toContain("/api/v1/requests?worker=coder-acp-copilot");
     expect(body.agentsMd).toBe("# Be helpful");
   });
@@ -230,7 +229,7 @@ describe("run submit", () => {
       logSpy.mockRestore();
     }
 
-    const { body } = captureSubmit([]);
+    const { body } = captureSubmit();
     expect(body).not.toHaveProperty("agentsMd");
   });
 });
