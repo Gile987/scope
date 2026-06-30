@@ -164,6 +164,13 @@ bypassed or drift between callers:
   criteria of the same `kind`. This keeps the gate DAG closed under
   `resolveWithAncestors` (observations never leak into a gate's evaluation set) and
   lets `kind:"observation"` criteria form their own optional dependency chains.
+- **Kind-dependent `subject` default + validation** — observation criteria carry a
+  `subject: "run" | "iteration"` deciding whole-run vs per-iteration evaluation. When
+  `subject` is omitted the store applies a **kind-dependent default** (not a flat zod
+  default): `kind:"observation"` ⇒ `"run"`, `kind:"gate"`/legacy ⇒ `"iteration"`. Gate
+  criteria are rejected if `subject:"run"` is supplied — `"iteration"` is their only legal
+  value. The field is threaded through `create`/`update`/`find` and both provider backends
+  so the `pp-taxonomy` worker and the CLI/Portal can read it.
 - **Referential integrity on delete** — deleting a criterion that still has
   dependents is rejected.
 
