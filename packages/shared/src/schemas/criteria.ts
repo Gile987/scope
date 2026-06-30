@@ -3,12 +3,13 @@
 
 import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
-import { GATES, CRITERION_KINDS, TAXONOMY_ELEMENT_IDS } from "../types/types.js";
+import { GATES, CRITERION_KINDS, CRITERION_SUBJECTS, TAXONOMY_ELEMENT_IDS } from "../types/types.js";
 
 extendZodWithOpenApi(z);
 
 export const GateIdSchema = z.enum(GATES);
 export const CriterionKindSchema = z.enum(CRITERION_KINDS);
+export const CriterionSubjectSchema = z.enum(CRITERION_SUBJECTS);
 export const TaxonomyElementIdSchema = z.enum(TAXONOMY_ELEMENT_IDS);
 
 export const CreateCriteriaInputSchema = z
@@ -19,6 +20,7 @@ export const CreateCriteriaInputSchema = z
     gates: z.array(GateIdSchema).optional(),
     kind: CriterionKindSchema.default("gate"),
     taxonomyElementId: TaxonomyElementIdSchema.optional(),
+    subject: CriterionSubjectSchema.optional(),
   })
   .openapi("CreateCriteriaInput");
 
@@ -29,6 +31,7 @@ export const UpdateCriteriaInputSchema = z
     gates: z.array(GateIdSchema).optional(),
     kind: CriterionKindSchema.optional(),
     taxonomyElementId: TaxonomyElementIdSchema.optional(),
+    subject: CriterionSubjectSchema.optional(),
   })
   .openapi("UpdateCriteriaInput");
 
@@ -40,6 +43,7 @@ export const CriteriaResponseSchema = z
     gates: z.array(GateIdSchema).optional(),
     kind: CriterionKindSchema.optional(),
     taxonomyElementId: TaxonomyElementIdSchema.optional(),
+    subject: CriterionSubjectSchema.optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     deletedAt: z.coerce.date().optional(),
@@ -54,6 +58,7 @@ export const CriteriaGraphNodeSchema = z
     gates: z.array(GateIdSchema).optional(),
     kind: CriterionKindSchema.optional(),
     taxonomyElementId: TaxonomyElementIdSchema.optional(),
+    subject: CriterionSubjectSchema.optional(),
   })
   .openapi("CriteriaGraphNode");
 

@@ -205,6 +205,7 @@ function mapToCriteriaConfig(data: Record<string, unknown>): CriteriaConfig {
   const gates = data.gates as CriteriaConfig["gates"] | undefined;
   const kind = data.kind as CriteriaConfig["kind"] | undefined;
   const taxonomyElementId = data.taxonomyElementId as CriteriaConfig["taxonomyElementId"] | undefined;
+  const subject = data.subject as CriteriaConfig["subject"] | undefined;
   return {
     id: String(data.id),
     prompt: String(data.prompt),
@@ -212,5 +213,6 @@ function mapToCriteriaConfig(data: Record<string, unknown>): CriteriaConfig {
     ...(gates && gates.length > 0 ? { gates } : {}),
     ...(kind ? { kind } : {}),
     ...(taxonomyElementId ? { taxonomyElementId } : {}),
+    ...(subject ? { subject } : {}),
   };
 }

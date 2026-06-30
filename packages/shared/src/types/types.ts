@@ -79,6 +79,27 @@ export function isCriterionKind(value: unknown): value is CriterionKind {
 }
 
 /**
+ * Granularity at which an observation criterion is evaluated. `"iteration"`
+ * evaluates each `run.turns[]` in isolation (result → `turn.observationResults`);
+ * `"run"` evaluates **once** over the whole run — the final snapshot + the merged
+ * trajectory across all iterations (result → run-level `run.observationResults`).
+ *
+ * Honored **only** by the observation/taxonomy pipeline. Gate criteria are always
+ * `"iteration"` (the API rejects `"run"` for gates). The kind-dependent default
+ * (observation ⇒ `"run"`, gate/legacy ⇒ `"iteration"`) is applied in the criteria
+ * store, not as a flat schema default. See issue #1156.
+ */
+export type CriterionSubject = "run" | "iteration";
+
+/** The hard-coded set of criterion subjects. */
+export const CRITERION_SUBJECTS = ["run", "iteration"] as const;
+
+/** True when `value` is a valid criterion subject. */
+export function isCriterionSubject(value: unknown): value is CriterionSubject {
+  return typeof value === "string" && (CRITERION_SUBJECTS as readonly string[]).includes(value);
+}
+
+/**
  * Hard-coded taxonomy elements for observation criteria — the three quality
  * dimensions from the R&A Readout design. Gates (select/build/test/run/deploy)
  * are excluded as they live in the criterion `gates` field. Namespaced ids keep
@@ -445,6 +466,12 @@ export interface RunState {
   rawChatFormat?: string;
   /** Per-handler post-processing status. Keys are handler IDs (e.g. "pp-atif"). */
   handlerStatus?: Record<string, HandlerRunStatus>;
+  /** Whole-run observation results — one entry per selected `subject:"run"`
+   *  observation criterion, evaluated once against the final snapshot + the
+   *  merged trajectory across all iterations by pp-taxonomy. Per-iteration
+   *  (`subject:"iteration"`) observations live on `turn.observationResults`
+   *  instead. Empty/absent when no run-subject observations were selected. #1156. */
+  observationResults?: CriterionResult[];
   /** Set once the scheduler has triggered report generation for this run after
    *  the handler DAG drained (every handler reached a terminal state). Acts as
    *  an exactly-once guard so the scheduler POSTs /api/v1/reports/trigger at
@@ -651,6 +678,12 @@ export interface CriteriaConfig {
   /** Design-time classification under a hard-coded taxonomy element. Only set
    *  on observation criteria. Static — never stored per run. See issue #1156. */
   taxonomyElementId?: TaxonomyElementId;
+  /** Evaluation granularity for observation criteria. `"iteration"` (per-turn,
+   *  → `turn.observationResults`) or `"run"` (once over the whole run, →
+   *  `run.observationResults`). Honored only for observations; gates are always
+   *  `"iteration"`. Kind-dependent default applied in the store (observation ⇒
+   *  "run", gate/legacy ⇒ "iteration"). See issue #1156. */
+  subject?: CriterionSubject;
 }
 
 // Per-criterion result from judge evaluation

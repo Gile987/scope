@@ -21,6 +21,11 @@ export interface JudgeEvaluateRequest {
    *  tool calls; sent by pp-taxonomy in place of toolCallsUrl so observations
    *  can be evaluated against the full agent trajectory. See issue #1156. */
   atifUrl?: string;
+  /** Blob URLs of EVERY iteration's ATIF trajectory JSON, in iteration order.
+   *  Sent by pp-taxonomy for `subject:"run"` observations so the judge merges
+   *  them into one whole-run trajectory (cross-iteration behavior is visible in a
+   *  single evaluation). Takes precedence over `atifUrl`. See issue #1156. */
+  atifUrls?: string[];
 }
 
 /**

@@ -370,3 +370,65 @@ describe("CriteriaStore kind + taxonomy (issue #1156)", () => {
     await expect(store.resolveObservations(["gate"])).rejects.toThrow(CriteriaValidationError);
   });
 });
+
+describe("CriteriaStore subject (run | iteration)", () => {
+  it("defaults an observation's subject to 'run' when absent", async () => {
+    const store = new CriteriaStore(fakeCollection());
+    const created = await store.create({ id: "obs_run", prompt: "p", kind: "observation" });
+    expect(created.subject).toBe("run");
+  });
+
+  it("defaults a gate's subject to 'iteration' when absent", async () => {
+    const store = new CriteriaStore(fakeCollection());
+    const created = await store.create({ id: "g_iter", prompt: "p", kind: "gate" });
+    expect(created.subject).toBe("iteration");
+  });
+
+  it("defaults a legacy (kind-absent) criterion's subject to 'iteration'", async () => {
+    const store = new CriteriaStore(fakeCollection());
+    const created = await store.create({ id: "legacy", prompt: "p" });
+    expect(created.subject).toBe("iteration");
+  });
+
+  it("persists an explicit subject:'iteration' override on an observation", async () => {
+    const store = new CriteriaStore(fakeCollection());
+    const created = await store.create({
+      id: "obs_iter",
+      prompt: "p",
+      kind: "observation",
+      subject: "iteration",
+    });
+    expect(created.subject).toBe("iteration");
+  });
+
+  it("rejects subject:'run' on a gate criterion", async () => {
+    const store = new CriteriaStore(fakeCollection());
+    await expect(
+      store.create({ id: "g_run", prompt: "p", kind: "gate", subject: "run" }),
+    ).rejects.toThrow(CriteriaValidationError);
+  });
+
+  it("rejects subject:'run' on a legacy (kind-absent) criterion", async () => {
+    const store = new CriteriaStore(fakeCollection());
+    await expect(
+      store.create({ id: "legacy_run", prompt: "p", subject: "run" }),
+    ).rejects.toThrow(CriteriaValidationError);
+  });
+
+  it("rejects flipping an observation to a gate while keeping subject:'run' on update", async () => {
+    const col = fakeCollection([
+      { id: "obs_x", prompt: "p", dependsOn: [], kind: "observation", subject: "run", createdAt: new Date() },
+    ]);
+    const store = new CriteriaStore(col);
+    await expect(store.update("obs_x", { kind: "gate" })).rejects.toThrow(CriteriaValidationError);
+  });
+
+  it("allows updating an observation's subject to 'iteration'", async () => {
+    const col = fakeCollection([
+      { id: "obs_y", prompt: "p", dependsOn: [], kind: "observation", subject: "run", createdAt: new Date() },
+    ]);
+    const store = new CriteriaStore(col);
+    const updated = await store.update("obs_y", { subject: "iteration" });
+    expect(updated.subject).toBe("iteration");
+  });
+});

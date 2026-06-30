@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import { CriteriaConfig, CriteriaDocument, CriterionKind, GateId, TaxonomyElementId } from '../types/types.js';
+import { CriteriaConfig, CriteriaDocument, CriterionKind, CriterionSubject, GateId, TaxonomyElementId } from '../types/types.js';
 import { DependencyGraph } from '../graph/dependency-graph.js';
 import { gatesSatisfyInvariant } from '../gates/gates.js';
 import {
@@ -42,9 +42,13 @@ export class CriteriaStore {
     gates?: GateId[];
     kind?: CriterionKind;
     taxonomyElementId?: TaxonomyElementId;
+    subject?: CriterionSubject;
   }): Promise<CriteriaDocument> {
     const { id, prompt, dependsOn = [], gates, taxonomyElementId } = input;
     const kind: CriterionKind = input.kind ?? 'gate';
+    // Kind-dependent default: observation ⇒ "run" (whole-run), gate/legacy ⇒
+    // "iteration". Applied here (where kind is known) — not a flat schema default.
+    const subject: CriterionSubject = input.subject ?? (kind === 'observation' ? 'run' : 'iteration');
 
     // Validate ID format
     if (!/^[a-z][a-z0-9_]*$/.test(id)) {
@@ -57,6 +61,14 @@ export class CriteriaStore {
     if (taxonomyElementId !== undefined && kind !== 'observation') {
       throw new CriteriaValidationError(
         `taxonomyElementId can only be set on observation criteria (got kind '${kind}')`
+      );
+    }
+
+    // subject "run" is only valid for observation criteria — gate criteria are
+    // always evaluated per iteration (their pass/fail feeds the per-turn loop).
+    if (subject !== 'iteration' && kind !== 'observation') {
+      throw new CriteriaValidationError(
+        `subject '${subject}' is not allowed for ${kind} criteria; gate criteria are always evaluated per iteration`
       );
     }
 
@@ -97,6 +109,7 @@ export class CriteriaStore {
       ...(gates !== undefined && { gates }),
       kind,
       ...(taxonomyElementId !== undefined && { taxonomyElementId }),
+      subject,
       createdAt: new Date(),
     };
 
@@ -138,7 +151,7 @@ export class CriteriaStore {
   /** Update a criterion's prompt, dependencies and/or gate compatibility */
   async update(
     id: string,
-    patch: { prompt?: string; dependsOn?: string[]; gates?: GateId[]; kind?: CriterionKind; taxonomyElementId?: TaxonomyElementId }
+    patch: { prompt?: string; dependsOn?: string[]; gates?: GateId[]; kind?: CriterionKind; taxonomyElementId?: TaxonomyElementId; subject?: CriterionSubject }
   ): Promise<CriteriaDocument> {
     const existing = await this.get(id);
     if (!existing) {
@@ -180,12 +193,23 @@ export class CriteriaStore {
       );
     }
 
+    // subject "run" is only valid for observation criteria. Resolve the effective
+    // subject (kind-dependent default when neither patch nor existing set it).
+    const effectiveSubject: CriterionSubject =
+      patch.subject ?? existing.subject ?? (effectiveKind === 'observation' ? 'run' : 'iteration');
+    if (effectiveSubject !== 'iteration' && effectiveKind !== 'observation') {
+      throw new CriteriaValidationError(
+        `subject '${effectiveSubject}' is not allowed for ${effectiveKind} criteria; gate criteria are always evaluated per iteration`
+      );
+    }
+
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (patch.prompt !== undefined) update.prompt = patch.prompt.trim();
     if (patch.dependsOn !== undefined) update.dependsOn = patch.dependsOn;
     if (patch.gates !== undefined) update.gates = patch.gates;
     if (patch.kind !== undefined) update.kind = patch.kind;
     if (patch.taxonomyElementId !== undefined) update.taxonomyElementId = patch.taxonomyElementId;
+    if (patch.subject !== undefined) update.subject = patch.subject;
 
     await this.collection.updateOne(
       { id, deletedAt: { $exists: false } },
@@ -255,6 +279,7 @@ export class CriteriaStore {
         ...(doc.gates !== undefined && { gates: doc.gates }),
         ...(doc.kind !== undefined && { kind: doc.kind }),
         ...(doc.taxonomyElementId !== undefined && { taxonomyElementId: doc.taxonomyElementId }),
+        ...(doc.subject !== undefined && { subject: doc.subject }),
       });
 
       if (doc.dependsOn) {
@@ -284,6 +309,7 @@ export class CriteriaStore {
       ...(c.gates !== undefined && { gates: c.gates }),
       ...(c.kind !== undefined && { kind: c.kind }),
       ...(c.taxonomyElementId !== undefined && { taxonomyElementId: c.taxonomyElementId }),
+      ...(c.subject !== undefined && { subject: c.subject }),
     }));
 
     const edges: { from: string; to: string }[] = [];
@@ -307,13 +333,15 @@ export class CriteriaStore {
     for (const config of configs) {
       const existing = await this.collection.findOne({ id: config.id });
       if (!existing) {
+        const seedKind: CriterionKind = config.kind ?? 'gate';
         await this.collection.insertOne({
           id: config.id,
           prompt: config.prompt,
           dependsOn: config.dependsOn || [],
           ...(config.gates !== undefined && { gates: config.gates }),
-          kind: config.kind ?? 'gate',
+          kind: seedKind,
           ...(config.taxonomyElementId !== undefined && { taxonomyElementId: config.taxonomyElementId }),
+          subject: config.subject ?? (seedKind === 'observation' ? 'run' : 'iteration'),
           createdAt: new Date(),
         } as any);
         inserted++;

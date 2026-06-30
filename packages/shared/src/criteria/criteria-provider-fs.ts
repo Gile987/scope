@@ -81,6 +81,14 @@ export class FileSystemCriteriaProvider implements CriteriaProvider {
           criteria.taxonomyElementId = String(taxonomyElementId).trim() as CriteriaConfig["taxonomyElementId"];
         }
 
+        const subject = data.subject;
+        if (subject !== undefined) {
+          if (subject !== "run" && subject !== "iteration") {
+            throw new Error(`'subject' must be 'run' or 'iteration' in ${file}`);
+          }
+          criteria.subject = subject;
+        }
+
         if (this.registry.has(criteria.id)) {
           throw new Error(`Duplicate criteria id '${criteria.id}' found in ${file}`);
         }

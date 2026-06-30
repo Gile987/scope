@@ -216,6 +216,10 @@ export const RunStateSchema = z
     rawChatFormat: z.string().optional(),
     pausedAt: z.coerce.date().optional(),
     resumedAt: z.coerce.date().optional(),
+    /** Whole-run observation results (one per selected subject:"run" observation
+     *  criterion), evaluated once against the merged trajectory. Per-iteration
+     *  observation results live on each turn's `observationResults`. #1156. */
+    observationResults: z.array(CriterionResultSchema).optional(),
   })
   .openapi("RunState");
 
