@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { JudgeClient, isRetryableJudgeError } from "shared";
-import type { ConversationTurn, CriterionResult } from "shared";
+import type { ConversationTurn, CriterionResult, CriterionSubject } from "shared";
 import type { PostProcessHandler, PostProcessorMessage, HandlerContext } from "../types.js";
 
 /** Minimal shape of the request document fields this handler reads/writes. */
@@ -17,15 +17,30 @@ interface RequestDoc {
   };
 }
 
+/** Minimal projection of a criterion needed to route by evaluation granularity. */
+interface CriterionMeta {
+  id: string;
+  subject?: CriterionSubject;
+}
+
 /**
- * Taxonomy Handler (pp-taxonomy): records per-iteration boolean observations.
+ * Taxonomy Handler (pp-taxonomy): records boolean observations.
  *
- * For each iteration turn with a `snapshotUrl`, reuses the judge service to
- * evaluate the run's selected observation criteria (top-level
- * `request.observations`) against the codebase snapshot AND the agent
- * trajectory (ATIF) — sending `atifUrl` in place of `toolCallsUrl`. Results are
- * written to `turn.observationResults`, mirroring gate `criteriaResults`. Never
- * gates, never steers the agent. Empty/absent `observations` → no-op. #1156.
+ * Each selected observation criterion is routed by its `subject` (#1156):
+ *
+ * - **`subject:"iteration"`** — evaluated on each iteration in isolation against
+ *   that turn's snapshot + ATIF; written to `turn.observationResults` (mirrors
+ *   gate `criteriaResults`).
+ * - **`subject:"run"`** (the observation default) — evaluated ONCE against the
+ *   whole run: the final iteration's snapshot + the MERGED trajectory of every
+ *   iteration's ATIF (`atifUrls`) + the full conversation history; written to the
+ *   run-level `run.observationResults`. This is what makes cross-iteration
+ *   behavior (e.g. a dependency added in one turn and removed in another) visible.
+ *
+ * Reuses the judge service; never gates, never steers the agent. Empty/absent
+ * `observations` → no-op. pp-taxonomy is dispatched exactly once per run (the
+ * scheduler never sets `message.iteration`), so the run-subject branch runs once
+ * with no idempotency guard.
  */
 export class TaxonomyHandler implements PostProcessHandler {
   readonly type = "taxonomy";
@@ -51,6 +66,30 @@ export class TaxonomyHandler implements PostProcessHandler {
       return;
     }
 
+    // Resolve each selected observation's evaluation granularity. A missing/unknown
+    // subject defaults to "run" (the observation default), so legacy criteria authored
+    // before the `subject` field get whole-run evaluation.
+    const metas = (await ctx.criteriaCollection
+      .find({ id: { $in: observations } }, { projection: { id: 1, subject: 1 } } as any)
+      .toArray()) as unknown as CriterionMeta[];
+    const subjectById = new Map(metas.map((m) => [m.id, m.subject]));
+    const iterationObs = observations.filter((id) => subjectById.get(id) === "iteration");
+    const runObs = observations.filter((id) => subjectById.get(id) !== "iteration");
+
+    await this.evaluateIterationObservations(iterationObs, turns, iteration, requestId, ctx);
+    await this.evaluateRunObservations(runObs, turns, iteration, requestId, ctx);
+  }
+
+  /** Per-iteration observations → `turn.observationResults` (one judge call per turn). */
+  private async evaluateIterationObservations(
+    iterationObs: string[],
+    turns: ConversationTurn[],
+    iteration: number | undefined,
+    requestId: string,
+    ctx: HandlerContext,
+  ): Promise<void> {
+    if (iterationObs.length === 0) return;
+
     const turnsToProcess = iteration ? turns.filter((t) => t.iteration === iteration) : turns;
     let processedCount = 0;
 
@@ -63,7 +102,7 @@ export class TaxonomyHandler implements PostProcessHandler {
       try {
         const result = await this.judge.evaluate({
           snapshotUrl: turn.snapshotUrl,
-          criteria: observations,
+          criteria: iterationObs,
           conversationHistory: turns,
           ...(turn.atifUrl ? { atifUrl: turn.atifUrl } : {}),
           requestId,
@@ -88,6 +127,73 @@ export class TaxonomyHandler implements PostProcessHandler {
       }
     }
 
-    await ctx.log("info", `Taxonomy evaluation complete: ${processedCount}/${turnsToProcess.length} iterations processed`);
+    await ctx.log(
+      "info",
+      `Iteration-subject evaluation complete: ${processedCount}/${turnsToProcess.length} iterations processed`,
+    );
+  }
+
+  /**
+   * Whole-run observations → `run.observationResults` (one judge call over the
+   * merged trajectory). Skipped when a single-iteration dispatch is requested
+   * (forward-compat: a whole-run eval needs every turn). Today `message.iteration`
+   * is never set, so this runs once per run.
+   */
+  private async evaluateRunObservations(
+    runObs: string[],
+    turns: ConversationTurn[],
+    iteration: number | undefined,
+    requestId: string,
+    ctx: HandlerContext,
+  ): Promise<void> {
+    if (runObs.length === 0) return;
+    if (iteration) {
+      await ctx.log(
+        "info",
+        `Skipping ${runObs.length} run-subject observation(s): single-iteration dispatch cannot evaluate the whole run`,
+      );
+      return;
+    }
+
+    const turnsWithSnapshot = turns.filter((t) => t.snapshotUrl);
+    const finalTurn = turnsWithSnapshot[turnsWithSnapshot.length - 1];
+    if (!finalTurn?.snapshotUrl) {
+      await ctx.log("info", "No turn with a snapshot, skipping run-subject observations");
+      return;
+    }
+
+    // Merge every iteration's ATIF into one whole-run trajectory.
+    const atifUrls = turns
+      .map((t) => t.atifUrl)
+      .filter((u): u is string => typeof u === "string" && u.length > 0);
+
+    try {
+      const result = await this.judge.evaluate({
+        snapshotUrl: finalTurn.snapshotUrl,
+        criteria: runObs,
+        conversationHistory: turns,
+        ...(atifUrls.length > 0 ? { atifUrls } : {}),
+        requestId,
+      });
+
+      const runObservationResults: CriterionResult[] = result.criteriaResults ?? [];
+
+      await ctx.collection.updateOne(
+        { _id: requestId } as any,
+        { $set: { "run.observationResults": runObservationResults } } as any,
+      );
+
+      await ctx.log(
+        "info",
+        `Run-subject evaluation complete: ${runObservationResults.length} whole-run observation(s) recorded over ${atifUrls.length} merged trajectory(ies)`,
+      );
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (isRetryableJudgeError(err)) {
+        await ctx.log("error", `Run-subject: judge infrastructure error, failing handler: ${errMsg}`);
+        throw err;
+      }
+      await ctx.log("warn", `Run-subject observation evaluation failed: ${errMsg}`);
+    }
   }
 }
