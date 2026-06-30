@@ -15,7 +15,7 @@ import { ArrowLeft, Trash2, List } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
 import { Badge } from "@/components/ui/badge";
-import { GATE_METADATA } from "@/lib/gates";
+import { promptTypeLabel } from "@/lib/gates";
 
 export function TaskPromptDetail() {
   const { id } = useParams<{ id: string }>();
@@ -102,7 +102,7 @@ export function TaskPromptDetail() {
       {/* Identity card */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Task Prompt</CardTitle>
+          <CardTitle className="text-lg">{promptTypeLabel(taskPrompt.type)} Prompt</CardTitle>
           <CardDescription className="font-mono text-xs select-all">
             {taskPrompt._id}
           </CardDescription>
@@ -111,7 +111,7 @@ export function TaskPromptDetail() {
           <div className="space-y-1">
             <span className="text-sm font-medium text-muted-foreground">Type</span>
             <div>
-              <Badge variant="secondary">{GATE_METADATA[taskPrompt.type ?? "select"].label}</Badge>
+              <Badge variant="secondary">{promptTypeLabel(taskPrompt.type)}</Badge>
             </div>
           </div>
           <div className="space-y-1">
@@ -130,7 +130,7 @@ export function TaskPromptDetail() {
       {/* Task text card */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Task Text</CardTitle>
+          <CardTitle className="text-lg">Prompt Text</CardTitle>
           <CardDescription>Immutable — content determines the ID</CardDescription>
         </CardHeader>
         <CardContent>

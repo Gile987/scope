@@ -101,15 +101,9 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
     onSuccess: (data) => {
       setPrompt(data.prompt);
       setAiGenerated(true);
-      // Optionally update ID if not manually edited and suggestion is valid + unique
-      if (!idManuallyEdited && data.suggestedId) {
-        const suggested = data.suggestedId;
-        const valid = /^[a-z][a-z0-9_]*$/.test(suggested);
-        const exists = existingCriteria.some((c) => c.id === suggested);
-        if (valid && !exists) {
-          setId(suggested);
-        }
-      }
+      // The id is intentionally NOT updated from the AI's suggestion: it stays the
+      // slugified behavior name (or the user's manual edit) chosen in step 1, so it
+      // never changes out from under the user when the generated prompt arrives.
       // Merge suggested parents into dependsOn (additive with manual picks)
       if (data.suggestedParents?.length) {
         setSuggestedParents(data.suggestedParents);

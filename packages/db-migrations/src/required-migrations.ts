@@ -33,4 +33,7 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "018-backfill-criteria-gates.ts",
   "019-backfill-task-prompt-type.ts",
   "020-create-codebase-indexes.ts",
+  "021-add-runs-filter-indexes.ts",
+  "022-add-runs-sort-indexes.ts",
+  "023-add-runs-search-task-index.ts",
 ];

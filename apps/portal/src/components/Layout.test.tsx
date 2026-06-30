@@ -53,4 +53,16 @@ describe("Layout", () => {
     expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
     expect(within(sidebar).getByText("Activity")).toBeTruthy();
   });
+
+  it("labels the prompt library nav item 'Prompts' linking to /task-prompts", () => {
+    localStorage.setItem("scope:layout:sidebar-expanded", "1");
+
+    renderLayout();
+
+    const sidebar = screen.getByLabelText("Primary navigation");
+    const promptsLink = within(sidebar).getByRole("link", { name: "Prompts" });
+    expect(promptsLink.getAttribute("href")).toBe("/task-prompts");
+    // The legacy "Tasks" label must be gone.
+    expect(within(sidebar).queryByRole("link", { name: "Tasks" })).toBeNull();
+  });
 });

@@ -30,7 +30,7 @@ taskPrompt
   .command("list")
   .description("List all task prompts")
   .option("-s, --search <search>", "Filter by text content")
-  .option("--type <type>", "Filter by prompt type/gate (select, build, test, run, deploy)")
+  .option("--type <type>", "Filter by prompt type/gate (select, build, test, run, deploy, agents.md)")
   .option("-l, --limit <n>", "Maximum number of results", "50")
   .option("--offset <n>", "Number of results to skip", "0")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
@@ -70,10 +70,12 @@ taskPrompt
         },
         { key: 'type', label: 'Type', formatter: (tp: any) => tp.type ?? 'select' },
         { key: 'text', label: 'Text', formatter: (tp: any) => {
-          const text = tp.text.replace(/\n/g, ' ');
+          const text = (tp.text ?? '').replace(/\n/g, ' ');
+          if (!text) return tp.contentBlobUrl ? '(blob)' : '';
           return text.length > 60 ? text.substring(0, 60) + '…' : text;
         }, tableFormatter: (tp: any) => {
-          const text = tp.text.replace(/\n/g, ' ');
+          const text = (tp.text ?? '').replace(/\n/g, ' ');
+          if (!text) return dimTimestamp(tp.contentBlobUrl ? '(blob)' : '');
           const truncated = text.length > 60 ? text.substring(0, 60) + '…' : text;
           return dimTimestamp(truncated);
         }},
@@ -111,7 +113,7 @@ taskPrompt
       }
 
       const tp = await response.json() as {
-        _id: string; text: string; type?: PromptType;
+        _id: string; text?: string; type?: PromptType; contentBlobUrl?: string;
         features?: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
         featuresExtractedAt?: string;
         createdAt: string; deletedAt?: string;
@@ -140,8 +142,12 @@ taskPrompt
       console.log(`${label('Created:')}   ${value(tp.createdAt)}`);
       if (tp.deletedAt) console.log(`${label('Deleted:')}   ${value(tp.deletedAt)}`);
       console.log(`${label('Text:')}`);
-      for (const line of tp.text.trim().split('\n')) {
-        console.log(`  ${line}`);
+      if (tp.text) {
+        for (const line of tp.text.trim().split('\n')) {
+          console.log(`  ${line}`);
+        }
+      } else {
+        console.log(`  ${dimTimestamp('(stored in blob — fetch via /api/v1/task-prompts/:id/content)')}`);
       }
 
       if (tp.features && tp.features.length > 0) {
@@ -211,7 +217,7 @@ taskPrompt
         process.exit(1);
       }
 
-      const tp = await response.json() as { _id: string; text: string; type?: PromptType; createdAt: string };
+      const tp = await response.json() as { _id: string; text?: string; type?: PromptType; createdAt: string };
       console.log(successText(`Task prompt registered.`));
       console.log(`${label('ID:')}      ${value(tp._id)}`);
       console.log(`${label('Type:')}    ${value(tp.type ?? type)}`);

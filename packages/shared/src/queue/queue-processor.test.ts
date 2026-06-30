@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import os from "node:os";
 import { CodingAgentQueueProcessor } from "./queue-processor.js";
 import type { QueueProcessorConfig, WorkerProcessor, WorkerResult } from "../types/types.js";
@@ -79,6 +79,63 @@ describe("CodingAgentQueueProcessor.getVersionFields", () => {
     expect(fields.os.platform).toBe(os.platform());
     expect(fields.os.release).toBe(os.release());
     expect(fields.os.arch).toBe(os.arch());
+  });
+});
+
+// ─── AGENTS.md workspace delivery ────────────────────────────────────────────
+describe("CodingAgentQueueProcessor.writeAgentsMd", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("no-ops when the request has no agentsMdPromptId", async () => {
+    const qp = new CodingAgentQueueProcessor(testConfig, stubProcessor);
+    const log = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await (qp as any).writeAgentsMd({ _id: "r1" }, "/tmp/does-not-matter", log);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("throws when agentsMdPromptId is set but apiBaseUrl is missing", async () => {
+    // testConfig has no apiBaseUrl.
+    const qp = new CodingAgentQueueProcessor(testConfig, stubProcessor);
+    const log = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      (qp as any).writeAgentsMd({ _id: "r1", agentsMdPromptId: "agents-1" }, "/tmp", log),
+    ).rejects.toThrow(/apiBaseUrl/);
+  });
+
+  it("writes the resolved AGENTS.md body into the workspace root", async () => {
+    const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const workspace = await mkdtemp(join(tmpdir(), "agents-md-test-"));
+
+    try {
+      const qp = new CodingAgentQueueProcessor(
+        { ...testConfig, apiBaseUrl: "https://api.example.com" },
+        stubProcessor,
+      );
+      const log = vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({ id: "agents-1", text: "# AGENTS\nBe terse." }),
+        }),
+      );
+
+      await (qp as any).writeAgentsMd({ _id: "r1", agentsMdPromptId: "agents-1" }, workspace, log);
+
+      const written = await readFile(join(workspace, "AGENTS.md"), "utf-8");
+      expect(written).toBe("# AGENTS\nBe terse.");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 });
 

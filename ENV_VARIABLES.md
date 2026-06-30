@@ -136,6 +136,20 @@ Model name / deployment name used by both backends. For Foundry, this must
 match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
 `gpt-4o`, `gpt-4.1-mini`. Put in `.env.local` (see note above).
 
+## Prompt Storage Configuration
+
+### PROMPT_INLINE_MAX_BYTES
+**Default:** `16384` (16 KB)
+**Type:** integer (UTF-8 byte length)
+**Used by:** API (`apps/api`)
+
+Threshold deciding where a task/AGENTS.md prompt body is stored. A body whose
+UTF-8 byte length is at/under this value is stored **inline** in Mongo (`text`);
+a larger body is uploaded to blob storage (`prompts/{promptId}.txt`) and the doc
+references it via `contentBlobUrl` with no inline `text`. The decision is purely
+size-based — independent of the prompt's `type`. Small task prompts stay inline
+(today's behavior); large AGENTS.md bodies go to blob automatically.
+
 ## Judge Strategy Configuration
 
 ### JUDGE_MODEL
@@ -231,6 +245,15 @@ Maximum total *uncompressed* bytes written while extracting a codebase archive (
 **Type:** integer
 
 Maximum number of entries (files + directories) extracted from a codebase archive. Aborts extraction with HTTP `413` once exceeded.
+
+## Analysis Configuration
+
+### ANALYSIS_MAX_RUNS
+**Default:** `5000`
+**Type:** integer
+**Scope:** API (`apps/api`)
+
+Maximum number of completed runs loaded into memory for a single Statistics / `GET /api/v1/analysis` pass. The endpoint fetches the most-recent `ANALYSIS_MAX_RUNS` done runs (sorted by `createdAt`, served by the existing `createdAt` index) with a slim projection, so server memory stays bounded as run history grows. When the cap is reached the response includes `truncated: true` and `runLimit`, and the portal shows a "most recent N runs" banner rather than dropping data silently or breaking the page. Raise it for richer all-time stats at the cost of memory; lower it on memory-constrained deployments.
 
 ## Portal Feature Flags
 
@@ -370,6 +393,12 @@ The reaper reuses `SCOPE_RUN_HEARTBEAT_STALE_MS` (Worker Configuration, below) a
 **Type:** integer (milliseconds)
 
 Maximum time the `coder-acp-copilot` worker waits for a Copilot CLI ACP session to complete before terminating it. If the agent takes longer than this to produce a response, the session is killed and the iteration fails with a timeout error. Increase for complex tasks that require extended processing. Set to `0` to disable the timeout entirely (not recommended in production).
+
+### CLAUDE_CODE_DISABLE_POLICY_SKILLS
+**Default:** `1` (set in the `coder-acp-claude-code` Dockerfile)
+**Type:** boolean-ish (`1` to disable, unset/`0` to allow)
+
+Disables Claude Code "policy skills" — auto-loaded, Anthropic-managed Agent Skills — for the `coder-acp-claude-code` worker. As of `claude-agent-acp` 0.52.0 / `claude-agent-sdk` 0.3.191 the bundled agent auto-invokes a `claude-api` policy skill on ordinary coding prompts; its injected payload overflows the context window available to Claude **subscription** OAuth tokens, so the turn fails with `Internal error: Prompt is too long`. Earlier agent versions never loaded it. The worker's Dockerfile bakes this variable at the container level so every descendant process (the worker, `claude-agent-acp`, and the bundled `claude` binary it spawns) inherits it — setting it only on the immediate child process is not sufficient. Disabling these skills restores the prior behavior and keeps benchmark runs reproducible. Override by setting it to `0` in the deployment environment if policy skills are explicitly wanted.
 
 ### SCOPE_RUN_HEARTBEAT_STALE_MS
 **Default:** `120000` (2 × `HEARTBEAT_VISIBILITY_SECONDS`)

@@ -30,6 +30,7 @@ promptFeature
   .command("list")
   .description("List all prompt features")
   .option("-q, --query <search>", "Filter by ID or prompt text")
+  .option("--type <type>", "Filter by feature type ('select' or 'agents.md')")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
@@ -37,6 +38,7 @@ promptFeature
     try {
       const params = new URLSearchParams();
       if (options.query) params.set("q", options.query);
+      if (options.type) params.set("type", options.type);
       const qs = params.toString();
       const response = await apiFetch(options.url, `/prompt-features${qs ? `?${qs}` : ""}`);
 
@@ -46,7 +48,7 @@ promptFeature
         process.exit(1);
       }
 
-      const items = await response.json() as Array<{ id: string; prompt: string }>;
+      const items = await response.json() as Array<{ id: string; prompt: string; type?: string }>;
       if (items.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner("No prompt features found."));
         return;
@@ -60,6 +62,8 @@ promptFeature
         { key: 'id', label: 'ID',
           tableFormatter: (f: any) => value(f.id),
         },
+        { key: 'type', label: 'Type', formatter: (f: any) => f.type ?? 'select',
+          tableFormatter: (f: any) => value(f.type ?? 'select') },
         { key: 'prompt', label: 'Prompt', formatter: (f: any) => {
           const prompt = f.prompt.replace(/\n/g, ' ');
           return prompt.length > 60 ? prompt.substring(0, 60) + '…' : prompt;
@@ -129,6 +133,7 @@ promptFeature
   .description("Create a new prompt feature")
   .requiredOption("--id <id>", "Prompt feature ID (lowercase snake_case)")
   .requiredOption("--prompt <prompt>", "Detection prompt for the feature")
+  .option("--type <type>", "Feature type ('select' default, or 'agents.md')")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
@@ -136,6 +141,7 @@ promptFeature
         id: options.id,
         prompt: options.prompt,
       };
+      if (options.type) body.type = options.type;
 
       const response = await apiFetch(options.url, `/prompt-features`, {
         method: "POST",

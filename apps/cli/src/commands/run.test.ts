@@ -176,6 +176,65 @@ describe("run list", () => {
   });
 });
 
+describe("run submit", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function captureSubmit(args: string[]): { url: string; body: Record<string, unknown> } {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [url, init] = fetchMock.mock.calls[0];
+    return { url: url as string, body: JSON.parse((init as { body: string }).body) };
+  }
+
+  it("includes agentsMd in the submit body", async () => {
+    mockFetchWith({ id: "req-submit-1", workerType: "coder-acp-copilot", status: "queued" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync(
+        [
+          "run", "submit",
+          "-m", "do the thing",
+          "--agents-md", "# Be helpful",
+          "--no-stream",
+          "-u", "http://localhost:3100",
+        ],
+        { from: "user" },
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    const { url, body } = captureSubmit([]);
+    expect(url).toContain("/api/v1/requests?worker=coder-acp-copilot");
+    expect(body.agentsMd).toBe("# Be helpful");
+  });
+
+  it("omits agentsMd when not provided", async () => {
+    mockFetchWith({ id: "req-submit-2", workerType: "coder-acp-copilot", status: "queued" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync(
+        ["run", "submit", "-m", "plain task", "--no-stream", "-u", "http://localhost:3100"],
+        { from: "user" },
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    const { body } = captureSubmit([]);
+    expect(body).not.toHaveProperty("agentsMd");
+  });
+});
+
 describe("run retry", () => {
   beforeEach(() => {
     vi.restoreAllMocks();

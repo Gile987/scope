@@ -422,6 +422,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         "options": [
           "--id",
           "--prompt",
+          "--type",
           "--url",
         ],
       },
@@ -458,6 +459,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         "options": [
           "--output",
           "--query",
+          "--type",
           "--url",
         ],
       },
@@ -618,10 +620,24 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       },
       "list": {
         "options": [
+          "--agent-version",
+          "--created-after",
+          "--created-before",
+          "--criteria",
           "--include-deleted",
           "--max-iterations",
+          "--model",
+          "--os",
+          "--outcome",
           "--output",
+          "--priority",
+          "--profile",
+          "--search",
+          "--sort-by",
+          "--sort-dir",
+          "--status",
           "--submission-id",
+          "--task",
           "--turns",
           "--url",
           "--worker",
@@ -651,6 +667,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "submit": {
         "options": [
           "--agent-version",
+          "--agents-md",
           "--base-profile",
           "--codebase",
           "--criteria",

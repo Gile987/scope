@@ -98,4 +98,42 @@ describe("DataTable", () => {
     fireEvent.click(checkboxes[1]);
     expect(onToggle).toHaveBeenCalledWith("r1", items[0]);
   });
+
+  it("renders a section footer only for expanded groups", () => {
+    setupResizeObserver();
+    const onLoadMore = vi.fn();
+
+    render(
+      <DataTable
+        items={items}
+        columns={columns}
+        getRowId={(r) => r.id}
+        grouping={{
+          getGroupKey: () => "A",
+          renderGroupHeader: (key) => <span>{`Group ${key}`}</span>,
+          expandedGroupKeys: new Set(["A"]),
+          onToggleGroup: vi.fn(),
+          sectionKeys: ["A", "B"],
+          renderSectionFooter: (key, secItems) =>
+            key === "A" ? (
+              <button onClick={onLoadMore}>{`more-${key}-${secItems.length}`}</button>
+            ) : null,
+        }}
+      />,
+    );
+
+    // Both sections render (collapsed B included via sectionKeys). DataTable
+    // renders both a desktop table and a mobile card layout, so each label
+    // appears twice.
+    expect(screen.getAllByText("Group A").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Group B").length).toBeGreaterThan(0);
+    // Expanded group A shows its loaded members and the footer (2 loaded rows).
+    expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0);
+    const loadMoreButtons = screen.getAllByText("more-A-2");
+    // Collapsed group B renders no footer (renderer returns null).
+    expect(screen.queryByText(/^more-B/)).toBeNull();
+
+    fireEvent.click(loadMoreButtons[0]);
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+  });
 });

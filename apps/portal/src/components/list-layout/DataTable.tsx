@@ -77,11 +77,28 @@ export interface DataTableGrouping<T> {
    */
   renderGroupCell?: (
     column: DataTableColumn<T>,
+    groupKey: string,
     items: readonly T[],
     expanded: boolean,
   ) => ReactNode;
   expandedGroupKeys: ReadonlySet<string>;
   onToggleGroup: (groupKey: string) => void;
+  /**
+   * Explicit, server-provided section keys in render order. When set, the table
+   * renders exactly these group rows (instead of deriving sections from the
+   * consecutive `getGroupKey` of `items`), so collapsed groups whose members are
+   * not loaded still render. Member rows for an expanded section come from
+   * `items` filtered by `getGroupKey`, letting callers lazily load only the
+   * expanded groups' members. Used for server-side grouping (issue #1138).
+   */
+  sectionKeys?: readonly string[];
+  /**
+   * Optional footer row rendered after an expanded section's loaded member rows.
+   * Used to surface a lazy-loading affordance (e.g. "Showing X of N" + Load more)
+   * when a group's members are paged in on demand (issue #1138). Return
+   * `null`/`undefined` to render no footer for a given section.
+   */
+  renderSectionFooter?: (groupKey: string, items: readonly T[]) => ReactNode;
 }
 
 export interface DataTableProps<T> {
@@ -175,19 +192,27 @@ export function DataTable<T>({
   // visually noisy on slower networks.
   const skeletonRowHeight = density === "compact" ? "h-9" : "h-[3.5rem]";
   const groupedSections = grouping
-    ? items.reduce<Array<{ key: string; items: T[] }>>((sections, item) => {
-        const key = grouping.getGroupKey(item);
-        const current = sections[sections.length - 1];
-        if (current?.key === key) current.items.push(item);
-        else sections.push({ key, items: [item] });
-        return sections;
-      }, [])
+    ? grouping.sectionKeys
+      ? grouping.sectionKeys.map((key) => ({
+          key,
+          items: items.filter((item) => grouping.getGroupKey(item) === key),
+        }))
+      : items.reduce<Array<{ key: string; items: T[] }>>((sections, item) => {
+          const key = grouping.getGroupKey(item);
+          const current = sections[sections.length - 1];
+          if (current?.key === key) current.items.push(item);
+          else sections.push({ key, items: [item] });
+          return sections;
+        }, [])
     : [];
   const visibleItems = grouping
     ? groupedSections.flatMap((section) =>
         grouping.expandedGroupKeys.has(section.key) ? section.items : [],
       )
     : items;
+  // When the caller supplies explicit server sections, emptiness is driven by the
+  // section list (collapsed groups have no loaded items but must still render).
+  const isEmpty = grouping?.sectionKeys ? grouping.sectionKeys.length === 0 : items.length === 0;
 
   useEffect(() => {
     const el = tableScrollRef.current;
@@ -531,7 +556,7 @@ export function DataTable<T>({
                 ))}
               </TableRow>
             ))
-          ) : items.length === 0 ? (
+          ) : isEmpty ? (
             <TableRow>
               <TableCell colSpan={colSpan} className="h-32 text-center text-muted-foreground">
                 {emptyState ?? "No results"}
@@ -604,7 +629,7 @@ export function DataTable<T>({
                                 )}
                               >
                                 <div className="min-w-0">
-                                  {grouping.renderGroupCell!(col, section.items, expanded)}
+                                  {grouping.renderGroupCell!(col, section.key, section.items, expanded)}
                                 </div>
                               </TableCell>
                             );
@@ -617,6 +642,24 @@ export function DataTable<T>({
                       )}
                     </TableRow>
                     {expanded ? section.items.map((item) => renderDataRow(item)) : null}
+                    {expanded && grouping.renderSectionFooter
+                      ? (() => {
+                          const footer = grouping.renderSectionFooter(
+                            section.key,
+                            section.items,
+                          );
+                          return footer ? (
+                            <TableRow
+                              key={`group-footer-${section.key}`}
+                              className="bg-background hover:bg-background"
+                            >
+                              <TableCell colSpan={colSpan} className="p-0">
+                                {footer}
+                              </TableCell>
+                            </TableRow>
+                          ) : null;
+                        })()
+                      : null}
                   </Fragment>
                 );
               })
@@ -673,7 +716,7 @@ export function DataTable<T>({
               <Skeleton className="h-3 w-2/3" />
             </div>
           ))
-        ) : items.length === 0 ? (
+        ) : isEmpty ? (
           <div className="rounded-md border bg-card p-6 text-center text-sm text-muted-foreground">
             {emptyState ?? "No results"}
           </div>
@@ -685,6 +728,9 @@ export function DataTable<T>({
                 <div key={`group-card-${section.key}`} className="flex flex-col gap-2">
                   {grouping.renderGroupHeader(section.key, section.items, expanded)}
                   {expanded ? section.items.map((item) => renderCard(item)) : null}
+                  {expanded && grouping.renderSectionFooter
+                    ? grouping.renderSectionFooter(section.key, section.items)
+                    : null}
                 </div>
               );
             })

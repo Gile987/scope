@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import {
   Send, Loader2, Server, Info, BookOpen, Sparkles, Puzzle, SlidersHorizontal,
-  X, Save, Plus, ChevronDown, FilePlus2, History, ArrowLeft, Check, FolderGit2,
+  X, Save, Plus, ChevronDown, FilePlus2, History, ArrowLeft, Check, FolderGit2, FileText,
 } from "lucide-react";
 import {
   WORKER_TYPES, type CodingAgent, type McpServerDocument,
@@ -209,6 +209,7 @@ export function SubmitRun() {
   }));
   const [occurrences, setOccurrences] = useState<number>(5);
   const [priority, setPriority] = useState<number>(0);
+  const [agentsMd, setAgentsMd] = useState<string>("");
 
   // Optional add-ons
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -241,6 +242,7 @@ export function SubmitRun() {
   const [mcpOpen, setMcpOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [codebaseOpen, setCodebaseOpen] = useState(false);
+  const [agentsMdOpen, setAgentsMdOpen] = useState(false);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
   const [graphSelection, setGraphSelection] = useState<GraphSelection>({ kind: "base" });
 
@@ -504,6 +506,12 @@ export function SubmitRun() {
       setSelectedCodebaseSpec(run.codebaseRevisionId);
       setCodebaseOpen(true);
     }
+    if (run.agentsMdPromptId) {
+      setAgentsMdOpen(true);
+      api.getTaskPromptContent(run.agentsMdPromptId)
+        .then((content) => setAgentsMd(content.text))
+        .catch(() => undefined);
+    }
     if (run.extensions && run.extensions.length > 0) {
       setSelectedExtensions(run.extensions);
       setExtensionsOpen(true);
@@ -622,6 +630,7 @@ export function SubmitRun() {
       ...(gatesEnabled ? { gates: gateConfigs } : {}),
       ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
+      ...(agentsMd.trim() ? { agentsMd: agentsMd } : {}),
       ...(inVariationMode ? {} : { ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}) }),
       ...(inVariationMode ? {} : { ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}) }),
       ...(inVariationMode ? {} : { ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}) }),
@@ -712,8 +721,8 @@ export function SubmitRun() {
   // ─── Render helpers ─────────────────────────────────────────────────────
   const summaryChips: string[] = [
     `${maxIterations} iteration${maxIterations === 1 ? "" : "s"}`,
-    `${pickedCriteria.length} select criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
-    gatesEnabled ? `${gateConfigs.length} configured gates` : "single-pass Select",
+    `${pickedCriteria.length} requirements criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
+    gatesEnabled ? `${gateConfigs.length} configured gates` : "single-pass Requirements",
     occurrences > 1 ? `×${occurrences} runs` : "",
     worker,
     model || "",
@@ -724,6 +733,7 @@ export function SubmitRun() {
     selectedMcpServers.length > 0 ? `${selectedMcpServers.length} MCP` : "",
     selectedSkills.length > 0 ? `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"}` : "",
     selectedCodebaseSpec ? `codebase ${selectedCodebaseSpec}` : "",
+    agentsMd.trim() ? "AGENTS.md" : "",
     selectedExtensions.length > 0 ? `${selectedExtensions.length} ext` : "",
   ].filter(Boolean);
 
@@ -1001,6 +1011,61 @@ export function SubmitRun() {
             </div>
           </div>
 
+          {/* ─── AGENTS.md (optional, discreet) ──────────────────────────── */}
+          {!(agentsMdOpen || agentsMd.trim()) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-xs text-muted-foreground"
+              onClick={() => setAgentsMdOpen(true)}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Add AGENTS.md
+            </Button>
+          ) : (
+            <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="agentsMd" className="text-xs">
+                    AGENTS.md{" "}
+                    <span className="font-normal text-muted-foreground">(optional)</span>
+                  </Label>
+                  <HelpTooltip text="Project-level instructions written to <workspace>/AGENTS.md before the run. Search the prompt library for an existing agents.md prompt or type a new one." />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                  onClick={() => {
+                    setAgentsMd("");
+                    setAgentsMdOpen(false);
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Remove
+                </Button>
+              </div>
+              <TaskPromptPicker
+                type="agents.md"
+                placeholder="Search existing AGENTS.md prompts or type a new one below…"
+                onSelect={(text) => setAgentsMd(text)}
+              />
+              <Textarea
+                id="agentsMd"
+                rows={6}
+                placeholder="# AGENTS.md&#10;Project-level instructions written to the workspace root before the run."
+                value={agentsMd}
+                onChange={(e) => setAgentsMd(e.target.value)}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Stored as an <code>agents.md</code> prompt and written to <code>&lt;workspace&gt;/AGENTS.md</code> before the run. Leave empty to omit.
+              </p>
+            </div>
+          )}
+
           <AdvancedSection show={advanced}>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
@@ -1030,7 +1095,7 @@ export function SubmitRun() {
         <CardHeader>
           <CardTitle>Gate pipeline</CardTitle>
           <CardDescription>
-            Optional phase gates after Select. Leave all disabled for the existing single-pass flow.
+            Optional phase gates after Requirements. Leave all disabled for the existing single-pass flow.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
