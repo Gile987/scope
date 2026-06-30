@@ -34,7 +34,7 @@ Central documentation hub for the Scope platform — an AI coding agent benchmar
 
 | Document | Description |
 |----------|-------------|
-| [Developer Tips & Tricks](tips.md) | Short, practical tips for working productively in this repo |
+| [Developer Tips & Tricks](tips/README.md) | Short, practical tips for working productively in this repo (one file per tip) |
 
 ## Decisions
 
