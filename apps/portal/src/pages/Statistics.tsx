@@ -31,6 +31,7 @@ import {
   Activity,
   Clock,
   Repeat,
+  FilterX,
 } from "lucide-react";
 import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
 import { formatDuration, cn } from "@/lib/utils";
@@ -708,6 +709,35 @@ function ZeroRunsState() {
   );
 }
 
+function NoMatchingRunsState({
+  selectedCount,
+  onClear,
+}: {
+  selectedCount: number;
+  onClear: () => void;
+}) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center justify-center gap-4 py-16 text-center">
+        <div className="rounded-full bg-muted p-3">
+          <FilterX className="h-8 w-8 text-muted-foreground" />
+        </div>
+        <div className="space-y-1">
+          <h3 className="text-lg font-semibold">No runs match the selected criteria</h3>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            No benchmark runs contain all {selectedCount} selected{" "}
+            {selectedCount === 1 ? "criterion" : "criteria"}. Try removing some filters to
+            broaden the results.
+          </p>
+        </div>
+        <Button variant="outline" size="lg" className="gap-2" onClick={onClear}>
+          <FilterX className="h-4 w-4" /> Clear filters
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Page ───────────────────────────────────────────────────────────────────
 
 export function Statistics() {
@@ -757,6 +787,7 @@ export function Statistics() {
   };
 
   const hasData = !!data && data.summary.totalRuns > 0;
+  const hasActiveFilter = selectedCriteria.length > 0;
   const showPassAtK = import.meta.env.VITE_SHOW_PASS_AT_K === "true";
 
   return (
@@ -784,7 +815,23 @@ export function Statistics() {
       {isLoading || !data ? (
         <StatisticsSkeleton />
       ) : !hasData ? (
-        <ZeroRunsState />
+        hasActiveFilter && data.availableCriteria.length > 0 ? (
+          <>
+            <CriteriaFilterBar
+              availableCriteria={data.availableCriteria}
+              selectedCriteria={selectedCriteria}
+              onToggle={handleToggleCriterion}
+              onClear={handleClearCriteria}
+              onSelectAll={handleSelectAllCriteria}
+            />
+            <NoMatchingRunsState
+              selectedCount={selectedCriteria.length}
+              onClear={handleClearCriteria}
+            />
+          </>
+        ) : (
+          <ZeroRunsState />
+        )
       ) : (
         <>
           {/* Success Criteria Filter — kept as the existing component renders its own container */}
