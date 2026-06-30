@@ -356,14 +356,12 @@ describe("run submit codebase", () => {
     }
 
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:3100/api/v1/requests?worker=coder-acp-copilot",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          scenario: { task: "Implement the task", criteria: [] },
-          codebase: "scope-core@r3",
-        }),
+    expect(lastRequest?.url).toBe("http://localhost:3100/api/v1/requests?worker=coder-acp-copilot");
+    expect(lastRequest?.method).toBe("POST");
+    expect(lastRequest?.body).toBe(
+      JSON.stringify({
+        scenario: { task: "Implement the task", criteria: [] },
+        codebase: "scope-core@r3",
       }),
     );
   });
