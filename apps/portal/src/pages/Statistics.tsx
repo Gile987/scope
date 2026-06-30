@@ -710,12 +710,22 @@ function ZeroRunsState() {
 }
 
 function NoMatchingRunsState({
-  selectedCount,
+  criteriaCount,
+  featureCount,
   onClear,
 }: {
-  selectedCount: number;
+  criteriaCount: number;
+  featureCount: number;
   onClear: () => void;
 }) {
+  const parts: string[] = [];
+  if (criteriaCount > 0) {
+    parts.push(`${criteriaCount} ${criteriaCount === 1 ? "criterion" : "criteria"}`);
+  }
+  if (featureCount > 0) {
+    parts.push(`${featureCount} ${featureCount === 1 ? "feature" : "features"}`);
+  }
+  const filterDesc = parts.join(" and ") || "filters";
   return (
     <Card>
       <CardContent className="flex flex-col items-center justify-center gap-4 py-16 text-center">
@@ -723,11 +733,10 @@ function NoMatchingRunsState({
           <FilterX className="h-8 w-8 text-muted-foreground" />
         </div>
         <div className="space-y-1">
-          <h3 className="text-lg font-semibold">No runs match the selected criteria</h3>
+          <h3 className="text-lg font-semibold">No runs match the selected filters</h3>
           <p className="max-w-sm text-sm text-muted-foreground">
-            No benchmark runs contain all {selectedCount} selected{" "}
-            {selectedCount === 1 ? "criterion" : "criteria"}. Try removing some filters to
-            broaden the results.
+            No benchmark runs match the selected {filterDesc}. Try removing some
+            filters to broaden the results.
           </p>
         </div>
         <Button variant="outline" size="lg" className="gap-2" onClick={onClear}>
@@ -746,13 +755,16 @@ export function Statistics() {
 
   const selectedCriteria =
     searchParams.get("criteria")?.split(",").filter(Boolean) || [];
+  const selectedFeatures =
+    searchParams.get("features")?.split(",").filter(Boolean) || [];
 
   const { data, isLoading, isRefetching } = useQuery({
-    queryKey: ["analysis", selectedCriteria],
+    queryKey: ["analysis", selectedCriteria, selectedFeatures],
     queryFn: () =>
       api.getAnalysis(
         [1, 2, 5],
         selectedCriteria.length > 0 ? selectedCriteria : undefined,
+        selectedFeatures.length > 0 ? selectedFeatures : undefined,
       ),
     refetchInterval: 30_000,
   });
@@ -786,9 +798,74 @@ export function Statistics() {
     setSearchParams(searchParams, { replace: true });
   };
 
+  const handleToggleFeature = (id: string) => {
+    const newSelected = selectedFeatures.includes(id)
+      ? selectedFeatures.filter((f) => f !== id)
+      : [...selectedFeatures, id];
+
+    if (newSelected.length === 0) {
+      searchParams.delete("features");
+    } else {
+      searchParams.set("features", newSelected.join(","));
+    }
+    setSearchParams(searchParams, { replace: true });
+  };
+
+  const handleClearFeatures = () => {
+    searchParams.delete("features");
+    setSearchParams(searchParams, { replace: true });
+  };
+
+  const handleSelectAllFeatures = (ids: string[]) => {
+    if (ids.length === 0) {
+      searchParams.delete("features");
+    } else {
+      searchParams.set("features", ids.join(","));
+    }
+    setSearchParams(searchParams, { replace: true });
+  };
+
+  const handleClearAllFilters = () => {
+    searchParams.delete("criteria");
+    searchParams.delete("features");
+    setSearchParams(searchParams, { replace: true });
+  };
+
   const hasData = !!data && data.summary.totalRuns > 0;
-  const hasActiveFilter = selectedCriteria.length > 0;
+  const hasActiveFilter =
+    selectedCriteria.length > 0 || selectedFeatures.length > 0;
   const showPassAtK = import.meta.env.VITE_SHOW_PASS_AT_K === "true";
+
+  // Both filter bars (criteria + task prompt features). Each bar renders null when
+  // its option list is empty, so this is safe to drop into any branch.
+  const filterBars = data ? (
+    <>
+      {data.availableCriteria.length > 0 && (
+        <CriteriaFilterBar
+          availableCriteria={data.availableCriteria}
+          selectedCriteria={selectedCriteria}
+          onToggle={handleToggleCriterion}
+          onClear={handleClearCriteria}
+          onSelectAll={handleSelectAllCriteria}
+        />
+      )}
+      {data.availableFeatures.length > 0 && (
+        <CriteriaFilterBar
+          availableCriteria={data.availableFeatures}
+          selectedCriteria={selectedFeatures}
+          onToggle={handleToggleFeature}
+          onClear={handleClearFeatures}
+          onSelectAll={handleSelectAllFeatures}
+          title="Task Prompt Feature Filter"
+          emptyDescription="Select task prompt features to scope stats to runs whose task was detected to have those features. Runs must have all selected features."
+          selectedDescription={(count) =>
+            `Filtering by ${count} task prompt feature${count !== 1 ? "s" : ""}. Only runs with all selected features detected are included.`
+          }
+          itemLabel="features"
+        />
+      )}
+    </>
+  ) : null;
 
   return (
     <div className="space-y-6">
@@ -815,18 +892,14 @@ export function Statistics() {
       {isLoading || !data ? (
         <StatisticsSkeleton />
       ) : !hasData ? (
-        hasActiveFilter && data.availableCriteria.length > 0 ? (
+        hasActiveFilter &&
+        (data.availableCriteria.length > 0 || data.availableFeatures.length > 0) ? (
           <>
-            <CriteriaFilterBar
-              availableCriteria={data.availableCriteria}
-              selectedCriteria={selectedCriteria}
-              onToggle={handleToggleCriterion}
-              onClear={handleClearCriteria}
-              onSelectAll={handleSelectAllCriteria}
-            />
+            {filterBars}
             <NoMatchingRunsState
-              selectedCount={selectedCriteria.length}
-              onClear={handleClearCriteria}
+              criteriaCount={selectedCriteria.length}
+              featureCount={selectedFeatures.length}
+              onClear={handleClearAllFilters}
             />
           </>
         ) : (
@@ -834,16 +907,8 @@ export function Statistics() {
         )
       ) : (
         <>
-          {/* Success Criteria Filter — kept as the existing component renders its own container */}
-          {data.availableCriteria.length > 0 && (
-            <CriteriaFilterBar
-              availableCriteria={data.availableCriteria}
-              selectedCriteria={selectedCriteria}
-              onToggle={handleToggleCriterion}
-              onClear={handleClearCriteria}
-              onSelectAll={handleSelectAllCriteria}
-            />
-          )}
+          {/* Success Criteria + Task Prompt Feature filters */}
+          {filterBars}
 
           {insights && <HeroKpis data={data} insights={insights} />}
           {insights && <InsightsRow insights={insights} />}

@@ -36,6 +36,7 @@ import {
   validateGateConfigs,
   isCriterionCompatibleWithGate,
   orderGates,
+  computeTaskPromptId,
 } from "shared";
 import type { ProfileDocument, ProfileVersionDocument, GateConfig, GateId } from "shared";
 import { apiRoute } from "../../openapi/api-route.js";
@@ -1610,6 +1611,7 @@ apiRoute(ctx.app, ctx.registry, {
     worker: z.string().optional(),
     taskPromptId: z.string().optional(),
     criteria: z.string().optional(),
+    features: z.string().optional(),
     submissionId: z.string().optional(),
     k: z.string().optional(),
   }),
@@ -1625,6 +1627,12 @@ apiRoute(ctx.app, ctx.registry, {
       ? criteriaParam.split(",").map(c => c.trim()).filter(Boolean)
       : undefined;
 
+    // Parse task-prompt feature filter from query string (comma-separated feature IDs)
+    const featuresParam = req.query.features as string | undefined;
+    const selectedFeatures = featuresParam
+      ? featuresParam.split(",").map(f => f.trim()).filter(Boolean)
+      : undefined;
+
     // Fetch all done runs (exclude pending/processing, exclude deleted).
     // Per-attempt state lives at run.* (run-retry-attempts).
     const runs = await ctx.requestCollection
@@ -1637,19 +1645,50 @@ apiRoute(ctx.app, ctx.registry, {
         scenario: 1,
         workerType: 1,
         run: 1,
+        taskPromptId: 1,
       })
       .toArray();
 
-    // Transform to AnalyzableRun format
-    const analyzableRuns: AnalyzableRun[] = runs.map(r => ({
-      scenario: r.scenario,
-      workerType: r.workerType,
-      status: r.run?.status ?? "done",
-      outcome: r.run?.outcome,
-      turns: r.run?.turns,
-    }));
+    // Effective task-prompt id per run: stored taskPromptId, else derived from the
+    // task text (legacy runs). Used to join task-prompt features for filtering.
+    const effectiveTaskPromptId = (r: { taskPromptId?: string; scenario?: { task?: string } }): string | undefined =>
+      r.taskPromptId || (r.scenario?.task ? computeTaskPromptId(r.scenario.task) : undefined);
 
-    const analysis: AnalysisResponse = computeAnalysis(analyzableRuns, kValues, selectedCriteria);
+    // Batch-lookup task prompts for their detected/evaluated features.
+    const taskPromptIds = [
+      ...new Set(runs.map(r => effectiveTaskPromptId(r)).filter(Boolean)),
+    ] as string[];
+    const taskPromptFeatures = new Map<
+      string,
+      Array<{ featureId: string; detected: boolean; evaluated: boolean }>
+    >();
+    if (taskPromptIds.length > 0) {
+      const taskPrompts = await ctx.taskPromptCollection
+        .find({ _id: { $in: taskPromptIds } })
+        .project({ _id: 1, features: 1 })
+        .toArray();
+      for (const tp of taskPrompts) {
+        if (tp.features && tp.features.length > 0) {
+          taskPromptFeatures.set(tp._id, tp.features);
+        }
+      }
+    }
+
+    // Transform to AnalyzableRun format
+    const analyzableRuns: AnalyzableRun[] = runs.map(r => {
+      const tpId = effectiveTaskPromptId(r);
+      return {
+        scenario: r.scenario,
+        taskPromptId: tpId,
+        promptFeatures: tpId ? taskPromptFeatures.get(tpId) : undefined,
+        workerType: r.workerType,
+        status: r.run?.status ?? "done",
+        outcome: r.run?.outcome,
+        turns: r.run?.turns,
+      };
+    });
+
+    const analysis: AnalysisResponse = computeAnalysis(analyzableRuns, kValues, selectedCriteria, selectedFeatures);
     res.json(analysis);
   },
 });

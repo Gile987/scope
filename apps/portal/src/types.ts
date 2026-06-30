@@ -333,6 +333,10 @@ export interface AnalysisResponse {
   availableCriteria: string[];
   /** Criteria IDs that were used to define success (empty = use turn.passed) */
   selectedCriteria: string[];
+  /** Union of all detected task-prompt feature IDs across all runs (before filtering) */
+  availableFeatures: string[];
+  /** Task-prompt feature IDs used to filter runs (empty = no feature filter) */
+  selectedFeatures: string[];
 }
 
 // MDP state-transition graph types
