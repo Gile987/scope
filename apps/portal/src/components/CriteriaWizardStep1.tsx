@@ -32,6 +32,8 @@ export function CriteriaWizardStep1({ wizard, idPrefix = "" }: CriteriaWizardSte
     setKind,
     taxonomyElementId,
     setTaxonomyElementId,
+    subject,
+    setSubject,
   } = wizard;
 
   return (
@@ -105,12 +107,14 @@ export function CriteriaWizardStep1({ wizard, idPrefix = "" }: CriteriaWizardSte
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="gate">Gate — controls pass/fail iteration flow</SelectItem>
-            <SelectItem value="observation">Observation — records per-iteration evidence</SelectItem>
+            <SelectItem value="gate">Gate — steers the agent (pass/fail feedback shapes its next iteration)</SelectItem>
+            <SelectItem value="observation">Observation — records evidence; never shown to the agent</SelectItem>
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          Gate criteria drive judge feedback. Observations are recorded after each iteration and never gate the agent.
+          Gate criteria steer the agent — their pass/fail verdict is fed back into the coding
+          session and shapes what it does next. Observations are recorded for analysis only:
+          never shown to the agent and never change its behavior.
         </p>
       </div>
 
@@ -125,11 +129,34 @@ export function CriteriaWizardStep1({ wizard, idPrefix = "" }: CriteriaWizardSte
           </p>
         </div>
       ) : (
-        <ObservationTaxonomySelect
-          id={`${idPrefix}taxonomy`}
-          value={taxonomyElementId}
-          onChange={setTaxonomyElementId}
-        />
+        <>
+          <ObservationTaxonomySelect
+            id={`${idPrefix}taxonomy`}
+            value={taxonomyElementId}
+            onChange={setTaxonomyElementId}
+          />
+
+          {/* Evaluation subject (observations only) */}
+          <div className="space-y-2">
+            <Label htmlFor={`${idPrefix}criteria-subject`} className="text-sm font-semibold">
+              Evaluation subject
+            </Label>
+            <Select value={subject} onValueChange={(value) => setSubject(value as typeof subject)}>
+              <SelectTrigger id={`${idPrefix}criteria-subject`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="run">Whole run — evaluated once across all iterations</SelectItem>
+                <SelectItem value="iteration">Per iteration — evaluated on each iteration in isolation</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Whole-run observations span iterations (e.g. a dependency added then later removed),
+              evaluated once against the final snapshot plus the merged trajectory. Per-iteration
+              observations are judged independently on each iteration.
+            </p>
+          </div>
+        </>
       )}
     </div>
   );

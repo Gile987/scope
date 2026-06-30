@@ -35,7 +35,7 @@ import {
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
 import { HelpTooltip } from "@/components/HelpTooltip";
-import { CriteriaKindBadge } from "@/components/CriteriaBadge";
+import { CriteriaKindBadge, CriteriaSubjectBadge } from "@/components/CriteriaBadge";
 import { TAXONOMY_ELEMENT_METADATA } from "@/types";
 
 const FILTER_KEYS = ["gate", "kind"] as const;
@@ -179,9 +179,14 @@ export function CriteriaList() {
     {
       id: "kind",
       header: "Kind",
-      width: "130px",
+      width: "180px",
       hidden: visibility.isHidden("kind"),
-      cell: (c) => <CriteriaKindBadge kind={c.kind} />,
+      cell: (c) => (
+        <div className="flex flex-wrap items-center gap-1">
+          <CriteriaKindBadge kind={c.kind} />
+          {c.kind === "observation" && <CriteriaSubjectBadge subject={c.subject} />}
+        </div>
+      ),
     },
     {
       id: "taxonomy",

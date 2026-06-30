@@ -20,7 +20,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Save, Trash2, Loader2, Sparkles, Check, X, Plus, Download } from "lucide-react";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
-import { CriteriaKindBadge } from "@/components/CriteriaBadge";
+import { CriteriaKindBadge, CriteriaSubjectBadge } from "@/components/CriteriaBadge";
 import { GateCompatibilityPicker } from "@/components/GateCompatibilityPicker";
 import { ObservationTaxonomySelect } from "@/components/ObservationTaxonomySelect";
 import { formatDate } from "@/lib/utils";
@@ -33,7 +33,7 @@ import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
 import { criteriaToExportYaml, downloadAsFile } from "@/lib/criteria-export";
 import { toast } from "sonner";
-import { TAXONOMY_ELEMENT_METADATA, type CriterionKind, type TaxonomyElementId } from "@/types";
+import { TAXONOMY_ELEMENT_METADATA, type CriterionKind, type CriterionSubject, type TaxonomyElementId } from "@/types";
 
 export function CriterionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -55,6 +55,7 @@ export function CriterionDetail() {
   const [editGates, setEditGates] = useState<GateId[] | undefined>(undefined);
   const [editKind, setEditKind] = useState<CriterionKind>("gate");
   const [editTaxonomyElementId, setEditTaxonomyElementId] = useState<TaxonomyElementId | undefined>(undefined);
+  const [editSubject, setEditSubject] = useState<CriterionSubject>("run");
 
   // AI Suggest state
   const [aiSuggestOpen, setAiSuggestOpen] = useState(false);
@@ -70,7 +71,7 @@ export function CriterionDetail() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (body: { prompt?: string; dependsOn?: string[]; gates?: GateId[]; kind?: CriterionKind; taxonomyElementId?: TaxonomyElementId }) =>
+    mutationFn: (body: { prompt?: string; dependsOn?: string[]; gates?: GateId[]; kind?: CriterionKind; taxonomyElementId?: TaxonomyElementId; subject?: CriterionSubject }) =>
       api.updateCriterion(id!, body),
     onSuccess: async () => {
       // Update accepted children to depend on this criterion
@@ -133,6 +134,7 @@ export function CriterionDetail() {
     setEditGates(criterion.gates && criterion.gates.length > 0 ? criterion.gates : ["select"]);
     setEditKind(criterion.kind ?? "gate");
     setEditTaxonomyElementId(criterion.taxonomyElementId);
+    setEditSubject(criterion.subject ?? ((criterion.kind ?? "gate") === "observation" ? "run" : "iteration"));
     setAiSuggestOpen(false);
     setBehaviorInput("");
     setSuggestedPrompt(null);
@@ -153,6 +155,8 @@ export function CriterionDetail() {
       ...(editKind === "gate" ? { gates: editGates } : {}),
       kind: editKind,
       taxonomyElementId: editKind === "observation" ? editTaxonomyElementId : undefined,
+      // Subject only applies to observations; gates are always per-iteration.
+      subject: editKind === "observation" ? editSubject : "iteration",
     });
   };
 
@@ -466,7 +470,7 @@ export function CriterionDetail() {
         <CardHeader>
           <CardTitle>Kind</CardTitle>
           <CardDescription>
-            Whether this criterion gates iteration flow or records observation evidence.
+            Gate criteria steer the agent (pass/fail feedback shapes its next iteration); observations only record evidence and are never shown to the agent.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -479,28 +483,45 @@ export function CriterionDetail() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="gate">Gate — controls pass/fail iteration flow</SelectItem>
-                    <SelectItem value="observation">Observation — records per-iteration evidence</SelectItem>
+                    <SelectItem value="gate">Gate — steers the agent (pass/fail feedback shapes its next iteration)</SelectItem>
+                    <SelectItem value="observation">Observation — records evidence; never shown to the agent</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               {editKind === "observation" && (
-                <ObservationTaxonomySelect
-                  id="criterion-taxonomy"
-                  value={editTaxonomyElementId}
-                  onChange={setEditTaxonomyElementId}
-                />
+                <>
+                  <ObservationTaxonomySelect
+                    id="criterion-taxonomy"
+                    value={editTaxonomyElementId}
+                    onChange={setEditTaxonomyElementId}
+                  />
+                  <div className="space-y-2">
+                    <Label htmlFor="criterion-subject">Evaluation subject</Label>
+                    <Select value={editSubject} onValueChange={(value) => setEditSubject(value as CriterionSubject)}>
+                      <SelectTrigger id="criterion-subject">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="run">Whole run — evaluated once across all iterations</SelectItem>
+                        <SelectItem value="iteration">Per iteration — evaluated on each iteration in isolation</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
               )}
             </>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               <CriteriaKindBadge kind={criterion.kind} />
               {(criterion.kind ?? "gate") === "observation" && (
-                <Badge variant="outline">
-                  {criterion.taxonomyElementId
-                    ? TAXONOMY_ELEMENT_METADATA[criterion.taxonomyElementId].label
-                    : "Unclassified"}
-                </Badge>
+                <>
+                  <Badge variant="outline">
+                    {criterion.taxonomyElementId
+                      ? TAXONOMY_ELEMENT_METADATA[criterion.taxonomyElementId].label
+                      : "Unclassified"}
+                  </Badge>
+                  <CriteriaSubjectBadge subject={criterion.subject} />
+                </>
               )}
             </div>
           )}

@@ -295,6 +295,80 @@ function ObservationResultsPanel({
   );
 }
 
+/**
+ * Whole-run observation results (#1156, `subject:"run"`). Each criterion is
+ * evaluated ONCE against the final snapshot + the merged trajectory across all
+ * iterations, so these live at run level (`run.observationResults`) rather than
+ * per turn. Rendered as a subsection above the per-iteration matrix, grouped by
+ * taxonomy dimension like the matrix.
+ */
+function WholeRunObservationsPanel({
+  results,
+  criteria,
+}: {
+  results: CriterionResult[] | undefined;
+  criteria: CriteriaDocument[];
+}) {
+  const criteriaById = useMemo(() => new Map(criteria.map((criterion) => [criterion.id, criterion])), [criteria]);
+  const groups = useMemo(() => {
+    const byDimension = new Map<ObservationDimensionKey, Array<{ result: CriterionResult; criterion?: CriteriaDocument }>>();
+    for (const result of results ?? []) {
+      const criterion = criteriaById.get(result.criterionId);
+      const key: ObservationDimensionKey = criterion?.taxonomyElementId ?? "unclassified";
+      const existing = byDimension.get(key) ?? [];
+      existing.push({ result, criterion });
+      byDimension.set(key, existing);
+    }
+    return Array.from(byDimension.entries()).sort(([a], [b]) => observationDimensionLabel(a).localeCompare(observationDimensionLabel(b)));
+  }, [results, criteriaById]);
+
+  if (groups.length === 0) return null;
+
+  return (
+    <div className="space-y-4">
+      {groups.map(([dimension, items]) => (
+        <Card key={dimension} className="border-violet-500/20">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Badge variant="outline" className="border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300">
+                Whole run
+              </Badge>
+              {observationDimensionLabel(dimension)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {items.map(({ result, criterion }) => (
+              <div key={result.criterionId} className="rounded-md border bg-muted/20 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-sm font-medium">{result.criterionId}</span>
+                  <Badge
+                    variant={result.evaluated ? (result.passed ? "success" : "destructive") : "secondary"}
+                    className="ml-auto gap-1"
+                  >
+                    {result.evaluated ? (
+                      result.passed ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />
+                    ) : (
+                      <MinusCircle className="h-3 w-3" />
+                    )}
+                    {result.evaluated ? (result.passed ? "True" : "False") : "Not evaluated"}
+                  </Badge>
+                </div>
+                {criterion?.prompt && (
+                  <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{criterion.prompt}</p>
+                )}
+                <div className="mt-3 rounded-md bg-background p-3 text-sm">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Evidence</p>
+                  <p className="mt-1 whitespace-pre-wrap">{result.feedback || "No evidence provided."}</p>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 export function RunDetail() {
   const { id, tab } = useParams<{ id: string; tab?: string }>();
   const navigate = useNavigate();
@@ -403,7 +477,9 @@ export function RunDetail() {
     enabled: !!taskPromptId,
   });
 
-  const hasObservationResults = (activeRun?.turns ?? []).some((turn) => (turn.observationResults?.length ?? 0) > 0);
+  const hasObservationResults =
+    (activeRun?.turns ?? []).some((turn) => (turn.observationResults?.length ?? 0) > 0) ||
+    (activeRun?.observationResults?.length ?? 0) > 0;
   const hasConfiguredObservations = (run?.observations?.length ?? 0) > 0;
   // Aggregate enrichment status across the whole post-processing DAG so the
   // "Enriched" badge waits for pp-taxonomy instead of flipping after pp-atif.
@@ -979,7 +1055,7 @@ export function RunDetail() {
           {hasVideoData && <TabsTrigger value="video"><Video className="h-3.5 w-3.5 mr-1" />Videos ({videoCount})</TabsTrigger>}
           {(hasConfiguredObservations || hasObservationResults) && (
             <TabsTrigger value="taxonomy">
-              Taxonomy {hasObservationResults ? `(${activeRun?.turns?.reduce((count, turn) => count + (turn.observationResults?.length ?? 0), 0) ?? 0})` : ""}
+              Taxonomy {hasObservationResults ? `(${((activeRun?.turns?.reduce((count, turn) => count + (turn.observationResults?.length ?? 0), 0) ?? 0) + (activeRun?.observationResults?.length ?? 0))})` : ""}
             </TabsTrigger>
           )}
           <TabsTrigger value="logs">Logs</TabsTrigger>
@@ -1083,9 +1159,10 @@ export function RunDetail() {
               <div>
                 <h3 className="text-lg font-medium">Observations</h3>
                 <p className="text-sm text-muted-foreground">
-                  Per-iteration boolean observations recorded over the codebase and agent trajectory, grouped by taxonomy dimension. Non-gating — they never steer the agent.
+                  Boolean observations recorded over the codebase and agent trajectory, grouped by taxonomy dimension. Non-gating — they never steer the agent.
                 </p>
               </div>
+              <WholeRunObservationsPanel results={activeRun?.observationResults} criteria={observationCriteria} />
               <ObservationResultsPanel turns={activeRun?.turns} criteria={observationCriteria} />
             </section>
           </TabsContent>

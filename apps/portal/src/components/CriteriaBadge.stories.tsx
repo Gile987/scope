@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { CriteriaBadge, CriteriaKindBadge } from "./CriteriaBadge";
+import { CriteriaBadge, CriteriaKindBadge, CriteriaSubjectBadge } from "./CriteriaBadge";
 
 const meta = {
   title: "Components/CriteriaBadge",
@@ -44,6 +44,20 @@ export const KindBadges: Story = {
     <div className="flex gap-2">
       <CriteriaKindBadge kind="gate" />
       <CriteriaKindBadge kind="observation" />
+    </div>
+  ),
+};
+
+export const SubjectBadges: Story = {
+  args: {
+    criterionId: "has_unit_tests",
+    link: false,
+  },
+  render: () => (
+    <div className="flex gap-2">
+      <CriteriaSubjectBadge subject="run" />
+      <CriteriaSubjectBadge subject="iteration" />
+      <CriteriaSubjectBadge subject={undefined} />
     </div>
   ),
 };

@@ -29,6 +29,16 @@ export interface ToolCall {
 
 export type CriterionKind = "gate" | "observation";
 
+/**
+ * Evaluation granularity for a criterion (#1156).
+ * - `iteration` — evaluated on each iteration in isolation (gates are always this).
+ * - `run` — evaluated once against the whole run (final snapshot + merged
+ *   trajectory). The default for observations; rejected for gates.
+ */
+export type CriterionSubject = "run" | "iteration";
+
+export const CRITERION_SUBJECTS: readonly CriterionSubject[] = ["run", "iteration"];
+
 export const TAXONOMY_ELEMENT_IDS = [
   "dimension:idiomatic-use",
   "dimension:dependency-currency",
@@ -167,6 +177,14 @@ export interface RunState {
    * tracks pp-atif and is kept for backward compatibility.
    */
   handlerStatus?: Record<string, HandlerRunStatus>;
+  /**
+   * Whole-run observation results — one entry per selected `subject:"run"`
+   * observation criterion, evaluated once against the final snapshot + the
+   * merged trajectory across all iterations (#1156). Per-iteration
+   * (`subject:"iteration"`) observations live on `turn.observationResults`
+   * instead. Empty/absent when no run-subject observations were selected.
+   */
+  observationResults?: CriterionResult[];
 }
 
 export interface Run {
@@ -263,6 +281,7 @@ export interface CriteriaConfig {
   gates?: GateId[];
   kind?: CriterionKind;
   taxonomyElementId?: TaxonomyElementId;
+  subject?: CriterionSubject;
 }
 
 export interface CriteriaDocument extends CriteriaConfig {
@@ -272,7 +291,7 @@ export interface CriteriaDocument extends CriteriaConfig {
 }
 
 export interface CriteriaGraphData {
-  nodes: Array<{ id: string; prompt: string; dependsOn: string[]; gates?: GateId[]; kind?: CriterionKind; taxonomyElementId?: TaxonomyElementId }>;
+  nodes: Array<{ id: string; prompt: string; dependsOn: string[]; gates?: GateId[]; kind?: CriterionKind; taxonomyElementId?: TaxonomyElementId; subject?: CriterionSubject }>;
   edges: Array<{ source: string; target: string }>;
 }
 
@@ -281,6 +300,7 @@ export interface GeneratePromptResponse {
   suggestedId: string;
   suggestedParents: string[];
   suggestedChildren: string[];
+  suggestedSubject?: CriterionSubject;
 }
 
 // Prompt Feature types

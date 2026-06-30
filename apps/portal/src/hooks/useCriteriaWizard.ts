@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { slugify } from "@/lib/utils";
 import { toast } from "sonner";
 import { gatesSatisfyInvariant, type GateId } from "@/lib/gates";
-import type { CriterionKind, TaxonomyElementId } from "@/types";
+import type { CriterionKind, CriterionSubject, TaxonomyElementId } from "@/types";
 
 export interface UseCriteriaWizardOptions {
   /** Pre-populated parent dependency IDs */
@@ -18,6 +18,8 @@ export interface UseCriteriaWizardOptions {
   lockedGates?: GateId[];
   initialKind?: CriterionKind;
   initialTaxonomyElementId?: TaxonomyElementId;
+  /** Pre-populated evaluation subject (observations default to "run"). */
+  initialSubject?: CriterionSubject;
   /** Called with the new criterion ID after successful creation */
   onSuccess: (id: string) => void;
 }
@@ -28,6 +30,7 @@ export function useCriteriaWizard({
   lockedGates,
   initialKind = "gate",
   initialTaxonomyElementId,
+  initialSubject = "run",
   onSuccess,
 }: UseCriteriaWizardOptions) {
   const queryClient = useQueryClient();
@@ -43,6 +46,7 @@ export function useCriteriaWizard({
   const [gates, setGates] = useState<GateId[] | undefined>(initialGates ?? ["select"]);
   const [kind, setKind] = useState<CriterionKind>(initialKind);
   const [taxonomyElementId, setTaxonomyElementId] = useState<TaxonomyElementId | undefined>(initialTaxonomyElementId);
+  const [subject, setSubject] = useState<CriterionSubject>(initialSubject);
 
   // Step 2 fields
   const [prompt, setPrompt] = useState("");
@@ -143,6 +147,11 @@ export function useCriteriaWizard({
         setSuggestedChildren([]);
         setAcceptedChildren([]);
       }
+      // Prefill the evaluation subject from the AI suggestion (observations
+      // only; the toggle is hidden for gates). User can still override it.
+      if (data.suggestedSubject) {
+        setSubject(data.suggestedSubject);
+      }
     },
     onError: () => {
       // LLM unavailable — proceed with empty prompt for manual entry
@@ -197,8 +206,9 @@ export function useCriteriaWizard({
       ...(kind === "gate" ? { gates } : {}),
       kind,
       ...(kind === "observation" && taxonomyElementId ? { taxonomyElementId } : {}),
+      ...(kind === "observation" ? { subject } : {}),
     });
-  }, [id, prompt, dependsOn, gates, kind, taxonomyElementId, createMutation]);
+  }, [id, prompt, dependsOn, gates, kind, taxonomyElementId, subject, createMutation]);
 
   // Regenerate prompt
   const handleRegenerate = useCallback(() => {
@@ -218,12 +228,13 @@ export function useCriteriaWizard({
     setGates(initialGates ?? ["select"]);
     setKind(initialKind);
     setTaxonomyElementId(initialTaxonomyElementId);
+    setSubject(initialSubject);
     setPrompt("");
     setAiGenerated(false);
     setSuggestedParents([]);
     setSuggestedChildren([]);
     setAcceptedChildren([]);
-  }, [initialDependsOn, initialGates, initialKind, initialTaxonomyElementId]);
+  }, [initialDependsOn, initialGates, initialKind, initialTaxonomyElementId, initialSubject]);
 
   return {
     // State
@@ -243,6 +254,8 @@ export function useCriteriaWizard({
     setKind,
     taxonomyElementId,
     setTaxonomyElementId,
+    subject,
+    setSubject,
     prompt,
     setPrompt,
     aiGenerated,
