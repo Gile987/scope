@@ -317,6 +317,23 @@ Criteria are reusable evaluation rules stored in the database and optionally def
 
 See [`ENV_VARIABLES.md`](../../scope-mt-app/ENV_VARIABLES.md) for related configuration options.
 
+## Statistics Analysis
+
+The Statistics page (`apps/portal/src/pages/Statistics.tsx`) is backed by `GET /api/v1/analysis` (`computeAnalysis` in `apps/api/src/analysis.ts`), which aggregates pass rates, iteration distribution, and duration stats across runs. It supports two independent, composable filters via query params:
+
+| Param | Filter | Semantics |
+|-------|--------|-----------|
+| `criteria` | Success criteria (comma-separated `criterionId`s) | A run counts as a pass only if **all** selected criteria pass; runs lacking a selected criterion are excluded |
+| `features` | Task prompt features (comma-separated `featureId`s) | Keep a run iff its task prompt was **detected** to have **every** selected feature (AND) |
+
+The response exposes the option lists and current selection for each filter so the Portal can render filter bars: `availableCriteria` / `selectedCriteria` and `availableFeatures` / `selectedFeatures`. Both `available*` lists are computed over the full valid-run set **before** filtering, so the bars stay populated even when a filter combination matches zero runs (the Portal then shows a "no runs match" empty state instead of the "no data yet" state).
+
+**Detected-based feature semantics (intentional divergence).** A task prompt's `features[]` stores a `{featureId, detected}` row for *every* evaluated feature, so presence is near-universal and meaningless as a filter. `availableFeatures` is therefore the sorted union of featureIds with `detected === true` across valid runs, and the feature filter matches on `detected === true`. This is deliberately stricter than the MDP route (`GET /api/v1/criteria/mdp`), whose feature filter is presence-based. Runs join to task prompts by effective id (`taskPromptId || computeTaskPromptId(scenario.task)`) so legacy runs without a stored `taskPromptId` still resolve their features.
+
+Feature data is produced by the `extract-features` endpoint (`POST /api/v1/task-prompts/:id/extract-features`), which evaluates a task prompt against the configured prompt-feature definitions (`config/prompt-features/*.yaml`, seedable via `POST /api/v1/prompt-features/seed`). The feature filter bar only appears once at least one referenced task prompt has a detected feature.
+
+**Bounded run set (memory).** `computeAnalysis` runs in Node over a materialized array, so the endpoint caps how many runs it loads to keep memory bounded as history grows. It fetches the most-recent `ANALYSIS_MAX_RUNS` (default 5000) done runs sorted by `createdAt` desc — served by the existing `createdAt` index (migration 010), so no extra index is needed — using a **slim projection** that includes only the fields the analysis reads (`run.status`, `run.outcome`, and per-turn `iteration` / `passed` / `durationMs` / `criteriaResults`). The heavy per-turn payloads (`codingAgentResponse`, `judgeFeedback`, legacy inline `toolCalls`, HAR/video URLs) are excluded — a single run document can otherwise approach Cosmos's 2 MB limit. To detect "more exist", it fetches `limit + 1` and trims via `capRunsToLimit`; when trimmed, the response sets `truncated: true` and `runLimit`, and the Portal shows a "most recent N runs" banner so capped metrics are never presented as all-time. Tune the cap with the `ANALYSIS_MAX_RUNS` env var (see [ENV_VARIABLES.md](../../ENV_VARIABLES.md)). The long-term scaling path is DB-side aggregation, but that is gated on Cosmos's partial aggregation-pipeline support.
+
 ## Codebase System
 
 Codebases are reusable source snapshots that can be attached to run submissions. The shared package owns the core types (`CodebaseDocument`, `CodebaseRevisionDocument`, `CodebaseConfig`), stores, resolver, API client, and worker seeder. The API exposes CRUD, Git resolution, archive upload, and archive-download proxy endpoints; workers use `CodebaseClient` to fetch a normalized root-level tar.gz and extract it into the run workspace.

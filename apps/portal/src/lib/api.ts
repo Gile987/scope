@@ -587,11 +587,14 @@ export const api = {
   // ─── Analysis ──────────────────────────────────────────────────────────────
 
   /** Get analysis data for statistics dashboard */
-  getAnalysis: (kValues: number[] = [1, 2, 5], criteria?: string[]): Promise<AnalysisResponse> => {
+  getAnalysis: (kValues: number[] = [1, 2, 5], criteria?: string[], features?: string[]): Promise<AnalysisResponse> => {
     const params = new URLSearchParams();
     params.set("k", kValues.join(","));
     if (criteria && criteria.length > 0) {
       params.set("criteria", criteria.join(","));
+    }
+    if (features && features.length > 0) {
+      params.set("features", features.join(","));
     }
     return request(`/analysis?${params.toString()}`);
   },

@@ -12,6 +12,7 @@ import * as checkbox from "./checkbox.stories";
 import * as dialog from "./dialog.stories";
 import * as dropdownMenu from "./dropdown-menu.stories";
 import * as label from "./label.stories";
+import * as popover from "./popover.stories";
 import * as scrollArea from "./scroll-area.stories";
 import * as select from "./select.stories";
 import * as separator from "./separator.stories";
@@ -25,7 +26,7 @@ import * as tooltip from "./tooltip.stories";
 import * as sonner from "./sonner.stories";
 
 const modules: Record<string, Record<string, unknown>> = {
-  alert, alertDialog, checkbox, dialog, dropdownMenu, label, scrollArea,
+  alert, alertDialog, checkbox, dialog, dropdownMenu, label, popover, scrollArea,
   select, separator, sheet, skeleton, switch: sw, table, tabs, textarea,
   tooltip, sonner,
 };

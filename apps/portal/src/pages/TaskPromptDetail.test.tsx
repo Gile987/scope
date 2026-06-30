@@ -62,19 +62,19 @@ describe("TaskPromptDetail heading adapts to prompt type", () => {
     expect(screen.queryByText("Task Prompt")).toBeNull();
   });
 
-  it("renders 'Select Prompt' for a select gate prompt", async () => {
+  it("renders 'Requirements Prompt' for a select gate prompt", async () => {
     getTaskPrompt.mockResolvedValue({ ...basePrompt, type: "select" });
 
     renderDetail();
 
-    expect(await screen.findByText(/Select Prompt/)).toBeTruthy();
+    expect(await screen.findByText(/Requirements Prompt/)).toBeTruthy();
   });
 
-  it("falls back to 'Select Prompt' for a legacy untyped prompt", async () => {
+  it("falls back to 'Requirements Prompt' for a legacy untyped prompt", async () => {
     getTaskPrompt.mockResolvedValue({ ...basePrompt, type: undefined });
 
     renderDetail();
 
-    expect(await screen.findByText(/Select Prompt/)).toBeTruthy();
+    expect(await screen.findByText(/Requirements Prompt/)).toBeTruthy();
   });
 });
