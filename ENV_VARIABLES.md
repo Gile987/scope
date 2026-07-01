@@ -360,6 +360,12 @@ How often the request scheduler polls MongoDB for pending requests to dispatch t
 
 How often the post-processor dispatcher polls for completed runs needing post-processing. This is a **backfill/catch-up** mechanism — the primary dispatch path is event-driven (coder workers enqueue directly on run completion). The 30s default keeps idle RU consumption low while still catching missed events or version-upgrade backfills within a reasonable window. Reduce temporarily for large backfills.
 
+### SCHEDULER_HANDLER_CACHE_TTL_MS
+**Default:** `300000`
+**Type:** integer (milliseconds)
+
+TTL for the DAG dispatcher's in-memory cache of handler topology (the `services` collection, `type: "post-process-handler"`). `loadHandlers()` runs on the notify/poll hot path (2–3 reads per notify plus every poll cycle) but topology only changes on deploys, so caching it eliminates nearly all of those reads (meaningful on CosmosDB where each query costs RUs). Cache coherence comes primarily from `HandlerDispatcher.registerHandler` invalidating the cache the moment topology changes — the scheduler is a singleton (`replicas: 1`, `Recreate`) and the sole writer of the collection — so this TTL is only a coarse backstop for out-of-band writes or a future scale-out to more than one replica. Kept well above `SCHEDULER_PP_POLL_INTERVAL_MS` so the poll loop doesn't force a fresh read every cycle.
+
 ### QUEUE_NAME_POST_PROCESSOR
 **Default:** `post-processor-queue`
 **Type:** string

@@ -27,10 +27,16 @@ export class HandlerDispatcher implements NotifyHandler {
 
   /** Cached handler topology. The `services` collection changes only on deploys
    *  (via registerHandler), yet loadHandlers() sits on the notify/poll hot path
-   *  (2–3 reads per notify, plus every poll cycle). A short TTL cache eliminates
-   *  nearly all of those reads — significant on CosmosDB where each query costs
-   *  RUs — while registerHandler invalidates it so new topology is picked up at
-   *  once rather than after the TTL elapses. */
+   *  (2–3 reads per notify, plus every poll cycle). A TTL cache eliminates nearly
+   *  all of those reads — significant on CosmosDB where each query costs RUs.
+   *
+   *  Coherence comes primarily from `registerHandler` invalidating the cache the
+   *  moment topology changes, not from expiry: the scheduler is a singleton
+   *  (`replicas: 1`, `Recreate`) and the sole writer of the `services` collection,
+   *  so a same-process registration is reflected immediately regardless of TTL.
+   *  The TTL is therefore a coarse defensive backstop (out-of-band writes, or a
+   *  future scale-out to >1 replica) and is intentionally set well above the poll
+   *  interval so the poll loop doesn't force a fresh read every cycle. */
   private handlerCache: { docs: HandlerServiceDocument[]; expiresAt: number } | null = null;
 
   /** Retry policy for the report-trigger POST. The 30s poll net is the durable
@@ -49,7 +55,7 @@ export class HandlerDispatcher implements NotifyHandler {
     private readonly pollIntervalMs: number = 30_000,
     private readonly batchSize: number = 30,
     private readonly apiUrl: string = process.env.API_URL || "http://api:80",
-    private readonly handlerCacheTtlMs: number = 60_000,
+    private readonly handlerCacheTtlMs: number = 300_000,
   ) {}
 
   start(): void {

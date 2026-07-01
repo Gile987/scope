@@ -184,6 +184,14 @@ async function main(): Promise<void> {
     10,
   );
 
+  // Handler topology is deploy-static and invalidated on registration, so this
+  // TTL only backstops out-of-band/multi-replica changes — keep it well above
+  // the poll interval so the poll loop doesn't force a fresh read every cycle.
+  const handlerCacheTtlMs = parseInt(
+    process.env.SCHEDULER_HANDLER_CACHE_TTL_MS || "300000",
+    10,
+  );
+
   const postProcessorDispatcher = new PostProcessorDispatcher(
     collection,
     db,
@@ -201,9 +209,12 @@ async function main(): Promise<void> {
     ppPollIntervalMs,
     30,
     API_URL,
+    handlerCacheTtlMs,
   );
   handlerDispatcher.start();
-  console.log("[Scheduler] Handler dispatcher (DAG) started");
+  console.log(
+    `[Scheduler] Handler dispatcher (DAG) started (poll=${ppPollIntervalMs}ms, topologyCacheTtl=${handlerCacheTtlMs}ms)`,
+  );
 
   // Start the stuck-run reaper (authoritative backstop). Redis is non-fatal:
   // on misconfig or connection failure the reaper self-disables (its sweeps
