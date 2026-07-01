@@ -249,3 +249,37 @@ describe("HandlerDispatcher — maybeTriggerReports", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("HandlerDispatcher — buildDispatchFilter", () => {
+  let collection: ReturnType<typeof createMockCollection>;
+
+  beforeEach(() => {
+    collection = createMockCollection();
+  });
+
+  it("allows done runs to be considered for autoBackfill version bumps", () => {
+    const d = makeDispatcher(collection) as any;
+    const autoBackfillHandler = HANDLERS[0];
+
+    const filter = d.buildDispatchFilter(autoBackfillHandler, HANDLERS, d.buildGraph(HANDLERS));
+
+    expect(filter[`run.handlerStatus.${autoBackfillHandler._id}.status`]).toEqual({
+      $nin: ["queued", "processing"],
+    });
+    expect(filter.$or).toEqual([
+      { [`run.handlerStatus.${autoBackfillHandler._id}.version`]: { $exists: false } },
+      { [`run.handlerStatus.${autoBackfillHandler._id}.version`]: { $lt: autoBackfillHandler.version } },
+    ]);
+  });
+
+  it("keeps done runs excluded for non-backfill handlers", () => {
+    const d = makeDispatcher(collection) as any;
+    const noBackfillHandler = HANDLERS[1];
+
+    const filter = d.buildDispatchFilter(noBackfillHandler, HANDLERS, d.buildGraph(HANDLERS));
+
+    expect(filter[`run.handlerStatus.${noBackfillHandler._id}.status`]).toEqual({
+      $nin: ["queued", "processing", "done"],
+    });
+  });
+});

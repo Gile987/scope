@@ -400,10 +400,14 @@ export class HandlerDispatcher implements NotifyHandler {
     allHandlers: HandlerServiceDocument[],
     _graph: DependencyGraph,
   ): Record<string, unknown> | null {
+    const statusExclusions = handler.autoBackfill
+      ? ["queued", "processing"]
+      : ["queued", "processing", "done"];
+
     const filter: Record<string, unknown> = {
       "run.status": "done",
       deletedAt: { $exists: false },
-      [`run.handlerStatus.${handler._id}.status`]: { $nin: ["queued", "processing", "done"] },
+      [`run.handlerStatus.${handler._id}.status`]: { $nin: statusExclusions },
     };
 
     // All dependencies must be "done"
