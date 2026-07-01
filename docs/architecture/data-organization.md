@@ -61,6 +61,8 @@ layer only decides how data is *organized*, not who may *see* it.
   any of them; it only adds the `projectId` organizing dimension they can compose with.
 - **Cross-cutting tags/labels** — a companion organizing layer, specified in
   [data-tags.md](data-tags.md), not here. This doc covers only the project container.
+- **Moving / re-filing entities between projects** — `projectId` is assigned once at creation and
+  stays fixed; changing an entity's project is out of scope for this design.
 - **Multi-cluster / cross-cluster** organization — explicitly out of scope. This is about
   organizing data *within a single cluster*.
 - **Code changes** — this document is a design proposal only. Schema/migration/route work is
@@ -270,12 +272,13 @@ Projects are an **organizational**, not access-control, construct. They decide h
 *filed and found*, never *who may see it* (that is [auth-rbac's](#non-goals)).
 
 - **`projectId` files an entity under exactly one project.** It is set at creation from the
-  caller's **active project** (below), and can be changed later by re-filing (moving the entity to
-  another project). Filing has no effect on who can see the entity.
-- **The active-project context is a narrowing filter.** Selecting a project in the Portal/CLI/API
-  adds an `AND { projectId }` clause to list/read queries, so you see only that project's data. It
-  can only show **less**, never more — it does not grant access to anything. With no active project
-  selected, listing spans every project the caller can otherwise see.
+  caller's **active project** (below) and stays fixed — moving an entity between projects is
+  [out of scope](#non-goals). Filing has no effect on who can see the entity.
+- **The active-project context is always set and acts as a narrowing filter.** A caller always
+  operates inside exactly one project; that project adds an `AND { projectId }` clause to list/read
+  queries, so you see only that project's data. It can only show **less**, never more — it does not
+  grant access to anything. There is **no** "all projects" / cleared state; to reach other data you
+  **switch** the active project (one at a time).
 - **Only platform infra is global.** `agents` and `models` are the sole global catalog — they have
   no `projectId` and appear the same in every project. Everything else (including the
   content-addressed [per-project copies](#content-addressed-entities-per-project-copies)) carries a
@@ -283,15 +286,13 @@ Projects are an **organizational**, not access-control, construct. They decide h
 
 Because none of this is access control, **who can see across projects is entirely auth-rbac's
 concern.** When the access layer exists, its `readScope` runs first (deciding *what the caller may
-see*) and the active-project filter narrows *within* that set:
+see*) and the always-set active-project filter narrows *within* that set:
 
 ```mermaid
 flowchart TB
     Q["List/read request<br/>(project-scoped resource)"] --> V["visible set<br/>(auth-rbac readScope —<br/>out of scope here)"]
-    V --> C{"active project<br/>selected?"}
-    C -- yes --> N["AND projectId == active<br/>(narrows only)"]
-    C -- no --> R["result set"]
-    N --> R
+    V --> N["AND projectId == active<br/>(always set; narrows only)"]
+    N --> R["result set"]
     R --> OUT["response"]
 ```
 
@@ -341,7 +342,8 @@ its fields.
   correctness requirement.
 - **Why it "keeps working."** This layer adds **no** enforcement, so filing data under Default
   changes *who can see what* not at all — every list simply gains a `projectId` it can now
-  filter/group by, and shows all projects when none is selected. Net: **behavior-preserving**.
+  filter/group by. The active project defaults to **Default**, which holds all pre-existing data, so
+  the first post-migration view is exactly today's list. Net: **behavior-preserving**.
 - **Going forward**, new data lands in the caller's **active project**, which defaults to Default
   until they create or select another. Users can create projects and switch between them.
 - **Landing order.** This Default backfill is **independent of** auth-rbac. It mirrors the *shape*
@@ -376,23 +378,27 @@ rule, every project capability in the Portal is also in the CLI.
   member/role routes — membership is an
   [access concern](#relationship-to-access-control-auth-rbac).
 - **Active-project context**: an ambient `X-Scope-Project: <id|slug>` header (and/or `?projectId=`
-  on list endpoints). Present ⇒ list handlers AND-filter to that project; absent ⇒ all projects the
-  caller can otherwise see (bounded by the access layer, when present).
+  on list endpoints) selects the project. It resolves through the
+  [resolution order](#default-project-resolution-order) and **always** yields exactly one project
+  (falling back to the caller's configured active project, ultimately **Default**) — there is no
+  "all projects" request. List handlers AND-filter to the resolved project.
 - **Runs list integration**: `projectId` becomes a categorical **filter** + **facet** dimension and
   a new `groupBy: "project"` value, composing with the existing server-side
   filter/facet/group/cursor pipeline (app-design.md "Runs List Query API") — no new query engine,
   just another dimension.
-- Entities accept `projectId` on create/update; responses include it so clients can show the
-  project and offer filtering.
+- Entities accept `projectId` on **create only** (immutable thereafter — moving is
+  [out of scope](#non-goals)); responses include it so clients can show the project and offer
+  filtering.
 
 ### Portal
 
-- A **project switcher** in the app shell (top nav) sets and persists the active project; an
-  **"All projects"** option clears it. The Runs list and catalog lists scope to the active project
-  with a removable filter chip.
+- A **project switcher** in the app shell (top nav) sets and persists the active project. Exactly
+  one project is **always** selected — there is no "All projects" / cleared state; users **switch**
+  between projects to change context. Runs and catalog lists always scope to the active project,
+  shown as a context indicator (not a removable filter chip); other filters remain removable.
 - Project management: **create / rename / describe / soft-delete** and list. (Members and roles are
   [out of scope](#non-goals) — added later by the access layer.)
-- Per-entity **"Move to project"** action; project shown on list rows and detail pages.
+- Project shown on list rows and detail pages.
 
 ### CLI
 
@@ -404,7 +410,8 @@ rule, every project capability in the Portal is also in the CLI.
 ### Default-project resolution order
 
 `--project` flag / `X-Scope-Project` header → configured active project → the global **Default**
-project.
+project. The chain **always** resolves to exactly one project; there is no unscoped / "all
+projects" request.
 
 ---
 
@@ -450,8 +457,6 @@ that belong to *this* (organization) layer are:
   Question B). This doc only guarantees `projectId` is present, indexed, and filterable.
 - **Global platform catalog.** `agents` and `models` stay global platform infrastructure; confirm
   neither ever needs project scoping (e.g. a project-private custom model or agent endpoint).
-- **Moving data between projects.** Is post-hoc re-filing supported, and should moving an entity
-  cascade to its derived children (reports/insights) or leave them where they are?
 - **Content-addressed dedup cost.** Per-project copies trade cluster-wide dedup for isolation;
   confirm the storage/write amplification is acceptable for high-volume `codebase-revisions`, or
   whether those specifically warrant a shared-with-`projectIds` exception.
