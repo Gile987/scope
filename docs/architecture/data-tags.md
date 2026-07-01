@@ -78,12 +78,13 @@ Tags apply to the **durable, single-copy, user-authored** entities — the same 
 [project-scoped single-copy](data-organization-projects.md#which-entities-are-project-scoped):
 
 - **Taggable:** runs (`requests`), profiles, criteria, personas, scenarios, MCP servers, codebases,
-  reports, insights, skills, extensions, report templates.
-- **Not taggable — content-addressed copies.** `task-prompts`, `prompt-features`/`-extractions`,
-  `skill-revisions`, `codebase-revisions` are immutable
-  [per-project copies](data-organization-projects.md#content-addressed-entities-per-project-copies); they
-  carry `projectId` only, and are identified by content, not by hand-applied labels. (A run that
-  references them can itself be tagged.)
+  reports, insights, skills, extensions, report templates, prompt features.
+- **Not taggable — deterministically-keyed copies.** `task-prompts` (content-addressed) and
+  `skill-revisions` (derived reference key) are immutable
+  [per-project copies](data-organization-projects.md#deterministically-keyed-entities-per-project-copies)
+  identified by a deterministic key, not hand-applied labels; a run that references them can itself be
+  tagged. `codebase-revisions` and `prompt-feature` extractions are immutable children — tag their
+  parent (`codebase` / `task-prompt`) instead.
 - **Not taggable — global platform catalog.** `agents` and `models` are global infrastructure with
   no per-user organizing state.
 
