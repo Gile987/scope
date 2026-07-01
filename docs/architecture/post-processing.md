@@ -149,6 +149,8 @@ dependsOn: []
 
 On deploy, a generic registration script — `packages/shared/src/scripts/register-handler.ts` — reads the `handler.yaml` pointed to by `HANDLER_YAML_PATH`, waits for the scheduler's `/health`, and POSTs the parsed document to `${SCHEDULER_URL}/handlers/register` (with retry). The scheduler validates the document, runs a cycle check against the existing topology, and upserts it into the `services` collection via `HandlerDispatcher.registerHandler`. **Workers never write to the `services` collection directly** — the scheduler is the sole owner.
 
+Because handler topology is read on the dispatch hot path (every notify reads it 2–3 times, and every poll cycle once) but only changes on deploys, the scheduler caches it in-memory with a short TTL (60s, configurable via the `HandlerDispatcher` constructor). `registerHandler` invalidates the cache immediately after upserting, so a freshly registered handler is picked up on the next dispatch rather than after the TTL elapses. Cycle-check validation always reads fresh (bypassing the cache).
+
 ```mermaid
 flowchart LR
     YAML[handler.yaml] --> SCRIPT[register-handler.ts]

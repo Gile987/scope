@@ -25,6 +25,14 @@ export class HandlerDispatcher implements NotifyHandler {
   private dispatching = false;
   private queueClients = new Map<string, QueueClient>();
 
+  /** Cached handler topology. The `services` collection changes only on deploys
+   *  (via registerHandler), yet loadHandlers() sits on the notify/poll hot path
+   *  (2–3 reads per notify, plus every poll cycle). A short TTL cache eliminates
+   *  nearly all of those reads — significant on CosmosDB where each query costs
+   *  RUs — while registerHandler invalidates it so new topology is picked up at
+   *  once rather than after the TTL elapses. */
+  private handlerCache: { docs: HandlerServiceDocument[]; expiresAt: number } | null = null;
+
   /** Retry policy for the report-trigger POST. The 30s poll net is the durable
    *  backstop, so in-call retries are modest. Overridable in tests. */
   private reportRetryOptions: RetryOptions = {
@@ -41,6 +49,7 @@ export class HandlerDispatcher implements NotifyHandler {
     private readonly pollIntervalMs: number = 30_000,
     private readonly batchSize: number = 30,
     private readonly apiUrl: string = process.env.API_URL || "http://api:80",
+    private readonly handlerCacheTtlMs: number = 60_000,
   ) {}
 
   start(): void {
@@ -137,8 +146,9 @@ export class HandlerDispatcher implements NotifyHandler {
   }
 
   async registerHandler(doc: HandlerServiceDocument): Promise<void> {
-    // Validate the resulting topology has no cycles before persisting.
-    const existing = await this.loadHandlers();
+    // Validate the resulting topology has no cycles before persisting. Read
+    // fresh (bypass the cache) so validation reflects any concurrent registrations.
+    const existing = await this.loadHandlers(true);
     const merged = [
       ...existing.filter((h) => h._id !== doc._id),
       doc,
@@ -158,6 +168,8 @@ export class HandlerDispatcher implements NotifyHandler {
       } as any,
       { upsert: true },
     );
+    // Topology changed — drop the cache so the next read picks up the new handler.
+    this.invalidateHandlerCache();
     console.log(
       `[HandlerDispatcher] Registered handler ${_id} (version=${doc.version}, queue=${doc.queue}, dependsOn=[${doc.dependsOn.join(", ")}])`,
     );
@@ -494,12 +506,23 @@ export class HandlerDispatcher implements NotifyHandler {
     return client;
   }
 
-  private async loadHandlers(): Promise<HandlerServiceDocument[]> {
-    const docs = await this.db
+  private async loadHandlers(forceFresh = false): Promise<HandlerServiceDocument[]> {
+    const now = Date.now();
+    if (!forceFresh && this.handlerCache && this.handlerCache.expiresAt > now) {
+      return this.handlerCache.docs;
+    }
+    const docs = (await this.db
       .collection("services")
       .find({ type: "post-process-handler" })
-      .toArray();
-    return docs as unknown as HandlerServiceDocument[];
+      .toArray()) as unknown as HandlerServiceDocument[];
+    this.handlerCache = { docs, expiresAt: now + this.handlerCacheTtlMs };
+    return docs;
+  }
+
+  /** Drops the cached topology so the next loadHandlers() re-reads from Mongo.
+   *  Called after registerHandler persists a change. */
+  private invalidateHandlerCache(): void {
+    this.handlerCache = null;
   }
 
   private buildGraph(handlers: HandlerServiceDocument[]): DependencyGraph {

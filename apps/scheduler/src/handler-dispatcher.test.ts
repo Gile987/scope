@@ -307,6 +307,64 @@ describe("HandlerDispatcher — onHandlerComplete", () => {
   });
 });
 
+describe("HandlerDispatcher — handler topology caching", () => {
+  function makeWithSpies(ttlMs = 60_000, handlers: HandlerServiceDocument[] = HANDLERS) {
+    const collection = createMockCollection();
+    const toArray = vi.fn().mockResolvedValue(handlers);
+    const find = vi.fn().mockReturnValue({ toArray });
+    const servicesUpdateOne = vi.fn().mockResolvedValue(undefined);
+    const db = {
+      collection: vi.fn().mockReturnValue({ find, updateOne: servicesUpdateOne }),
+    } as any;
+    const dispatcher = new HandlerDispatcher(
+      collection,
+      db,
+      vi.fn(),
+      60_000,
+      30,
+      "http://api.test",
+      ttlMs,
+    ) as any;
+    return { dispatcher, find, toArray, servicesUpdateOne };
+  }
+
+  it("reuses cached topology within the TTL window", async () => {
+    const { dispatcher, toArray } = makeWithSpies(60_000);
+
+    await dispatcher.loadHandlers();
+    await dispatcher.loadHandlers();
+
+    expect(toArray).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-reads topology once the TTL has elapsed", async () => {
+    const { dispatcher, toArray } = makeWithSpies(0); // TTL 0 → every read is stale
+
+    await dispatcher.loadHandlers();
+    await dispatcher.loadHandlers();
+
+    expect(toArray).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidates the cache when a handler is registered", async () => {
+    const { dispatcher, toArray } = makeWithSpies(60_000);
+
+    await dispatcher.loadHandlers(); // read #1 — populates cache
+    await dispatcher.registerHandler({
+      _id: "pp-new",
+      type: "post-process-handler",
+      version: 1,
+      queue: "pp-new-queue",
+      selector: "new",
+      autoBackfill: false,
+      dependsOn: [],
+    }); // read #2 (forceFresh validation) + invalidate
+    await dispatcher.loadHandlers(); // read #3 — cache was invalidated
+
+    expect(toArray).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe("HandlerDispatcher — buildDispatchFilter", () => {
   let collection: ReturnType<typeof createMockCollection>;
 
