@@ -162,7 +162,6 @@ erDiagram
 
     PROJECT {
         string _id "fresh UUID (Scope-owned)"
-        string slug "unique URL-safe id"
         string name "display name"
         string description "optional"
         date   createdAt
@@ -182,13 +181,12 @@ erDiagram
 
 ### New collection: `projects`
 
-Mirrors the first-class-entity pattern established by `codebases` (fresh-UUID `_id`, unique
-`slug`, timestamps, soft-delete `deletedAt`) — minus any ownership field:
+Mirrors the first-class-entity pattern established by `codebases` (fresh-UUID `_id`, timestamps,
+soft-delete `deletedAt`) — minus any ownership field:
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `_id` | `string` | Fresh Scope-owned UUID |
-| `slug` | `string` | Unique, URL-safe (used in CLI/URLs) |
+| `_id` | `string` | Fresh Scope-owned UUID; the seeded **Default** project uses the reserved id `"default"` |
 | `name` | `string` | Display name |
 | `description?` | `string` | |
 | `createdAt` / `updatedAt` / `deletedAt?` | `Date` | Soft-delete like `codebases` |
@@ -330,7 +328,7 @@ project."** Every project-scoped entity is assigned to a **Default project** so 
 keep working. This mirrors the *shape* of how auth-rbac backfills legacy data, but requires none of
 its fields.
 
-- **Create + migrate (canonical).** Create one **"Default"** project (`slug: "default"`), then
+- **Create + migrate (canonical).** Create one **"Default"** project (reserved `_id: "default"`), then
   **backfill `projectId: "default"`** onto all existing docs in the project-scoped collections.
   After it runs, every project-scoped entity physically carries a `projectId` — there is no null/global bucket. The
   Default project has **no** owner and **no** members (those are access concepts, out of scope); it
@@ -360,7 +358,6 @@ Migration mechanics (`mongo-migrate-ts`, CosmosDB-RU constraints — see
 
 | Collection | Index | Purpose |
 |------------|-------|---------|
-| `projects` | `{ slug: 1 }` unique | Slug lookup/uniqueness |
 | `projects` | `{ createdAt: -1 }`, `{ deletedAt: 1 }` | Newest-first list, active (non-deleted) filter |
 | scoped entities (e.g. `requests`) | `{ projectId: 1 }` sparse | Project filter |
 | scoped entities | `{ projectId: 1, _id: 1 }` | Project-scoped newest-first / cursor sort |
@@ -377,7 +374,7 @@ rule, every project capability in the Portal is also in the CLI.
 - **CRUD**: `GET/POST /api/v1/projects`, `GET/PATCH/DELETE /api/v1/projects/:id` (soft-delete). No
   member/role routes — membership is an
   [access concern](#relationship-to-access-control-auth-rbac).
-- **Active-project context**: an ambient `X-Scope-Project: <id|slug>` header (and/or `?projectId=`
+- **Active-project context**: an ambient `X-Scope-Project: <id>` header (and/or `?projectId=`
   on list endpoints) selects the project. It resolves through the
   [resolution order](#default-project-resolution-order) and **always** yields exactly one project
   (falling back to the caller's configured active project, ultimately **Default**) — there is no
@@ -402,8 +399,8 @@ rule, every project capability in the Portal is also in the CLI.
 
 ### CLI
 
-- `scope project list | create | use <slug> | show`.
-- Active project stored in CLI config (like `SCOPE_API_URL`); `--project <slug|id>` per-command
+- `scope project list | create | use <id> | show`.
+- Active project stored in CLI config (like `SCOPE_API_URL`); `--project <id>` per-command
   override; `SCOPE_PROJECT` env var. `scope run list` gains `--project` alongside its existing
   filters, keeping parity.
 
@@ -498,8 +495,8 @@ that belong to *this* (organization) layer are:
   field and owns project-scoped *access* (§5, Open Question B).
 - [app-design.md](app-design.md) — Runs list query API (filters/facets/grouping/cursors) that
   the `projectId` dimension plugs into.
-- [codebases.md](codebases.md) — the first-class-entity pattern (`slug`, soft-delete, creator)
-  that `projects` mirrors.
+- [codebases.md](codebases.md) — the first-class-entity pattern (fresh-UUID `_id`, soft-delete,
+  creator) that `projects` mirrors.
 - [db.md](db.md) / [db-migrations.md](db-migrations.md) — collections, index strategy, and the
   migration framework.
 - Tracking issue: growth-ecosystems/scope-project#142. Motivating pain: scope-core#677,

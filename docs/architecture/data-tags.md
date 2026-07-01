@@ -2,19 +2,19 @@
 
 > **Status:** Proposed — design proposal. Date: 2026-06-30.
 
-The [project container](data-organization.md) gives Scope data a durable home, but some organizing
+The [project container](data-organization-projects.md) gives Scope data a durable home, but some organizing
 axes cut **across** projects: a run may belong to several efforts, and labels like `regression`,
 `q3-eval`, or `flaky` don't fit a single container. This document proposes **tags** — lightweight,
 cross-cutting labels for filtering and grouping data along those axes.
 
-Tags are a **companion** to [projects](data-organization.md). Like projects, they are purely an
+Tags are a **companion** to [projects](data-organization-projects.md). Like projects, they are purely an
 **organizing** dimension and carry **no** access meaning — access control stays entirely with
 [auth-rbac.md](auth-rbac.md). Tags compose *on top of* the project filter but do **not** depend on
 projects: they are an independent, additive field.
 
 > **Landing order — independent.** Tags add a single optional array field plus a multikey index and
 > **no** access control, so this layer can land **before, after, or alongside** both
-> [projects](data-organization.md) and [auth-rbac.md](auth-rbac.md) with no dependency in any
+> [projects](data-organization-projects.md) and [auth-rbac.md](auth-rbac.md) with no dependency in any
 > direction. Unlike `projectId`, tags need **no backfill** — an absent/empty `tags` simply means
 > "untagged."
 
@@ -22,7 +22,7 @@ projects: they are an independent, additive field.
 
 ## Problem
 
-Even once data is filed under a [project](data-organization.md), a single container can't express
+Even once data is filed under a [project](data-organization-projects.md), a single container can't express
 every way users need to slice their work:
 
 - **Cross-cutting efforts.** "This run belongs to the Q3 regression sweep *and* the flaky-tests
@@ -63,25 +63,25 @@ Tags add **one** optional field to existing documents — no new collection:
 ```mermaid
 erDiagram
     ENTITY {
-        string   projectId "filed under (see data-organization.md)"
+        string   projectId "filed under (see data-organization-projects.md)"
         array    tags "cross-cutting labels (this doc)"
     }
 ```
 
 > `ENTITY` is any [taggable collection](#which-entities-can-be-tagged). The `projectId` field is
-> owned by [data-organization.md](data-organization.md); `tags` is this doc's only addition. Both
+> owned by [data-organization-projects.md](data-organization-projects.md); `tags` is this doc's only addition. Both
 > are organizing dimensions with no access meaning; auth-rbac separately adds its own access fields.
 
 ### Which entities can be tagged
 
 Tags apply to the **durable, single-copy, user-authored** entities — the same set that is
-[project-scoped single-copy](data-organization.md#which-entities-are-project-scoped):
+[project-scoped single-copy](data-organization-projects.md#which-entities-are-project-scoped):
 
 - **Taggable:** runs (`requests`), profiles, criteria, personas, scenarios, MCP servers, codebases,
   reports, insights, skills, extensions, report templates.
 - **Not taggable — content-addressed copies.** `task-prompts`, `prompt-features`/`-extractions`,
   `skill-revisions`, `codebase-revisions` are immutable
-  [per-project copies](data-organization.md#content-addressed-entities-per-project-copies); they
+  [per-project copies](data-organization-projects.md#content-addressed-entities-per-project-copies); they
   carry `projectId` only, and are identified by content, not by hand-applied labels. (A run that
   references them can itself be tagged.)
 - **Not taggable — global platform catalog.** `agents` and `models` are global infrastructure with
@@ -102,7 +102,7 @@ rather than needing a compound index for every combination.
 ## Semantics
 
 Tags are an **organizational**, not access-control, construct — they decide how data is *found*,
-never *who may see it* (that is [auth-rbac's](data-organization.md#non-goals)).
+never *who may see it* (that is [auth-rbac's](data-organization-projects.md#non-goals)).
 
 - **Tags are cross-cutting filters.** `tags` label an entity along axes that cut across projects
   (e.g. `regression`, `q3-eval`, `flaky`). A tag filter adds an `AND tags ∋ "regression"` clause.
@@ -120,7 +120,7 @@ never *who may see it* (that is [auth-rbac's](data-organization.md#non-goals)).
 flowchart TB
     Q["List/read request"] --> V["visible set<br/>(auth-rbac readScope —<br/>out of scope)"]
     V --> P{"active project?"}
-    P -- yes --> PN["AND projectId == active<br/>(data-organization.md)"]
+    P -- yes --> PN["AND projectId == active<br/>(data-organization-projects.md)"]
     P -- no --> T{"tag filter?"}
     PN --> T
     T -- yes --> TF["AND tags ∋ …<br/>(narrows only)"]
@@ -172,12 +172,12 @@ Per the repo's **CLI↔Portal parity** rule, every tag capability in the Portal 
 
 ## Phased rollout
 
-Tags are a **single additive phase** that follows the [projects rollout](data-organization.md#phased-rollout)
+Tags are a **single additive phase** that follows the [projects rollout](data-organization-projects.md#phased-rollout)
 (or ships independently). It is reversible and non-breaking.
 
 ```mermaid
 flowchart LR
-    subgraph proj["data-organization.md"]
+    subgraph proj["data-organization-projects.md"]
         P1["P1 Projects"]
     end
     P1 -.optional, after or independent.-> T["Tags: field + index +<br/>filter across Portal/API/CLI"]
@@ -211,7 +211,7 @@ flowchart LR
 ## Alternatives considered
 
 - **Many-to-many project filing instead of tags.** Model "belongs to several efforts" by letting an
-  entity carry multiple `projectId`s. Rejected in [data-organization.md](data-organization.md#alternatives-considered):
+  entity carry multiple `projectId`s. Rejected in [data-organization-projects.md](data-organization-projects.md#alternatives-considered):
   it turns the singular container into an array and complicates every filter/index. Tags meet the
   cross-cutting need without overloading the container.
 - **Key–value labels (`env=prod`) instead of flat strings.** More expressive, but adds parsing,
@@ -228,7 +228,7 @@ flowchart LR
 
 ## References
 
-- [data-organization.md](data-organization.md) — the **project container** this tags layer composes
+- [data-organization-projects.md](data-organization-projects.md) — the **project container** this tags layer composes
   with; owns `projectId`, the taggable-entity set, and the active-project filter.
 - [auth-rbac.md](auth-rbac.md) — the **access-control layer**; tags carry no access meaning and
   defer all visibility/enforcement to it.
