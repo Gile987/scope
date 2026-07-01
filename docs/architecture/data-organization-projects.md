@@ -164,6 +164,7 @@ erDiagram
         string _id "fresh UUID (Scope-owned)"
         string name "display name"
         string description "optional"
+        bool   isDefault "true on exactly one (the seeded Default)"
         date   createdAt
         date   updatedAt
         date   deletedAt "soft delete"
@@ -186,8 +187,9 @@ soft-delete `deletedAt`) — minus any ownership field:
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `_id` | `string` | Fresh Scope-owned UUID; the seeded **Default** project uses the reserved id `"default"` |
+| `_id` | `string` | Fresh Scope-owned UUID (no special-cased ids) |
 | `name` | `string` | Display name |
+| `isDefault?` | `boolean` | `true` on exactly one project — the seeded **Default** (the backfill target and resolution-order fallback); **absent** on all others (keeps the sparse index a single entry) |
 | `description?` | `string` | |
 | `createdAt` / `updatedAt` / `deletedAt?` | `Date` | Soft-delete like `codebases` |
 
@@ -328,13 +330,16 @@ project."** Every project-scoped entity is assigned to a **Default project** so 
 keep working. This mirrors the *shape* of how auth-rbac backfills legacy data, but requires none of
 its fields.
 
-- **Create + migrate (canonical).** Create one **"Default"** project (reserved `_id: "default"`), then
-  **backfill `projectId: "default"`** onto all existing docs in the project-scoped collections.
-  After it runs, every project-scoped entity physically carries a `projectId` — there is no null/global bucket. The
+- **Create + migrate (canonical).** Insert one **"Default"** project like any other (a fresh
+  Scope-owned `_id`, `isDefault: true`), **capture its generated `_id`**, then **backfill that
+  `_id`** as `projectId` onto all existing docs in the project-scoped collections. No id is
+  special-cased — the Default is an ordinary project that happens to be seeded first and flagged
+  `isDefault`. After it runs, every project-scoped entity physically carries a `projectId` — there is no null/global bucket. The
   Default project has **no** owner and **no** members (those are access concepts, out of scope); it
   is simply the bucket everything starts in.
 - **Unset coalesces to Default (safety net, not a second meaning).** Reads/lookups treat a missing
-  `projectId` as `"default"` (`projectId ?? "default"`). This only covers the transient window
+  `projectId` as the **Default project's `_id`** — resolved once from the `isDefault` project and
+  cached (`projectId ?? defaultProjectId`), not a hard-coded constant. This only covers the transient window
   between schema deploy and backfill completion (or a doc a batch misses), so nothing ever lands in
   a "global / no-project" limbo. Backfill is therefore an **indexing/filtering optimization**, not a
   correctness requirement.
@@ -358,6 +363,7 @@ Migration mechanics (`mongo-migrate-ts`, CosmosDB-RU constraints — see
 
 | Collection | Index | Purpose |
 |------------|-------|---------|
+| `projects` | `{ isDefault: 1 }` sparse | Resolve the Default project (one cached lookup); exactly one doc carries it (seed migration + app invariant) |
 | `projects` | `{ createdAt: -1 }`, `{ deletedAt: 1 }` | Newest-first list, active (non-deleted) filter |
 | scoped entities (e.g. `requests`) | `{ projectId: 1 }` sparse | Project filter |
 | scoped entities | `{ projectId: 1, _id: 1 }` | Project-scoped newest-first / cursor sort |
@@ -406,8 +412,8 @@ rule, every project capability in the Portal is also in the CLI.
 
 ### Default-project resolution order
 
-`--project` flag / `X-Scope-Project` header → configured active project → the global **Default**
-project. The chain **always** resolves to exactly one project; there is no unscoped / "all
+`--project` flag / `X-Scope-Project` header → configured active project → the **Default** project
+(the one flagged `isDefault`). The chain **always** resolves to exactly one project; there is no unscoped / "all
 projects" request.
 
 ---
