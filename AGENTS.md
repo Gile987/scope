@@ -202,7 +202,8 @@ pnpm test:integration             # Integration tests (requires .env + Docker)
 |----------|-------------|
 | [docs/architecture/overview.md](docs/architecture/overview.md) | System architecture, component interactions, data flow |
 | [docs/architecture/app-design.md](docs/architecture/app-design.md) | Data models, API design, package dependency graph |
-| [docs/architecture/data-organization.md](docs/architecture/data-organization.md) | Projects/groups/tags to isolate and group data; composes with auth-rbac ownership |
+| [docs/architecture/data-organization.md](docs/architecture/data-organization.md) | Projects (a single container) to isolate/group data within a cluster; composes with data-tags and auth-rbac |
+| [docs/architecture/data-tags.md](docs/architecture/data-tags.md) | Cross-cutting tags (companion to projects) for filtering/grouping data; organizing only, no access effect |
 | [docs/architecture/vscode-web-worker.md](docs/architecture/vscode-web-worker.md) | XState chat machine, GitHub auth flow, ARIA snapshots |
 | [docs/architecture/token-manager.md](docs/architecture/token-manager.md) | Token storage, validation, round-robin distribution |
 | [docs/architecture/criteria-provider.md](docs/architecture/criteria-provider.md) | CriteriaProvider abstraction, filesystem vs REST backends |
