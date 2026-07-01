@@ -65,6 +65,12 @@ layer only decides how data is *organized*, not who may *see* it.
   stays fixed; changing an entity's project is out of scope for this design.
 - **Multi-cluster / cross-cluster** organization — explicitly out of scope. This is about
   organizing data *within a single cluster*.
+- **Higher-level containers above the project** (e.g. a **workspace** grouping several projects, or
+  an **organization** grouping several workspaces) — out of scope. The project is the **single level
+  of structure** this design introduces. Such a tier is a natural future extension and can be added
+  **additively**: an entity's `projectId` stays its anchor, a project later gains an optional parent
+  (`workspaceId`), and a workspace an `organizationId` — with no re-modelling or re-filing of
+  anything defined here. See [Alternatives considered](#alternatives-considered).
 - **Code changes** — this document is a design proposal only. Schema/migration/route work is
   sequenced in [Phased rollout](#phased-rollout) for follow-up PRs.
 - A new billing/quota/tenant-isolation boundary — projects are an *organizing* boundary, not a
@@ -486,6 +492,13 @@ that belong to *this* (organization) layer are:
 - **Nested / hierarchical projects.** Appealing for org → team → project, but adds path-scoping
   complexity and Cosmos query cost. Deferred — a flat list covers the near-term need, and hierarchy
   can be added later without re-modelling (a project could gain an optional `parentId`).
+- **Higher-level containers (workspace → organization).** A tier *above* the project — a
+  **workspace** grouping projects, an **organization** grouping workspaces — is a natural future
+  extension, but out of scope here. Unlike nesting projects (above), it introduces **new container
+  collections above `projects`** rather than making projects self-similar. It stays purely additive:
+  projects gain an optional `workspaceId`, workspaces an `organizationId`, while entities keep
+  carrying a single `projectId` unchanged. Starting with one level (the project) keeps the first
+  cut small; the higher tiers are layered on only when a concrete need appears.
 - **Reuse `submissionId` / the Experiment grouping (scope-project#54).** Those are
   **batch/reporting** groupings, not a durable container. Projects generalize *above* them: a
   submission or experiment lives *within* a project.
