@@ -407,6 +407,31 @@ rule, every project capability in the Portal is also in the CLI.
   [out of scope](#non-goals)); responses include it so clients can show the project and offer
   filtering.
 
+### Impact on existing endpoints
+
+**Non-breaking, and invisible until projects are actually used.** No current route is renamed,
+removed, or changes shape in a breaking way; every change is additive and phased — during **P0**
+the API is byte-for-byte identical (only the schema field + backfill land). The
+[resolution order](#default-project-resolution-order) guarantees that a request carrying no project
+context resolves to **Default**, which after backfill holds all pre-existing data, so an unchanged
+client sees exactly today's results.
+
+| Endpoint class | Change | Backward compatibility |
+|----------------|--------|------------------------|
+| **List** — `GET /api/v1/{requests, profiles, criteria, codebases, reports, insights, mcp-servers, skills, extensions, task-prompts, prompt-features, report-templates}` | AND-filter by the resolved active project (`X-Scope-Project` header / resolution order) | No project context ⇒ Default ⇒ all legacy data ⇒ same list as today. Results only narrow once a user creates other projects and files data there. |
+| **Runs list** — `GET /api/v1/requests` | `projectId` added as a **filter + facet + `groupBy:"project"`** value in the existing filter/facet/group/cursor pipeline (#1138) — no new query engine | All new params optional; omit them and behavior is unchanged. |
+| **Create** — `POST /api/v1/…` | Accepts an optional `projectId`; when omitted, defaults to the active project (ultimately Default) | Old create calls keep working and land in Default. |
+| **Point read/update/delete** — `GET/PATCH/DELETE /api/v1/…/:id` | Unchanged; responses gain an additive `projectId`. Point lookups stay **unscoped** — `_id` is a globally-unique UUID, so deep links and stored ids keep resolving | `projectId` is immutable, so update/delete never re-file. Enforcing project boundaries on point reads is an [access concern](#relationship-to-access-control-auth-rbac), not added here. |
+| **Global catalog** — `GET /api/v1/agents`, `GET /api/v1/models` | **No change** — stay global platform infrastructure | Fully unaffected. |
+| **Infra / config** — `system`, `feature-flags`, `secrets` | **No change** — not user content, outside this layer | Fully unaffected. |
+
+Two cross-cutting notes: (1) responses across project-scoped resources gain an additive `projectId`
+field and the OpenAPI spec is regenerated (field + `X-Scope-Project` header **added**; nothing
+removed), so schema-strict clients keep validating. (2) The one **identity** change is for
+[content-addressed entities](#content-addressed-entities-per-project-copies): their `_id` moves from
+a bare content hash to a per-project key, so an internal lookup by raw-hash id becomes
+project-scoped — called out in that section.
+
 ### Portal
 
 - A **project switcher** in the app shell (top nav) sets and persists the active project. Exactly
