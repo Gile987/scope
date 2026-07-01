@@ -105,6 +105,11 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
     const handlerId = `pp-${msg.type}`;
     const currentStatus = doc.run?.handlerStatus?.[handlerId] as HandlerRunStatus | undefined;
 
+    // This is the authoritative claim. A queued message alone does not mean the
+    // handler still needs work: the scheduler may have enqueued optimistically,
+    // another worker may already be processing it, or a fresher backfill may
+    // have completed it. Only the worker can safely decide that by atomically
+    // transitioning the specific run attempt into "processing".
     const claim = await this.collection.findOneAndUpdate(
       this.buildHandlerClaimFilter(doc._id, msg.runId, handlerId, handler) as any,
       {
@@ -121,6 +126,8 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
     );
 
     if (!claim) {
+      // No claim means the message is stale, duplicate, or already satisfied.
+      // Ack and drop it — at-least-once delivery is expected here.
       await log("info", "Post-processing message no longer needed, discarding", {
         handlerId,
         runId: msg.runId,

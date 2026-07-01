@@ -383,9 +383,18 @@ export class HandlerDispatcher implements NotifyHandler {
       return;
     }
 
+    // Queue FIRST, then write the best-effort "queued" marker back to Mongo.
+    // The queue message is the durable work signal; the DB status is only an
+    // optimization / observability hint. If we crash after sendMessage() but
+    // before this update, the worker entrypoint claim still makes the message
+    // safe and prevents a permanent "queued" wedge.
     const enqueued = await this.enqueueToHandler(handler, requestId, runId);
     if (!enqueued) return;
 
+    // This is NOT the authoritative processing claim. It only records that a
+    // message was successfully placed on the queue and is expected to be picked
+    // up soon. The worker performs the real claim when it atomically flips the
+    // handler from eligible -> processing for this specific run attempt.
     const queueMarkFilter = this.buildDispatchFilter(handler, allHandlers, graph);
     const queueMarkResult = await this.collection.updateOne(
       {
