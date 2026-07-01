@@ -30,7 +30,7 @@ function createMockCollection() {
   return {
     findOne: vi.fn(),
     findOneAndUpdate: vi.fn(),
-    updateOne: vi.fn().mockResolvedValue(undefined),
+    updateOne: vi.fn().mockResolvedValue({ matchedCount: 1 }),
     find: vi.fn(),
   } as any;
 }
@@ -247,6 +247,48 @@ describe("HandlerDispatcher — maybeTriggerReports", () => {
 
     expect(collection.findOneAndUpdate).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("HandlerDispatcher — onHandlerComplete", () => {
+  let collection: ReturnType<typeof createMockCollection>;
+
+  beforeEach(() => {
+    collection = createMockCollection();
+  });
+
+  it("only accepts completion when current handler status is processing", async () => {
+    const d = makeDispatcher(collection) as any;
+    const maybeTriggerReportsSpy = vi
+      .spyOn(d, "maybeTriggerReports")
+      .mockResolvedValue(undefined);
+
+    await d.onHandlerComplete("req-1", "run-1", "pp-atif", "failed");
+
+    expect(collection.updateOne).toHaveBeenCalledWith(
+      { _id: "req-1", "run.handlerStatus.pp-atif.status": "processing" },
+      {
+        $set: {
+          "run.handlerStatus.pp-atif.status": "failed",
+          "run.handlerStatus.pp-atif.updatedAt": expect.any(Date),
+        },
+      },
+    );
+    expect(maybeTriggerReportsSpy).toHaveBeenCalledWith("req-1", "run-1");
+  });
+
+  it("ignores stale or duplicate completion notifications", async () => {
+    collection.updateOne.mockResolvedValue({ matchedCount: 0 });
+    const d = makeDispatcher(collection) as any;
+    const maybeTriggerReportsSpy = vi
+      .spyOn(d, "maybeTriggerReports")
+      .mockResolvedValue(undefined);
+    const loadHandlersSpy = vi.spyOn(d, "loadHandlers");
+
+    await d.onHandlerComplete("req-1", "run-1", "pp-atif", "done");
+
+    expect(maybeTriggerReportsSpy).not.toHaveBeenCalled();
+    expect(loadHandlersSpy).not.toHaveBeenCalled();
   });
 });
 

@@ -89,9 +89,11 @@ export class HandlerDispatcher implements NotifyHandler {
       `[HandlerDispatcher] Notify: handler-complete ${handlerId} for ${requestId} (status=${status})`,
     );
 
-    // Update the handler status on the run document
-    await this.collection.updateOne(
-      { _id: requestId } as any,
+    // Only apply terminal status from an active in-flight execution.
+    // This avoids stale/duplicate notifies regressing a newly re-dispatched
+    // handler back to "done" or "failed".
+    const updateResult = await this.collection.updateOne(
+      { _id: requestId, [`run.handlerStatus.${handlerId}.status`]: "processing" } as any,
       {
         $set: {
           [`run.handlerStatus.${handlerId}.status`]: status,
@@ -99,6 +101,13 @@ export class HandlerDispatcher implements NotifyHandler {
         },
       } as any,
     );
+
+    if (updateResult.matchedCount === 0) {
+      console.log(
+        `[HandlerDispatcher] Ignored stale/duplicate completion for ${handlerId} on ${requestId}`,
+      );
+      return;
+    }
 
     if (status === "failed") {
       // Don't dispatch downstream on failure, but the failure may have drained
