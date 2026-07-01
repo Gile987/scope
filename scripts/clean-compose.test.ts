@@ -7,6 +7,7 @@ import {
   matchWorktree,
   classifyComposeProjects,
   parseArgs,
+  isDockerDaemonUnavailable,
   type ComposeProject,
 } from "./clean-compose.js";
 import type { PrInfo, Worktree } from "./clean-worktrees.js";
@@ -38,6 +39,34 @@ describe("parseComposeLs", () => {
       { Name: "x", Status: "running", ConfigFiles: " /a.yml , /b.yml " },
     ]);
     expect(parseComposeLs(json)[0].configFiles).toEqual(["/a.yml", "/b.yml"]);
+  });
+});
+
+describe("isDockerDaemonUnavailable", () => {
+  it("detects the Colima/Docker daemon-down message", () => {
+    expect(
+      isDockerDaemonUnavailable(
+        "Cannot connect to the Docker daemon at unix:///Users/x/.colima/default/docker.sock. Is the docker daemon running?",
+      ),
+    ).toBe(true);
+  });
+
+  it("detects the Docker Desktop connect error", () => {
+    expect(
+      isDockerDaemonUnavailable(
+        "error during connect: this error may indicate that the docker daemon is not running",
+      ),
+    ).toBe(true);
+  });
+
+  it("returns false for an unrelated compose error", () => {
+    expect(
+      isDockerDaemonUnavailable("no configuration file provided: not found"),
+    ).toBe(false);
+  });
+
+  it("returns false for empty input", () => {
+    expect(isDockerDaemonUnavailable("")).toBe(false);
   });
 });
 
