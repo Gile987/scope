@@ -98,9 +98,9 @@ Every user-facing collection is global and flat. Relevant collections today (see
 | `criteria` | Evaluation criteria (a DAG) | Durable |
 | `task-prompts` | Content-addressed prompts (`task` / `agents.md`) | Content-addressed (immutable) |
 | `mcp-servers` | MCP server configs | Durable |
-| `codebases` / `codebase-revisions` | Source snapshots | Durable (codebase) / content-addressed (revision) |
+| `codebases` / `codebase-revisions` | Source snapshots | Durable; revision `_id` is a fresh UUID (**not** content-addressed) |
 | `reports` / `insights` | Judge output, derived from a run | Derived (follows parent) |
-| `prompt-features` / `-extractions` | Extracted features | Content-addressed (immutable) |
+| `prompt-features` | Feature definitions (user-slug id); extractions embedded on `task-prompts` | Durable |
 | `skills` / `skill-revisions` | Agent skills | Durable (skill) / content-addressed (revision) |
 
 auth-rbac.md **reserves** (optional, ignored by its v1 logic) a `projectId?` field on entities,
@@ -230,13 +230,18 @@ are added separately by [auth-rbac.md](auth-rbac.md); the field sets are disjoin
 The scoping boundary is deliberately **broad**: nearly all user-facing data is project-scoped, and
 only platform infrastructure stays global.
 
-- **Project-scoped, single-copy** (durable, mutable — carry `projectId`): runs (`requests`),
-  profiles, criteria, personas, scenarios, MCP servers, codebases, reports, insights, **skills**,
-  **extensions**, **report templates**.
-- **Project-scoped, content-addressed** (immutable — carry `projectId`): `task-prompts`,
-  `prompt-features`/`-extractions`, `skill-revisions`, `codebase-revisions`. Scoping these to a
-  project means **each project keeps its own copy**, which trades away cluster-wide deduplication
-  and changes how they are keyed — see
+- **Project-scoped, single-copy** (carry `projectId`): runs (`requests`), profiles, criteria,
+  personas, scenarios, MCP servers, codebases, reports, insights, **skills**, **extensions**,
+  **report templates**, **prompt features** (a per-project catalog keyed by a user-chosen slug — the
+  slug becomes unique *within* a project, not globally), and **codebase revisions** (a fresh-UUID
+  child that **inherits `projectId` from its parent codebase**). Prompt-feature *extractions* are not
+  a standalone entity — they are embedded on the task prompt (`TaskPromptDocument.features`) and
+  follow it.
+- **Project-scoped, content-addressed** (immutable, deterministic id — carry `projectId`):
+  **`task-prompts` and `skill-revisions` only.** Their `_id` is a deterministic UUIDv5 **derived from
+  content** (the trimmed prompt text; the skill-revision ref), so identical content yields an
+  identical id that would collide across projects. Scoping them means **each project keeps its own
+  copy**, changing how they are keyed — see
   [Content-addressed entities](#content-addressed-entities-per-project-copies).
 - **Global platform catalog** (not project-scoped): **agents** and **models** — the platform-level
   registry of available coding agents and LLMs, shared by every project. Whether either ever needs
@@ -244,21 +249,27 @@ only platform infrastructure stays global.
 
 ### Content-addressed entities: per-project copies
 
-`task-prompts`, `prompt-features`/`-extractions`, `skill-revisions`, and `codebase-revisions` are
-**content-addressed**: today one physical document per content hash is shared by every run that
-references it (`_id = hash(content)`), deduplicating identical prompts and snapshots cluster-wide.
+Only two entities are genuinely **content-addressed**: `task-prompts` and `skill-revisions`. Their
+`_id` is a **deterministic UUIDv5 derived from content** — `uuidv5(trimmed text)` for a task prompt,
+`uuidv5("{source}/{skillName}@{commitHash}")` for a skill revision — so today one physical document
+per content value is shared by every run that references it, deduplicating identical prompts and
+skill revisions cluster-wide. (`codebase-revisions` are **not** content-addressed — their `_id` is a
+fresh UUID keyed by `{codebaseId, revisionNumber}` — and `prompt-features` use a human-chosen slug;
+both are ordinary [single-copy](#which-entities-are-project-scoped) project-scoped data, so the rest
+of this section does not apply to them.)
 
 Making them project-scoped means **each project keeps its own copy** — the same task prompt used in
 two projects becomes two documents. This is the deliberate cost of strict project isolation (chosen
 over a shared doc spanning multiple projects; see [Alternatives](#alternatives-considered)):
 
-- **Identity becomes per-project.** `_id` can no longer be the bare content hash (it would collide
-  across projects). Identity is either a composite `_id` (`{projectId}:{contentHash}`) or a fresh
-  `_id` with a unique index on `{ projectId, contentHash }`. The content hash is retained as a field
-  for equality/lookup **within** a project.
+- **Identity becomes per-project.** `_id` can no longer be the bare content-derived UUIDv5 (it would
+  collide across projects). Identity is either a composite `_id` (`{projectId}:{contentId}`) or a
+  fresh `_id` with a unique index on `{ projectId, contentId }`, where `contentId` is the existing
+  deterministic value (the task-prompt id, or the skill-revision ref). That content key is retained
+  as a field for equality/lookup **within** a project.
 - **Dedup narrows from cluster-wide to per-project.** Identical content is still deduplicated for
-  runs **inside the same project**, but no longer across projects — write amplification and storage
-  grow with cross-project reuse (notably for large `codebase-revisions`).
+  runs **inside the same project**, but no longer across projects — write amplification grows with
+  cross-project reuse of the same prompt text or skill revision.
 - **Filed directly, not via a parent.** Each copy carries its own `projectId`, so these entities are
   filed and filtered like any other project-scoped data; the previous "reach through the parent run"
   indirection is gone.
@@ -438,10 +449,10 @@ client sees exactly today's results.
 
 Two cross-cutting notes: (1) responses across project-scoped resources gain an additive `projectId`
 field and the OpenAPI spec is regenerated (field + `X-Scope-Project` header **added**; nothing
-removed), so schema-strict clients keep validating. (2) The one **identity** change is for
-[content-addressed entities](#content-addressed-entities-per-project-copies): their `_id` moves from
-a bare content hash to a per-project key, so an internal lookup by raw-hash id becomes
-project-scoped — called out in that section.
+removed), so schema-strict clients keep validating. (2) The one **identity** change is for the two
+[content-addressed entities](#content-addressed-entities-per-project-copies) (`task-prompts`,
+`skill-revisions`): their `_id` moves from a bare content-derived id to a per-project key, so an
+internal lookup by that content id becomes project-scoped — called out in that section.
 
 ### Portal
 
@@ -511,9 +522,10 @@ that belong to *this* (organization) layer are:
   Question B). This doc only guarantees `projectId` is present, indexed, and filterable.
 - **Global platform catalog.** `agents` and `models` stay global platform infrastructure; confirm
   neither ever needs project scoping (e.g. a project-private custom model or agent endpoint).
-- **Content-addressed dedup cost.** Per-project copies trade cluster-wide dedup for isolation;
-  confirm the storage/write amplification is acceptable for high-volume `codebase-revisions`, or
-  whether those specifically warrant a shared-with-`projectIds` exception.
+- **Content-addressed dedup cost.** Per-project copies of `task-prompts` and `skill-revisions` trade
+  cluster-wide dedup for isolation; confirm the storage/write amplification is acceptable, or whether
+  high-reuse content warrants a shared-with-`projectIds` exception. (Large codebase snapshots are
+  **not** affected — `codebase-revisions` are single-project children of their codebase, never copied.)
 
 ---
 
@@ -528,7 +540,7 @@ that belong to *this* (organization) layer are:
   "which project this belongs to." Rejected; the cross-cutting need is met by
   [tags](data-tags.md) at far lower cost.
 - **Shared content-addressed docs with a `projectIds` set.** Instead of copying content-addressed
-  entities (`task-prompts`, revisions) per project, keep **one** deduplicated document carrying the
+  entities (`task-prompts`, `skill-revisions`) per project, keep **one** deduplicated document carrying the
   *set* of projects that reference it. Preserves cluster-wide dedup and storage efficiency, but a
   single physical doc then spans multiple projects — breaking strict project isolation and the "one
   project per entity" invariant, and muddying project deletion (when may the shared doc be
