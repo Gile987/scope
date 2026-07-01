@@ -27,7 +27,8 @@ enforcement, and re-models **no** existing data.
 
 All Scope data — runs (`requests`), profiles, criteria, prompts, personas, scenarios,
 codebases, reports, insights, MCP servers — lives in **one shared, flat space** with no
-organizing container. Consequences as adoption grows:
+organizing container. This is a **pressing, present-day pain** — not a future one — already
+surfacing in user reports:
 
 - Users can't find their own work (scope-core#677 _"How can I find back 'my' runs?"_,
   scope-core#766 _"Improve UX when listing all runs"_).
@@ -40,6 +41,13 @@ auth-rbac.md governs **who can see and edit** each item (ownership + visibility)
 **not** provide is a **durable container** to file related work under and organize/filter by.
 That container is what this document adds. Access control stays entirely with auth-rbac; this
 layer only decides how data is *organized*, not who may *see* it.
+
+**Crucially, findability is an _organization_ problem, not an _access_ problem.** Letting users
+file and filter *their own* work needs no permissions, roles, ownership, or enforcement — only a
+container and a filter. So this pressing pain can be addressed **now, on its own timeline**,
+without waiting on or coupling to the access-control work: this design needs nothing from
+auth-rbac, and auth-rbac needs nothing from it. That is precisely why the two are **independent
+and can land in either order** (see [Landing order](#landing-order-independent)).
 
 ### Goals
 
