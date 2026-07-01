@@ -29,6 +29,7 @@ import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
 import { CriteriaBadge } from "@/components/CriteriaBadge";
+import { TaskPromptBadge } from "@/components/TaskPromptBadge";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X } from "lucide-react";
 import { formatDate, formatId, formatDuration, cn } from "@/lib/utils";
 import {
@@ -1120,16 +1121,28 @@ export function RunDetail() {
               <CardContent className="space-y-3">
                 <div>
                   <h4 className="text-sm font-medium mb-1">Task</h4>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5 cursor-default">
+                  {run.taskPromptId ? (
+                    <TaskPromptBadge
+                      taskPromptId={run.taskPromptId}
+                      prompt={taskPrompt}
+                      className="block"
+                    >
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5 cursor-pointer hover:underline">
                         {run.scenario?.task ?? "–"}
                       </p>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-sm whitespace-pre-wrap">
-                      {run.scenario?.task ?? "–"}
-                    </TooltipContent>
-                  </Tooltip>
+                    </TaskPromptBadge>
+                  ) : (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5 cursor-default">
+                          {run.scenario?.task ?? "–"}
+                        </p>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-sm whitespace-pre-wrap">
+                        {run.scenario?.task ?? "–"}
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
                 </div>
                 {run.scenario?.version && (
                   <div>
@@ -1147,6 +1160,11 @@ export function RunDetail() {
                             <span className="text-xs font-medium">{GATE_METADATA[gateConfig.gate].label}</span>
                             <GateStatusBadge summary={gateSummaryById.get(gateConfig.gate)} />
                           </div>
+                          {gateConfig.promptId && (
+                            <div className="mb-1.5">
+                              <TaskPromptBadge taskPromptId={gateConfig.promptId} />
+                            </div>
+                          )}
                           <div className="flex flex-wrap gap-1.5">
                             {gateConfig.criteria.length > 0 ? gateConfig.criteria.map((c) => (
                               <CriteriaBadge
@@ -1155,7 +1173,6 @@ export function RunDetail() {
                                 result={latestCriteriaResultsMap?.get(c)}
                                 evaluated={activeRun?.status === "done"}
                                 showStateLabel={activeRun?.status === "done"}
-                                link={false}
                               />
                             )) : (
                               <span className="text-xs text-muted-foreground">Pass-through (no criteria)</span>
@@ -1177,7 +1194,6 @@ export function RunDetail() {
                             result={latestCriteriaResultsMap?.get(c)}
                             evaluated={activeRun?.status === "done"}
                             showStateLabel={activeRun?.status === "done"}
-                            link={false}
                           />
                         );
                       })}
@@ -1396,9 +1412,12 @@ export function RunDetail() {
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <Link to={`/task-prompts/${run.agentsMdPromptId}`} className="font-mono hover:underline">
+                    <TaskPromptBadge
+                      taskPromptId={run.agentsMdPromptId}
+                      className="font-mono hover:underline"
+                    >
                       {formatId(run.agentsMdPromptId)}
-                    </Link>
+                    </TaskPromptBadge>
                     {run.agentsMdParentIds && run.agentsMdParentIds.length > 0 && (
                       <Badge variant="secondary" className="font-mono">
                         {run.agentsMdParentIds.length === 1 ? "mutation" : "merge"} · {run.agentsMdParentIds.length} parent{run.agentsMdParentIds.length === 1 ? "" : "s"}

@@ -3,13 +3,15 @@
 
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, FileText } from "lucide-react";
 import { api } from "@/lib/api";
 import { DetailPanel } from "@/components/list-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
+import { TaskPromptBadge } from "@/components/TaskPromptBadge";
+import { GATE_METADATA } from "@/lib/gates";
 import { formatDate, formatId, formatDuration, truncate } from "@/lib/utils";
 
 export function RunPreviewPanel() {
@@ -93,6 +95,72 @@ export function RunPreviewPanel() {
             </div>
           </CardContent>
         </Card>
+
+        {(run.scenario?.task || run.taskPromptId) && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Task</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {run.taskPromptId ? (
+                <TaskPromptBadge taskPromptId={run.taskPromptId} className="block">
+                  <p className="cursor-pointer whitespace-pre-wrap text-sm text-muted-foreground line-clamp-6 hover:underline">
+                    {run.scenario?.task ?? "–"}
+                  </p>
+                </TaskPromptBadge>
+              ) : (
+                <p className="whitespace-pre-wrap text-sm text-muted-foreground line-clamp-6">
+                  {run.scenario?.task ?? "–"}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {run.agentsMdPromptId && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-1.5 text-sm">
+                <FileText className="h-3.5 w-3.5" /> AGENTS.md
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <TaskPromptBadge
+                taskPromptId={run.agentsMdPromptId}
+                className="font-mono text-xs hover:underline"
+              >
+                {formatId(run.agentsMdPromptId)}
+              </TaskPromptBadge>
+            </CardContent>
+          </Card>
+        )}
+
+        {run.gates && run.gates.some((g) => g.gate !== "select" && g.promptId) && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Gate prompts</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="space-y-2">
+                {run.gates
+                  .filter((g) => g.gate !== "select" && g.promptId)
+                  .map((g) => (
+                    <div key={g.gate} className="flex items-center justify-between gap-2">
+                      <dt className="text-xs text-muted-foreground">{GATE_METADATA[g.gate].label}</dt>
+                      <dd className="min-w-0">
+                        <TaskPromptBadge
+                          taskPromptId={g.promptId}
+                          className="font-mono text-xs hover:underline"
+                        >
+                          {formatId(g.promptId!)}
+                        </TaskPromptBadge>
+                      </dd>
+                    </div>
+                  ))}
+              </dl>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader className="pb-2">

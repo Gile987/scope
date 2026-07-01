@@ -306,6 +306,46 @@ Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API su
 
 The Portal desktop shell uses a persistent left navigation sidebar. It defaults to the compact icon rail, and users can expand it to show navigation labels; the choice is stored in `localStorage` under `scope:layout:sidebar-expanded`. Mobile navigation remains a sheet-based menu with labels always visible.
 
+### Hover-preview + navigate badges
+
+Criteria and task prompts appear across many surfaces (Run Detail, Runs list and its
+right-hand preview panel, Statistics, Criteria list/graph, Task Prompt list,
+report-template triggers). Wherever one is shown, two
+reusable badge components provide a consistent **hover-to-preview + click-to-navigate** affordance:
+
+| Component | Entity | Links to | Hover preview |
+|-----------|--------|----------|---------------|
+| `components/CriteriaBadge.tsx` | Criterion | `/criteria/:id` | Criterion prompt snippet |
+| `components/TaskPromptBadge.tsx` | Task prompt (any type) | `/task-prompts/:id` | Type label, text snippet, list of detected features, created date, **Open details** button |
+
+Both follow the same rules:
+
+- **Self-contained tooltip.** Each wraps its trigger in a Radix `Tooltip` (a local
+  `TooltipProvider`, mirroring `StatusBadge`) and a React Router `Link`. The link calls
+  `e.stopPropagation()` so a badge inside a clickable table row navigates to the detail page
+  without also firing the row's `onRowClick`.
+- **No request fan-out.** Callers that already have the object/text pass it via props
+  (`prompt`) and **no** request fires. Otherwise the entity is fetched lazily via React Query
+  **only when the tooltip opens** (gated on an internal `open` state), so dense lists never
+  issue one request per row on mount. Blob-backed task prompts (no inline `text`) additionally
+  lazy-load their body via `getTaskPromptContent` on open.
+- **`TaskPromptBadge` is type-agnostic.** Gate prompts (`select`/`build`/`test`/`run`/`deploy`),
+  `agents.md`, and legacy untyped prompts all render the same hover + the same
+  `/task-prompts/:id` navigation; only the human label differs (via `promptTypeLabel`). It also
+  renders content plainly (no link/tooltip) when no `taskPromptId` is available.
+- **Detected-features list + explicit navigate button.** `TaskPromptBadge`'s preview lists only
+  the prompt's **detected** features by id (it never shows undetected features or an `x/y` count)
+  and ends with an obvious button-styled **Open details** `Link` (not plain text). Because the
+  popup is interactive (hoverable feature badges + a clickable button), its `TooltipContent` is
+  wrapped in a Radix `Tooltip.Portal` with `collisionPadding` so it can't be clipped by an
+  overflow container (e.g. a table cell) — the same portaling `ShortId` uses.
+
+A sibling affordance, `components/ShortId.tsx`, applies the same hoverable-tooltip pattern to
+**identifiers**: the Runs list renders run and submission IDs truncated to 8 chars
+(`formatId`), and on hover the tooltip reveals the full ID plus a copy-to-clipboard button. The
+trigger stays an inline `<span>` (not a link) so the row click still navigates to the run; the
+copy button calls `e.stopPropagation()` so copying never triggers row navigation.
+
 ## Criteria System
 
 Criteria are reusable evaluation rules stored in the database and optionally defined in `config/criteria/*.yaml`. They support:
@@ -316,6 +356,23 @@ Criteria are reusable evaluation rules stored in the database and optionally def
 - **Gate compatibility** — a `gates: GateId[]` list controls which [gates](#gates--multi-phase-evaluation-pipeline) a criterion may be selected for (empty = all); the list is downward-closed along the DAG
 
 See [`ENV_VARIABLES.md`](../../scope-mt-app/ENV_VARIABLES.md) for related configuration options.
+
+## Statistics Analysis
+
+The Statistics page (`apps/portal/src/pages/Statistics.tsx`) is backed by `GET /api/v1/analysis` (`computeAnalysis` in `apps/api/src/analysis.ts`), which aggregates pass rates, iteration distribution, and duration stats across runs. It supports two independent, composable filters via query params:
+
+| Param | Filter | Semantics |
+|-------|--------|-----------|
+| `criteria` | Success criteria (comma-separated `criterionId`s) | A run counts as a pass only if **all** selected criteria pass; runs lacking a selected criterion are excluded |
+| `features` | Task prompt features (comma-separated `featureId`s) | Keep a run iff its task prompt was **detected** to have **every** selected feature (AND) |
+
+The response exposes the option lists and current selection for each filter so the Portal can render filter bars: `availableCriteria` / `selectedCriteria` and `availableFeatures` / `selectedFeatures`. Both `available*` lists are computed over the full valid-run set **before** filtering, so the bars stay populated even when a filter combination matches zero runs (the Portal then shows a "no runs match" empty state instead of the "no data yet" state).
+
+**Detected-based feature semantics (intentional divergence).** A task prompt's `features[]` stores a `{featureId, detected}` row for *every* evaluated feature, so presence is near-universal and meaningless as a filter. `availableFeatures` is therefore the sorted union of featureIds with `detected === true` across valid runs, and the feature filter matches on `detected === true`. This is deliberately stricter than the MDP route (`GET /api/v1/criteria/mdp`), whose feature filter is presence-based. Runs join to task prompts by effective id (`taskPromptId || computeTaskPromptId(scenario.task)`) so legacy runs without a stored `taskPromptId` still resolve their features.
+
+Feature data is produced by the `extract-features` endpoint (`POST /api/v1/task-prompts/:id/extract-features`), which evaluates a task prompt against the configured prompt-feature definitions (`config/prompt-features/*.yaml`, seedable via `POST /api/v1/prompt-features/seed`). The feature filter bar only appears once at least one referenced task prompt has a detected feature.
+
+**Bounded run set (memory).** `computeAnalysis` runs in Node over a materialized array, so the endpoint caps how many runs it loads to keep memory bounded as history grows. It fetches the most-recent `ANALYSIS_MAX_RUNS` (default 5000) done runs sorted by `createdAt` desc — served by the existing `createdAt` index (migration 010), so no extra index is needed — using a **slim projection** that includes only the fields the analysis reads (`run.status`, `run.outcome`, and per-turn `iteration` / `passed` / `durationMs` / `criteriaResults`). The heavy per-turn payloads (`codingAgentResponse`, `judgeFeedback`, legacy inline `toolCalls`, HAR/video URLs) are excluded — a single run document can otherwise approach Cosmos's 2 MB limit. To detect "more exist", it fetches `limit + 1` and trims via `capRunsToLimit`; when trimmed, the response sets `truncated: true` and `runLimit`, and the Portal shows a "most recent N runs" banner so capped metrics are never presented as all-time. Tune the cap with the `ANALYSIS_MAX_RUNS` env var (see [ENV_VARIABLES.md](../../ENV_VARIABLES.md)). The long-term scaling path is DB-side aggregation, but that is gated on Cosmos's partial aggregation-pipeline support.
 
 ## Codebase System
 

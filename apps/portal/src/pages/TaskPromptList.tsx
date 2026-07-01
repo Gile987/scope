@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Trash2, Eye, Plus, List, ArrowRight, ArrowLeft, Info, Loader2, MessageSquareText } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
+import { TaskPromptBadge } from "@/components/TaskPromptBadge";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { Stepper } from "@/components/Stepper";
 import { GATE_METADATA, promptTypeLabel } from "@/lib/gates";
@@ -166,10 +167,12 @@ export function TaskPromptList() {
       width: "140px",
       hidden: visibility.isHidden("id"),
       cell: (tp) => (
-        <span className="flex items-center gap-1.5 font-mono text-xs">
-          <MessageSquareText className="h-3.5 w-3.5 text-muted-foreground" />
-          {formatId(tp._id)}
-        </span>
+        <TaskPromptBadge taskPromptId={tp._id} prompt={tp}>
+          <span className="flex items-center gap-1.5 font-mono text-xs">
+            <MessageSquareText className="h-3.5 w-3.5 text-muted-foreground" />
+            {formatId(tp._id)}
+          </span>
+        </TaskPromptBadge>
       ),
     },
     {

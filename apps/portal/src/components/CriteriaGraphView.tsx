@@ -1,8 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useMemo } from "react";
+import { useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import {
   ReactFlow,
   Background,
@@ -102,7 +103,7 @@ function CriterionNode({ data }: NodeProps<Node<CriterionNodeData>>) {
   return (
     <div
       className={cn(
-        "rounded-md border px-3 py-2 text-xs font-mono shadow-sm min-w-[140px] text-center whitespace-nowrap",
+        "rounded-md border px-3 py-2 text-xs font-mono shadow-sm min-w-[140px] text-center whitespace-nowrap cursor-pointer transition-shadow hover:ring-1 hover:ring-slate-400",
         statusStyles[status]
       )}
       title={data.prompt}
@@ -206,12 +207,20 @@ interface CriteriaGraphViewProps {
 }
 
 export function CriteriaGraphView({ scenarioCriteria, logs, gate }: CriteriaGraphViewProps) {
+  const navigate = useNavigate();
   // Fetch the full criteria graph from the API
   const { data: graphData, isLoading } = useQuery({
     queryKey: ["criteria-graph"],
     queryFn: () => api.getCriteriaGraph(),
     staleTime: 5 * 60 * 1000, // Graph structure rarely changes
   });
+
+  const onNodeClick = useCallback(
+    (_: unknown, node: Node<CriterionNodeData>) => {
+      navigate(`/criteria/${node.id}`);
+    },
+    [navigate],
+  );
 
   // Derive criteria status from streaming logs
   const criteriaStatus = useMemo(() => extractCriteriaStatus(logs, gate), [logs, gate]);
@@ -287,6 +296,7 @@ export function CriteriaGraphView({ scenarioCriteria, logs, gate }: CriteriaGrap
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}
+        onNodeClick={onNodeClick}
         fitView
         fitViewOptions={{ padding: 0.3 }}
         nodesDraggable={false}

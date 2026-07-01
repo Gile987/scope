@@ -39,4 +39,5 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "021-add-runs-filter-indexes.ts",
   "022-add-runs-sort-indexes.ts",
   "023-add-runs-search-task-index.ts",
+  "024-add-criteria-sort-index.ts",
 ];

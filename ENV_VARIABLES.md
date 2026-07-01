@@ -246,6 +246,15 @@ Maximum total *uncompressed* bytes written while extracting a codebase archive (
 
 Maximum number of entries (files + directories) extracted from a codebase archive. Aborts extraction with HTTP `413` once exceeded.
 
+## Analysis Configuration
+
+### ANALYSIS_MAX_RUNS
+**Default:** `5000`
+**Type:** integer
+**Scope:** API (`apps/api`)
+
+Maximum number of completed runs loaded into memory for a single Statistics / `GET /api/v1/analysis` pass. The endpoint fetches the most-recent `ANALYSIS_MAX_RUNS` done runs (sorted by `createdAt`, served by the existing `createdAt` index) with a slim projection, so server memory stays bounded as run history grows. When the cap is reached the response includes `truncated: true` and `runLimit`, and the portal shows a "most recent N runs" banner rather than dropping data silently or breaking the page. Raise it for richer all-time stats at the cost of memory; lower it on memory-constrained deployments.
+
 ## Portal Feature Flags
 
 ### VITE_SHOW_PASS_AT_K

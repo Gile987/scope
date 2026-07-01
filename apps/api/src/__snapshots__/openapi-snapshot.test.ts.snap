@@ -3940,6 +3940,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           {
             "in": "query",
+            "name": "features",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
             "name": "submissionId",
             "required": false,
             "schema": {
