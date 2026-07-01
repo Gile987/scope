@@ -125,21 +125,33 @@ describe("CriteriaWizardStep2 — honest empty-pool notes", () => {
   it("explains why no parents are available when no candidate is gate-compatible", async () => {
     renderStep2({ parentCandidates: false, childCandidates: true });
     await screen.findAllByPlaceholderText("Type to search criteria…");
-    expect(screen.getByText(/so none can be parents/i)).toBeTruthy();
-    expect(screen.queryByText(/so none can be children/i)).toBeNull();
+    expect(
+      screen.getByText(/no gate-compatible criteria available as parents/i),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(/no gate-compatible criteria available as children/i),
+    ).toBeNull();
   });
 
   it("explains why no children are available when no candidate is gate-compatible", async () => {
     renderStep2({ parentCandidates: true, childCandidates: false });
     await screen.findAllByPlaceholderText("Type to search criteria…");
-    expect(screen.getByText(/so none can be children/i)).toBeTruthy();
-    expect(screen.queryByText(/so none can be parents/i)).toBeNull();
+    expect(
+      screen.getByText(/no gate-compatible criteria available as children/i),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(/no gate-compatible criteria available as parents/i),
+    ).toBeNull();
   });
 
   it("shows no empty-pool note when candidates exist in both directions", async () => {
     renderStep2({ parentCandidates: true, childCandidates: true });
     await screen.findAllByPlaceholderText("Type to search criteria…");
-    expect(screen.queryByText(/so none can be parents/i)).toBeNull();
-    expect(screen.queryByText(/so none can be children/i)).toBeNull();
+    expect(
+      screen.queryByText(/no gate-compatible criteria available as parents/i),
+    ).toBeNull();
+    expect(
+      screen.queryByText(/no gate-compatible criteria available as children/i),
+    ).toBeNull();
   });
 });
