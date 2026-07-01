@@ -424,6 +424,28 @@ apiRoute(ctx.app, ctx.registry, {
       const taskPrompt = await ctx.taskPromptStore.findOrCreate(scenario.task);
       const taskPromptId = taskPrompt._id;
 
+      // Gates are the shared evaluation harness for the whole comparative
+      // submission, not a per-variation controlled field: every variation
+      // (including the base) runs the same gate configuration. Resolve, validate
+      // and canonicalize them up front so an invalid config fails the whole
+      // submit before any inserts (docs/design/gates.md §4.3), mirroring the
+      // single-profile branch below.
+      const variationGatesProvided = Array.isArray(requestedGates) && requestedGates.length > 0;
+      let persistedVariationGates: GateConfig[] | undefined;
+      if (variationGatesProvided) {
+        const resolvedGates = await resolveGatePromptText(ctx, requestedGates as GateConfig[]);
+        const gateError = await validateGatesForSubmit(ctx, resolvedGates, maxIterations);
+        if (gateError) {
+          res.status(400).json({ error: gateError });
+          return;
+        }
+        // Order canonically and point the Select gate's prompt at the resolved
+        // task prompt, identical to the single-profile path.
+        persistedVariationGates = orderGates(resolvedGates).map((g) =>
+          g.gate === "select" ? { ...g, promptId: taskPromptId } : g,
+        );
+      }
+
       // Per-variation resolved config — collected in pass 1 so we can fail
       // the whole submit atomically before any insert.
       type ResolvedVariation = {
@@ -629,6 +651,7 @@ apiRoute(ctx.app, ctx.registry, {
             ...(r.agentVersion ? { agentVersion: r.agentVersion } : {}),
             profileId: r.profile._id,
             profileVersionId: r.profileVersion._id,
+            ...(persistedVariationGates ? { gates: persistedVariationGates } : {}),
             submissionId,
             ...agentsMdFields,
             run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
@@ -655,6 +678,7 @@ apiRoute(ctx.app, ctx.registry, {
         message: `${allNewIds.length} request(s) submitted across ${variationResults.length} profile(s)`,
         scenario,
         ...(maxIterations ? { maxIterations } : {}),
+        ...(persistedVariationGates ? { gates: persistedVariationGates.length } : {}),
       });
       return;
     }
