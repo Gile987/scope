@@ -34,7 +34,7 @@ export const SelectPrompt: Story = {
     const link = canvas.getByRole("link");
     await expect(link).toBeVisible();
     await expect(link).toHaveAttribute("href", "/task-prompts/abcdef1234567890");
-    await expect(link.textContent).toContain("Select");
+    await expect(link.textContent).toContain("Requirements");
   },
 };
 
@@ -55,8 +55,8 @@ export const AgentsMdPrompt: Story = {
 export const LegacyUntypedPrompt: Story = {
   args: { prompt: { ...basePrompt, type: undefined } },
   play: async ({ canvas }) => {
-    // Legacy untyped prompts fall back to the Select label.
-    await expect(canvas.getByRole("link").textContent).toContain("Select");
+    // Legacy untyped prompts fall back to the Requirements (select) label.
+    await expect(canvas.getByRole("link").textContent).toContain("Requirements");
   },
 };
 

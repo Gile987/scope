@@ -23,6 +23,14 @@ export class CriteriaStore {
 
   /** List all active (non-deleted) criteria */
   async getAll(): Promise<CriteriaDocument[]> {
+    // NOTE: `.sort({ id: 1 })` is an ORDER BY that Cosmos DB (RU-based) can only
+    // serve from a *range* index on the sort path. The unique `{ id: 1 }` index
+    // (migration 002) is a uniqueness constraint, NOT a range index, so it does
+    // not satisfy this sort — the compound `{ deletedAt: 1, id: 1 }` index
+    // (migration 024) does. Without that index Cosmos returns a 400
+    // "index path ... is excluded" (see #1192 / #1103), which is why creating or
+    // updating a criterion with dependencies (both call validateNoCycles() ->
+    // getAll()) failed on int/prod but not against local Azurite/Mongo.
     return this.collection
       .find({ deletedAt: { $exists: false } })
       .sort({ id: 1 })

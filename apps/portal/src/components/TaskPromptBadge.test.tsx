@@ -58,7 +58,7 @@ describe("TaskPromptBadge navigation + default rendering", () => {
       <TaskPromptBadge taskPromptId="abcdef1234567890" prompt={{ ...basePrompt, type: "select" }} />,
     );
     const link = screen.getByRole("link");
-    expect(link.textContent).toContain("Select");
+    expect(link.textContent).toContain("Requirements");
     expect(link.textContent).toContain("abcdef12");
   });
 
@@ -91,13 +91,13 @@ describe("TaskPromptBadge navigation + default rendering", () => {
 
 describe("TaskPromptBadge is type-agnostic", () => {
   const cases: Array<[PromptType | undefined, string]> = [
-    ["select", "Select"],
+    ["select", "Requirements"],
     ["build", "Build"],
     ["test", "Test"],
     ["run", "Run"],
     ["deploy", "Deploy"],
     ["agents.md", "AGENTS.md"],
-    [undefined, "Select"], // legacy untyped ⇒ select label
+    [undefined, "Requirements"], // legacy untyped ⇒ select label
   ];
 
   it.each(cases)("renders label %s with identical href + navigation", (type, label) => {
