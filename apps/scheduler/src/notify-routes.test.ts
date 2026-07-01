@@ -2,11 +2,22 @@
 // Licensed under the MIT License.
 
 import type { AddressInfo } from "node:net";
+import type { IncomingMessage } from "node:http";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createHttpServer, type NotifyHandler } from "./notify-routes.js";
+import {
+  createHttpServer,
+  readJsonBody,
+  MAX_BODY_BYTES,
+  type HttpServerOptions,
+  type NotifyHandler,
+} from "./notify-routes.js";
 
-async function startServer(handler: NotifyHandler): Promise<{ server: ReturnType<typeof createHttpServer>; baseUrl: string }> {
-  const server = createHttpServer(handler);
+async function startServer(
+  handler: NotifyHandler,
+  options?: HttpServerOptions,
+): Promise<{ server: ReturnType<typeof createHttpServer>; baseUrl: string }> {
+  const server = createHttpServer(handler, options);
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -200,5 +211,76 @@ describe("createHttpServer", () => {
 
     expect(response.status).toBe(400);
     expect(handler.registerHandler).not.toHaveBeenCalled();
+  });
+
+  it("returns 413 and does not invoke the handler when the body exceeds the cap", async () => {
+    const handler: NotifyHandler = {
+      onRunTerminal: vi.fn().mockResolvedValue(undefined),
+      onHandlerComplete: vi.fn().mockResolvedValue(undefined),
+      registerHandler: vi.fn().mockResolvedValue(undefined),
+    };
+    // Tiny cap so a small, deterministic payload trips it (no socket-buffer race).
+    const { server, baseUrl } = await startServer(handler, { maxBodyBytes: 32 });
+    servers.push(server);
+
+    const response = await fetch(`${baseUrl}/notify/run-terminal`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId: "r".repeat(100), runId: "run-1" }),
+    });
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: "Request body too large" });
+    expect(handler.onRunTerminal).not.toHaveBeenCalled();
+  });
+});
+
+describe("readJsonBody", () => {
+  /** Build a mock IncomingMessage backed by a PassThrough with the given headers. */
+  function mockReq(headers: Record<string, string> = {}): IncomingMessage & PassThrough {
+    const req = new PassThrough() as PassThrough & { headers: Record<string, string> };
+    req.headers = headers;
+    return req as unknown as IncomingMessage & PassThrough;
+  }
+
+  it("parses a valid JSON body under the cap", async () => {
+    const req = mockReq();
+    const promise = readJsonBody(req, 1024);
+    req.end(JSON.stringify({ hello: "world" }));
+
+    await expect(promise).resolves.toEqual({ hello: "world" });
+  });
+
+  it("rejects a declared Content-Length over the cap without reading the body", async () => {
+    const req = mockReq({ "content-length": "5000" });
+    const onData = vi.fn();
+    req.on("data", onData);
+
+    await expect(readJsonBody(req, 1024)).rejects.toThrow(/limit/);
+    expect(onData).not.toHaveBeenCalled(); // fast-path rejects before consuming
+  });
+
+  it("rejects a chunked body that streams past the cap (no Content-Length)", async () => {
+    const req = mockReq(); // no content-length → exercises the streaming guard
+    const promise = readJsonBody(req, 16);
+    req.write("x".repeat(10));
+    req.write("x".repeat(10)); // total 20 > 16
+    req.end();
+
+    await expect(promise).rejects.toThrow(/limit/);
+  });
+
+  it("rejects an empty body", async () => {
+    const req = mockReq();
+    const promise = readJsonBody(req, 1024);
+    req.end("");
+
+    await expect(promise).rejects.toThrow("Request body is required");
+  });
+
+  it("defaults the cap to MAX_BODY_BYTES (64 KB)", async () => {
+    const req = mockReq({ "content-length": String(MAX_BODY_BYTES + 1) });
+
+    await expect(readJsonBody(req)).rejects.toThrow(/limit/);
   });
 });

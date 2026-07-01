@@ -4,6 +4,22 @@
 import http from "node:http";
 import type { HandlerServiceDocument } from "shared";
 
+/**
+ * Maximum accepted request body size for the scheduler's HTTP endpoints.
+ * Notify/register payloads are a few hundred bytes; 64 KB is a generous cap
+ * that protects this singleton control-plane process from unbounded buffering
+ * (and OOM) if a buggy caller streams a large body.
+ */
+export const MAX_BODY_BYTES = 64 * 1024;
+
+/** Thrown by readJsonBody when the request body exceeds MAX_BODY_BYTES. */
+class PayloadTooLargeError extends Error {
+  constructor(maxBytes: number) {
+    super(`Request body exceeds ${maxBytes}-byte limit`);
+    this.name = "PayloadTooLargeError";
+  }
+}
+
 export interface NotifyHandler {
   onRunTerminal(requestId: string, runId: string): Promise<void>;
   onHandlerComplete(
@@ -27,8 +43,13 @@ interface HandlerCompleteRequest {
   status: "done" | "failed";
 }
 
-function sendJson(res: http.ServerResponse, statusCode: number, body: object): void {
-  res.writeHead(statusCode, { "Content-Type": "application/json" });
+function sendJson(
+  res: http.ServerResponse,
+  statusCode: number,
+  body: object,
+  extraHeaders?: http.OutgoingHttpHeaders,
+): void {
+  res.writeHead(statusCode, { "Content-Type": "application/json", ...extraHeaders });
   res.end(JSON.stringify(body));
 }
 
@@ -117,22 +138,84 @@ function parseHandlerRegisterRequest(body: unknown): HandlerServiceDocument | nu
   };
 }
 
-async function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
+export function readJsonBody(
+  req: http.IncomingMessage,
+  maxBytes: number = MAX_BODY_BYTES,
+): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    // Fast path: reject an oversized declared Content-Length before reading any
+    // body. Well-behaved clients (fetch/axios/http.request with a body) always
+    // send it, so this catches the common case without buffering a single byte.
+    const declaredLength = Number(req.headers["content-length"]);
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      reject(new PayloadTooLargeError(maxBytes));
+      return;
+    }
 
-  for await (const chunk of req) {
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
-  }
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let settled = false;
 
-  const rawBody = Buffer.concat(chunks).toString("utf-8").trim();
-  if (rawBody.length === 0) {
-    throw new Error("Request body is required");
-  }
+    const cleanup = (): void => {
+      req.removeListener("data", onData);
+      req.removeListener("end", onEnd);
+      req.removeListener("error", onError);
+    };
 
-  return JSON.parse(rawBody) as unknown;
+    // Streaming guard: Content-Length may be absent (chunked) or lie, so also
+    // enforce the cap as bytes arrive and bail the moment it is exceeded.
+    const onData = (chunk: Buffer | string): void => {
+      if (settled) return;
+      const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      total += buf.length;
+      if (total > maxBytes) {
+        settled = true;
+        cleanup();
+        reject(new PayloadTooLargeError(maxBytes));
+        return;
+      }
+      chunks.push(buf);
+    };
+
+    const onEnd = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const rawBody = Buffer.concat(chunks).toString("utf-8").trim();
+      if (rawBody.length === 0) {
+        reject(new Error("Request body is required"));
+        return;
+      }
+      try {
+        resolve(JSON.parse(rawBody) as unknown);
+      } catch (err) {
+        reject(err);
+      }
+    };
+
+    const onError = (err: Error): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    };
+
+    req.on("data", onData);
+    req.on("end", onEnd);
+    req.on("error", onError);
+  });
 }
 
-export function createHttpServer(handler: NotifyHandler): http.Server {
+export interface HttpServerOptions {
+  /** Max request body size in bytes. Defaults to MAX_BODY_BYTES (64 KB). */
+  maxBodyBytes?: number;
+}
+
+export function createHttpServer(
+  handler: NotifyHandler,
+  options: HttpServerOptions = {},
+): http.Server {
+  const maxBodyBytes = options.maxBodyBytes ?? MAX_BODY_BYTES;
   return http.createServer(async (req, res) => {
     const method = req.method ?? "GET";
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -144,7 +227,7 @@ export function createHttpServer(handler: NotifyHandler): http.Server {
       }
 
       if (method === "POST" && url.pathname === "/notify/run-terminal") {
-        const parsedBody = parseRunTerminalRequest(await readJsonBody(req));
+        const parsedBody = parseRunTerminalRequest(await readJsonBody(req, maxBodyBytes));
         if (!parsedBody) {
           sendJson(res, 400, { error: "requestId and runId are required" });
           return;
@@ -156,7 +239,7 @@ export function createHttpServer(handler: NotifyHandler): http.Server {
       }
 
       if (method === "POST" && url.pathname === "/notify/handler-complete") {
-        const parsedBody = parseHandlerCompleteRequest(await readJsonBody(req));
+        const parsedBody = parseHandlerCompleteRequest(await readJsonBody(req, maxBodyBytes));
         if (!parsedBody) {
           sendJson(res, 400, {
             error: "requestId, runId, handlerId, and status (done|failed) are required",
@@ -175,7 +258,7 @@ export function createHttpServer(handler: NotifyHandler): http.Server {
       }
 
       if (method === "POST" && url.pathname === "/handlers/register") {
-        const parsedBody = parseHandlerRegisterRequest(await readJsonBody(req));
+        const parsedBody = parseHandlerRegisterRequest(await readJsonBody(req, maxBodyBytes));
         if (!parsedBody) {
           sendJson(res, 400, {
             error:
@@ -189,6 +272,13 @@ export function createHttpServer(handler: NotifyHandler): http.Server {
         return;
       }
     } catch (error) {
+      // Body was not fully consumed — close the connection so leftover bytes
+      // can't corrupt the next request on a keep-alive socket.
+      if (error instanceof PayloadTooLargeError) {
+        sendJson(res, 413, { error: "Request body too large" }, { Connection: "close" });
+        return;
+      }
+
       const message = error instanceof Error ? error.message : "Internal server error";
       const statusCode =
         message === "Request body is required" || error instanceof SyntaxError ? 400 : 500;
