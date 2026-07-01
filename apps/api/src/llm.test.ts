@@ -118,7 +118,11 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
     await expect(generateCriteriaPrompt("behave", existing, ["select"])).rejects.toThrow("author down");
   });
 
-  it("uses the full list for both pools when gates are omitted (backward compatible)", async () => {
+  it("treats omitted gates as the universal set, consistent with create validation", async () => {
+    // newGates omitted ⇒ new criterion is unrestricted (all gates). Create validation
+    // then only accepts unrestricted parents (parent ⊇ universal), while any criterion
+    // is a valid child (universal ⊇ child). The suggestion pools must match that so a
+    // suggested dep can never be rejected at creation.
     const seen: Record<string, number> = { parents: 0, children: 0 };
     postSpy.mockImplementation(async ({ body }: any) => {
       const kind = kindOf(body);
@@ -127,10 +131,34 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
       return reply({ suggestions: [] });
     });
 
+    // The fixture has no unrestricted criteria, so no candidate can be a parent.
     await generateCriteriaPrompt("behave", existing);
 
-    expect(seen.parents).toBe(existing.length);
+    expect(seen.parents).toBe(0);
     expect(seen.children).toBe(existing.length);
+  });
+
+  it("offers only unrestricted parents when gates are omitted", async () => {
+    const withUnrestricted: ExistingCriterion[] = [
+      ...existing,
+      { id: "anything", prompt: "any gate", gates: [] },
+      { id: "legacy", prompt: "legacy no gates" },
+    ];
+    const seenParents: string[] = [];
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") return reply({ prompt: "p", suggestedId: "x" });
+      if (kind === "parents") {
+        for (const l of body.messages[1].content.match(/^- (\w+):/gm) ?? [])
+          seenParents.push(l.replace(/^- (\w+):.*/, "$1"));
+      }
+      return reply({ suggestions: [] });
+    });
+
+    await generateCriteriaPrompt("behave", withUnrestricted);
+
+    // Only the unrestricted criteria (empty or undefined gates) qualify as parents.
+    expect(seenParents.sort()).toEqual(["anything", "legacy"]);
   });
 
   it("steers the author prompt toward captured tool output for tool-output gates", async () => {

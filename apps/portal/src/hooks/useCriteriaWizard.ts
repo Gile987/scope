@@ -62,6 +62,25 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
     return map;
   }, [existingCriteria]);
 
+  // Whether the current gate selection leaves *any* existing criterion eligible to
+  // be a parent / child. Used to explain an empty picker honestly ("no gate-compatible
+  // criteria") instead of silently showing nothing — the invariant the API enforces
+  // means a tool-output criterion has no compatible parents in a Select-only library.
+  const hasCompatibleParentCandidates = useMemo(
+    () =>
+      existingCriteria.some(
+        (c) => c.id !== id.trim() && gatesSatisfyInvariant(c.gates, gates),
+      ),
+    [existingCriteria, gates, id],
+  );
+  const hasCompatibleChildCandidates = useMemo(
+    () =>
+      existingCriteria.some(
+        (c) => c.id !== id.trim() && gatesSatisfyInvariant(gates, c.gates),
+      ),
+    [existingCriteria, gates, id],
+  );
+
   // Keep parent/child selections consistent with the chosen gates. A parent must
   // be compatible with every gate this criterion applies to; a child may only be
   // compatible with a subset of them. Incompatible entries (e.g. AI suggestions
@@ -134,7 +153,11 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
   const createMutation = useMutation({
     mutationFn: api.createCriterion,
     onSuccess: async (data) => {
-      // Update accepted children to depend on the new criterion
+      // Update accepted children to depend on the new criterion. These updates are
+      // non-blocking (the criterion is already created), but failures must be
+      // surfaced — otherwise a detected child dependency that can't be linked
+      // (e.g. it would introduce a cycle) is silently lost.
+      const failedChildren: string[] = [];
       await Promise.allSettled(
         acceptedChildren.map(async (childId) => {
           try {
@@ -145,14 +168,21 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
                 dependsOn: [...existingDeps, data.id],
               });
             }
-          } catch {
-            // Non-blocking: child update failure doesn't prevent success
-            console.warn(`Failed to update child criterion ${childId}`);
+          } catch (err) {
+            failedChildren.push(childId);
+            console.warn(`Failed to link child criterion ${childId}`, err);
           }
         }),
       );
       queryClient.invalidateQueries({ queryKey: ["criteria"] });
       toast.success(`Criterion "${data.id}" created`);
+      if (failedChildren.length > 0) {
+        toast.warning(
+          `Created "${data.id}", but couldn't link ${failedChildren.length} child ` +
+            `${failedChildren.length === 1 ? "criterion" : "criteria"} ` +
+            `(${failedChildren.join(", ")}). Add the dependency manually.`,
+        );
+      }
       onSuccess(data.id);
     },
   });
@@ -225,6 +255,8 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
     idExists,
     criteriaLoading,
     canContinue,
+    hasCompatibleParentCandidates,
+    hasCompatibleChildCandidates,
 
     // Callbacks
     handleBehaviorChange,

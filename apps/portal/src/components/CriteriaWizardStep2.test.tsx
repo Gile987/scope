@@ -35,9 +35,13 @@ const noopMutation = { isPending: false, isError: false, error: null } as never;
 function Harness({
   initialParents = [],
   initialChildren = [],
+  parentCandidates = true,
+  childCandidates = true,
 }: {
   initialParents?: string[];
   initialChildren?: string[];
+  parentCandidates?: boolean;
+  childCandidates?: boolean;
 }) {
   const [dependsOn, setDependsOn] = useState<string[]>(initialParents);
   const [acceptedChildren, setAcceptedChildren] = useState<string[]>(initialChildren);
@@ -58,6 +62,8 @@ function Harness({
     suggestedChildren: [],
     acceptedChildren,
     setAcceptedChildren,
+    hasCompatibleParentCandidates: parentCandidates,
+    hasCompatibleChildCandidates: childCandidates,
     handleRegenerate: () => {},
     generateMutation: noopMutation,
     createMutation: noopMutation,
@@ -112,5 +118,28 @@ describe("CriteriaWizardStep2 — parent/child cross-exclusion", () => {
     expect(text).not.toContain("crit_b"); // selected as a child → excluded here
     expect(text).toContain("crit_a");
     expect(text).toContain("crit_c");
+  });
+});
+
+describe("CriteriaWizardStep2 — honest empty-pool notes", () => {
+  it("explains why no parents are available when no candidate is gate-compatible", async () => {
+    renderStep2({ parentCandidates: false, childCandidates: true });
+    await screen.findAllByPlaceholderText("Type to search criteria…");
+    expect(screen.getByText(/so none can be parents/i)).toBeTruthy();
+    expect(screen.queryByText(/so none can be children/i)).toBeNull();
+  });
+
+  it("explains why no children are available when no candidate is gate-compatible", async () => {
+    renderStep2({ parentCandidates: true, childCandidates: false });
+    await screen.findAllByPlaceholderText("Type to search criteria…");
+    expect(screen.getByText(/so none can be children/i)).toBeTruthy();
+    expect(screen.queryByText(/so none can be parents/i)).toBeNull();
+  });
+
+  it("shows no empty-pool note when candidates exist in both directions", async () => {
+    renderStep2({ parentCandidates: true, childCandidates: true });
+    await screen.findAllByPlaceholderText("Type to search criteria…");
+    expect(screen.queryByText(/so none can be parents/i)).toBeNull();
+    expect(screen.queryByText(/so none can be children/i)).toBeNull();
   });
 });

@@ -30,6 +30,8 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
     suggestedChildren,
     acceptedChildren,
     setAcceptedChildren,
+    hasCompatibleParentCandidates,
+    hasCompatibleChildCandidates,
     handleRegenerate,
     generateMutation,
     createMutation,
@@ -86,6 +88,13 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
           aiSuggested={suggestedParents}
           filter={(c) => gatesSatisfyInvariant(c.gates, gates) && !acceptedChildren.includes(c.id)}
         />
+        {!hasCompatibleParentCandidates && (
+          <p className="text-xs text-amber-600" role="note">
+            No existing criteria are compatible with the selected gate{gates && gates.length > 1 ? "s" : ""},
+            so none can be parents. A parent must be compatible with every gate this criterion
+            applies to — broaden the gate compatibility, or create the prerequisite criterion first.
+          </p>
+        )}
         <p className="text-xs text-muted-foreground">
           Criteria that must pass before this one is evaluated. Only criteria compatible with
           every selected gate are shown. List only direct parents —
@@ -107,6 +116,13 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
           aiSuggested={suggestedChildren}
           filter={(c) => gatesSatisfyInvariant(gates, c.gates) && !dependsOn.includes(c.id)}
         />
+        {!hasCompatibleChildCandidates && (
+          <p className="text-xs text-amber-600" role="note">
+            No existing criteria are compatible with the selected gate{gates && gates.length > 1 ? "s" : ""},
+            so none can be children. A child must be compatible with a subset of this criterion's
+            gates — create the dependent criterion first, or adjust its gate compatibility.
+          </p>
+        )}
         <p className="text-xs text-muted-foreground">
           These criteria will be updated to depend on <span className="font-mono">{id || "this criterion"}</span> after creation.
           Only criteria compatible with a subset of the selected gates are shown.
