@@ -6,20 +6,17 @@ Scope currently stores all user-facing data in one flat, global namespace. This 
 proposes a first-class way to **organize** that data **within a single Kubernetes cluster** by
 introducing **the project** — a named container data is filed under.
 
-This is the **data-organization layer** only. It defines the `projects` container plus the
-`projectId` field, and how data is **filed, filtered, and grouped** by it. **Access control —
-ownership, membership, groups, visibility, and authorization — is out of scope and owned by
-[auth-rbac.md](auth-rbac.md).** The two are orthogonal layers: this design populates the
-`projectId` field auth-rbac already reserved, and auth-rbac's access model can later key off that
-field to enforce project-scoped visibility. This doc adds **no** permissions, roles, ownership, or
-enforcement, and re-models **no** existing data.
+This is the **data-organization layer** only: it defines the `projects` container, the `projectId`
+field, and how data is **filed, filtered, and grouped** by it. **Access control — ownership,
+membership, groups, visibility, and authorization — is out of scope and owned by
+[auth-rbac.md](auth-rbac.md);** this design only populates the `projectId` field auth-rbac already
+reserved, adding **no** permissions, roles, ownership, or enforcement and re-modelling **no**
+existing data.
 
-> **Landing order — independent of auth-rbac.** auth-rbac.md is itself `Proposed`. Because this
-> layer adds only organization (a container + one field + filtering) and **no** access control,
-> it can land **before, after, or alongside** auth-rbac with no dependency in either direction —
-> the `projectId` field is simply inert until an access layer chooses to read it. See
-> [Landing order](#landing-order-independent). Where project-scoped *access* is concerned, this
-> doc defers to auth-rbac **Open Question B** ("Sharing, groups & projects").
+> **Landing order — independent of auth-rbac.** Because this layer adds only organization (a
+> container + one field + filtering) and **no** access control, it can land **before, after, or
+> alongside** auth-rbac with no dependency either way — `projectId` is simply inert until an access
+> layer chooses to read it. See [Landing order](#landing-order-independent).
 
 ---
 
@@ -38,16 +35,13 @@ surfacing in user reports:
   durable grouping to file work under.
 
 auth-rbac.md governs **who can see and edit** each item (ownership + visibility). What it does
-**not** provide is a **durable container** to file related work under and organize/filter by.
-That container is what this document adds. Access control stays entirely with auth-rbac; this
-layer only decides how data is *organized*, not who may *see* it.
+**not** provide is a **durable container** to file related work under and organize/filter by —
+which is what this document adds.
 
 **Crucially, findability is an _organization_ problem, not an _access_ problem.** Letting users
 file and filter *their own* work needs no permissions, roles, ownership, or enforcement — only a
 container and a filter. So this pressing pain can be addressed **now, on its own timeline**,
-without waiting on or coupling to the access-control work: this design needs nothing from
-auth-rbac, and auth-rbac needs nothing from it. That is precisely why the two are **independent
-and can land in either order** (see [Landing order](#landing-order-independent)).
+independent of the access-control work (see [Landing order](#landing-order-independent)).
 
 ### Goals
 
@@ -73,12 +67,10 @@ and can land in either order** (see [Landing order](#landing-order-independent))
   stays fixed; changing an entity's project is out of scope for this design.
 - **Multi-cluster / cross-cluster** organization — explicitly out of scope. This is about
   organizing data *within a single cluster*.
-- **Higher-level containers above the project** (e.g. a **workspace** grouping several projects, or
-  an **organization** grouping several workspaces) — out of scope. The project is the **single level
-  of structure** this design introduces. Such a tier is a natural future extension and can be added
-  **additively**: an entity's `projectId` stays its anchor, a project later gains an optional parent
-  (`workspaceId`), and a workspace an `organizationId` — with no re-modelling or re-filing of
-  anything defined here. See [Alternatives considered](#alternatives-considered).
+- **Higher-level containers above the project** (a **workspace** grouping projects, an
+  **organization** grouping workspaces) — out of scope. The project is the **single level of
+  structure** here; such higher tiers are a natural additive future extension, discussed in
+  [Alternatives considered](#alternatives-considered).
 - **Code changes** — this document is a design proposal only. Schema/migration/route work is
   sequenced in [Phased rollout](#phased-rollout) for follow-up PRs.
 - A new billing/quota/tenant-isolation boundary — projects are an *organizing* boundary, not a
@@ -237,13 +229,10 @@ only platform infrastructure stays global.
   child that **inherits `projectId` from its parent codebase**). Prompt-feature *extractions* are not
   a standalone entity — they are embedded on the task prompt (`TaskPromptDocument.features`) and
   follow it.
-- **Project-scoped, deterministically-keyed** (immutable, deterministic `_id` — carry `projectId`):
-  **`task-prompts` and `skill-revisions` only.** Their `_id` is a deterministic UUIDv5 that is a pure
-  function of the entity, not a random value — `task-prompts` are **content-addressed** (`_id` from
-  the trimmed prompt text) and `skill-revisions` use a **derived reference key** (`_id` from the ref
-  `{source}/{skillName}@{commitHash}`). Either way the id is project-independent, so the same logical
-  entity computed in two projects collides. Scoping them means **each project keeps its own copy**,
-  changing how they are keyed — see
+- **Project-scoped, deterministically-keyed** (carry `projectId`): **`task-prompts` and
+  `skill-revisions` only.** Their `_id` is a deterministic UUIDv5 (a pure function of the entity, so
+  project-independent), meaning the same logical entity computed in two projects collides; scoping
+  them means **each project keeps its own copy**. Full mechanics in
   [Deterministically-keyed entities](#deterministically-keyed-entities-per-project-copies).
 - **Global platform catalog** (not project-scoped): **agents** and **models** — the platform-level
   registry of available coding agents and LLMs, shared by every project. Whether either ever needs
@@ -273,10 +262,10 @@ two projects becomes two documents. This is the deliberate cost of strict projec
 over a shared doc spanning multiple projects; see [Alternatives](#alternatives-considered)):
 
 - **Identity becomes per-project.** `_id` can no longer be the bare deterministic UUIDv5 (it would
-  collide across projects). Identity is either a composite `_id` (`{projectId}:{keyId}`) or a fresh
-  `_id` with a unique index on `{ projectId, keyId }`, where `keyId` is the existing deterministic
-  value (the content-addressed task-prompt id, or the skill-revision ref). That key is retained as a
-  field for equality/lookup **within** a project.
+  collide across projects). Instead each copy takes a fresh `_id` with a **unique index on
+  `{ projectId, keyId }`**, where `keyId` is the existing deterministic value (the content-addressed
+  task-prompt id, or the skill-revision ref), retained as a field for equality/lookup **within** a
+  project. *(A composite `_id` of `{projectId}:{keyId}` is an equivalent alternative.)*
 - **Dedup narrows from cluster-wide to per-project.** Identical content is still deduplicated for
   runs **inside the same project**, but no longer across projects — write amplification grows with
   cross-project reuse of the same prompt text or skill revision.
@@ -320,20 +309,8 @@ Projects are an **organizational**, not access-control, construct. They decide h
   carries a `projectId` and filters accordingly.
 
 Because none of this is access control, **who can see across projects is entirely auth-rbac's
-concern.** When the access layer exists, its `readScope` runs first (deciding *what the caller may
-see*) and the always-set active-project filter narrows *within* that set:
-
-```mermaid
-flowchart TB
-    Q["List/read request<br/>(project-scoped resource)"] --> V["visible set<br/>(auth-rbac readScope —<br/>out of scope here)"]
-    V --> N["AND projectId == active<br/>(always set; narrows only)"]
-    N --> R["result set"]
-    R --> OUT["response"]
-```
-
-> If this design lands **before** auth-rbac, the "visible set" step is simply "all data" (there is
-> no enforcement yet); the project filter still works. auth-rbac later inserts real enforcement
-> at that step without changing anything here.
+concern** — its `readScope` decides the visible set, and the always-set active-project filter only
+narrows *within* it. See [Relationship to access control](#relationship-to-access-control-auth-rbac).
 
 ---
 
@@ -415,22 +392,20 @@ rule, every project capability in the Portal is also in the CLI.
 - **CRUD**: `GET/POST /api/v1/projects`, `GET/PATCH/DELETE /api/v1/projects/:id` (soft-delete). No
   member/role routes — membership is an
   [access concern](#relationship-to-access-control-auth-rbac).
-- **How the project reaches the API — header first, query param to override.** The active project
-  is carried as an **ambient request header `X-Scope-Project: <id>`**. This is the primary
-  mechanism: it is **additive** (no existing route changes shape), cross-cutting (Portal/CLI set it
-  once and it applies to every call), and keeps project *context* out of each resource's *address*.
-  An optional **`?projectId=<id>` query param** on list/read endpoints overrides the header for
-  explicit, deep-linkable requests; on **create**, `projectId` may instead be supplied in the
-  request **body**.
+- **How the project reaches the API — an ambient header.** The active project is carried as a
+  request header **`X-Scope-Project: <id>`**: **additive** (no existing route changes shape),
+  cross-cutting (Portal/CLI set it once and it applies to every call), and keeping project *context*
+  out of each resource's *address*. On **create**, the target `projectId` may instead be supplied in
+  the request **body**. *(A future `?projectId=<id>` query-param override on list/read endpoints, for
+  explicit deep-linkable requests, is a possible additive nicety — not part of the core design.)*
 - **Not a URL path segment.** We deliberately do **not** nest routes under `/api/v1/projects/:id/…`.
   That would rewrite **every** existing route (a breaking change, contradicting the
   [non-breaking goal](#impact-on-existing-endpoints)) and conflate *context* with *identity* — an
   entity's `_id` is globally unique, so the project is scoping context, not part of its address.
   Point lookups stay at `…/:id` and remain [unscoped](#impact-on-existing-endpoints).
-- **Resolution**: the header/param resolve through the
-  [resolution order](#default-project-resolution-order) and **always** yield exactly one project
-  (ultimately **Default**) — there is no "all projects" request. List handlers AND-filter to the
-  resolved project.
+- **Resolution**: the header resolves through the
+  [resolution order](#default-project-resolution-order), **always** yielding exactly one project
+  (ultimately **Default**); list handlers AND-filter to it.
 - **Runs list integration**: `projectId` becomes a categorical **filter** + **facet** dimension and
   a new `groupBy: "project"` value, composing with the existing server-side
   filter/facet/group/cursor pipeline (app-design.md "Runs List Query API") — no new query engine,
@@ -467,10 +442,10 @@ internal lookup by that content id becomes project-scoped — called out in that
 
 ### Portal
 
-- A **project switcher** in the app shell (top nav) sets and persists the active project. Exactly
-  one project is **always** selected — there is no "All projects" / cleared state; users **switch**
-  between projects to change context. Runs and catalog lists always scope to the active project,
-  shown as a context indicator (not a removable filter chip); other filters remain removable.
+- A **project switcher** in the app shell (top nav) sets and persists the active project; exactly
+  one is **always** selected ([never a cleared "All projects" state](#organization-semantics)). Runs
+  and catalog lists scope to it, shown as a context indicator (not a removable filter chip); other
+  filters remain removable.
 - Project management: **create / rename / describe / soft-delete** and list. (Members and roles are
   [out of scope](#non-goals) — added later by the access layer.)
 - Project shown on list rows and detail pages.
@@ -484,10 +459,9 @@ internal lookup by that content id becomes project-scoped — called out in that
 
 ### Default-project resolution order
 
-Explicit `?projectId=` query param → `X-Scope-Project` header (CLI: `--project` flag / `SCOPE_PROJECT`
-env) → configured active project → the **Default** project (the one flagged `isDefault`). The most
-explicit signal wins, and the chain **always** resolves to exactly one project; there is no unscoped
-/ "all projects" request.
+`X-Scope-Project` header (CLI: `--project` flag / `SCOPE_PROJECT` env) → configured active project →
+the **Default** project (the one flagged `isDefault`). The most explicit signal wins, and the chain
+**always** resolves to exactly one project.
 
 ---
 
@@ -511,12 +485,10 @@ flowchart LR
   `project` commands. Default is the initial active project ⇒ status quo preserved; new projects are
   opt-in.
 
-> **Independent of auth-rbac.** No phase here needs an identity or access layer — every phase adds
-> only organization (a container, one field, filtering) and can ship **before, after, or
-> alongside** auth-rbac. Project-scoped *access enforcement* (making a project's data discoverable
-> to its members) is **auth-rbac's** to deliver, keyed off the `projectId` this design exposes; it
-> is out of scope here (see [Landing order](#landing-order-independent) and
-> [Relationship to access control](#relationship-to-access-control-auth-rbac)).
+> **Independent of auth-rbac.** No phase needs an identity or access layer — every phase adds only
+> organization and can ship in any order relative to auth-rbac; project-scoped *access enforcement*
+> stays [auth-rbac's to deliver](#relationship-to-access-control-auth-rbac), keyed off the
+> `projectId` this design exposes. See [Landing order](#landing-order-independent).
 
 ---
 
