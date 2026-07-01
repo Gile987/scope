@@ -10,14 +10,18 @@ container data is filed under), **groups** (teams that can own projects), and **
 It is a **sibling proposal to [auth-rbac.md](auth-rbac.md)** and composes with it additively:
 it populates the fields that spec already reserved (`ownerType`, `groupId`, `projectId`,
 `sharedWith`) and routes all enforcement through the single `readScope`/`writeScope`
-chokepoint auth-rbac defines. It does **not** re-model existing data or rewrite queries, and
-it does **not** replace ownership, visibility, or RBAC — it layers on top of them.
+chokepoint (the seam auth-rbac defines — or that this design introduces if it lands first).
+It does **not** re-model existing data or rewrite queries, and it does **not** replace
+ownership, visibility, or RBAC — it layers on top of them.
 
-> **Dependency note.** auth-rbac.md is itself `Proposed`; its ownership fields
-> (`ownerId`, `visibility`) are not yet in the schemas. This document assumes the auth-rbac
-> ownership model lands first (or alongside), and is written so its phases can interleave
-> with the auth-rbac rollout. Where this design needs a decision auth-rbac left open, it
-> cross-references auth-rbac **Open Question B** ("Sharing, groups & projects").
+> **Landing order — either direction.** auth-rbac.md is itself `Proposed`; its ownership
+> fields (`ownerId`, `visibility`) are not yet in the schemas. This design is written to land
+> **before, after, or alongside** auth-rbac: its schema is unconditionally additive, its
+> *organization* value (filing, filtering, tags) needs no identity layer, and its *isolation*
+> value composes with whichever release introduces caller identity + the `readScope`/
+> `writeScope` seam. See [Landing order (either direction)](#landing-order-either-direction).
+> Where this design needs a decision auth-rbac left open, it cross-references auth-rbac
+> **Open Question B** ("Sharing, groups & projects").
 
 ---
 
@@ -50,8 +54,8 @@ scope a team's data. That container is what this document adds.
    container.
 4. **Purely additive & non-breaking**: existing flat/global data keeps working unchanged;
    the feature is opt-in and reversible phase-by-phase.
-5. **One enforcement path**: all scoping flows through the existing `readScope`/`writeScope`
-   chokepoint; call sites and route guards are untouched.
+5. **One enforcement path**: all scoping flows through a single `readScope`/`writeScope`
+   chokepoint (shared with auth-rbac); call sites and route guards are untouched.
 
 ### Non-goals
 
@@ -73,7 +77,7 @@ Every user-facing collection is global and flat. Relevant collections today (see
 
 | Collection | Entity | Owned/authored by a user? |
 |------------|--------|---------------------------|
-| `requests` | Runs (the core entity) | Yes (once auth-rbac lands) |
+| `requests` | Runs (the core entity) | Yes (with the ownership layer) |
 | `profiles` / `profile-versions` | Run configuration profiles | Yes |
 | `criteria` | Evaluation criteria (a DAG) | Yes |
 | `task-prompts` | Content-addressed prompts (`task` / `agents.md`) | Shared building block |
@@ -102,6 +106,26 @@ It also **reserves** (optional, ignored by v1 logic) exactly the shape this desi
 `ownerType: "user" | "group"` (default `"user"`), `groupId?`, `projectId?`, `sharedWith?[]`,
 and future `groups`/`projects` collections keyed by Scope-owned ids. This design **is** that
 future work.
+
+### Landing order (either direction)
+
+This design and auth-rbac are **orthogonal layers** that meet at one seam. Project *isolation*
+needs three things from an **ownership layer**: (1) an authenticated caller identity
+(`users._id`), (2) a per-entity `ownerId` + `visibility`, and (3) the single
+`readScope`/`writeScope` seam every read/write already funnels through. auth-rbac supplies all
+three. Because neither doc has shipped, this design is written to land in **any** order:
+
+| Layer of this design | Needs identity? | If auth-rbac lands first | If this design lands first |
+|----------------------|-----------------|--------------------------|----------------------------|
+| **Schema** (`projectId`, `tags`, `ownerType`, `groupId`; `projects`/`project-memberships`) | No | Additive fields alongside `ownerId`/`visibility` | Additive fields; auth-rbac's `ownerId`/`visibility` slot in later |
+| **Organization** (filing, active-project filter, `groupBy:"project"`, tags) | No | Works | Works — these only *narrow* result sets, so they need no identity |
+| **Isolation** (`project` visibility tier + project clause in the chokepoint) | Yes | Add one OR-clause + one visibility value to the existing seam | This design **introduces** the seam (reduced, project-only form); auth-rbac later drops its `ownerId`/`visibility` clauses into the *same* seam — no call-site rework |
+
+The reserved-field discipline is **symmetric**: auth-rbac reserved
+`projectId`/`ownerType`/`groupId` for this design, and this design reserves the ownership
+clauses of the seam for auth-rbac. Whichever ships first **owns** the seam; the other extends
+it. The [phased rollout](#phased-rollout) marks which phases need the identity layer so they
+can be sequenced after it, regardless of order.
 
 ---
 
@@ -234,8 +258,9 @@ Every **user-owned** entity (the "Yes" rows in [Current state](#current-state)) 
   reserved shape; set when a group owns the data via its project.
 - `tags?: string[]` — cross-cutting labels (no auth effect).
 
-`ownerId` and `visibility` come from auth-rbac; this design only **extends `visibility`** with
-a third value (below).
+`ownerId` and `visibility` come from the **ownership layer** (auth-rbac); this design only
+**extends `visibility`** with a third value (below). If this design ships first, that extension
+activates when the ownership layer lands — see [Landing order](#landing-order-either-direction).
 
 ### Which entities are project-scoped
 
@@ -371,6 +396,11 @@ function writeScope(user, resource): Filter {
   list handlers), keeping authorization and filtering cleanly separated.
 - **Project/group identity is Scope-owned** and re-resolved server-side per request; it is
   never trusted from the client (same discipline as `ownerId`).
+- **Landing order.** If auth-rbac has landed, this design adds only the third `readScope`
+  OR-clause and the optional `writeScope` clause. If this design lands **first**, it introduces
+  these two functions in reduced form (project clauses only; the `ownerId` / `visibility:"shared"`
+  clauses are inert until auth-rbac adds them), so auth-rbac later extends the *same* seam with
+  no call-site changes.
 
 ---
 
@@ -389,6 +419,11 @@ existing flat data is assigned to a **Default project** so today's behavior is p
 - **Going forward**, each user gets a **personal default project** as their initial active
   context; they can create/switch to team (group-owned) or shared projects. New data lands in
   the active project rather than the global Default.
+- **Landing order.** This Default-project backfill is **independent of** auth-rbac's `ownerId`
+  backfill — it mirrors its *shape* but doesn't require it. The `"system"` sentinel owner is
+  introduced by whichever design lands first and reused by the other. If this design ships
+  before auth-rbac, Default is owned by `"system"` with every user a member; when auth-rbac
+  lands, its `ownerId` backfill runs over the same data with no conflict.
 
 Migration mechanics (`mongo-migrate-ts`, CosmosDB-RU constraints — see
 [db-migrations.md](db-migrations.md)):
@@ -480,6 +515,13 @@ flowchart LR
 - **P3 — Groups / team ownership.** `groups` + `group-memberships`; `ownerType:"group"`
   projects; `scope/group:*`; group principals in `project-memberships`.
 - **P4 — Tags.** Cross-cutting `tags` filtering across Portal/API/CLI.
+
+> **Interleaving with auth-rbac (either order).** P0 (schema) and the *organization* parts of
+> P1/P2/P4 need no identity layer and can ship **before** auth-rbac. The **isolation** parts —
+> the `readScope`/`writeScope` project clause (P1) and the `project` visibility tier (P2) —
+> need caller identity + `visibility`, so sequence them **after** whichever release provides the
+> ownership layer. If this design ships first, P1 stands up the seam and auth-rbac slots its
+> ownership clauses in later (see [Landing order](#landing-order-either-direction)).
 
 ---
 
