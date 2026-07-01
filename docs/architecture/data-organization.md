@@ -3,9 +3,10 @@
 > **Status:** Proposed — design proposal. Date: 2026-06-30.
 
 Scope currently stores all user-facing data in one flat, global namespace. This document
-proposes a first-class way to **isolate** and **group** that data — **projects** (a shared
-container data is filed under), **groups** (teams that can own projects), and **tags**
-(lightweight cross-cutting labels) — **within a single Kubernetes cluster**.
+proposes a first-class way to **isolate** and **group** that data **within a single Kubernetes
+cluster** — **starting with a single structure, the project** (a shared container data is filed
+under), and **phasing in groups** (teams that can own projects) and **tags** (lightweight
+cross-cutting labels).
 
 It is a **sibling proposal to [auth-rbac.md](auth-rbac.md)** and composes with it additively:
 it populates the fields that spec already reserved (`ownerType`, `groupId`, `projectId`,
@@ -131,16 +132,25 @@ can be sequenced after it, regardless of order.
 
 ## Recommended primitive
 
-**Adopt all three, with clearly separated jobs:**
+**Start with a single organizing structure — the Project — and phase the rest in.** The design
+uses three primitives with clearly separated jobs, but they are deliberately **not** adopted at
+once. **Project** is the foundational structure: it ships first and satisfies the isolate +
+group goal on its own. **Groups** (team ownership) and **Tags** (cross-cutting labels) are
+**additive layers phased in afterward** — each behind its own phase, none blocking the first.
 
-| Primitive | Job | Cardinality | Carries authorization? |
-|-----------|-----|-------------|------------------------|
-| **Project** | Primary **isolation + grouping** container; the thing data is *filed under* | Each entity has **one** owning `projectId` | **Yes** — membership grants access |
-| **Group** | A **team** that can *own* a project (reuses reserved `ownerType:"group"`/`groupId`) | A project is owned by one user **or** one group | **Yes** — group membership → project access |
-| **Tag** | **Cross-cutting**, many-to-many labels for filtering/organizing | An entity has **many** `tags` | **No** — pure organization, never widens access |
+| Primitive | Job | First lands | Cardinality | Carries authorization? |
+|-----------|-----|-------------|-------------|------------------------|
+| **Project** — _start here_ | Primary **isolation + grouping** container; the thing data is *filed under* | **P1–P2** | Each entity has **one** owning `projectId` | **Yes** — membership grants access |
+| **Group** — _phased in_ | A **team** that can *own* a project (reuses reserved `ownerType:"group"`/`groupId`) | **P3** | A project is owned by one user **or** one group | **Yes** — group membership → project access |
+| **Tag** — _phased in_ | **Cross-cutting**, many-to-many labels for filtering/organizing | **P4** | An entity has **many** `tags` | **No** — pure organization, never widens access |
 
-### Why this split
+### Why start with Project (and split the rest)
 
+- **Project alone satisfies the core goal, so it ships first.** A single owning project delivers
+  both isolation and grouping with **no** dependency on groups or tags — it is the MVP that
+  resolves the "find my work / don't clash" pain in the first phase, while groups and tags are
+  additive enhancements that follow without re-work. This is the "start with one structure,
+  phase the rest" spine of the [rollout](#phased-rollout).
 - **A container is required for real isolation.** Tags alone can't isolate — a label is
   visible to whoever can already see the item, so it can group but never *keep data from
   clashing*. The "don't step on each other" goal needs an ownership/membership boundary. That
@@ -491,6 +501,8 @@ default project → the global **Default** project.
 
 ## Phased rollout
 
+The sequence deliberately **starts with the single Project structure** (P0–P2) and **phases in**
+Groups (P3) and Tags (P4), so the core isolate + group goal ships before the additive layers.
 Each phase is independently shippable, reversible, and non-breaking; earlier phases change
 **no** behavior because everything defaults into the Default project and unset `projectId` is
 treated as Default.
