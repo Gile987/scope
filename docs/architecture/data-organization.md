@@ -6,10 +6,6 @@ Scope currently stores all user-facing data in one flat, global namespace. This 
 proposes a first-class way to **organize** that data **within a single Kubernetes cluster** by
 introducing **the project** — a named container data is filed under.
 
-Cross-cutting **tags** (lightweight labels that span projects) are a **companion** organizing
-layer, specified separately in [data-tags.md](data-tags.md). This document is about the **project
-container**; the two compose but are independent.
-
 This is the **data-organization layer** only. It defines the `projects` container plus the
 `projectId` field, and how data is **filed, filtered, and grouped** by it. **Access control —
 ownership, membership, groups, visibility, and authorization — is out of scope and owned by
@@ -43,8 +39,7 @@ organizing container. Consequences as adoption grows:
 auth-rbac.md governs **who can see and edit** each item (ownership + visibility). What it does
 **not** provide is a **durable container** to file related work under and organize/filter by.
 That container is what this document adds. Access control stays entirely with auth-rbac; this
-layer only decides how data is *organized*, not who may *see* it. The cross-cutting labelling need
-(axes that don't fit a single container) is met by the companion [tags](data-tags.md) layer.
+layer only decides how data is *organized*, not who may *see* it.
 
 ### Goals
 
@@ -129,8 +124,8 @@ everyone's data into one list" goal on its own, with no dependency on the access
 | **Project** | Primary **organizing container**; the thing data is *filed under* and filtered/grouped by | **P1** | Each entity has **one** `projectId` |
 
 Cross-cutting, many-to-many labelling (a run belonging to several efforts) is deliberately **not**
-folded into the project. That need is met by the companion **[tags](data-tags.md)** layer, which
-stacks *on top of* the project filter without turning the singular `projectId` into an array.
+folded into the project — that keeps the singular `projectId` a scalar rather than an array (see
+[Alternatives considered](#alternatives-considered)).
 
 > **Groups / teams are deliberately not a primitive here.** A "team that owns a workstream" is an
 > *access* concept (ownership + membership), which this layer leaves entirely to
@@ -148,16 +143,12 @@ stacks *on top of* the project filter without turning the singular `projectId` i
   scalar write and filtering is one `{ projectId: { $in: […] } }` clause — no per-entity fan-out,
   no array-membership index gymnastics on Cosmos DB. It also hands the access layer a single scalar
   to key off later, should it choose to.
-- **Cross-cutting needs are handled separately.** "This run belongs to three efforts" is real, but
-  modelling it as multi-project membership forces the singular field to become an array and
-  complicates every filter. That many-to-many need is met by the companion
-  [tags](data-tags.md) layer at the price of one multikey index — not by the container.
 - **Organization ≠ access, so this layer stays small.** By leaving ownership, membership, groups,
   and visibility to auth-rbac, this design reduces to a container + one field + filtering —
   shippable in any order (see [Landing order](#landing-order-independent)).
 
-Trade-offs and the rejected shapes (many-to-many projects, nested projects, tags-as-the-only-
-primitive) are in [Alternatives considered](#alternatives-considered).
+Trade-offs and the rejected shapes (many-to-many projects, nested projects) are in
+[Alternatives considered](#alternatives-considered).
 
 ---
 
@@ -214,9 +205,8 @@ Every [project-scoped](#which-entities-are-project-scoped) entity gains a single
 For the immutable [content-addressed](#content-addressed-entities-per-project-copies) copies,
 `projectId` comes with an identity change (below).
 
-This design adds **nothing else** to existing documents. Cross-cutting `tags` are added by the
-companion [data-tags.md](data-tags.md) layer; auth-rbac separately adds `ownerId`, `visibility`,
-and its other access fields. All three field sets are disjoint and independent (see
+This design adds **nothing else** to existing documents. Access fields (`ownerId`, `visibility`, …)
+are added separately by [auth-rbac.md](auth-rbac.md); the field sets are disjoint and independent (see
 [Landing order](#landing-order-independent)).
 
 ### Which entities are project-scoped
@@ -263,7 +253,7 @@ over a shared doc spanning multiple projects; see [Alternatives](#alternatives-c
 ### Shape decisions
 
 - **One project per entity — including copies.** An entity is filed under a single project;
-  cross-cutting grouping is handled by the companion [tags](data-tags.md) layer, not multi-project
+  cross-cutting grouping is a separate concern, not multi-project
   filing. Content-addressed entities preserve this invariant by keeping a
   [per-project copy](#content-addressed-entities-per-project-copies) rather than one shared doc.
   (Multi-project filing is an [alternative considered](#alternatives-considered).)
@@ -290,10 +280,6 @@ Projects are an **organizational**, not access-control, construct. They decide h
   no `projectId` and appear the same in every project. Everything else (including the
   content-addressed [per-project copies](#content-addressed-entities-per-project-copies)) carries a
   `projectId` and filters accordingly.
-
-Cross-cutting **tag** filtering composes *on top of* the project filter (`projectId == X AND tags ∋
-"regression"`) and is specified in the companion [data-tags.md](data-tags.md); like projects, tags
-carry no access meaning.
 
 Because none of this is access control, **who can see across projects is entirely auth-rbac's
 concern.** When the access layer exists, its `readScope` runs first (deciding *what the caller may
@@ -441,9 +427,6 @@ flowchart LR
   narrows lists; `projectId` as a Runs **filter/facet/`groupBy:"project"`**; Portal switcher + CLI
   `project` commands. Default is the initial active project ⇒ status quo preserved; new projects are
   opt-in.
-
-> **Cross-cutting tags ship separately.** The [tags](data-tags.md) layer is an additive follow-on
-> that can land after this (or independently) without re-working anything here.
 
 > **Independent of auth-rbac.** No phase here needs an identity or access layer — every phase adds
 > only organization (a container, one field, filtering) and can ship **before, after, or
