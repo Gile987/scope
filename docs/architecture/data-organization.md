@@ -262,8 +262,9 @@ group claims are advisory only (auth-rbac §5, B4).
 
 Every **user-owned** entity (the "Yes" rows in [Current state](#current-state)) gains:
 
-- `projectId?: string` — the **owning project** (exactly one). Missing ⇒ treated as the
-  **Default project** (see [Migration](#migration)), so no document ever becomes unreachable.
+- `projectId?: string` — the **owning project** (exactly one). Missing ⇒ **coalesces to the
+  Default project** (see [Migration](#migration)); after backfill every doc carries one, so no
+  document is ever project-less or unreachable.
 - `ownerType?: "user" | "group"` (default `"user"`) and `groupId?: string` — from the
   reserved shape; set when a group owns the data via its project.
 - `tags?: string[]` — cross-cutting labels (no auth effect).
@@ -400,8 +401,11 @@ function writeScope(user, resource): Filter {
 }
 ```
 
-- Documents with **no** `projectId` behave exactly as auth-rbac v1 (owner-or-shared), so the
-  generalization is a **strict superset** — nothing that worked before breaks.
+- **Legacy/unset docs stay owner-or-shared.** Missing `projectId` coalesces to the **Default**
+  project (see [Migration](#migration)), and legacy data carries only `private`/`shared`
+  visibility (the `project` tier is new) — so the added third clause is a **no-op** for it. The
+  generalization is a **strict superset**; nothing that worked before breaks. Unset never means
+  "global / no project."
 - The active-project context is applied **outside** these functions (an extra `$and` clause on
   list handlers), keeping authorization and filtering cleanly separated.
 - **Project/group identity is Scope-owned** and re-resolved server-side per request; it is
@@ -416,16 +420,25 @@ function writeScope(user, resource): Filter {
 
 ## Migration
 
-Consistent with how auth-rbac backfills legacy `ownerId` to the reserved `"system"` sentinel,
-existing flat data is assigned to a **Default project** so today's behavior is preserved.
+**We create a Default container and migrate existing data into it — "unset" never means "global
+/ no project."** Consistent with how auth-rbac backfills legacy `ownerId` to the reserved
+`"system"` sentinel, every project-scoped entity is assigned to a **Default project** so today's
+behavior is preserved.
 
-- **Create one global "Default" project** (`slug: "default"`, owned by the `"system"`
-  sentinel) and make **every user a member**. Backfill `projectId: "default"` onto all
-  existing docs in the project-scoped collections. Because everyone is a member of Default,
-  **no one loses visibility of legacy data** — the change is behavior-preserving.
-- **Treat missing `projectId` as Default** in `readScope`/lookups, so any doc created between
-  schema landing and backfill (or missed by a batch) is still reachable. Backfill is therefore
-  an optimization for indexing/filtering, not a correctness requirement.
+- **Create + migrate (canonical).** Create one global **"Default"** project (`slug: "default"`,
+  owned by the `"system"` sentinel) with **every user a member**, then **backfill
+  `projectId: "default"`** onto all existing docs in the project-scoped collections. After it
+  runs, every entity physically carries a `projectId` — there is no null/global bucket.
+- **Unset coalesces to Default (safety net, not a second meaning).** `readScope`/lookups treat a
+  missing `projectId` as `"default"` (`projectId ?? "default"`). This only covers the transient
+  window between schema deploy and backfill completion (or a doc a batch misses), so nothing ever
+  lands in a "global / no-project" limbo. Backfill is therefore an **indexing/filtering
+  optimization**, not a correctness requirement.
+- **Why it "keeps working."** Legacy data keeps its existing `visibility`, and the `project`
+  visibility tier is new — so the added `readScope` project clause is a **no-op** for legacy
+  docs (they stay owner-or-shared). Everyone being a Default member means even a later
+  `project`-visible legacy doc hides from no one; and pre-identity there is no enforcement to
+  change. Net: **behavior-preserving**.
 - **Going forward**, each user gets a **personal default project** as their initial active
   context; they can create/switch to team (group-owned) or shared projects. New data lands in
   the active project rather than the global Default.
