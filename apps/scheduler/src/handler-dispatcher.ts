@@ -288,26 +288,21 @@ export class HandlerDispatcher implements NotifyHandler {
         const graph = this.buildGraph(handlers);
 
         for (const handler of handlers) {
-          // Find runs that need this handler dispatched
-          for (let i = 0; i < this.batchSize; i++) {
-            const filter = this.buildDispatchFilter(handler, handlers, graph);
-            if (!filter) break;
+          const filter = this.buildDispatchFilter(handler, handlers, graph);
+          if (!filter) continue;
 
-            const claimed = await this.collection.findOneAndUpdate(
-              filter as any,
-              {
-                $set: {
-                  [`run.handlerStatus.${handler._id}.status`]: "queued",
-                  [`run.handlerStatus.${handler._id}.updatedAt`]: new Date(),
-                },
-              } as any,
-              { sort: { updatedAt: -1 }, returnDocument: "after" },
-            );
+          const candidates = await this.collection
+            .find(filter as any, {
+              projection: { _id: 1, "run._id": 1 },
+              sort: { updatedAt: -1 },
+              limit: this.batchSize,
+            })
+            .toArray();
 
-            if (!claimed) break;
-
-            await this.enqueueToHandler(handler, claimed._id, (claimed as any).run?._id);
-            console.log(`[HandlerDispatcher] Poll-dispatched ${handler._id} for ${claimed._id}`);
+          for (const candidate of candidates) {
+            const runId = (candidate as any).run?._id as string | undefined;
+            if (!runId) continue;
+            await this.dispatchIfEligible(candidate._id, runId, handler, graph, handlers);
           }
         }
       }
@@ -347,7 +342,7 @@ export class HandlerDispatcher implements NotifyHandler {
 
   private async dispatchIfEligible(
     requestId: string,
-    _runId: string,
+    runId: string,
     handler: HandlerServiceDocument,
     graph: DependencyGraph,
     allHandlers: HandlerServiceDocument[],
@@ -355,6 +350,7 @@ export class HandlerDispatcher implements NotifyHandler {
     // Check if all dependencies are satisfied for this request
     const doc = await this.collection.findOne({ _id: requestId } as any);
     if (!doc?.run || doc.run.status !== "done") return;
+    if (doc.run._id !== runId) return;
 
     const handlerStatus = (doc.run as any).handlerStatus as
       | Record<string, HandlerRunStatus>
@@ -368,24 +364,34 @@ export class HandlerDispatcher implements NotifyHandler {
       }
     }
 
-    // Check this handler hasn't already been dispatched
+    // Check whether this handler still needs work.
     const currentStatus = handlerStatus?.[handler._id]?.status;
-    if (currentStatus === "queued" || currentStatus === "processing" || currentStatus === "done") {
-      return;
-    }
-
-    // Check version — skip if already at current version
     const currentVersion = handlerStatus?.[handler._id]?.version;
-    if (currentVersion !== undefined && currentVersion >= handler.version && !handler.autoBackfill) {
+    const statusExclusions = handler.autoBackfill
+      ? ["queued", "processing"]
+      : ["queued", "processing", "done"];
+
+    if (currentStatus && statusExclusions.includes(currentStatus)) {
       return;
     }
 
-    // Atomic claim
-    const claimed = await this.collection.findOneAndUpdate(
+    if (handler.autoBackfill) {
+      if (currentVersion !== undefined && currentVersion >= handler.version) {
+        return;
+      }
+    } else if (currentVersion !== undefined) {
+      return;
+    }
+
+    const enqueued = await this.enqueueToHandler(handler, requestId, runId);
+    if (!enqueued) return;
+
+    const queueMarkFilter = this.buildDispatchFilter(handler, allHandlers, graph);
+    const queueMarkResult = await this.collection.updateOne(
       {
         _id: requestId,
-        "run.status": "done",
-        [`run.handlerStatus.${handler._id}.status`]: { $nin: ["queued", "processing"] },
+        "run._id": runId,
+        ...(queueMarkFilter ?? {}),
       } as any,
       {
         $set: {
@@ -393,12 +399,15 @@ export class HandlerDispatcher implements NotifyHandler {
           [`run.handlerStatus.${handler._id}.updatedAt`]: new Date(),
         },
       } as any,
-      { returnDocument: "after" },
     );
 
-    if (!claimed) return;
+    if ((queueMarkResult.matchedCount ?? 0) === 0) {
+      console.log(
+        `[HandlerDispatcher] ${handler._id} for ${requestId} advanced concurrently after enqueue; leaving queue message to worker idempotency guard`,
+      );
+      return;
+    }
 
-    await this.enqueueToHandler(handler, requestId, (claimed as any).run?._id);
     console.log(`[HandlerDispatcher] Dispatched ${handler._id} for ${requestId}`);
   }
 
@@ -444,7 +453,7 @@ export class HandlerDispatcher implements NotifyHandler {
     handler: HandlerServiceDocument,
     requestId: string,
     runId: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const queueClient = await this.getOrCreateQueueClient(handler.queue);
     const message = Buffer.from(
       JSON.stringify({
@@ -456,16 +465,13 @@ export class HandlerDispatcher implements NotifyHandler {
 
     try {
       await queueClient.sendMessage(message);
+      return true;
     } catch (err) {
-      // Roll back status on queue failure
-      await this.collection.updateOne(
-        { _id: requestId } as any,
-        { $unset: { [`run.handlerStatus.${handler._id}.status`]: "" } } as any,
-      );
       console.error(
-        `[HandlerDispatcher] Queue send failed for ${handler._id}/${requestId}, rolled back:`,
+        `[HandlerDispatcher] Queue send failed for ${handler._id}/${requestId}:`,
         err,
       );
+      return false;
     }
   }
 

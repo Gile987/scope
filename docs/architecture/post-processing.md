@@ -63,6 +63,8 @@ The post-processor uses a registry pattern for extensibility:
 ```typescript
 interface PostProcessHandler {
   readonly type: string;
+  readonly version: number;
+  readonly autoBackfill: boolean;
   process(message: PostProcessorMessage, ctx: HandlerContext): Promise<void>;
 }
 
@@ -87,6 +89,23 @@ const processor = new PostProcessor(config);
 processor.registerHandler(new AtifHandler());
 processor.start();
 ```
+
+## Idempotency and Dispatch Semantics
+
+Post-processing delivery is treated as **at-least-once**. Queue messages may be duplicated or redelivered, and the scheduler may enqueue a handler message before the corresponding `queued` marker is durably written back to MongoDB.
+
+To keep this safe, idempotency is enforced at the **post-processor worker entrypoint**, not inside each individual handler:
+
+1. The scheduler decides whether work is needed from `run.handlerStatus[handlerId]` + handler metadata (`version`, `autoBackfill`).
+2. The worker re-checks that same eligibility when a message is dequeued, scoped to the specific `runId`.
+3. The worker atomically claims the handler by transitioning its status to `processing`.
+4. If the message is stale, duplicated, or the handler is already current, the worker deletes the queue message and no-ops.
+
+This means:
+
+- A crash after queue send but before the scheduler writes `queued` no longer wedges the run forever.
+- Duplicate queue messages are harmless.
+- Handler implementations can stay simple; correctness does not depend on each handler re-implementing duplicate guards.
 
 ### Adding a New Handler
 
@@ -207,7 +226,7 @@ stateDiagram-v2
 | Status | Meaning |
 | --- | --- |
 | *(absent)* | Run hasn't been dispatched for post-processing yet |
-| `queued` | Message sent to queue, awaiting pickup |
+| `queued` | Message sent to queue, awaiting pickup (best-effort marker; the worker entrypoint is authoritative) |
 | `processing` | Worker is actively processing |
 | `done` | Post-processing completed successfully |
 | `failed` | Handler threw an error (may be retried by scheduler on next poll) |

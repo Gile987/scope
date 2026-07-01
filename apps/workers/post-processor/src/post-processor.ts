@@ -3,22 +3,11 @@
 
 import type { DequeuedMessageItem } from "@azure/storage-queue";
 import { BaseQueueProcessor, BlobStorage, type BaseQueueProcessorConfig, type LogEvent, type VisibilityHeartbeat } from "shared";
-import { POST_PROCESSOR_VERSION } from "./version.js";
+import type { RequestDocument, HandlerRunStatus } from "shared";
 import type { PostProcessHandler, PostProcessorMessage, HandlerContext } from "./types.js";
 
 export interface PostProcessorConfig extends BaseQueueProcessorConfig {
   apiBaseUrl?: string;
-}
-
-interface RequestDocument {
-  _id: string;
-  run?: {
-    _id: string;
-    status: string;
-    turns?: Array<{ iteration: number; harUrl?: string; atifUrl?: string }>;
-    postProcessorVersion?: number;
-    postProcessorStatus?: string;
-  };
 }
 
 /**
@@ -45,6 +34,43 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
     console.log(`[post-processor] Registered handler: ${handler.type}`);
   }
 
+  private isPostProcessorMessage(payload: unknown): payload is PostProcessorMessage {
+    return typeof payload === "object" &&
+      payload !== null &&
+      typeof (payload as Record<string, unknown>).type === "string" &&
+      typeof (payload as Record<string, unknown>).requestId === "string" &&
+      typeof (payload as Record<string, unknown>).runId === "string";
+  }
+
+  private buildHandlerClaimFilter(
+    requestId: string,
+    runId: string,
+    handlerId: string,
+    handler: PostProcessHandler,
+  ): Record<string, unknown> {
+    const statusExclusions = handler.autoBackfill
+      ? ["queued", "processing"]
+      : ["queued", "processing", "done"];
+
+    const filter: Record<string, unknown> = {
+      _id: requestId,
+      "run._id": runId,
+      "run.status": "done",
+      [`run.handlerStatus.${handlerId}.status`]: { $nin: statusExclusions },
+    };
+
+    if (handler.autoBackfill) {
+      filter.$or = [
+        { [`run.handlerStatus.${handlerId}.version`]: { $exists: false } },
+        { [`run.handlerStatus.${handlerId}.version`]: { $lt: handler.version } },
+      ];
+    } else {
+      filter[`run.handlerStatus.${handlerId}.version`] = { $exists: false };
+    }
+
+    return filter;
+  }
+
   protected async handleRequest(
     doc: RequestDocument,
     message: DequeuedMessageItem,
@@ -52,13 +78,13 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     payload?: Record<string, unknown>,
   ): Promise<void> {
-    const msg = payload as unknown as PostProcessorMessage;
-
-    if (!msg?.type) {
+    if (!this.isPostProcessorMessage(payload)) {
       await log("warn", "Message missing 'type' field, discarding");
       await this.safeDeleteMessage(message.messageId, heartbeat.stop());
       return;
     }
+
+    const msg: PostProcessorMessage = payload;
 
     const handler = this.handlers.get(msg.type);
     if (!handler) {
@@ -67,13 +93,44 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
       return;
     }
 
-    // Set status to "processing".
-    // Concurrency safety: the Azure Storage Queue guarantees at-most-once delivery
-    // via visibility timeout, so only one worker processes a given message at a time.
-    await this.collection.updateOne(
-      { _id: doc._id } as any,
-      { $set: { "run.postProcessorStatus": "processing" } } as any,
+    if (doc.run?._id !== msg.runId) {
+      await log("info", "Stale post-processing message discarded (runId mismatch)", {
+        messageRunId: msg.runId,
+        currentRunId: doc.run?._id,
+      });
+      await this.safeDeleteMessage(message.messageId, heartbeat.stop());
+      return;
+    }
+
+    const handlerId = `pp-${msg.type}`;
+    const currentStatus = doc.run?.handlerStatus?.[handlerId] as HandlerRunStatus | undefined;
+
+    const claim = await this.collection.findOneAndUpdate(
+      this.buildHandlerClaimFilter(doc._id, msg.runId, handlerId, handler) as any,
+      {
+        $set: {
+          "run.postProcessorStatus": "processing",
+          [`run.handlerStatus.${handlerId}.status`]: "processing",
+          [`run.handlerStatus.${handlerId}.updatedAt`]: new Date(),
+        },
+        $unset: {
+          [`run.handlerStatus.${handlerId}.error`]: "",
+        },
+      } as any,
+      { returnDocument: "after" },
     );
+
+    if (!claim) {
+      await log("info", "Post-processing message no longer needed, discarding", {
+        handlerId,
+        runId: msg.runId,
+        currentStatus: currentStatus?.status,
+        currentVersion: currentStatus?.version,
+        targetVersion: handler.version,
+      });
+      await this.safeDeleteMessage(message.messageId, heartbeat.stop());
+      return;
+    }
 
     try {
       await log("info", `Running handler: ${msg.type}`);
@@ -87,21 +144,33 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
       await handler.process(msg, ctx);
 
       // Stamp version and status on success (legacy fields + new handlerStatus)
-      const handlerId = `pp-${msg.type}`; // e.g., "pp-atif"
-      await this.collection.updateOne(
-        { _id: doc._id } as any,
+      const successResult = await this.collection.updateOne(
+        {
+          _id: doc._id,
+          "run._id": msg.runId,
+          [`run.handlerStatus.${handlerId}.status`]: "processing",
+        } as any,
         {
           $set: {
-            "run.postProcessorVersion": POST_PROCESSOR_VERSION,
+            "run.postProcessorVersion": handler.version,
             "run.postProcessorStatus": "done",
             [`run.handlerStatus.${handlerId}.status`]: "done",
-            [`run.handlerStatus.${handlerId}.version`]: POST_PROCESSOR_VERSION,
+            [`run.handlerStatus.${handlerId}.version`]: handler.version,
             [`run.handlerStatus.${handlerId}.updatedAt`]: new Date(),
           },
         } as any,
       );
 
-      await log("info", `Post-processing complete (v${POST_PROCESSOR_VERSION})`);
+      if ((successResult.matchedCount ?? 0) === 0) {
+        await log("warn", `Handler '${msg.type}' completed after state changed; skipping terminal write`, {
+          handlerId,
+          runId: msg.runId,
+        });
+        await this.safeDeleteMessage(message.messageId, heartbeat.stop());
+        return;
+      }
+
+      await log("info", `Post-processing complete (v${handler.version})`);
 
       // Notify the scheduler that this handler is done (best-effort)
       await this.notifyHandlerComplete(doc._id, doc.run?._id ?? "", handlerId, "done");
@@ -110,20 +179,26 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
       await log("error", `Handler '${msg.type}' failed: ${errMsg}`);
 
       // Mark as failed so scheduler doesn't immediately re-dispatch
-      const handlerId = `pp-${msg.type}`;
-      await this.collection.updateOne(
-        { _id: doc._id } as any,
+      const failureResult = await this.collection.updateOne(
+        {
+          _id: doc._id,
+          "run._id": msg.runId,
+          [`run.handlerStatus.${handlerId}.status`]: "processing",
+        } as any,
         {
           $set: {
             "run.postProcessorStatus": "failed",
             [`run.handlerStatus.${handlerId}.status`]: "failed",
             [`run.handlerStatus.${handlerId}.updatedAt`]: new Date(),
+            [`run.handlerStatus.${handlerId}.error`]: errMsg,
           },
         } as any,
       );
 
-      // Notify scheduler of failure (best-effort — don't dispatch downstream)
-      await this.notifyHandlerComplete(doc._id, doc.run?._id ?? "", handlerId, "failed");
+      if ((failureResult.matchedCount ?? 0) > 0) {
+        // Notify scheduler of failure (best-effort — don't dispatch downstream)
+        await this.notifyHandlerComplete(doc._id, doc.run?._id ?? "", handlerId, "failed");
+      }
 
       throw err;
     }

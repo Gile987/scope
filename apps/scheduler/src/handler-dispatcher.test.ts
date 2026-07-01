@@ -54,6 +54,21 @@ function makeDispatcher(
   return new HandlerDispatcher(collection, db, createQueueClient, 60_000, 30, apiUrl);
 }
 
+function makeDispatcherWithQueue(
+  collection: any,
+  handlers: HandlerServiceDocument[] = HANDLERS,
+  apiUrl = "http://api.test",
+) {
+  const db = createMockDb(handlers);
+  const queueClient = {
+    createIfNotExists: vi.fn().mockResolvedValue(undefined),
+    sendMessage: vi.fn().mockResolvedValue(undefined),
+  };
+  const createQueueClient = vi.fn().mockReturnValue(queueClient);
+  const dispatcher = new HandlerDispatcher(collection, db, createQueueClient, 60_000, 30, apiUrl);
+  return { dispatcher, queueClient, createQueueClient };
+}
+
 describe("HandlerDispatcher — drain detection", () => {
   let collection: ReturnType<typeof createMockCollection>;
 
@@ -322,6 +337,78 @@ describe("HandlerDispatcher — buildDispatchFilter", () => {
 
     expect(filter[`run.handlerStatus.${noBackfillHandler._id}.status`]).toEqual({
       $nin: ["queued", "processing", "done"],
+    });
+  });
+
+  describe("HandlerDispatcher — dispatchIfEligible", () => {
+    let collection: ReturnType<typeof createMockCollection>;
+
+    beforeEach(() => {
+      collection = createMockCollection();
+    });
+
+    it("allows autoBackfill re-dispatch for outdated done versions", async () => {
+      collection.findOne.mockResolvedValue({
+        _id: "req-1",
+        run: {
+          _id: "run-1",
+          status: "done",
+          handlerStatus: {
+            "pp-atif": { status: "done", version: 0 },
+          },
+        },
+      });
+      collection.updateOne.mockResolvedValue({ matchedCount: 1 });
+
+      const { dispatcher, queueClient } = makeDispatcherWithQueue(collection);
+      await (dispatcher as any).dispatchIfEligible(
+        "req-1",
+        "run-1",
+        HANDLERS[0],
+        (dispatcher as any).buildGraph(HANDLERS),
+        HANDLERS,
+      );
+
+      expect(queueClient.sendMessage).toHaveBeenCalledTimes(1);
+      expect(collection.updateOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          _id: "req-1",
+          "run._id": "run-1",
+          "run.status": "done",
+          "run.handlerStatus.pp-atif.status": { $nin: ["queued", "processing"] },
+          $or: [
+            { "run.handlerStatus.pp-atif.version": { $exists: false } },
+            { "run.handlerStatus.pp-atif.version": { $lt: 1 } },
+          ],
+        }),
+        {
+          $set: {
+            "run.handlerStatus.pp-atif.status": "queued",
+            "run.handlerStatus.pp-atif.updatedAt": expect.any(Date),
+          },
+        },
+      );
+    });
+
+    it("enqueues before marking the handler queued", async () => {
+      collection.findOne.mockResolvedValue({
+        _id: "req-1",
+        run: { _id: "run-1", status: "done", handlerStatus: {} },
+      });
+      collection.updateOne.mockResolvedValue({ matchedCount: 1 });
+
+      const { dispatcher, queueClient } = makeDispatcherWithQueue(collection);
+      await (dispatcher as any).dispatchIfEligible(
+        "req-1",
+        "run-1",
+        HANDLERS[0],
+        (dispatcher as any).buildGraph(HANDLERS),
+        HANDLERS,
+      );
+
+      expect(queueClient.sendMessage.mock.invocationCallOrder[0]).toBeLessThan(
+        collection.updateOne.mock.invocationCallOrder[0],
+      );
     });
   });
 });
