@@ -306,6 +306,46 @@ Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API su
 
 The Portal desktop shell uses a persistent left navigation sidebar. It defaults to the compact icon rail, and users can expand it to show navigation labels; the choice is stored in `localStorage` under `scope:layout:sidebar-expanded`. Mobile navigation remains a sheet-based menu with labels always visible.
 
+### Hover-preview + navigate badges
+
+Criteria and task prompts appear across many surfaces (Run Detail, Runs list and its
+right-hand preview panel, Statistics, Criteria list/graph, Task Prompt list,
+report-template triggers). Wherever one is shown, two
+reusable badge components provide a consistent **hover-to-preview + click-to-navigate** affordance:
+
+| Component | Entity | Links to | Hover preview |
+|-----------|--------|----------|---------------|
+| `components/CriteriaBadge.tsx` | Criterion | `/criteria/:id` | Criterion prompt snippet |
+| `components/TaskPromptBadge.tsx` | Task prompt (any type) | `/task-prompts/:id` | Type label, text snippet, list of detected features, created date, **Open details** button |
+
+Both follow the same rules:
+
+- **Self-contained tooltip.** Each wraps its trigger in a Radix `Tooltip` (a local
+  `TooltipProvider`, mirroring `StatusBadge`) and a React Router `Link`. The link calls
+  `e.stopPropagation()` so a badge inside a clickable table row navigates to the detail page
+  without also firing the row's `onRowClick`.
+- **No request fan-out.** Callers that already have the object/text pass it via props
+  (`prompt`) and **no** request fires. Otherwise the entity is fetched lazily via React Query
+  **only when the tooltip opens** (gated on an internal `open` state), so dense lists never
+  issue one request per row on mount. Blob-backed task prompts (no inline `text`) additionally
+  lazy-load their body via `getTaskPromptContent` on open.
+- **`TaskPromptBadge` is type-agnostic.** Gate prompts (`select`/`build`/`test`/`run`/`deploy`),
+  `agents.md`, and legacy untyped prompts all render the same hover + the same
+  `/task-prompts/:id` navigation; only the human label differs (via `promptTypeLabel`). It also
+  renders content plainly (no link/tooltip) when no `taskPromptId` is available.
+- **Detected-features list + explicit navigate button.** `TaskPromptBadge`'s preview lists only
+  the prompt's **detected** features by id (it never shows undetected features or an `x/y` count)
+  and ends with an obvious button-styled **Open details** `Link` (not plain text). Because the
+  popup is interactive (hoverable feature badges + a clickable button), its `TooltipContent` is
+  wrapped in a Radix `Tooltip.Portal` with `collisionPadding` so it can't be clipped by an
+  overflow container (e.g. a table cell) — the same portaling `ShortId` uses.
+
+A sibling affordance, `components/ShortId.tsx`, applies the same hoverable-tooltip pattern to
+**identifiers**: the Runs list renders run and submission IDs truncated to 8 chars
+(`formatId`), and on hover the tooltip reveals the full ID plus a copy-to-clipboard button. The
+trigger stays an inline `<span>` (not a link) so the row click still navigates to the run; the
+copy button calls `e.stopPropagation()` so copying never triggers row navigation.
+
 ## Criteria System
 
 Criteria are reusable evaluation rules stored in the database and optionally defined in `config/criteria/*.yaml`. They support:
