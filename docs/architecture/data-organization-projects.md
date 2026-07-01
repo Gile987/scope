@@ -394,11 +394,22 @@ rule, every project capability in the Portal is also in the CLI.
 - **CRUD**: `GET/POST /api/v1/projects`, `GET/PATCH/DELETE /api/v1/projects/:id` (soft-delete). No
   member/role routes — membership is an
   [access concern](#relationship-to-access-control-auth-rbac).
-- **Active-project context**: an ambient `X-Scope-Project: <id>` header (and/or `?projectId=`
-  on list endpoints) selects the project. It resolves through the
-  [resolution order](#default-project-resolution-order) and **always** yields exactly one project
-  (falling back to the caller's configured active project, ultimately **Default**) — there is no
-  "all projects" request. List handlers AND-filter to the resolved project.
+- **How the project reaches the API — header first, query param to override.** The active project
+  is carried as an **ambient request header `X-Scope-Project: <id>`**. This is the primary
+  mechanism: it is **additive** (no existing route changes shape), cross-cutting (Portal/CLI set it
+  once and it applies to every call), and keeps project *context* out of each resource's *address*.
+  An optional **`?projectId=<id>` query param** on list/read endpoints overrides the header for
+  explicit, deep-linkable requests; on **create**, `projectId` may instead be supplied in the
+  request **body**.
+- **Not a URL path segment.** We deliberately do **not** nest routes under `/api/v1/projects/:id/…`.
+  That would rewrite **every** existing route (a breaking change, contradicting the
+  [non-breaking goal](#impact-on-existing-endpoints)) and conflate *context* with *identity* — an
+  entity's `_id` is globally unique, so the project is scoping context, not part of its address.
+  Point lookups stay at `…/:id` and remain [unscoped](#impact-on-existing-endpoints).
+- **Resolution**: the header/param resolve through the
+  [resolution order](#default-project-resolution-order) and **always** yield exactly one project
+  (ultimately **Default**) — there is no "all projects" request. List handlers AND-filter to the
+  resolved project.
 - **Runs list integration**: `projectId` becomes a categorical **filter** + **facet** dimension and
   a new `groupBy: "project"` value, composing with the existing server-side
   filter/facet/group/cursor pipeline (app-design.md "Runs List Query API") — no new query engine,
@@ -451,9 +462,10 @@ project-scoped — called out in that section.
 
 ### Default-project resolution order
 
-`--project` flag / `X-Scope-Project` header → configured active project → the **Default** project
-(the one flagged `isDefault`). The chain **always** resolves to exactly one project; there is no unscoped / "all
-projects" request.
+Explicit `?projectId=` query param → `X-Scope-Project` header (CLI: `--project` flag / `SCOPE_PROJECT`
+env) → configured active project → the **Default** project (the one flagged `isDefault`). The most
+explicit signal wins, and the chain **always** resolves to exactly one project; there is no unscoped
+/ "all projects" request.
 
 ---
 
