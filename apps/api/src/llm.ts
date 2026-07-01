@@ -284,11 +284,8 @@ async function suggestDeps(
  * The candidate pools are pre-filtered by the gate-compatibility invariant so no
  * gate wording is ever sent to the model: a parent must satisfy the invariant
  * over the new criterion's gates, and a child must have the new criterion as a
- * compatible parent. The pools are filtered with the *same* invariant the create
- * endpoint validates, so a suggested dependency can never be rejected at creation
- * on gate grounds. When `newGates` is omitted it is treated as the universal set
- * (all gates) — identical to create validation: only unrestricted criteria can be
- * parents, while any criterion can be a child.
+ * compatible parent. When `newGates` is omitted both pools are the full list
+ * (backward compatible).
  */
 export async function generateCriteriaPrompt(
   behavior: string,
@@ -301,11 +298,12 @@ export async function generateCriteriaPrompt(
   // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
   const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
 
-  // Filter both pools with the same invariant the create endpoint validates, so a
-  // suggested dependency is always create-valid. `newGates` omitted ⇒ universal set:
-  // gatesSatisfyInvariant already maps that to "only unrestricted parents, any child".
-  const parentPool = existingCriteria.filter((c) => gatesSatisfyInvariant(c.gates, newGates));
-  const childPool = existingCriteria.filter((c) => gatesSatisfyInvariant(newGates, c.gates));
+  const parentPool = newGates
+    ? existingCriteria.filter((c) => gatesSatisfyInvariant(c.gates, newGates))
+    : existingCriteria;
+  const childPool = newGates
+    ? existingCriteria.filter((c) => gatesSatisfyInvariant(newGates, c.gates))
+    : existingCriteria;
 
   const [authored, suggestedParents, suggestedChildren] = await Promise.all([
     author(llm, modelName, behavior, newGates),
