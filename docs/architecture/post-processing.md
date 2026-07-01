@@ -98,7 +98,7 @@ To keep this safe, idempotency is enforced at the **post-processor worker entryp
 
 1. The scheduler decides whether work is needed from `run.handlerStatus[handlerId]` + handler metadata (`version`, `autoBackfill`).
 2. The worker re-checks that same eligibility when a message is dequeued, scoped to the specific `runId`.
-3. The worker atomically claims the handler by transitioning its status to `processing`.
+3. The worker atomically claims the handler by transitioning its status to `processing`. The claim filter accepts both the *absent* state and the `queued` marker as valid source states — it only excludes `processing` (another worker is mid-flight) and, for non-backfill handlers, `done` (already complete; for `autoBackfill` handlers a stale `done` is re-claimable via the version gate). Because the scheduler writes the best-effort `queued` marker in-process immediately after enqueueing (enqueue-before-claim), a dequeued message almost always sees `queued`; excluding `queued` from the claim filter would make the worker discard its own message and strand the run at `queued` forever (the 30s backfill poll also skips `queued`), so `queued → processing` **must** be a permitted worker transition.
 4. If the message is stale, duplicated, or the handler is already current, the worker deletes the queue message and no-ops.
 
 This means:

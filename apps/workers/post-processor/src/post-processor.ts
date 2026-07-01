@@ -48,9 +48,19 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
     handlerId: string,
     handler: PostProcessHandler,
   ): Record<string, unknown> {
+    // "queued" is deliberately NOT excluded: the scheduler writes a best-effort
+    // "queued" marker immediately after enqueueing (enqueue-before-claim), so by
+    // the time this message is dequeued the status is almost always "queued".
+    // The worker is exactly what transitions queued -> processing, so it must be
+    // able to claim a "queued" attempt. Excluding it would let the worker discard
+    // its own message and strand the run at "queued" (the scheduler poll also
+    // excludes "queued", so nothing would ever retry it). We only exclude
+    // "processing" (another worker is mid-flight) and — for non-backfill handlers
+    // — "done" (already complete). For autoBackfill, "done" is gated by the
+    // version check below instead, so a version bump can re-process it.
     const statusExclusions = handler.autoBackfill
-      ? ["queued", "processing"]
-      : ["queued", "processing", "done"];
+      ? ["processing"]
+      : ["processing", "done"];
 
     const filter: Record<string, unknown> = {
       _id: requestId,

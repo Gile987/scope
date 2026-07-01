@@ -122,7 +122,7 @@ describe("PostProcessor", () => {
         _id: "req-1",
         "run._id": "run-1",
         "run.status": "done",
-        "run.handlerStatus.pp-atif.status": { $nin: ["queued", "processing"] },
+        "run.handlerStatus.pp-atif.status": { $nin: ["processing"] },
         $or: [
           { "run.handlerStatus.pp-atif.version": { $exists: false } },
           { "run.handlerStatus.pp-atif.version": { $lt: 1 } },
@@ -175,6 +175,60 @@ describe("PostProcessor", () => {
           "run.handlerStatus.pp-atif.status": "done",
           "run.handlerStatus.pp-atif.version": 1,
           "run.handlerStatus.pp-atif.updatedAt": expect.any(Date),
+        }),
+      },
+    );
+    expect(notifyHandlerComplete).toHaveBeenCalledWith("req-1", "run-1", "pp-atif", "done");
+    expect(safeDeleteMessage).toHaveBeenCalledWith("message-1", "pop-1");
+  });
+
+  it("claims a run left in the scheduler's 'queued' state and drives it to done", async () => {
+    // Regression: the scheduler writes a best-effort "queued" marker right after
+    // enqueue-before-claim, so a dequeued message almost always sees status
+    // "queued". The worker MUST be able to claim it (queued -> processing).
+    // Previously "queued" was in the claim exclusion list, so the worker
+    // discarded its own message and stranded the run at "queued" forever.
+    const { processor, collection, safeDeleteMessage, notifyHandlerComplete } = makeProcessor();
+    processor.registerHandler(handler);
+
+    const doc = makeDoc({
+      handlerStatus: {
+        "pp-atif": { status: "queued", updatedAt: new Date() },
+      },
+    });
+    const heartbeat = makeHeartbeat();
+    const payload: PostProcessorMessage = { type: "atif", requestId: "req-1", runId: "run-1" };
+
+    collection.findOneAndUpdate.mockResolvedValue({ _id: "req-1" });
+    collection.updateOne.mockResolvedValue({ matchedCount: 1 });
+
+    await (processor as any).handleRequest(doc, makeMessage(), heartbeat, log, payload);
+
+    // The claim filter must NOT exclude "queued" — only "processing".
+    expect(collection.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _id: "req-1",
+        "run._id": "run-1",
+        "run.status": "done",
+        "run.handlerStatus.pp-atif.status": { $nin: ["processing"] },
+      }),
+      expect.any(Object),
+      expect.objectContaining({ returnDocument: "after" }),
+    );
+    expect(handler.process).toHaveBeenCalledWith(
+      payload,
+      expect.objectContaining({ collection, log }),
+    );
+    expect(collection.updateOne).toHaveBeenCalledWith(
+      {
+        _id: "req-1",
+        "run._id": "run-1",
+        "run.handlerStatus.pp-atif.status": "processing",
+      },
+      {
+        $set: expect.objectContaining({
+          "run.handlerStatus.pp-atif.status": "done",
+          "run.handlerStatus.pp-atif.version": 1,
         }),
       },
     );
