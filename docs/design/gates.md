@@ -577,6 +577,15 @@ flowchart LR
   explicitly as `run.gates: { gate, status, iterations }[]` for cheap querying.
 - No change to blob layout; tool-calls/snapshot blobs are already per
   `requestId/runs/runId/iteration-N/...`.
+- **Comparative submissions (profile variations).** When a submit fans out into
+  multiple profile variations (base + variations sharing one `submissionId`), the
+  request-level `gates` are the **shared evaluation harness**: the same resolved
+  `gates` array (with `promptText` materialized and the Select gate's `promptId`
+  stamped to the task prompt) is persisted onto **every** variation's request
+  document, so all variations are judged identically. Variations only vary agent
+  config (worker / model / mcpServers / skills / extensions); they never alter gate
+  selection. An invalid gate config fails the whole submit (400) before any request
+  is inserted.
 
 ### 4.8 Surfaces — Portal & CLI (parity required)
 
