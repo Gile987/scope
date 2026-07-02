@@ -649,6 +649,50 @@ describe("runMultiTurnLoop — optional criteria (issue #605)", () => {
     expect(judgeEvaluate).toHaveBeenCalledTimes(1);
   });
 
+  // Issue #1136: the judge must receive the coding agent's response for the
+  // iteration under evaluation (inline `currentAgentResponse`) so criteria can
+  // grade what the agent said. The current turn isn't persisted until after the
+  // judge returns, so inline transport is the only way the judge can see it.
+  it("forwards the coding agent's response to the judge as currentAgentResponse", async () => {
+    const judgeEvaluate = vi.fn().mockResolvedValue({ passed: true, feedback: "OK" });
+    const config = makeConfig({
+      criteria: ["has_button"],
+      maxIterations: 1,
+      processor: {
+        workerName: "test-worker",
+        processMessage: vi
+          .fn()
+          .mockResolvedValue({ response: "The factorial of 5 is 120." } satisfies WorkerResult),
+      },
+      judgeClient: { evaluate: judgeEvaluate },
+    });
+
+    await runMultiTurnLoop(config as any);
+
+    expect(judgeEvaluate).toHaveBeenCalledTimes(1);
+    expect(judgeEvaluate).toHaveBeenCalledWith(
+      expect.objectContaining({ currentAgentResponse: "The factorial of 5 is 120." }),
+    );
+  });
+
+  it("omits currentAgentResponse when the worker produced no response text", async () => {
+    const judgeEvaluate = vi.fn().mockResolvedValue({ passed: true, feedback: "OK" });
+    const config = makeConfig({
+      criteria: ["has_button"],
+      maxIterations: 1,
+      processor: {
+        workerName: "test-worker",
+        processMessage: vi.fn().mockResolvedValue({ response: "" } satisfies WorkerResult),
+      },
+      judgeClient: { evaluate: judgeEvaluate },
+    });
+
+    await runMultiTurnLoop(config as any);
+
+    expect(judgeEvaluate).toHaveBeenCalledTimes(1);
+    expect(judgeEvaluate.mock.calls[0][0]).not.toHaveProperty("currentAgentResponse");
+  });
+
   it("throws when criteria is empty and maxIterations > 1", async () => {
     const config = makeConfig({
       criteria: [],
