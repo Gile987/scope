@@ -491,3 +491,16 @@ Directory where DevProxy writes HAR files. Shared between the DevProxy process a
 **Type:** integer (Docker Compose only)
 
 Host port mapping for the Copilot DevProxy REST API in Docker Compose.
+
+## Observability
+
+### APPLICATIONINSIGHTS_CONNECTION_STRING
+**Default:** *(none — telemetry disabled when unset)*
+**Type:** Azure Application Insights connection string
+
+Connection string for Azure Application Insights. When set, enables automatic HTTP/dependency tracking and custom metrics emission (e.g., `worker.run_duration_ms`, `worker.first_ai_call_ms`). When unset, all telemetry calls are no-ops and the service operates normally without instrumentation.
+
+The telemetry module is initialized via `initTelemetry()` from `packages/shared/src/telemetry/` and must be called early in the service startup (before Express/MongoDB connections) to ensure auto-instrumentation patches are applied.
+
+- **Docker Compose:** Set in `.env` file or leave unset for local development
+- **Kubernetes:** Sourced from `appinsights-secrets` ExternalSecret (workers) or `appinsights-secrets` secretRef (API), which reads from Key Vault secret `appinsights-connection-string`

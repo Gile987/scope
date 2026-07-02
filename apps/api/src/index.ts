@@ -8,7 +8,7 @@ import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
-import { TaskPromptStore, SkillRevisionStore, SkillResolver, CodebaseStore, CodebaseRevisionStore, CodebaseResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore } from "shared";
+import { TaskPromptStore, SkillRevisionStore, SkillResolver, CodebaseStore, CodebaseRevisionStore, CodebaseResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore, initTelemetry } from "shared";
 import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, ProfileDocument, ProfileVersionDocument, HeartbeatStore } from "shared";
 import { acquireGitHubPublicApiToken } from "./github-api-token.js";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
@@ -58,6 +58,9 @@ import type {
 } from "./route-context.js";
 
 dotenv.config();
+
+// Initialize Application Insights telemetry (must be early to patch HTTP/DB libs)
+initTelemetry("scope-api");
 
 const TOKEN_MANAGER_URL = process.env.TOKEN_MANAGER_URL || "";
 const mcpSecretClient: McpSecretClient | null = TOKEN_MANAGER_URL

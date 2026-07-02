@@ -1,11 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces, initTelemetry, trackMetric, trackTrace, trackEvent } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
 dotenv.config();
+
+// Initialize telemetry before any other setup
+initTelemetry(process.env.WORKER_NAME || "coder-acp-copilot");
+
+const PROCESS_START_TIME = Date.now();
 
 /**
  * Build the environment variables for the copilot subprocess.
@@ -56,6 +61,7 @@ const tokenClient = new TokenManagerClient();
 const AGENT_VERSION = `copilot-${process.env.COPILOT_CLI_VERSION || "unknown"}`;
 
 class CopilotProcessor implements WorkerProcessor {
+  static coldStartTracked = false;
   readonly workerName = WORKER_NAME;
   workspacePath: string | undefined = undefined;
   private gateway: McpGatewayClient | null = null;
@@ -111,6 +117,12 @@ class CopilotProcessor implements WorkerProcessor {
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
     options?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
+    const runStartTime = Date.now();
+    const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const workerType = WORKER_NAME;
+    let firstAiCallTracked = false;
+    let lastProtocolEventTime = runStartTime;
+
     const skillConfigs = options?.skillConfigs ?? [];
     await log("info", "Starting Copilot ACP processor", {
       inputLength: message.length,
@@ -120,6 +132,11 @@ class CopilotProcessor implements WorkerProcessor {
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
       skillCount: skillConfigs.length,
       skills: skillConfigs.map((s) => s.name),
+    });
+
+    trackEvent({
+      name: "worker.run_started",
+      properties: { runId, workerType, model: options?.model || "default" },
     });
 
     // Proxy integration — start recording if enabled
@@ -178,6 +195,23 @@ class CopilotProcessor implements WorkerProcessor {
         env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL, devProxy?.proxyUrl),
         cwd: this.workspacePath!,
         onLog: async (msg) => {
+          lastProtocolEventTime = Date.now();
+          // Track first AI call timing
+          if (!firstAiCallTracked && msg.toLowerCase().includes("turn")) {
+            firstAiCallTracked = true;
+            const firstAiCallMs = Date.now() - runStartTime;
+            trackMetric({
+              name: "worker.first_ai_call_ms",
+              value: firstAiCallMs,
+              properties: { runId, workerType },
+            });
+          }
+          // Forward subprocess logs to App Insights
+          trackTrace({
+            message: msg,
+            severityLevel: "Verbose",
+            properties: { runId, workerType },
+          });
           await log("debug", msg);
         },
         mcpServers: [],
@@ -189,6 +223,32 @@ class CopilotProcessor implements WorkerProcessor {
       await log("info", "Copilot processing complete", { 
         stopReason: result.stopReason,
         responseLength: result.response.length 
+      });
+
+      // Track run duration
+      const runDurationMs = Date.now() - runStartTime;
+      trackMetric({
+        name: "worker.run_duration_ms",
+        value: runDurationMs,
+        properties: { runId, workerType, stopReason: result.stopReason },
+      });
+
+      // Track cold start (first run only — time from process start to first ACP message)
+      if (!CopilotProcessor.coldStartTracked) {
+        CopilotProcessor.coldStartTracked = true;
+        trackMetric({
+          name: "worker.cold_start_ms",
+          value: runStartTime - PROCESS_START_TIME,
+          properties: { workerType },
+        });
+      }
+
+      // Track subprocess idle time (max gap between protocol events)
+      const subprocessIdleS = (Date.now() - lastProtocolEventTime) / 1000;
+      trackMetric({
+        name: "worker.subprocess_idle_s",
+        value: subprocessIdleS,
+        properties: { runId, workerType },
       });
 
       const response = result.response || `[${this.workerName}] No response from Copilot`;
