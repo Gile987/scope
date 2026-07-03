@@ -170,6 +170,24 @@ describe("classifyComposeProjects", () => {
     }
   });
 
+  it("records the worktree path on merged/closed removals (for offset freeing)", () => {
+    const projects = [project("merged", "/repo/.worktrees/merged")];
+    const result = classifyComposeProjects(projects, worktrees, getPr, () => true);
+    expect(result[0].decision.kind).toBe("remove");
+    if (result[0].decision.kind === "remove") {
+      expect(result[0].decision.worktreePath).toBe("/repo/.worktrees/merged");
+    }
+  });
+
+  it("leaves worktreePath undefined on orphan removals", () => {
+    const projects = [project("orphan", "/elsewhere/gone")];
+    const result = classifyComposeProjects(projects, worktrees, getPr, () => false);
+    expect(result[0].decision.kind).toBe("remove");
+    if (result[0].decision.kind === "remove") {
+      expect(result[0].decision.worktreePath).toBeUndefined();
+    }
+  });
+
   it("keeps unmatched projects whose config files still exist", () => {
     const projects = [project("external", "/elsewhere/here")];
     const result = classifyComposeProjects(projects, worktrees, getPr, () => true);

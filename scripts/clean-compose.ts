@@ -19,8 +19,10 @@ import { existsSync } from "node:fs";
 import { createInterface } from "readline";
 import { fileURLToPath } from "node:url";
 import {
+  deletePortOffset,
   parseRemoteUrl,
   parseWorktreeList,
+  readPortOffset,
   type PrInfo,
   type Worktree,
 } from "./clean-worktrees.js";
@@ -32,7 +34,7 @@ export interface ComposeProject {
 }
 
 export type ComposeDecision =
-  | { kind: "remove"; reason: string; pr?: PrInfo }
+  | { kind: "remove"; reason: string; pr?: PrInfo; worktreePath?: string }
   | { kind: "keep"; reason: string };
 
 export interface ClassifiedProject {
@@ -138,6 +140,8 @@ export function classifyComposeProjects(
           kind: "remove",
           reason: `worktree ${wt.branch}: PR #${pr.number} ${pr.state}`,
           pr,
+          // Track the worktree so main() can also free its port offset.
+          worktreePath: wt.path,
         },
       };
     }
@@ -331,6 +335,12 @@ async function main() {
     console.log("(dry run — no changes made)");
     for (const c of toRemove) {
       console.log(`  $ ${buildDownCommand(c.project.name, opts)}`);
+      if (c.decision.kind === "remove" && c.decision.worktreePath) {
+        const offset = readPortOffset(c.decision.worktreePath);
+        if (offset !== null) {
+          console.log(`      ↳ would free port offset ${offset}`);
+        }
+      }
     }
     return;
   }
@@ -360,6 +370,16 @@ async function main() {
       execSync(cmd, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
       console.log(`  ✓ ${c.project.name}`);
       downed++;
+      // Also free the worktree's port offset (delete .port-offset) so the
+      // number can be reused. Only for worktree-matched removals — orphan
+      // projects have no worktree (and thus no offset file) to free.
+      if (c.decision.kind === "remove" && c.decision.worktreePath) {
+        const wtPath = c.decision.worktreePath;
+        const offset = readPortOffset(wtPath);
+        if (deletePortOffset(wtPath) && offset !== null) {
+          console.log(`    ↳ freed port offset ${offset}`);
+        }
+      }
     } catch (err: any) {
       console.error(
         `  ✗ ${c.project.name}: ${err.stderr?.toString().trim() || err.message}`,
