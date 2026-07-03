@@ -2,9 +2,43 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi } from "vitest";
-import { runACPSession, selectModel, selectReasoningEffort, selectPermissionMode, formatModeError, formatToolArgs, formatToolContent, AUTOPILOT_MODE_ID } from "./acp-client.js";
+import { runACPSession, selectModel, selectReasoningEffort, selectPermissionMode, formatModeError, formatToolArgs, formatToolContent, buildCopilotBaseArgs, AUTOPILOT_MODE_ID } from "./acp-client.js";
 import type * as acp from "@agentclientprotocol/sdk";
 import os from "node:os";
+
+describe("buildCopilotBaseArgs", () => {
+  it("always includes the ACP transport and yolo permission flags", () => {
+    expect(buildCopilotBaseArgs()).toEqual(["--acp", "--yolo"]);
+  });
+
+  it("does NOT add --autopilot when autopilot is undefined (opt-in default off)", () => {
+    expect(buildCopilotBaseArgs({ model: "gpt-5" })).not.toContain("--autopilot");
+  });
+
+  it("does NOT add --autopilot when autopilot is explicitly false", () => {
+    expect(buildCopilotBaseArgs({ autopilot: false })).not.toContain("--autopilot");
+  });
+
+  it("adds --autopilot only when autopilot is explicitly true", () => {
+    expect(buildCopilotBaseArgs({ autopilot: true })).toContain("--autopilot");
+  });
+
+  it("appends model and reasoning-effort flags when provided", () => {
+    expect(buildCopilotBaseArgs({ autopilot: true, model: "gpt-5", reasoningEffort: "high" })).toEqual([
+      "--acp",
+      "--yolo",
+      "--autopilot",
+      "--model",
+      "gpt-5",
+      "--reasoning-effort",
+      "high",
+    ]);
+  });
+
+  it("omits optional flags when not provided", () => {
+    expect(buildCopilotBaseArgs({})).toEqual(["--acp", "--yolo"]);
+  });
+});
 
 describe("formatToolContent", () => {
   it("returns an empty string for non-array or empty input", () => {

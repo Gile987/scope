@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { SkillPicker } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { useModelCapabilities, useReasoningEffort, ReasoningEffortSelect, ModelSelectItems } from "@/components/ReasoningEffortSelect";
@@ -26,6 +27,7 @@ export function NewProfileVersion() {
   const [worker, setWorker] = useState("");
   const [model, setModel] = useState("");
   const [reasoningEffort, setReasoningEffort] = useState("");
+  const [autopilot, setAutopilot] = useState(false);
   const [selectedAgentVersion, setSelectedAgentVersion] = useState("");
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
@@ -56,6 +58,7 @@ export function NewProfileVersion() {
       setWorker(profile.version.workerType);
       setModel(profile.version.model);
       setReasoningEffort(profile.version.reasoningEffort ?? "");
+      setAutopilot(profile.version.autopilot === true);
       setSelectedAgentVersion(profile.version.agentVersion ?? "");
       setSelectedMcpServers(profile.version.mcpServers ?? []);
       setSelectedSkills(profile.version.skillRevisions ?? []);
@@ -103,6 +106,7 @@ export function NewProfileVersion() {
     mutationFn: () => api.createProfileVersion(profileId!, {
       workerType: worker,
       model,
+      autopilot,
       ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
@@ -143,6 +147,7 @@ export function NewProfileVersion() {
     worker !== ev.workerType ||
     model !== ev.model ||
     (reasoningEffort || "") !== (ev.reasoningEffort || "") ||
+    autopilot !== (ev.autopilot === true) ||
     (selectedAgentVersion || "") !== (ev.agentVersion || "") ||
     JSON.stringify([...selectedMcpServers].sort()) !== JSON.stringify([...(ev.mcpServers ?? [])].sort()) ||
     JSON.stringify([...selectedSkills].sort()) !== JSON.stringify([...(ev.skillRevisions ?? [])].sort()) ||
@@ -210,6 +215,18 @@ export function NewProfileVersion() {
             onChange={onEffortChange}
             workerEffortWarning={workerEffortWarning}
           />
+
+          <div className="flex items-center justify-between rounded-md border p-3">
+            <div className="space-y-0.5 pr-4">
+              <Label htmlFor="autopilot">Autopilot mode</Label>
+              <p className="text-xs text-muted-foreground">
+                Run the agent in its native autopilot mode — fully autonomous, never
+                pausing to ask clarifying questions. Off by default; leave off for
+                interactive runs.
+              </p>
+            </div>
+            <Switch id="autopilot" checked={autopilot} onCheckedChange={setAutopilot} />
+          </div>
 
           {sortedVersions.length > 0 && (
             <div className="space-y-2">

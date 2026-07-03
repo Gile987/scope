@@ -53,6 +53,9 @@ export interface MultiTurnConfig {
   model?: string;
   /** Reasoning effort level to pass to the coding agent (e.g. "low", "medium", "high") */
   reasoningEffort?: string;
+  /** Run the agent in native autopilot mode (autonomous, no HITL questions).
+   *  Opt-in: true = autopilot; undefined/false = interactive (default). */
+  autopilot?: boolean;
   /** Resolved MCP server configurations to pass to the coding agent */
   mcpServerConfigs?: McpServerConfig[];
   /** Resolved skill configurations to inject into the agent prompt */
@@ -111,6 +114,7 @@ export async function runMultiTurnLoop(
     personaInstructions,
     model,
     reasoningEffort,
+    autopilot,
     mcpServerConfigs,
     skillConfigs,
     extensionConfigs,
@@ -168,7 +172,7 @@ export async function runMultiTurnLoop(
     let turnChatResultFormat: string | undefined;
     const turnVideoUrls: string[] = [];
     try {
-      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, reasoningEffort, mcpServerConfigs, skillConfigs, extensionConfigs, iteration });
+      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, reasoningEffort, autopilot, mcpServerConfigs, skillConfigs, extensionConfigs, iteration });
       codingResponse = workerResult.response;
       turnTokenUsage = workerResult.tokenUsage;
       turnAiCallCount = workerResult.aiCallCount;

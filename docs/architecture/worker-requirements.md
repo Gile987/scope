@@ -338,9 +338,21 @@ The multi-turn loop is: `setup()` → (`processMessage()` → judge → feedback
 
 All workers must ensure that their coding agent can execute tool calls and file operations without interactive confirmation prompts. Since workers run in isolated containers with no interactive user, the agent must operate in a fully autonomous ("yolo") mode.
 
+> **Auto-approve vs. autopilot.** Two orthogonal concerns are easy to conflate:
+> - **Auto-approve (this requirement)** — accept individual tool/permission
+>   prompts non-interactively (`--yolo`, `requestPermission()` → first option,
+>   `chat.tools.global.autoApprove`). Always on; a headless worker cannot answer
+>   permission dialogs.
+> - **Autopilot mode** — the agent's *native* autonomous mode where it never
+>   pauses to ask the user clarifying/decision questions and iterates to
+>   completion. This is **profile-configurable** and **opt-in** via
+>   `WorkerProcessorOptions.autopilot` (default `false`; only an explicit `true`
+>   enables it); see [Autopilot mode](./app-design.md#autopilot-mode). Do **not**
+>   emulate it with prompt injection — use each agent's native mechanism.
+
 The mechanism varies by worker type:
 
-- **ACP-based workers** — implement `requestPermission()` to auto-approve all permission requests, **and** set the ACP session mode to `autopilot` after creating the session. The `--yolo` CLI flag alone does **not** change the ACP session mode: an ACP session starts in `agent` mode, where execute/bash tool calls (e.g. `npm run build`) are denied non-interactively. Autopilot mode enables allow-all and runs without prompts. The Copilot CLI advertises modes by their canonical ACP URL ids (e.g. `https://agentclientprotocol.com/protocol/session-modes#autopilot`), so match on the full id:
+- **ACP-based workers** — implement `requestPermission()` to auto-approve all permission requests. For the **Copilot CLI**, pass the native **`--autopilot`** startup flag only when the resolved `autopilot` setting is explicitly enabled (opt-in; off by default). Independently — and **regardless** of the `autopilot` setting — the worker also sets the ACP session mode to `autopilot` after creating the session: this is a headless-execution requirement, not a HITL toggle. The `--yolo` flag alone does **not** change the ACP session mode, and an ACP session starts in `agent` mode where execute/bash tool calls (e.g. `npm run build`) are denied non-interactively, so this unconditional session-mode switch must always run. The Copilot CLI advertises modes by their canonical ACP URL ids (e.g. `https://agentclientprotocol.com/protocol/session-modes#autopilot`), so match on the full id:
 
 ```typescript
 async requestPermission(

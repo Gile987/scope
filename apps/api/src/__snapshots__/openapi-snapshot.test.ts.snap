@@ -733,6 +733,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "agentVersion": {
             "type": "string",
           },
+          "autopilot": {
+            "type": "boolean",
+          },
           "description": {
             "maxLength": 512,
             "type": "string",
@@ -1896,6 +1899,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "agentVersion": {
             "type": "string",
           },
+          "autopilot": {
+            "type": "boolean",
+          },
           "createdAt": {
             "format": "date-time",
             "type": [
@@ -2410,6 +2416,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "agentsMdPromptId": {
             "type": "string",
+          },
+          "autopilot": {
+            "type": "boolean",
           },
           "codebaseRevisionId": {
             "type": "string",
@@ -6122,6 +6131,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                 "properties": {
                   "agentVersion": {
                     "type": "string",
+                  },
+                  "autopilot": {
+                    "type": "boolean",
                   },
                   "extensions": {
                     "items": {

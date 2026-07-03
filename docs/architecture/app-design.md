@@ -90,6 +90,42 @@ To support submitting an AGENTS.md prompt with a run, the request carries:
   (`[]`/absent = root, `[p]` = mutation, `[i, j]` = merge) for callers that know
   parentage at submit time.
 
+### Autopilot mode
+
+Profiles carry an optional **`autopilot`** flag that controls whether the coding
+agent runs in its **native autopilot mode** — fully autonomous, running to
+completion without ever pausing to ask the *user* clarifying or decision
+questions. This is distinct from tool-permission auto-approval (e.g. `--yolo`),
+which only auto-accepts individual permission prompts; autopilot governs whether
+the agent asks questions at all.
+
+- **Where it lives:** `ProfileVersionDocument.autopilot?: boolean` — a versioned,
+  reproducible sibling of `reasoningEffort`. It is **profile-only**: it is not
+  accepted as a direct request/run override (not in `CreateRequestInputSchema`).
+- **Default:** `false` (interactive). Autopilot is **opt-in**: an undefined field
+  resolves to `false` everywhere via the `autopilot === true` idiom, so existing
+  profile versions and profile-less runs keep their pre-existing (non-autopilot)
+  behavior. Only an explicit `true` enables the agent's native autopilot mode.
+  This keeps the feature backward-compatible.
+- **Resolution:** the API computes `effectiveAutopilot` from the resolved profile
+  version and stores it **unconditionally** on `RequestDocument.autopilot` as a
+  resolved boolean snapshot for the run. The queue-processor threads it into
+  `WorkerProcessorOptions.autopilot`; all readers use `autopilot === true`, so
+  legacy/undefined documents resolve to interactive.
+- **Per-worker native mapping:**
+  - **Copilot / Copilot-Windows** (`coder-acp-copilot`): pass the native
+    `--autopilot` CLI flag only when explicitly enabled (kept alongside `--yolo`,
+    which is permissions-only); omit it otherwise. The runtime ACP
+    `setSessionMode(#autopilot)` call is **unconditional** and independent of this
+    setting — it is a headless-execution/permissions concern (allowing the agent
+    to run bash/builds non-interactively) that must always run for backward
+    compatibility, not a HITL toggle.
+    resolved value in the per-run settings (defaults to `false`).
+  - **Claude Code** (`coder-acp-claude-code`): no native autopilot toggle exists
+    (only permission modes); treated as a **capability gap**. It is autonomous in
+    headless ACP regardless; an informational log is emitted only when autopilot
+    is explicitly requested, and no prompt injection is used.
+
 ## Judge Pipeline
 
 The judge evaluates coding agent output against criteria. Two strategies are supported:

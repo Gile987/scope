@@ -86,6 +86,7 @@ profile
           console.log(`\n${label('Configuration (v' + profile.version.version + '):')}`);
           console.log(`  ${label('Worker:')}  ${value(profile.version.workerType)}`);
           console.log(`  ${label('Model:')}   ${value(profile.version.model)}`);
+          console.log(`  ${label('Autopilot:')} ${value(profile.version.autopilot === true ? 'on' : 'off')}`);
           if (profile.version.agentVersion) console.log(`  ${label('Agent:')}   ${value(profile.version.agentVersion)}`);
           if (profile.version.mcpServers?.length) console.log(`  ${label('MCP:')}     ${profile.version.mcpServers.join(', ')}`);
           if (profile.version.skillRevisions?.length) console.log(`  ${label('Skills:')}  ${profile.version.skillRevisions.join(', ')}`);
@@ -118,6 +119,8 @@ profile
   .option("--mcp-servers <ids...>", "MCP server IDs")
   .option("--skills <refs...>", "Skill revision references")
   .option("--extensions <ids...>", "Extension IDs (publisher.name or publisher.name@version)")
+  .option("--autopilot", "Run the agent in its native autopilot mode (autonomous, no HITL prompts). Default: off")
+  .option("--no-autopilot", "Disable autopilot; the agent may pause for interactive prompts (default)")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
@@ -131,6 +134,7 @@ profile
       if (options.mcpServers) body.mcpServers = options.mcpServers;
       if (options.skills) body.skillRevisions = options.skills;
       if (options.extensions) body.extensions = options.extensions;
+      if (options.autopilot !== undefined) body.autopilot = options.autopilot;
 
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/profiles`, {
         method: "POST",
@@ -245,6 +249,7 @@ version
         console.log(label(`Version v${ver.version}:`));
         console.log(`  ${label('Worker:')}  ${value(ver.workerType)}`);
         console.log(`  ${label('Model:')}   ${value(ver.model)}`);
+        console.log(`  ${label('Autopilot:')} ${value(ver.autopilot === true ? 'on' : 'off')}`);
         if (ver.agentVersion) console.log(`  ${label('Agent:')}   ${value(ver.agentVersion)}`);
         if (ver.mcpServers?.length) console.log(`  ${label('MCP:')}     ${ver.mcpServers.join(', ')}`);
         if (ver.skillRevisions?.length) console.log(`  ${label('Skills:')}  ${ver.skillRevisions.join(', ')}`);
@@ -255,6 +260,7 @@ version
           { key: 'version', label: 'Version' },
           { key: 'workerType', label: 'Worker' },
           { key: 'model', label: 'Model' },
+          { key: 'autopilot', label: 'Autopilot', formatter: (v: any) => v.autopilot === true ? 'on' : 'off' },
           { key: 'agentVersion', label: 'Agent Version', formatter: (v: any) => v.agentVersion || '' },
           { key: 'mcpServers', label: 'MCP Servers', formatter: (v: any) => (v.mcpServers || []).join(', ') },
           { key: 'skillRevisions', label: 'Skills', formatter: (v: any) => (v.skillRevisions || []).join(', ') },
@@ -279,6 +285,8 @@ version
   .option("--mcp-servers <ids...>", "MCP server IDs")
   .option("--skills <refs...>", "Skill revision references")
   .option("--extensions <ids...>", "Extension IDs (publisher.name or publisher.name@version)")
+  .option("--autopilot", "Run the agent in its native autopilot mode (autonomous, no HITL prompts). Default: off")
+  .option("--no-autopilot", "Disable autopilot; the agent may pause for interactive prompts (default)")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
@@ -290,6 +298,7 @@ version
       if (options.mcpServers) body.mcpServers = options.mcpServers;
       if (options.skills) body.skillRevisions = options.skills;
       if (options.extensions) body.extensions = options.extensions;
+      if (options.autopilot !== undefined) body.autopilot = options.autopilot;
 
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/profiles/${options.id}`, {
         method: "POST",

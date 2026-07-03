@@ -271,6 +271,7 @@ export interface RequestDocument {
   workerType: string;
   model?: string;              // Model selected for this run
   reasoningEffort?: string;    // User-selected reasoning effort level (informational / validated)
+  autopilot?: boolean;         // Resolved from the profile version. Run the agent in native autopilot mode (autonomous, no HITL questions). Opt-in; undefined = default (off/interactive)
   createdAt: Date;
   updatedAt?: Date;
   // Multi-turn fields
@@ -462,6 +463,11 @@ export interface WorkerProcessorOptions {
   model?: string;
   /** Reasoning effort level to apply (e.g. "low", "medium", "high"). */
   reasoningEffort?: string;
+  /** Run the agent in its native autopilot mode (autonomous, no human-in-the-loop
+   *  questions) when explicitly true. Opt-in: undefined/false leaves the agent in
+   *  its default interactive mode (backward-compatible). Not every agent has a
+   *  native autopilot equivalent (e.g. Claude Code). */
+  autopilot?: boolean;
   mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
   skillConfigs?: SkillConfig[];          // Resolved skill configurations for prompt injection
   extensionConfigs?: ExtensionConfig[];  // Resolved VS Code extension configurations for runtime installation

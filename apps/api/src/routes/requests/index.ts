@@ -640,6 +640,7 @@ apiRoute(ctx.app, ctx.registry, {
             ...((r.profileVersion.reasoningEffort ?? requestedReasoningEffort)
               ? { reasoningEffort: r.profileVersion.reasoningEffort ?? requestedReasoningEffort }
               : {}),
+            autopilot: r.profileVersion.autopilot === true,
             ...(maxIterations ? { maxIterations } : {}),
             ...(personaInstructions ? { personaInstructions } : {}),
             ...(personaObj ? { persona: personaObj } : {}),
@@ -762,6 +763,11 @@ apiRoute(ctx.app, ctx.registry, {
     // Effective values: profile overrides client inputs for controlled fields
     const effectiveModel = profileVersion ? profileVersion.model : requestedModel;
     const effectiveReasoningEffort = profileVersion?.reasoningEffort ? profileVersion.reasoningEffort : requestedReasoningEffort;
+    // Autopilot is a profile-controlled field (placement: profile only). It is
+    // opt-in and defaults to OFF (interactive) for backward compatibility — an
+    // unset profile field or a profile-less run resolves to false. Only an
+    // explicit `true` on the profile enables the agent's native autopilot mode.
+    const effectiveAutopilot = profileVersion ? profileVersion.autopilot === true : false;
     const effectiveMcpServers = profileVersion ? (profileVersion.mcpServers ?? undefined) : mcpServerSlugs;
     const effectiveSkills = profileVersion ? (profileVersion.skillRevisions ?? undefined) : skillSlugs;
     const effectiveExtensions = profileVersion ? (profileVersion.extensions ?? undefined) : extensionIds;
@@ -1073,6 +1079,7 @@ apiRoute(ctx.app, ctx.registry, {
           priority: requestedPriority ?? 0,
           ...(model ? { model } : {}),
           ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
+          autopilot: effectiveAutopilot,
           ...(maxIterations ? { maxIterations } : {}),
           ...(personaInstructions ? { personaInstructions } : {}),
           ...(personaObj ? { persona: personaObj } : {}),
@@ -1134,6 +1141,7 @@ apiRoute(ctx.app, ctx.registry, {
       priority: requestedPriority ?? 0,
       ...(model ? { model } : {}),
       ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
+      autopilot: effectiveAutopilot,
       ...(maxIterations ? { maxIterations } : {}),
       ...(personaInstructions ? { personaInstructions } : {}),
       ...(personaObj ? { persona: personaObj } : {}),
@@ -1880,6 +1888,13 @@ apiRoute(ctx.app, ctx.registry, {
         const effectiveReasoningEffort = activeProfileVersion?.reasoningEffort
           ? activeProfileVersion.reasoningEffort
           : (overrides?.reasoningEffort !== undefined ? overrides.reasoningEffort : original.reasoningEffort);
+        // Autopilot is profile-controlled (profile-only placement) and opt-in
+        // (default OFF). Resolve from the active profile version when present,
+        // else fall back to the original request's stored value. Only an explicit
+        // `true` enables it; unset resolves to false (backward-compatible).
+        const effectiveAutopilot = activeProfileVersion
+          ? activeProfileVersion.autopilot === true
+          : original.autopilot === true;
         const effectiveMaxIterations = overrides?.maxIterations !== undefined ? overrides.maxIterations : original.maxIterations;
         const effectiveMcpServers = activeProfileVersion
           ? (activeProfileVersion.mcpServers ?? null)
@@ -1924,6 +1939,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(original.persona ? { persona: original.persona } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
+          autopilot: effectiveAutopilot,
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
           ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(isVscodeWorker && effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),

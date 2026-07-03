@@ -20,6 +20,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type { CodingAgent, McpServerDocument, ProfileWithVersion } from "@/types";
@@ -44,6 +45,7 @@ export function ProfileCreateForm({
   const [worker, setWorker] = useState("");
   const [model, setModel] = useState("");
   const [reasoningEffort, setReasoningEffort] = useState("");
+  const [autopilot, setAutopilot] = useState(false);
   const [selectedAgentVersion, setSelectedAgentVersion] = useState("");
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
@@ -106,6 +108,7 @@ export function ProfileCreateForm({
         ...(description ? { description } : {}),
         workerType: worker,
         model,
+        autopilot,
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
         ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
@@ -262,6 +265,18 @@ export function ProfileCreateForm({
             value={reasoningEffort}
             onChange={onEffortChange}
           />
+
+          <div className="flex items-center justify-between rounded-md border p-3">
+            <div className="space-y-0.5 pr-4">
+              <Label htmlFor="autopilot">Autopilot mode</Label>
+              <p className="text-xs text-muted-foreground">
+                Run the agent in its native autopilot mode — fully autonomous, never
+                pausing to ask clarifying questions. Off by default; leave off for
+                interactive runs.
+              </p>
+            </div>
+            <Switch id="autopilot" checked={autopilot} onCheckedChange={setAutopilot} />
+          </div>
 
           {sortedVersions.length > 0 && (
             <div className="space-y-2">

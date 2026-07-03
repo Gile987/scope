@@ -69,15 +69,31 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     options?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
     const skillConfigs = options?.skillConfigs ?? [];
+    const autopilot = options?.autopilot === true;
     await log("info", "Starting Claude Code ACP processor", {
       inputLength: message.length,
       model: options?.model,
       reasoningEffort: options?.reasoningEffort,
+      autopilot,
       mcpServerCount: this.mcpConfigs.length,
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
       skillCount: skillConfigs.length,
       skills: skillConfigs.map((s) => s.name),
     });
+
+    // Claude Code has no native "autopilot" mode toggle distinct from its
+    // permission modes. In headless ACP it already runs autonomously and does
+    // not pause to ask the user questions (tool permissions are auto-approved via
+    // bypassPermissions + the ACP client). Autopilot is opt-in and defaults to
+    // off, but Claude Code cannot enforce an interactive (non-autopilot) mode
+    // either — it is inherently autonomous here. We only log the gap when
+    // autopilot is explicitly requested, to avoid noise on the default path.
+    if (autopilot) {
+      await log(
+        "info",
+        "Native autopilot requested — Claude Code has no explicit autopilot toggle but already runs autonomously in headless ACP",
+      );
+    }
 
     // Proxy integration — start recording if enabled
     let devProxy: ProxyClient | null = null;

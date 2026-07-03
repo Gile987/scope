@@ -33,6 +33,36 @@ const SENSITIVE_PATH_PATTERN = /(^|\/)\.env|secret|credential|\.pem$|\.key$/i;
 const REDACTED = "[redacted]";
 
 /**
+ * Build the base command-line arguments for launching the Copilot CLI over ACP.
+ *
+ * The base always includes `--acp` (ACP transport) and `--yolo` (auto-approve
+ * tool permissions — required for headless execution). The native `--autopilot`
+ * flag is **opt-in** and only added when `autopilot === true`; it is distinct
+ * from `--yolo` and from the unconditional ACP `#autopilot` session mode set in
+ * `runACPSession`. Model and reasoning-effort flags are appended when provided.
+ *
+ * Worker-specific flags (e.g. `--additional-mcp-config`) are appended by the
+ * caller after this base.
+ */
+export function buildCopilotBaseArgs(options?: {
+  autopilot?: boolean;
+  model?: string;
+  reasoningEffort?: string;
+}): string[] {
+  const args = ["--acp", "--yolo"];
+  if (options?.autopilot === true) {
+    args.push("--autopilot");
+  }
+  if (options?.model) {
+    args.push("--model", options.model);
+  }
+  if (options?.reasoningEffort) {
+    args.push("--reasoning-effort", options.reasoningEffort);
+  }
+  return args;
+}
+
+/**
  * Truncate a string to at most `maxLength` characters, appending an ellipsis
  * when truncated.
  */
@@ -582,11 +612,14 @@ export async function runACPSession(
       await selectReasoningEffort(connection, sessionResult, reasoningEffort, onLog);
     }
 
-    // Set the session into autopilot mode so the agent can execute commands
-    // (build/test) headlessly. The default `agent` mode denies execute/bash
-    // tool calls non-interactively, and the `--yolo` CLI flag does not change
-    // the ACP session mode. The ACP client also auto-approves any residual
-    // permission requests.
+    // Put the ACP session into the CLI's `#autopilot` session mode. This is the
+    // ACP-layer allow-all needed so the agent can execute commands (build/test)
+    // headlessly — an ACP session starts in `agent` mode where execute/bash tool
+    // calls are denied non-interactively. This runs UNCONDITIONALLY (independent
+    // of the profile `autopilot` setting): it preserves the pre-existing headless
+    // execution behavior and is a permissions concern, not a HITL concern. The
+    // profile's autopilot setting is applied separately via the native
+    // `--autopilot` startup flag (see the worker's arg building).
     await selectPermissionMode(connection, sessionResult, onLog);
 
     // Send prompt

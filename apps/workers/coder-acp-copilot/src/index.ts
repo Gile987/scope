@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
-import { runACPSession } from "./acp-client.js";
+import { runACPSession, buildCopilotBaseArgs } from "./acp-client.js";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -116,6 +116,7 @@ class CopilotProcessor implements WorkerProcessor {
       inputLength: message.length,
       model: options?.model,
       reasoningEffort: options?.reasoningEffort,
+      autopilot: options?.autopilot === true,
       mcpServerCount: this.mcpConfigs.length,
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
       skillCount: skillConfigs.length,
@@ -155,14 +156,18 @@ class CopilotProcessor implements WorkerProcessor {
         preview: `${githubToken.substring(0, 7)}...(${githubToken.length} chars)`,
       });
 
-      // Run ACP session with GitHub Copilot
-      const args = ["--acp", "--yolo"];
-      if (options?.model) {
-        args.push("--model", options.model);
-      }
-      if (options?.reasoningEffort) {
-        args.push("--reasoning-effort", options.reasoningEffort);
-      }
+      // Run ACP session with GitHub Copilot. Native autopilot mode is opt-in via
+      // the profile's `autopilot` setting (default off / interactive); when
+      // enabled the agent runs autonomously end-to-end without pausing to ask the
+      // user questions. This is separate from `--yolo` (which only auto-approves
+      // tool permissions) and from the ACP `#autopilot` session mode set
+      // unconditionally in runACPSession (which enables headless command
+      // execution).
+      const args = buildCopilotBaseArgs({
+        autopilot: options?.autopilot,
+        model: options?.model,
+        reasoningEffort: options?.reasoningEffort,
+      });
       // The Copilot CLI does not support MCP servers via ACP newSession.mcpServers
       // (agentCapabilities.mcpCapabilities is undefined). Instead, pass the gateway
       // endpoint via --additional-mcp-config so the CLI initializes it at startup.

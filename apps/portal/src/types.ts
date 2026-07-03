@@ -122,6 +122,9 @@ export interface Run {
   workerType: string;
   model?: string;
   reasoningEffort?: string;
+  /** Resolved from the profile version. Native autopilot mode (autonomous, no
+   *  HITL questions). Opt-in; undefined resolves to off/interactive. */
+  autopilot?: boolean;
   agentVersion?: string;
   /** Per-attempt mutable state for the current attempt. */
   run?: RunState;
@@ -1012,6 +1015,7 @@ export interface ProfileVersionDocument {
   workerType: string;
   model: string;
   reasoningEffort?: string;
+  autopilot?: boolean;
   agentVersion?: string;
   mcpServers?: string[];
   skillRevisions?: string[];

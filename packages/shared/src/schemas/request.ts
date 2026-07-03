@@ -148,6 +148,7 @@ export const RequestResponseSchema = z
     workerType: z.string(),
     model: z.string().optional(),
     reasoningEffort: z.string().optional(),
+    autopilot: z.boolean().optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     maxIterations: z.number().optional(),

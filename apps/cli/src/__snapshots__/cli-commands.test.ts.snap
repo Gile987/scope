@@ -354,11 +354,13 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "create": {
         "options": [
           "--agent-version",
+          "--autopilot",
           "--description",
           "--extensions",
           "--mcp-servers",
           "--model",
           "--name",
+          "--no-autopilot",
           "--skills",
           "--url",
           "--worker",
@@ -388,10 +390,12 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "create": {
             "options": [
               "--agent-version",
+              "--autopilot",
               "--extensions",
               "--id",
               "--mcp-servers",
               "--model",
+              "--no-autopilot",
               "--skills",
               "--url",
               "--worker",

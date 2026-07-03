@@ -36,6 +36,29 @@ describe("CreateProfileInputSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts autopilot flag (true and false)", () => {
+    const base = {
+      name: "Autopilot Profile",
+      workerType: "coder-acp-copilot",
+      model: "gpt-4o",
+    };
+    const on = CreateProfileInputSchema.safeParse({ ...base, autopilot: true });
+    const off = CreateProfileInputSchema.safeParse({ ...base, autopilot: false });
+    expect(on.success).toBe(true);
+    expect(off.success).toBe(true);
+    if (off.success) expect(off.data.autopilot).toBe(false);
+  });
+
+  it("rejects a non-boolean autopilot value", () => {
+    const result = CreateProfileInputSchema.safeParse({
+      name: "Bad Autopilot",
+      workerType: "coder-acp-copilot",
+      model: "gpt-4o",
+      autopilot: "yes",
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("rejects empty name", () => {
     const input = {
       name: "",
@@ -148,6 +171,21 @@ describe("ProfileVersionResponseSchema", () => {
     };
     const result = ProfileVersionResponseSchema.safeParse(data);
     expect(result.success).toBe(false);
+  });
+
+  it("carries the autopilot flag through the response", () => {
+    const data = {
+      _id: "pv-123",
+      profileId: "p-123",
+      version: 1,
+      workerType: "coder-acp-copilot",
+      model: "gpt-4o",
+      autopilot: false,
+      createdAt: "2025-01-01T00:00:00Z",
+    };
+    const result = ProfileVersionResponseSchema.safeParse(data);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.autopilot).toBe(false);
   });
 });
 

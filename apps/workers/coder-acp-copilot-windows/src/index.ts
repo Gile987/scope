@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
-import { runACPSession } from "./acp-client.js";
+import { runACPSession, buildCopilotBaseArgs } from "./acp-client.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import dotenv from "dotenv";
@@ -101,6 +101,7 @@ class CopilotWindowsProcessor implements WorkerProcessor {
     await log("info", "Starting Copilot ACP processor (Windows)", {
       inputLength: message.length,
       model: options?.model,
+      autopilot: options?.autopilot === true,
     });
 
     // Proxy integration — start recording if enabled (gateway backend only)
@@ -135,10 +136,15 @@ class CopilotWindowsProcessor implements WorkerProcessor {
         preview: `${githubToken.substring(0, 7)}...(${githubToken.length} chars)`,
       });
 
-      const args = ["--acp", "--yolo"];
-      if (options?.model) {
-        args.push("--model", options.model);
-      }
+      // Native autopilot mode is opt-in via the profile's `autopilot` setting
+      // (default off / interactive) — distinct from `--yolo` (tool-permission
+      // auto-approval) and from the ACP `#autopilot` session mode set
+      // unconditionally in runACPSession. The Windows worker does not append a
+      // reasoning-effort flag (parity with its prior behavior).
+      const args = buildCopilotBaseArgs({
+        autopilot: options?.autopilot,
+        model: options?.model,
+      });
 
       const result = await runACPSession(message, {
         command: "copilot",
