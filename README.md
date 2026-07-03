@@ -248,6 +248,18 @@ Docker Compose works seamlessly in [git worktrees](https://git-scm.com/docs/git-
 
 No manual configuration is needed — just run `pnpm docker:dev:copilot` from any worktree.
 
+#### Cleaning up worktrees
+
+The offset range is finite (1–99), so long-lived worktrees can exhaust it. Several
+cleanup commands reclaim resources from worktrees you're done with:
+
+- `pnpm worktrees:clean:worktrees` — remove whole worktrees whose PR is merged/closed (this also deletes their `.port-offset`).
+- `pnpm worktrees:clean:docker` — `docker compose down` the stacks of merged/closed worktrees; also frees the `.port-offset` of each worktree it downs.
+- `pnpm worktrees:clean:port-offsets` — free **only** the port offset (delete `.port-offset`) of every *done* worktree while keeping its checkout and `.env` intact. It combines PR state and git state: a worktree is freed when its PR is **merged or closed**, or — when no PR matches its branch — when the branch has **no commits ahead of `origin/main`** (merged-then-reset, or an empty/never-worked worktree) **and** a clean tree. Worktrees with an **open PR** or **uncommitted changes** are always kept, as are the primary checkout and the worktree you run it from. Use this to reclaim offsets in bulk without removing worktrees.
+- `pnpm worktrees:clean` — runs the docker + worktree cleanups together.
+
+`worktrees:clean:port-offsets` needs both signals because they cover each other's blind spots: in this workflow a merged worktree usually doesn't keep a branch name matching its PR (so PR matching alone reclaims almost nothing — the git-state fallback catches that backlog), while git state alone can't tell a reset-but-still-open PR from a truly-done worktree (so the open-PR veto prevents freeing an offset that's still live). It runs `git fetch origin main` first (`--no-fetch` to skip) and queries PRs via `gh`; if `gh` can't run (offline, unauthenticated) it degrades to the git-state criterion automatically. Both `worktrees:clean:docker` and `worktrees:clean:port-offsets` accept `--dry-run` to preview and `--yes` to skip the confirmation prompt.
+
 ### Environment Variables
 
 See [ENV_VARIABLES.md](ENV_VARIABLES.md) for a full reference of configurable environment variables.
