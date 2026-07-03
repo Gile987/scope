@@ -1,8 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { describe, it, expect } from "vitest";
-import { parseRemoteUrl, parseWorktreeList, classifyWorktrees } from "./clean-worktrees.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  parseRemoteUrl,
+  parseWorktreeList,
+  classifyWorktrees,
+  portOffsetPath,
+  readPortOffset,
+  deletePortOffset,
+} from "./clean-worktrees.js";
 import type { PrInfo } from "./clean-worktrees.js";
 
 describe("parseRemoteUrl", () => {
@@ -115,5 +125,45 @@ describe("classifyWorktrees", () => {
       title: "Open",
     }));
     expect(toRemove).toHaveLength(0);
+  });
+});
+
+describe("port-offset helpers", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "wt-offset-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("portOffsetPath joins the .port-offset filename", () => {
+    expect(portOffsetPath("/some/wt")).toBe(join("/some/wt", ".port-offset"));
+  });
+
+  it("readPortOffset returns null when the file is absent", () => {
+    expect(readPortOffset(dir)).toBeNull();
+  });
+
+  it("readPortOffset returns the trimmed offset", () => {
+    writeFileSync(portOffsetPath(dir), "12\n");
+    expect(readPortOffset(dir)).toBe("12");
+  });
+
+  it("readPortOffset returns null for an empty file", () => {
+    writeFileSync(portOffsetPath(dir), "  \n");
+    expect(readPortOffset(dir)).toBeNull();
+  });
+
+  it("deletePortOffset removes the file and reports true", () => {
+    writeFileSync(portOffsetPath(dir), "3\n");
+    expect(deletePortOffset(dir)).toBe(true);
+    expect(existsSync(portOffsetPath(dir))).toBe(false);
+  });
+
+  it("deletePortOffset returns false when there is nothing to remove", () => {
+    expect(deletePortOffset(dir)).toBe(false);
   });
 });

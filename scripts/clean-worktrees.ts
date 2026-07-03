@@ -14,6 +14,8 @@
 // =============================================================================
 
 import { execSync } from "child_process";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "readline";
 import { fileURLToPath } from "node:url";
 
@@ -28,6 +30,44 @@ export interface PrInfo {
   title: string;
 }
 
+// --- Port-offset helpers -----------------------------------------------------
+// Each worktree reserves a unique port offset (1-99) via a `.port-offset` file
+// at its root (managed by the `worktree-env` package). Deleting that file frees
+// the offset for reuse by a new worktree, without touching the worktree or its
+// `.env`. Shared here so both `clean-port-offsets.ts` and `clean-compose.ts` can
+// reclaim offsets consistently.
+
+/** Absolute path to a worktree's `.port-offset` file. */
+export function portOffsetPath(worktreePath: string): string {
+  return join(worktreePath, ".port-offset");
+}
+
+/**
+ * Read a worktree's persisted port offset. Returns the trimmed file contents,
+ * or `null` when the file is absent, empty, or unreadable.
+ */
+export function readPortOffset(worktreePath: string): string | null {
+  const file = portOffsetPath(worktreePath);
+  if (!existsSync(file)) return null;
+  try {
+    const value = readFileSync(file, "utf-8").trim();
+    return value === "" ? null : value;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Delete a worktree's `.port-offset` file, freeing its offset for reuse.
+ * Returns `true` when a file was removed, `false` when none existed.
+ */
+export function deletePortOffset(worktreePath: string): boolean {
+  const file = portOffsetPath(worktreePath);
+  if (!existsSync(file)) return false;
+  unlinkSync(file);
+  return true;
+}
+
 export function parseRemoteUrl(url: string): string {
   const match = url.match(/github\.com[:/](.+?)(?:\.git)?$/);
   if (!match) {
@@ -36,7 +76,7 @@ export function parseRemoteUrl(url: string): string {
   return match[1];
 }
 
-function getRemoteRepo(): string {
+export function getRemoteRepo(): string {
   const url = execSync("git remote get-url origin", { encoding: "utf-8" }).trim();
   return parseRemoteUrl(url);
 }
