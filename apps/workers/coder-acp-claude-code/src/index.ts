@@ -66,17 +66,17 @@ class ClaudeCodeProcessor implements WorkerProcessor {
   async processMessage(
     message: string,
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
-    options?: WorkerProcessorOptions
+    processorOptions?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
-    const skillConfigs = options?.skillConfigs ?? [];
+    const skillConfigs = processorOptions?.skillConfigs ?? [];
     // Claude Code advertises no agent options (see agent.yaml) — autopilot has no
     // equivalent here. We still defensively read it so the documented no-op log
     // fires if an autopilot value ever reaches this worker.
-    const autopilot = options?.agentOptions?.autopilot === true;
+    const autopilot = processorOptions?.options?.autopilot === true;
     await log("info", "Starting Claude Code ACP processor", {
       inputLength: message.length,
-      model: options?.model,
-      reasoningEffort: options?.reasoningEffort,
+      model: processorOptions?.model,
+      reasoningEffort: processorOptions?.reasoningEffort,
       autopilot,
       mcpServerCount: this.mcpConfigs.length,
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
@@ -133,8 +133,8 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       const env: Record<string, string> = {
         [envVarName]: tokenResponse.value,
       };
-      if (options?.model) {
-        env.ANTHROPIC_MODEL = options.model;
+      if (processorOptions?.model) {
+        env.ANTHROPIC_MODEL = processorOptions.model;
       }
       // When proxy is active, ensure the subprocess routes through the proxy
       if (devProxy) {
@@ -171,7 +171,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         mcpServers: this.gateway && this.mcpConfigs.length > 0
           ? [{ type: "http" as const, slug: "mcp-gateway", name: "mcp-gateway", url: this.gateway.mcpEndpoint }]
           : [],
-        reasoningEffort: options?.reasoningEffort,
+        reasoningEffort: processorOptions?.reasoningEffort,
       });
 
       await log("info", "Claude Code processing complete", { 

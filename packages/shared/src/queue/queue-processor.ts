@@ -571,7 +571,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       maxIterations: requestDoc.maxIterations,
       ...(requestDoc.model ? { model: requestDoc.model } : {}),
       ...(requestDoc.reasoningEffort ? { reasoningEffort: requestDoc.reasoningEffort } : {}),
-      ...(requestDoc.options ? { agentOptions: requestDoc.options } : {}),
+      ...(requestDoc.options ? { options: requestDoc.options } : {}),
     });
 
     // Only create JudgeClient when criteria exist and judge will actually be called
@@ -585,7 +585,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     // Setup: create workspace, extract skills, upload setup videos
     if (this.processor.setup) {
-      const setupResult = await this.processor.setup(log, { model: requestDoc.model, agentOptions: requestDoc.options, mcpServerConfigs, skillConfigs, extensionConfigs });
+      const setupResult = await this.processor.setup(log, { model: requestDoc.model, options: requestDoc.options, mcpServerConfigs, skillConfigs, extensionConfigs });
 
       if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
         try {
@@ -682,7 +682,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         personaInstructions: requestDoc.personaInstructions,
         model: requestDoc.model,
         reasoningEffort: requestDoc.reasoningEffort,
-        agentOptions: requestDoc.options,
+        options: requestDoc.options,
         mcpServerConfigs,
         skillConfigs,
         extensionConfigs,

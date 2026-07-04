@@ -465,13 +465,14 @@ export interface WorkerProcessorOptions {
   model?: string;
   /** Reasoning effort level to apply (e.g. "low", "medium", "high"). */
   reasoningEffort?: string;
-  /** Generic per-worker agent options bag (resolved request+profile merge).
-   *  Each worker reads the keys it advertises — e.g. Copilot / VS Code read
-   *  `agentOptions.autopilot`. Named `agentOptions` (not `options`) to avoid an
-   *  `options.options` foot-gun at this worker-facing boundary; the queue
-   *  processor maps `RequestDocument.options` → `agentOptions`. Not every agent
-   *  honours every key (e.g. Claude Code advertises no options). */
-  agentOptions?: Record<string, unknown>;
+  /** Generic per-worker agent options bag (resolved request+profile merge),
+   *  passed straight through from `RequestDocument.options` (same field name at
+   *  every layer). Each worker reads the keys it advertises — e.g. Copilot /
+   *  VS Code read `options.autopilot`. Worker methods that read this bag name
+   *  their outer param `processorOptions` (so the access reads
+   *  `processorOptions.options.autopilot`, not `options.options`). Not every
+   *  agent honours every key (e.g. Claude Code advertises no options). */
+  options?: Record<string, unknown>;
   mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
   skillConfigs?: SkillConfig[];          // Resolved skill configurations for prompt injection
   extensionConfigs?: ExtensionConfig[];  // Resolved VS Code extension configurations for runtime installation

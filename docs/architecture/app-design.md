@@ -137,18 +137,20 @@ agent asks questions at all.
   controlled-field semantics, implemented as a **per-key merge**
   (`mergeAgentOptions(requestOptions, profileVersion.options)`) where **profile
   keys override request keys**. The resolved bag is stored on
-  `RequestDocument.options` and threaded by the queue-processor into
-  `WorkerProcessorOptions.agentOptions` (named `agentOptions` at the worker
-  boundary to avoid an `options.options` foot-gun).
+  `RequestDocument.options` and passed straight through by the queue-processor
+  into `WorkerProcessorOptions.options` — the same field name `options` at every
+  layer. Worker methods that read the bag name their outer parameter
+  `processorOptions`, so the access reads `processorOptions.options.autopilot`
+  rather than `options.options`.
 - **Per-worker native mapping:**
   - **Copilot / Copilot-Windows** (`coder-acp-copilot`): pass the native
-    `--autopilot` CLI flag only when `agentOptions.autopilot === true` (kept
+    `--autopilot` CLI flag only when `options.autopilot === true` (kept
     alongside `--yolo`, which is permissions-only); omit it otherwise. The runtime
     ACP `setSessionMode(#autopilot)` call is **unconditional** and independent of
     this option — it is a headless-execution/permissions concern (allowing the
     agent to run bash/builds non-interactively) that must always run, not a HITL
     toggle.
-    `agentOptions.autopilot === true` in the per-run settings (defaults to
+    `options.autopilot === true` in the per-run settings (defaults to
     `false`).
   - **Claude Code** (`coder-acp-claude-code`): no native autopilot toggle exists
     (only permission modes) and it advertises no options — a documented **no-op**.

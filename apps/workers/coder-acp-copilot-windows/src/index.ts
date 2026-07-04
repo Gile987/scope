@@ -96,12 +96,12 @@ class CopilotWindowsProcessor implements WorkerProcessor {
   async processMessage(
     message: string,
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
-    options?: WorkerProcessorOptions
+    processorOptions?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
     await log("info", "Starting Copilot ACP processor (Windows)", {
       inputLength: message.length,
-      model: options?.model,
-      autopilot: options?.agentOptions?.autopilot === true,
+      model: processorOptions?.model,
+      autopilot: processorOptions?.options?.autopilot === true,
     });
 
     // Proxy integration — start recording if enabled (gateway backend only)
@@ -142,8 +142,8 @@ class CopilotWindowsProcessor implements WorkerProcessor {
       // unconditionally in runACPSession. The Windows worker does not append a
       // reasoning-effort flag (parity with its prior behavior).
       const args = buildCopilotBaseArgs({
-        autopilot: options?.agentOptions?.autopilot === true,
-        model: options?.model,
+        autopilot: processorOptions?.options?.autopilot === true,
+        model: processorOptions?.model,
       });
 
       const result = await runACPSession(message, {
@@ -164,7 +164,7 @@ class CopilotWindowsProcessor implements WorkerProcessor {
           await log("debug", msg);
         },
         mcpServers: [],
-        model: options?.model,
+        model: processorOptions?.model,
       });
 
       await log("info", "Copilot processing complete", {

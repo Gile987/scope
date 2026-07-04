@@ -54,9 +54,10 @@ export interface MultiTurnConfig {
   /** Reasoning effort level to pass to the coding agent (e.g. "low", "medium", "high") */
   reasoningEffort?: string;
   /** Generic per-worker agent options bag (resolved request+profile merge),
-   *  forwarded verbatim to the processor. Each worker reads the keys it
-   *  advertises (e.g. Copilot / VS Code read `agentOptions.autopilot`). */
-  agentOptions?: Record<string, unknown>;
+   *  forwarded verbatim to the processor (same field name at every layer).
+   *  Each worker reads the keys it advertises (e.g. Copilot / VS Code read
+   *  `options.autopilot`). */
+  options?: Record<string, unknown>;
   /** Resolved MCP server configurations to pass to the coding agent */
   mcpServerConfigs?: McpServerConfig[];
   /** Resolved skill configurations to inject into the agent prompt */
@@ -115,7 +116,7 @@ export async function runMultiTurnLoop(
     personaInstructions,
     model,
     reasoningEffort,
-    agentOptions,
+    options,
     mcpServerConfigs,
     skillConfigs,
     extensionConfigs,
@@ -173,7 +174,7 @@ export async function runMultiTurnLoop(
     let turnChatResultFormat: string | undefined;
     const turnVideoUrls: string[] = [];
     try {
-      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, reasoningEffort, agentOptions, mcpServerConfigs, skillConfigs, extensionConfigs, iteration });
+      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, reasoningEffort, options, mcpServerConfigs, skillConfigs, extensionConfigs, iteration });
       codingResponse = workerResult.response;
       turnTokenUsage = workerResult.tokenUsage;
       turnAiCallCount = workerResult.aiCallCount;

@@ -109,14 +109,14 @@ class CopilotProcessor implements WorkerProcessor {
   async processMessage(
     message: string,
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
-    options?: WorkerProcessorOptions
+    processorOptions?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
-    const skillConfigs = options?.skillConfigs ?? [];
-    const autopilot = options?.agentOptions?.autopilot === true;
+    const skillConfigs = processorOptions?.skillConfigs ?? [];
+    const autopilot = processorOptions?.options?.autopilot === true;
     await log("info", "Starting Copilot ACP processor", {
       inputLength: message.length,
-      model: options?.model,
-      reasoningEffort: options?.reasoningEffort,
+      model: processorOptions?.model,
+      reasoningEffort: processorOptions?.reasoningEffort,
       autopilot,
       mcpServerCount: this.mcpConfigs.length,
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
@@ -166,8 +166,8 @@ class CopilotProcessor implements WorkerProcessor {
       // execution).
       const args = buildCopilotBaseArgs({
         autopilot,
-        model: options?.model,
-        reasoningEffort: options?.reasoningEffort,
+        model: processorOptions?.model,
+        reasoningEffort: processorOptions?.reasoningEffort,
       });
       // The Copilot CLI does not support MCP servers via ACP newSession.mcpServers
       // (agentCapabilities.mcpCapabilities is undefined). Instead, pass the gateway
@@ -188,8 +188,8 @@ class CopilotProcessor implements WorkerProcessor {
         },
         mcpServers: [],
         sessionTimeoutMs: process.env.ACP_SESSION_TIMEOUT_MS ? Number(process.env.ACP_SESSION_TIMEOUT_MS) : undefined,
-        model: options?.model,
-        reasoningEffort: options?.reasoningEffort,
+        model: processorOptions?.model,
+        reasoningEffort: processorOptions?.reasoningEffort,
       });
 
       await log("info", "Copilot processing complete", { 
