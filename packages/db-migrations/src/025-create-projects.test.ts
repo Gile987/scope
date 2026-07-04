@@ -137,6 +137,50 @@ describe("migration 025: CreateProjects", () => {
       });
       await expect(new CreateProjects().up(db)).rejects.toThrow(/duplicate/i);
     });
+
+    it("falls back to a non-unique index when Cosmos rejects a unique index on an empty, already-created collection (403 'cannot be modified')", async () => {
+      // Cosmos returns HTTP 403 (mapped to code 13) when asked to add a unique
+      // key policy to a collection that already exists — even when it is empty.
+      // This is distinct from the code-67 "populated" case and must ALSO degrade
+      // to a non-unique index rather than crash the migration.
+      const err: any = new Error(
+        "Error=13, Details='Forbidden (403): The unique index cannot be modified. " +
+          "To change the unique index, remove the collection and re-create a new one.'",
+      );
+      err.code = 13;
+      const skillRev = makeCollection();
+      skillRev.createIndex = vi.fn(async (key: any, options: any = {}) => {
+        if (options.unique) throw err;
+        return Object.keys(key).join("_");
+      });
+      const db = makeDb({ "skill-revisions": skillRev });
+
+      await expect(new CreateProjects().up(db)).resolves.toBeUndefined();
+
+      const calls = skillRev.createIndex.mock.calls;
+      const uniqueAttempt = calls.find(
+        ([k, o]: any[]) =>
+          JSON.stringify(k) === JSON.stringify({ projectId: 1, ref: 1 }) && o?.unique,
+      );
+      const nonUniqueFallback = calls.find(
+        ([k, o]: any[]) =>
+          JSON.stringify(k) === JSON.stringify({ projectId: 1, ref: 1 }) && !o?.unique,
+      );
+      expect(uniqueAttempt).toBeTruthy(); // it tried unique first
+      expect(nonUniqueFallback).toBeTruthy(); // then fell back to non-unique
+    });
+
+    it("re-throws a genuine authorization error (code 13) that is not the Cosmos unique-index signal", async () => {
+      const err: any = new Error("Error=13, not authorized on db to execute command");
+      err.code = 13;
+      const skillRev = makeCollection();
+      skillRev.createIndex = vi.fn(async (key: any, options: any = {}) => {
+        if (options.unique) throw err;
+        return Object.keys(key).join("_");
+      });
+      const db = makeDb({ "skill-revisions": skillRev });
+      await expect(new CreateProjects().up(db)).rejects.toThrow(/not authorized/i);
+    });
   });
 
   describe("down()", () => {

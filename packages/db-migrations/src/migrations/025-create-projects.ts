@@ -30,14 +30,15 @@
  *
  *      **Cosmos DB caveat (RU-based):** a unique index can only be created while
  *      the collection is empty / at creation time (via the CreateCollection
- *      extension command). `createIndex(..., {unique:true})` on a *populated*
- *      collection fails with code 67 (`CannotCreateIndex`). We therefore degrade
- *      gracefully: on code 67 we create a **non-unique** index on the same key
- *      (kept for lookup performance) and rely on the application-level
- *      `findOrCreate` for per-project dedup — which is already how these
- *      collections behave on Cosmos today (migration 003's unique `{ref}` index
- *      silently no-op'd there). Real MongoDB (local/CI) still gets true unique
- *      indexes, so unit/integration tests continue to assert uniqueness.
+ *      extension command). `createIndex(..., {unique:true})` on an already-created
+ *      collection fails either with code 67 (populated) or HTTP 403 "unique index
+ *      cannot be modified" (empty-but-created). We therefore degrade gracefully:
+ *      on either signal we create a **non-unique** index on the same key (kept for
+ *      lookup performance) and rely on the application-level `findOrCreate` for
+ *      per-project dedup — which is already how these collections behave on Cosmos
+ *      today (migration 003's unique `{ref}` index silently no-op'd there). Real
+ *      MongoDB (local/CI) still gets true unique indexes, so unit/integration
+ *      tests continue to assert uniqueness.
  *   5. Add scoping indexes `{projectId}` and `{projectId, _id}` on every scoped
  *      collection (supports the required `?projectId=` list filter).
  *
@@ -86,11 +87,32 @@ const ALREADY_EXISTS_CODES = new Set([85, 86, 68]);
 /** Index/namespace-not-found error codes. */
 const NOT_FOUND_CODES = new Set([26, 27]);
 /**
- * Azure Cosmos DB (RU-based) rejects unique-index creation on a *populated*
- * collection with code 67 (`CannotCreateIndex`, "Cannot create unique index
- * when collection contains documents"). Real MongoDB has no such restriction.
+ * Azure Cosmos DB (RU-based) refuses to create/modify a unique index on an
+ * *already-created* collection. This surfaces two different ways depending on
+ * collection state:
+ *   - **Populated** collection → code 67 (`CannotCreateIndex`, "Cannot create
+ *     unique index when collection contains documents").
+ *   - **Empty but already-created** collection → HTTP 403 Forbidden (mapped to
+ *     Mongo error code 13) with the message "The unique index cannot be
+ *     modified. To change the unique index, remove the collection and re-create
+ *     a new one." — because Cosmos fixes a collection's unique-key policy at
+ *     creation time (via the CreateCollection extension command) and will not
+ *     alter it afterwards, even when the collection holds no documents.
+ * Real MongoDB has neither restriction.
  */
 const CANNOT_CREATE_UNIQUE_ON_POPULATED = 67;
+
+/**
+ * True when `err` is Cosmos refusing a unique index because the collection
+ * already exists (populated → code 67, or empty-but-created → 403 "unique index
+ * cannot be modified"). Matched by message for the 403 case so a genuine
+ * authorization failure (also code 13) still surfaces instead of silently
+ * degrading to a non-unique index.
+ */
+function isCosmosUniqueIndexUnsupported(err: any): boolean {
+  if (err?.code === CANNOT_CREATE_UNIQUE_ON_POPULATED) return true;
+  return /unique index cannot be modified/i.test(String(err?.message ?? ""));
+}
 
 /** Create an index, tolerating "already exists" but surfacing real failures. */
 async function ensureIndex(
@@ -137,14 +159,15 @@ async function dropIndexSafe(
  * On real MongoDB the unique index is created and enforced. On Cosmos (RU-based)
  * a unique index can only be created while the collection is empty / at creation
  * time (via the CreateCollection extension command), so `createIndex(...,
- * {unique:true})` on a *populated* collection fails with code 67. In that case we
- * fall back to a **non-unique** index on the same key (kept for lookup
- * performance) and rely on the application-level `findOrCreate` for per-project
- * dedup — which is already how these collections have always behaved on Cosmos
- * (migration 003's unique `{ref}` index silently no-op'd there). A pre-flight
- * `assertNoCompositeDuplicates` guards data quality regardless of backend, and
- * genuine duplicate-key errors (code 11000, real MongoDB) are surfaced, not
- * swallowed.
+ * {unique:true})` on an already-created collection fails — with code 67 when it
+ * holds documents, or HTTP 403 "unique index cannot be modified" when it is empty
+ * but already created. In either case we fall back to a **non-unique** index on
+ * the same key (kept for lookup performance) and rely on the application-level
+ * `findOrCreate` for per-project dedup — which is already how these collections
+ * have always behaved on Cosmos (migration 003's unique `{ref}` index silently
+ * no-op'd there). A pre-flight `assertNoCompositeDuplicates` guards data quality
+ * regardless of backend, and genuine duplicate-key errors (code 11000, real
+ * MongoDB) are surfaced, not swallowed.
  */
 async function ensureUniqueIndexOrFallback(
   col: Collection,
@@ -160,13 +183,14 @@ async function ensureUniqueIndexOrFallback(
       console.log(`  [025] unique index ${JSON.stringify(key)} on ${label} already exists`);
       return;
     }
-    if (err?.code !== CANNOT_CREATE_UNIQUE_ON_POPULATED) {
+    if (!isCosmosUniqueIndexUnsupported(err)) {
       throw err;
     }
     console.warn(
-      `  [025] ⚠ ${label}: Cosmos DB cannot create a unique index on a populated ` +
-        `collection (code 67). Falling back to a NON-unique ${JSON.stringify(key)} ` +
-        `index; per-project uniqueness is enforced by the application (findOrCreate).`,
+      `  [025] ⚠ ${label}: Cosmos DB cannot create a unique index on an ` +
+        `already-created collection (code ${err?.code}: ${String(err?.message ?? "").slice(0, 80)}). ` +
+        `Falling back to a NON-unique ${JSON.stringify(key)} index; per-project ` +
+        `uniqueness is enforced by the application (findOrCreate).`,
     );
   }
   // Fallback path (Cosmos): create the same key as a non-unique lookup index.
