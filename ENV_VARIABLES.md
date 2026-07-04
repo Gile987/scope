@@ -150,6 +150,25 @@ references it via `contentBlobUrl` with no inline `text`. The decision is purely
 size-based — independent of the prompt's `type`. Small task prompts stay inline
 (today's behavior); large AGENTS.md bodies go to blob automatically.
 
+## Project Scoping Configuration
+
+Data Organization: Projects introduces a first-class **Project** container and an
+immutable `projectId` on every user-scoped entity. See
+[db.md § Project scoping (migration 025)](docs/architecture/db.md#project-scoping-migration-025)
+and [app-design.md § Data Organization: Projects](docs/architecture/app-design.md#data-organization-projects).
+
+### SCOPE_INITIAL_PROJECT_NAME
+**Default:** `Initial Project`
+**Type:** string
+**Used by:** DB migration `025-create-projects` (`packages/db-migrations`)
+
+Human-readable name given to the single **initial project** that migration 025
+seeds and files all pre-existing data into. Read once, only when the migration
+first creates the project (a fresh UUID `_id`, **no `isDefault` flag**). On a
+re-run the migration reuses the oldest existing project, so changing this value
+after the initial run has no effect. It is an ordinary, re-nameable project — not
+a fallback or default.
+
 ## Judge Strategy Configuration
 
 ### JUDGE_MODEL
