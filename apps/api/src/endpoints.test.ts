@@ -112,6 +112,61 @@ describe("API Endpoints", () => {
   });
 
   // ===================================================================
+  // Project scoping enforcement (Data Organization: Projects)
+  // A scoped list / root create with no ?projectId= must fail fast with
+  // 400 — there is no default project. Point reads by :id stay unscoped.
+  // ===================================================================
+
+  describe("project scoping enforcement", () => {
+    it("400s a top-level runs list with no projectId", async () => {
+      const res = await request(app).get("/api/v1/requests");
+      expect(res.status).toBe(400);
+    });
+
+    it("400s the runs facets endpoint with no projectId", async () => {
+      const res = await request(app).get("/api/v1/requests/facets");
+      expect(res.status).toBe(400);
+    });
+
+    it("400s a top-level criteria list with no projectId", async () => {
+      const res = await request(app).get("/api/v1/criteria");
+      expect(res.status).toBe(400);
+    });
+
+    it("400s a root criteria create with no projectId", async () => {
+      // findOne → null means this would 201 if scoping were not enforced.
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
+      const res = await request(app)
+        .post("/api/v1/criteria")
+        .send({ id: "unscoped_crit", prompt: "No project?", dependsOn: [] });
+      expect(res.status).toBe(400);
+    });
+
+    it("allows a point read by :id with no projectId (unscoped)", async () => {
+      const doc = { id: "c1", prompt: "Check it", dependsOn: [], createdAt: new Date() };
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue(doc);
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+      const res = await request(app).get("/api/v1/criteria/c1");
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBe("c1");
+    });
+
+    it("allows a scoped list once projectId is supplied", async () => {
+      const cursor = {
+        toArray: vi.fn().mockResolvedValue([]),
+        sort: vi.fn().mockReturnThis(),
+        skip: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+      };
+      (mocks.criteriaCollection.find as any).mockReturnValue(cursor);
+      const res = await request(app).get(`/api/v1/criteria?projectId=${TEST_PROJECT_ID}`);
+      expect(res.status).toBe(200);
+    });
+  });
+
+  // ===================================================================
   // Criteria endpoints
   // ===================================================================
 
