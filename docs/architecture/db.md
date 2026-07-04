@@ -7,6 +7,18 @@ MongoDB database (Cosmos DB for MongoDB RU in production, MongoDB 7.0 locally) s
 
 ## Collections
 
+### `projects`
+
+Top-level organizational container introduced by migration 025 (Data Organization: Projects). Every user-scoped entity carries an immutable `projectId` referencing a project. There is **no default project** — migration 025 seeds one ordinary, re-nameable initial project and files all pre-existing data into it. See [Project scoping (migration 025)](#project-scoping-migration-025) below.
+
+| Index | Key | Options | Migration |
+|-------|-----|---------|-----------|
+| `_id` | `{ _id: 1 }` | default | — |
+| `createdAt` | `{ createdAt: -1 }` | | 025 |
+| `deletedAt` | `{ deletedAt: 1 }` | | 025 |
+
+Key fields: `name`, `description?`, `creator?`, `createdAt`, `updatedAt?`, `deletedAt?`. No `isDefault` flag.
+
 ### `requests`
 
 Benchmark runs — the core entity. Each document represents a single coding agent run against a task.
@@ -27,12 +39,15 @@ Key fields: `status`, `outcome`, `workerType`, `taskPromptId`, `submissionId`, `
 
 ### `task-prompts`
 
-Canonical task definitions with prompt text. Runs link to a task prompt via `taskPromptId`.
+Canonical task definitions with prompt text. Runs link to a task prompt via `taskPromptId`. **Per-project copies:** `_id` is a fresh UUID and `keyId` holds the content-address `computePromptId(type, text)` (the value legacy `_id`s were built from), so identical prompt text yields one document per project. Migration 025 backfills `keyId = _id` on legacy docs.
 
 | Index | Key | Options | Migration |
 |-------|-----|---------|-----------|
 | `_id` | `{ _id: 1 }` | default | — |
 | `createdAt` | `{ createdAt: -1 }` | | 002 |
+| `projectId` | `{ projectId: 1 }` | | 025 |
+| `projectId__id` | `{ projectId: 1, _id: 1 }` | | 025 |
+| `projectId_keyId` | `{ projectId: 1, keyId: 1 }` | unique | 025 |
 
 ### `reports`
 
@@ -86,14 +101,17 @@ Agent skill definitions (source + name).
 
 ### `skill-revisions`
 
-Immutable revisions of agent skills, referenced by runs.
+Immutable revisions of agent skills, referenced by runs. **Per-project copies:** `_id` is a fresh UUID and `ref` (`{source}/{skillName}@{commit}`) is unique *within* a project. Migration 025 replaces the global `{ ref }` unique index with `{ projectId, ref }` unique.
 
 | Index | Key | Options | Migration |
 |-------|-----|---------|-----------|
 | `_id` | `{ _id: 1 }` | default | — |
-| `ref` | `{ ref: 1 }` | unique | 003 |
+| `ref` (dropped in 025) | `{ ref: 1 }` | was unique | 003 |
+| `projectId_ref` | `{ projectId: 1, ref: 1 }` | unique | 025 |
 | `source_skillName` | `{ source: 1, skillName: 1 }` | | 003 |
 | `resolvedAt` | `{ resolvedAt: -1 }` | | 003 |
+| `projectId` | `{ projectId: 1 }` | | 025 |
+| `projectId__id` | `{ projectId: 1, _id: 1 }` | | 025 |
 
 ### `prompt-features`
 
@@ -176,3 +194,18 @@ Production uses **Cosmos DB for MongoDB (RU-based)**. Key considerations:
 - **Single-field indexes over compound** — Cosmos DB for MongoDB RU uses index intersection for multi-property `$match` filters. Compound indexes are only needed for sort optimization.
 - **Sparse indexes** — used for optional fields (`submissionId`) to avoid indexing documents that lack the field.
 - **All index changes go through migrations** — see [db-migrations.md](db-migrations.md) for the migration framework.
+
+### Project scoping (migration 025)
+
+Migration 025 (Data Organization: Projects) adds an immutable `projectId` to every user-scoped collection and indexes it for the required `?projectId=` list filter. Each of the following gains `{ projectId: 1 }` and `{ projectId: 1, _id: 1 }`:
+
+`requests`, `profiles`, `criteria`, `prompt-features`, `mcp-servers`, `report-templates`, `skills`, `extensions`, `codebases`, `runs`, `profile-versions`, `codebase-revisions`, `reports`, `insights`, `task-prompts`, `skill-revisions`.
+
+Two deterministic-key collections additionally get project-scoped **unique** indexes so identical content can coexist across projects:
+
+- `task-prompts`: `{ projectId, keyId }` unique — replaces the global content-addressed `_id` uniqueness.
+- `skill-revisions`: `{ projectId, ref }` unique — replaces the global `{ ref }` unique.
+
+The migration **pre-asserts** there are no duplicate `{ projectId, keyId }` / `{ projectId, ref }` pairs before creating these unique indexes (a pre-existing collision would fail index creation on Cosmos). It seeds exactly one initial project (fresh UUID `_id`, **no `isDefault` flag**), reusing the oldest existing project on re-run for idempotency.
+
+Unscoped collections (`projects`, `agents`, `models`, `feature-flags`, `prompt-feature-extractions`, `accounts`, `_migrations`) do not carry `projectId`.
