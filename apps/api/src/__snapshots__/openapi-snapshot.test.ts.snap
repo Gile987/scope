@@ -4054,6 +4054,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/analysis": {
       "get": {
+        "description": "Aggregates pass@k / success@T metrics over a single project's done runs. Requires ?projectId=.",
         "parameters": [
           {
             "in": "query",
@@ -4100,6 +4101,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "k",
             "required": false,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },

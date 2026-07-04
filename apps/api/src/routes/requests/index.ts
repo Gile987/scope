@@ -1632,6 +1632,8 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/analysis",
   tags: ["Requests"],
   summary: "Compute pass@k / success@T metrics",
+  description:
+    "Aggregates pass@k / success@T metrics over a single project's done runs. Requires ?projectId=.",
   query: z.object({
     worker: z.string().optional(),
     taskPromptId: z.string().optional(),
@@ -1639,9 +1641,13 @@ apiRoute(ctx.app, ctx.registry, {
     features: z.string().optional(),
     submissionId: z.string().optional(),
     k: z.string().optional(),
-  }),
+  }).merge(ProjectIdQuerySchema),
   response: z.object({}).passthrough().describe("Analysis metrics"),
   handler: async (req, res) => {
+    // Scope every metric to the selected project — no cross-project aggregation
+    // (400 when ?projectId= is absent, mirroring the runs list / facets routes).
+    const projectId = getQueryProjectId(req);
+
     // Parse k values from query string (default: 1,2,5)
     const kParam = (req.query.k as string) || "1,2,5";
     const kValues = kParam.split(",").map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v) && v > 0);
@@ -1668,6 +1674,7 @@ apiRoute(ctx.app, ctx.registry, {
     // Fetch one extra (limit + 1) so we can detect "more exist" without a count.
     const runDocs = await ctx.requestCollection
       .find({
+        projectId,
         "run.status": "done",
         deletedAt: { $exists: false },
       })
