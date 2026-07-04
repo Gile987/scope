@@ -11,7 +11,7 @@
 // The agent can also close issues programmatically via the canvas actions below.
 
 import { createServer } from "node:http";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { execFile, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -19,7 +19,20 @@ import { joinSession, createCanvas } from "@github/copilot-sdk/extension";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UI_HTML = readFileSync(join(__dirname, "ui.html"), "utf8");
-const ISSUES = JSON.parse(readFileSync(join(__dirname, "data.json"), "utf8"));
+
+// The issue dataset is runtime/generated data, not source. It is loaded from
+// the session workspace's files/ dir after joinSession() resolves (see bottom
+// of this file), so it lives alongside the triage source (stale_issues.csv,
+// *_issues.json) instead of being committed to (or gitignored inside) the repo.
+let ISSUES = [];
+function loadIssues(file) {
+    try {
+        const raw = JSON.parse(readFileSync(file, "utf8"));
+        return Array.isArray(raw) ? raw : [];
+    } catch {
+        return [];
+    }
+}
 
 // Live close-state for issues WE closed this session, keyed by issue number.
 const closedState = new Set();
@@ -34,10 +47,12 @@ const remote = new Map();
 let remotePromise = null;
 
 // "Set aside" — issues the user reviewed and decided should NOT be closed.
-// This is a triage decision with no GitHub equivalent, so we persist it locally
-// (JSON file next to the extension, gitignored) to survive extension reloads.
-const ASIDE_FILE = join(__dirname, "aside-state.json");
-const asideState = new Set(loadAside());
+// This is a triage decision with no GitHub equivalent, so we persist it in the
+// session workspace's files/ dir (resolved after joinSession, see bottom of this
+// file) to survive extension reloads. The value below is only the fallback path
+// used when infinite sessions are disabled and no workspace dir is available.
+let ASIDE_FILE = join(__dirname, "aside-state.json");
+const asideState = new Set();
 function loadAside() {
     try {
         const raw = JSON.parse(readFileSync(ASIDE_FILE, "utf8"));
@@ -356,3 +371,23 @@ const session = await joinSession({
         }),
     ],
 });
+
+// Now that the session exists, resolve where runtime data lives and load it.
+// Prefer the session workspace's files/ dir (~/.copilot/session-state/<id>/files)
+// so the dataset and set-aside state sit next to the triage source and never
+// touch the repo. Fall back to the extension dir when infinite sessions are
+// disabled (workspacePath is undefined then).
+const DATA_DIR = session.workspacePath
+    ? join(session.workspacePath, "files")
+    : __dirname;
+try { mkdirSync(DATA_DIR, { recursive: true }); } catch { /* ignore */ }
+ASIDE_FILE = join(DATA_DIR, "aside-state.json");
+ISSUES = loadIssues(join(DATA_DIR, "data.json"));
+for (const n of loadAside()) asideState.add(n);
+if (ISSUES.length === 0) {
+    session.log(
+        `No data.json in ${DATA_DIR}; the canvas will show no issues until the ` +
+        `triage dataset is generated there.`,
+    );
+}
+session.log(`Data dir ${DATA_DIR}: ${ISSUES.length} issues, ${asideState.size} set aside`);
