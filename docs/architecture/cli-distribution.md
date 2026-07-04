@@ -111,7 +111,41 @@ normalization, the single `401` re-auth retry, redacted logging, and `ApiError`
 shaping. `update-check.ts` stays on raw `fetch` precisely because it must bypass that
 auth hook.
 
+For **scoped** operations the facade also appends the resolved project as a
+`?projectId=` query param (see _Project scoping_ below): pass `{ projectId }` in the
+`apiFetch` init and it is URL-encoded onto the query and stripped from the ky init (a
+blank value is a no-op). This is the single seam through which every scoped command
+inherits project scoping.
+
 Source: `apps/cli/src/utils/update-check.ts`
+
+## Project scoping
+
+Every user-facing entity carries an immutable `projectId`
+([Data Organization: Projects](./app-design.md#data-organization-projects)), so the
+CLI must know **which** project a scoped command targets. The `scope project` group
+manages the selection:
+
+| Command | Purpose |
+|---------|---------|
+| `scope project list` | List projects |
+| `scope project create <name>` | Create a project |
+| `scope project use <id>` | Persist the selected project to `~/.config/scope/config.json` |
+| `scope project show` | Show the currently selected project |
+
+Scoped commands (`run list`/`run submit`, and every entity `list`/`search`/`create`/
+`import`) resolve the effective project with this precedence:
+
+1. `--project <id>` flag (per-invocation override)
+2. `SCOPE_PROJECT` environment variable
+3. the saved selection from `scope project use <id>`
+
+There is **no default project**. When none of these resolves, scoped commands
+**fail fast**: `requireProjectId()` throws and the top-level handler in `index.ts`
+prints a clean `Error: No project selected…` line and exits `1` — no request is
+issued. Point reads and by-`_id` mutations (e.g. `run get -i <id>`) are globally
+unique and need no project. See
+[`SCOPE_PROJECT`](../../ENV_VARIABLES.md#scope_project) for the env-var reference.
 
 ## Local development vs bundled
 

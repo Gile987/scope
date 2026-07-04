@@ -157,6 +157,19 @@ immutable `projectId` on every user-scoped entity. See
 [db.md § Project scoping (migration 025)](docs/architecture/db.md#project-scoping-migration-025)
 and [app-design.md § Data Organization: Projects](docs/architecture/app-design.md#data-organization-projects).
 
+### SCOPE_PROJECT
+**Default:** _none_
+**Type:** string (project ID)
+**Used by:** CLI (`apps/cli`)
+
+Project ID the CLI uses to scope commands when `--project` is omitted.
+Resolution precedence is `--project <id>` → `SCOPE_PROJECT` → the saved selection
+from `scope project use <id>` (persisted in `~/.config/scope/config.json`). There
+is **no default project**: if none of these resolves, scoped lists and creates
+**fail fast** with an error asking you to pick a project
+(`scope project use <id>`). Point reads by `_id` (e.g. `run get -i <id>`) are
+globally unique and do not require a project.
+
 ### SCOPE_INITIAL_PROJECT_NAME
 **Default:** `Initial Project`
 **Type:** string
