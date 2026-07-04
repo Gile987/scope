@@ -202,6 +202,23 @@ pnpm dev:coder-acp-copilot
 pnpm dev:coder-acp-claude-code
 ```
 
+### Secret scanning
+
+CI scans every pull request and push for committed secrets with
+[gitleaks](https://github.com/gitleaks/gitleaks) (see
+[`.github/workflows/gitleaks.yml`](.github/workflows/gitleaks.yml)). Known-benign false
+positives — public dev/emulator keys, container image tags and test fixtures — are
+allowlisted in [`.gitleaks.toml`](.gitleaks.toml). To reproduce the scan locally before
+pushing (install the [gitleaks CLI](https://github.com/gitleaks/gitleaks#installing) first):
+
+```bash
+# Full history — matches the push / scheduled CI job
+gitleaks git . --log-opts="--all" --config .gitleaks.toml --redact
+
+# Only your branch's new commits — matches the pull_request CI job
+gitleaks git . --log-opts="main..HEAD" --config .gitleaks.toml --redact
+```
+
 ### VS Code Shortcuts
 
 The repo includes `.vscode/launch.json` and `.vscode/tasks.json` for common dev workflows:
