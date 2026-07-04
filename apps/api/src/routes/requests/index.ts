@@ -1955,6 +1955,17 @@ apiRoute(ctx.app, ctx.registry, {
           }
         }
 
+        // Validate the resolved options bag against the effective worker's
+        // advertised descriptors — the effective worker can differ from the
+        // original run's (via a workerType override or a newly-attached
+        // profile), so the previously-stored options may be invalid here.
+        // Mirrors the validation on the initial-submit paths.
+        const resubmitOptionsCheck = validateAgentOptions(effectiveOptions, agentDoc?.options);
+        if (!resubmitOptionsCheck.success) {
+          res.status(400).json({ error: `Invalid options for worker "${effectiveWorkerType}": ${resubmitOptionsCheck.error}` });
+          return;
+        }
+
         const newDoc: RequestDocument = {
           _id: requestId,
           scenario: original.scenario,
