@@ -28,6 +28,7 @@ import { CodebasePicker } from "@/components/CodebasePicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { ProfileCreateForm } from "@/components/ProfileCreateForm";
 import { ProfilePicker } from "@/components/ProfilePicker";
+import { AgentOptionsFields } from "@/components/AgentOptionsFields";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { AdvancedSection } from "@/components/AdvancedSection";
 import { AdvancedModeToggle } from "@/components/AdvancedModeToggle";
@@ -200,6 +201,7 @@ export function SubmitRun() {
   const [worker, setWorker] = useState<string>("coder-acp-copilot");
   const [model, setModel] = useState<string>("");
   const [reasoningEffort, setReasoningEffort] = useState<string>("");
+  const [options, setOptions] = useState<Record<string, unknown>>({});
   const [maxIterations, setMaxIterations] = useState<number>(10);
   const [gateDrafts, setGateDrafts] = useState<Record<Exclude<GateId, "select">, GateDraft>>(() => ({
     build: createGateDraft(10),
@@ -297,6 +299,7 @@ export function SubmitRun() {
     } else {
       setModel("");
     }
+    setOptions({});
     if (!worker.includes("vscode")) {
       setSelectedExtensions([]);
     }
@@ -345,6 +348,7 @@ export function SubmitRun() {
     setWorker(v.workerType);
     setModel(v.model);
     setReasoningEffort(v.reasoningEffort ?? "");
+    setOptions(v.options ?? {});
     setSelectedAgentVersion(v.agentVersion ?? "");
     setSelectedMcpServers(v.mcpServers ?? []);
     setSelectedSkills(v.skillRevisions ?? []);
@@ -463,6 +467,7 @@ export function SubmitRun() {
     if (run.scenario?.criteria) setPickedCriteria(run.scenario.criteria);
     setWorker(run.workerType);
     if (run.model) setModel(run.model);
+    if (run.options) setOptions(run.options);
     if (run.agentVersion) setSelectedAgentVersion(run.agentVersion);
     if (run.maxIterations) setMaxIterations(run.maxIterations);
     setGateDrafts(() => {
@@ -526,6 +531,7 @@ export function SubmitRun() {
         name: saveProfileName.trim(),
         workerType: worker,
         model,
+        ...(Object.keys(options).length > 0 ? { options } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
         ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
@@ -626,6 +632,7 @@ export function SubmitRun() {
       ...(inVariationMode ? {} : { ...(worker ? { worker } : {}) }),
       ...(inVariationMode ? {} : { ...(model ? { model } : {}) }),
       ...(inVariationMode ? {} : { ...(reasoningEffort ? { reasoningEffort } : {}) }),
+      ...(inVariationMode ? {} : { ...(Object.keys(options).length > 0 ? { options } : {}) }),
       maxIterations,
       ...(gatesEnabled ? { gates: gateConfigs } : {}),
       ...(priority !== 0 ? { priority } : {}),
@@ -1613,6 +1620,13 @@ export function SubmitRun() {
                   workerEffortWarning={workerEffortWarning}
                 />
               </div>
+            )}
+            {!profileLocked && (
+              <AgentOptionsFields
+                descriptors={selectedAgent?.options}
+                values={options}
+                onChange={setOptions}
+              />
             )}
           </div>
 

@@ -11,9 +11,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Switch } from "@/components/ui/switch";
 import { SkillPicker } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
+import { AgentOptionsFields } from "@/components/AgentOptionsFields";
 import { useModelCapabilities, useReasoningEffort, ReasoningEffortSelect, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Loader2, Save } from "lucide-react";
@@ -27,7 +27,7 @@ export function NewProfileVersion() {
   const [worker, setWorker] = useState("");
   const [model, setModel] = useState("");
   const [reasoningEffort, setReasoningEffort] = useState("");
-  const [autopilot, setAutopilot] = useState(false);
+  const [options, setOptions] = useState<Record<string, unknown>>({});
   const [selectedAgentVersion, setSelectedAgentVersion] = useState("");
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
@@ -58,7 +58,7 @@ export function NewProfileVersion() {
       setWorker(profile.version.workerType);
       setModel(profile.version.model);
       setReasoningEffort(profile.version.reasoningEffort ?? "");
-      setAutopilot(profile.version.autopilot === true);
+      setOptions(profile.version.options ?? {});
       setSelectedAgentVersion(profile.version.agentVersion ?? "");
       setSelectedMcpServers(profile.version.mcpServers ?? []);
       setSelectedSkills(profile.version.skillRevisions ?? []);
@@ -106,7 +106,7 @@ export function NewProfileVersion() {
     mutationFn: () => api.createProfileVersion(profileId!, {
       workerType: worker,
       model,
-      autopilot,
+      ...(Object.keys(options).length > 0 ? { options } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
@@ -143,11 +143,13 @@ export function NewProfileVersion() {
   }
 
   const ev = profile?.version;
+  const canonOptions = (o: Record<string, unknown>) =>
+    JSON.stringify(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
   const hasChanges = !!ev && (
     worker !== ev.workerType ||
     model !== ev.model ||
     (reasoningEffort || "") !== (ev.reasoningEffort || "") ||
-    autopilot !== (ev.autopilot === true) ||
+    canonOptions(options) !== canonOptions(ev.options ?? {}) ||
     (selectedAgentVersion || "") !== (ev.agentVersion || "") ||
     JSON.stringify([...selectedMcpServers].sort()) !== JSON.stringify([...(ev.mcpServers ?? [])].sort()) ||
     JSON.stringify([...selectedSkills].sort()) !== JSON.stringify([...(ev.skillRevisions ?? [])].sort()) ||
@@ -180,7 +182,7 @@ export function NewProfileVersion() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="worker">Worker *</Label>
-            <Select value={worker} onValueChange={(v) => { setWorker(v); setModel(""); setSelectedAgentVersion(""); }}>
+            <Select value={worker} onValueChange={(v) => { setWorker(v); setModel(""); setSelectedAgentVersion(""); setOptions({}); }}>
               <SelectTrigger id="worker">
                 <SelectValue placeholder="Select a worker" />
               </SelectTrigger>
@@ -216,17 +218,11 @@ export function NewProfileVersion() {
             workerEffortWarning={workerEffortWarning}
           />
 
-          <div className="flex items-center justify-between rounded-md border p-3">
-            <div className="space-y-0.5 pr-4">
-              <Label htmlFor="autopilot">Autopilot mode</Label>
-              <p className="text-xs text-muted-foreground">
-                Run the agent in its native autopilot mode — fully autonomous, never
-                pausing to ask clarifying questions. Off by default; leave off for
-                interactive runs.
-              </p>
-            </div>
-            <Switch id="autopilot" checked={autopilot} onCheckedChange={setAutopilot} />
-          </div>
+          <AgentOptionsFields
+            descriptors={selectedAgent?.options}
+            values={options}
+            onChange={setOptions}
+          />
 
           {sortedVersions.length > 0 && (
             <div className="space-y-2">

@@ -5,6 +5,7 @@ import type { McpServerConfig } from './mcp.js';
 import type { SkillConfig } from './skill.js';
 import type { ExtensionConfig } from './extension.js';
 import type { ToolCall } from '../har/types.js';
+import type { AgentOptionDescriptor } from '../schemas/agent-options.js';
 
 // Re-export ToolCall so consumers can import from types
 export type { ToolCall } from '../har/types.js';
@@ -237,7 +238,8 @@ export interface CodingAgentDocument {
   supportedModels: string[];  // Empty array = model selection disabled
   defaultModel?: string;
   available?: boolean;        // Whether this agent is available for new submissions (default: true)
-  capabilities?: AgentCapabilities;  // Worker-level capabilities
+  capabilities?: AgentCapabilities;  // Worker-level capability gates on model dimensions (e.g. supportsReasoningEffort)
+  options?: AgentOptionDescriptor[]; // Per-worker agent options this worker advertises it accepts (rendered by portal, validated by API). Distinct from capability gates.
   versions?: AgentVersion[];  // Registered agent versions (embedded array)
   createdAt: Date;
   updatedAt?: Date;
@@ -271,7 +273,7 @@ export interface RequestDocument {
   workerType: string;
   model?: string;              // Model selected for this run
   reasoningEffort?: string;    // User-selected reasoning effort level (informational / validated)
-  autopilot?: boolean;         // Resolved from the profile version. Run the agent in native autopilot mode (autonomous, no HITL questions). Opt-in; undefined = default (off/interactive)
+  options?: Record<string, unknown>; // Resolved per-worker agent options bag (request+profile merged; validated per-worker). E.g. { autopilot: true }
   createdAt: Date;
   updatedAt?: Date;
   // Multi-turn fields
@@ -463,11 +465,13 @@ export interface WorkerProcessorOptions {
   model?: string;
   /** Reasoning effort level to apply (e.g. "low", "medium", "high"). */
   reasoningEffort?: string;
-  /** Run the agent in its native autopilot mode (autonomous, no human-in-the-loop
-   *  questions) when explicitly true. Opt-in: undefined/false leaves the agent in
-   *  its default interactive mode (backward-compatible). Not every agent has a
-   *  native autopilot equivalent (e.g. Claude Code). */
-  autopilot?: boolean;
+  /** Generic per-worker agent options bag (resolved request+profile merge).
+   *  Each worker reads the keys it advertises — e.g. Copilot / VS Code read
+   *  `agentOptions.autopilot`. Named `agentOptions` (not `options`) to avoid an
+   *  `options.options` foot-gun at this worker-facing boundary; the queue
+   *  processor maps `RequestDocument.options` → `agentOptions`. Not every agent
+   *  honours every key (e.g. Claude Code advertises no options). */
+  agentOptions?: Record<string, unknown>;
   mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
   skillConfigs?: SkillConfig[];          // Resolved skill configurations for prompt injection
   extensionConfigs?: ExtensionConfig[];  // Resolved VS Code extension configurations for runtime installation

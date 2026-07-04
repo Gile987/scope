@@ -300,10 +300,12 @@ export function ProfileDetail() {
                     <FieldLabel>Model</FieldLabel>
                     <p className="font-mono text-sm">{displayVersion.model}</p>
                   </div>
-                  <div>
-                    <FieldLabel>Autopilot</FieldLabel>
-                    <p className="font-mono text-sm">{displayVersion.autopilot === true ? "On" : "Off"}</p>
-                  </div>
+                  {Object.entries(displayVersion.options ?? {}).map(([key, val]) => (
+                    <div key={key}>
+                      <FieldLabel>{key}</FieldLabel>
+                      <p className="font-mono text-sm">{String(val)}</p>
+                    </div>
+                  ))}
                   {displayVersion.reasoningEffort && (
                     <div>
                       <FieldLabel>Reasoning Effort</FieldLabel>

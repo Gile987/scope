@@ -314,9 +314,9 @@ describe("request schemas", () => {
       expect(result.run).toBeUndefined();
     });
 
-    it("carries the autopilot flag when present", () => {
-      const result = RequestResponseSchema.parse({ ...minimal, autopilot: false });
-      expect(result.autopilot).toBe(false);
+    it("carries the options bag when present", () => {
+      const result = RequestResponseSchema.parse({ ...minimal, options: { autopilot: false } });
+      expect(result.options?.autopilot).toBe(false);
     });
 
     it("rejects missing _id", () => {

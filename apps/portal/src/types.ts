@@ -122,9 +122,9 @@ export interface Run {
   workerType: string;
   model?: string;
   reasoningEffort?: string;
-  /** Resolved from the profile version. Native autopilot mode (autonomous, no
-   *  HITL questions). Opt-in; undefined resolves to off/interactive. */
-  autopilot?: boolean;
+  /** Resolved per-worker agent options bag (request+profile merged; validated
+   *  per-worker). E.g. `{ autopilot: true }`. */
+  options?: Record<string, unknown>;
   agentVersion?: string;
   /** Per-attempt mutable state for the current attempt. */
   run?: RunState;
@@ -701,6 +701,22 @@ export interface AgentCapabilities {
   supportsReasoningEffort?: boolean;
 }
 
+// Value types an advertised agent option can take
+export type AgentOptionType = "boolean" | "string" | "number" | "enum";
+
+// Descriptor for a single per-worker agent option a worker advertises it accepts.
+// Distinct from AgentCapabilities gates: an option is a user-picked agent
+// behavioral value, not a model-dimension gate. The portal renders these
+// dynamically for the selected worker; the API validates submitted bags against them.
+export interface AgentOptionDescriptor {
+  key: string;
+  type: AgentOptionType;
+  label: string;
+  description?: string;
+  default?: unknown;
+  enum?: string[];
+}
+
 // Coding Agent types
 export interface CodingAgent {
   _id: string;
@@ -711,6 +727,7 @@ export interface CodingAgent {
   defaultModel?: string;
   available?: boolean;
   capabilities?: AgentCapabilities;
+  options?: AgentOptionDescriptor[];
   versions?: AgentVersion[];
   createdAt: string;
   updatedAt?: string;
@@ -1015,7 +1032,7 @@ export interface ProfileVersionDocument {
   workerType: string;
   model: string;
   reasoningEffort?: string;
-  autopilot?: boolean;
+  options?: Record<string, unknown>;
   agentVersion?: string;
   mcpServers?: string[];
   skillRevisions?: string[];

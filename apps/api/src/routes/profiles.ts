@@ -11,6 +11,7 @@ import {
   ProfileWithVersionResponseSchema,
   ExtensionClient,
   parseExtensionSpec,
+  validateAgentOptions,
 } from "shared";
 import type { ProfileDocument, ProfileVersionDocument } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
@@ -34,7 +35,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: ProfileWithVersionResponseSchema,
   handler: async (req, res, next) => {
     try {
-      const { name, description, workerType, model, reasoningEffort, autopilot, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
+      const { name, description, workerType, model, reasoningEffort, options, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
 
       // Extensions are only supported by VS Code workers
       if (extensions && extensions.length > 0 && !workerType.includes("vscode")) {
@@ -54,6 +55,15 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(agentCheck.status).json(payload);
         return;
       }
+
+      // Validate the generic options bag against the worker's advertised
+      // option descriptors (unknown keys / wrong types are rejected).
+      const optionsCheck = validateAgentOptions(workerType, options, agentCheck.agent.options);
+      if (!optionsCheck.success) {
+        res.status(400).json({ error: `Invalid options for worker "${workerType}": ${optionsCheck.error}` });
+        return;
+      }
+      const resolvedOptions = Object.keys(optionsCheck.data).length > 0 ? optionsCheck.data : undefined;
 
       const now = new Date();
       const profileId = uuidv4();
@@ -106,7 +116,7 @@ apiRoute(ctx.app, ctx.registry, {
         workerType,
         model,
         ...(reasoningEffort ? { reasoningEffort } : {}),
-        ...(autopilot !== undefined ? { autopilot } : {}),
+        ...(resolvedOptions ? { options: resolvedOptions } : {}),
         ...(agentVersion ? { agentVersion } : {}),
         ...(mcpServers && mcpServers.length > 0 ? { mcpServers } : {}),
         ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
@@ -261,7 +271,7 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
 
-      const { workerType, model, reasoningEffort, autopilot, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
+      const { workerType, model, reasoningEffort, options, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
 
       // Extensions are only supported by VS Code workers
       if (extensions && extensions.length > 0 && !workerType.includes("vscode")) {
@@ -280,6 +290,15 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(agentCheck.status).json(payload);
         return;
       }
+
+      // Validate the generic options bag against the worker's advertised
+      // option descriptors (unknown keys / wrong types are rejected).
+      const optionsCheck = validateAgentOptions(workerType, options, agentCheck.agent.options);
+      if (!optionsCheck.success) {
+        res.status(400).json({ error: `Invalid options for worker "${workerType}": ${optionsCheck.error}` });
+        return;
+      }
+      const resolvedOptions = Object.keys(optionsCheck.data).length > 0 ? optionsCheck.data : undefined;
 
       const now = new Date();
       const newVersion = profile.latestVersion + 1;
@@ -324,7 +343,7 @@ apiRoute(ctx.app, ctx.registry, {
         workerType,
         model,
         ...(reasoningEffort ? { reasoningEffort } : {}),
-        ...(autopilot !== undefined ? { autopilot } : {}),
+        ...(resolvedOptions ? { options: resolvedOptions } : {}),
         ...(agentVersion ? { agentVersion } : {}),
         ...(mcpServers && mcpServers.length > 0 ? { mcpServers } : {}),
         ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),

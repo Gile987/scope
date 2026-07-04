@@ -37,6 +37,8 @@ import {
   isCriterionCompatibleWithGate,
   orderGates,
   computeTaskPromptId,
+  validateAgentOptions,
+  mergeAgentOptions,
 } from "shared";
 import type { ProfileDocument, ProfileVersionDocument, GateConfig, GateId } from "shared";
 import { apiRoute } from "../../openapi/api-route.js";
@@ -277,7 +279,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, agentsMd: requestedAgentsMd, agentsMdParentIds: requestedAgentsMdParentIds, gates: requestedGates, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, options: requestedOptions, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, agentsMd: requestedAgentsMd, agentsMdParentIds: requestedAgentsMdParentIds, gates: requestedGates, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId } = req.body;
     let worker = req.query.worker as string | undefined;
 
     // AGENTS.md body + lineage (for any caller that wants to attach an
@@ -622,6 +624,17 @@ apiRoute(ctx.app, ctx.registry, {
       const agentsMdFields = buildAgentsMdFields(agentsMdPromptId);
 
       for (const r of resolved) {
+        // Per-key merge of request-level options with this variation's profile
+        // options (profile keys win) — mirrors the reasoningEffort precedence.
+        const variationOptions = mergeAgentOptions(requestedOptions, r.profileVersion.options);
+        // Validate the merged bag against the variation worker's advertised
+        // options (profile options were already validated at creation, but the
+        // request-level bag has not been checked against this worker).
+        const variationOptionsCheck = validateAgentOptions(r.workerType, variationOptions);
+        if (!variationOptionsCheck.success) {
+          res.status(400).json({ error: `Invalid options for worker "${r.workerType}": ${variationOptionsCheck.error}` });
+          return;
+        }
         const newIds: string[] = [];
         for (let i = 0; i < count; i++) {
           const requestId = uuidv4();
@@ -640,7 +653,7 @@ apiRoute(ctx.app, ctx.registry, {
             ...((r.profileVersion.reasoningEffort ?? requestedReasoningEffort)
               ? { reasoningEffort: r.profileVersion.reasoningEffort ?? requestedReasoningEffort }
               : {}),
-            autopilot: r.profileVersion.autopilot === true,
+            ...(variationOptions ? { options: variationOptions } : {}),
             ...(maxIterations ? { maxIterations } : {}),
             ...(personaInstructions ? { personaInstructions } : {}),
             ...(personaObj ? { persona: personaObj } : {}),
@@ -763,11 +776,13 @@ apiRoute(ctx.app, ctx.registry, {
     // Effective values: profile overrides client inputs for controlled fields
     const effectiveModel = profileVersion ? profileVersion.model : requestedModel;
     const effectiveReasoningEffort = profileVersion?.reasoningEffort ? profileVersion.reasoningEffort : requestedReasoningEffort;
-    // Autopilot is a profile-controlled field (placement: profile only). It is
-    // opt-in and defaults to OFF (interactive) for backward compatibility — an
-    // unset profile field or a profile-less run resolves to false. Only an
-    // explicit `true` on the profile enables the agent's native autopilot mode.
-    const effectiveAutopilot = profileVersion ? profileVersion.autopilot === true : false;
+    // Generic per-worker agent options (e.g. { autopilot }). Placement is
+    // request-level: options are a request input that the profile refines via a
+    // per-key merge (profile keys override request keys) — mirroring how model /
+    // reasoningEffort / mcpServers / skills / extensions are controlled fields.
+    // Backward-compatible: unset on both sides resolves to undefined (defaults
+    // applied by each worker).
+    const effectiveOptions = mergeAgentOptions(requestedOptions, profileVersion?.options);
     const effectiveMcpServers = profileVersion ? (profileVersion.mcpServers ?? undefined) : mcpServerSlugs;
     const effectiveSkills = profileVersion ? (profileVersion.skillRevisions ?? undefined) : skillSlugs;
     const effectiveExtensions = profileVersion ? (profileVersion.extensions ?? undefined) : extensionIds;
@@ -951,6 +966,16 @@ apiRoute(ctx.app, ctx.registry, {
       );
     }
 
+    // Validate the resolved generic options bag against the worker's advertised
+    // option descriptors (unknown keys / wrong types are rejected). Mirrors the
+    // per-worker validation done on profile create; here it covers request-level
+    // options and the merged request+profile result.
+    const optionsCheck = validateAgentOptions(workerType, effectiveOptions, agentDoc?.options);
+    if (!optionsCheck.success) {
+      res.status(400).json({ error: `Invalid options for worker "${workerType}": ${optionsCheck.error}` });
+      return;
+    }
+
     // Validate MCP server slugs if provided
     let validatedMcpServers: string[] | undefined;
     if (effectiveMcpServers !== undefined) {
@@ -1079,7 +1104,7 @@ apiRoute(ctx.app, ctx.registry, {
           priority: requestedPriority ?? 0,
           ...(model ? { model } : {}),
           ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
-          autopilot: effectiveAutopilot,
+          ...(effectiveOptions ? { options: effectiveOptions } : {}),
           ...(maxIterations ? { maxIterations } : {}),
           ...(personaInstructions ? { personaInstructions } : {}),
           ...(personaObj ? { persona: personaObj } : {}),
@@ -1141,7 +1166,7 @@ apiRoute(ctx.app, ctx.registry, {
       priority: requestedPriority ?? 0,
       ...(model ? { model } : {}),
       ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
-      autopilot: effectiveAutopilot,
+      ...(effectiveOptions ? { options: effectiveOptions } : {}),
       ...(maxIterations ? { maxIterations } : {}),
       ...(personaInstructions ? { personaInstructions } : {}),
       ...(personaObj ? { persona: personaObj } : {}),
@@ -1888,13 +1913,12 @@ apiRoute(ctx.app, ctx.registry, {
         const effectiveReasoningEffort = activeProfileVersion?.reasoningEffort
           ? activeProfileVersion.reasoningEffort
           : (overrides?.reasoningEffort !== undefined ? overrides.reasoningEffort : original.reasoningEffort);
-        // Autopilot is profile-controlled (profile-only placement) and opt-in
-        // (default OFF). Resolve from the active profile version when present,
-        // else fall back to the original request's stored value. Only an explicit
-        // `true` enables it; unset resolves to false (backward-compatible).
-        const effectiveAutopilot = activeProfileVersion
-          ? activeProfileVersion.autopilot === true
-          : original.autopilot === true;
+        // Generic per-worker agent options. Resolve with the same request+profile
+        // precedence used at initial submit: the original request's stored options
+        // are the request-level base, refined by a per-key merge with the active
+        // profile version's options (profile keys win). Backward-compatible: unset
+        // on both sides resolves to undefined.
+        const effectiveOptions = mergeAgentOptions(original.options, activeProfileVersion?.options);
         const effectiveMaxIterations = overrides?.maxIterations !== undefined ? overrides.maxIterations : original.maxIterations;
         const effectiveMcpServers = activeProfileVersion
           ? (activeProfileVersion.mcpServers ?? null)
@@ -1939,7 +1963,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(original.persona ? { persona: original.persona } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
-          autopilot: effectiveAutopilot,
+          ...(effectiveOptions ? { options: effectiveOptions } : {}),
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
           ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(isVscodeWorker && effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),

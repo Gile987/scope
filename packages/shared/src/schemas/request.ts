@@ -5,6 +5,7 @@ import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 import { ScenarioSchema, PersonaSchema } from "./scenario.js";
 import { GateIdSchema } from "./criteria.js";
+import { AgentOptionsSchema } from "./agent-options.js";
 
 extendZodWithOpenApi(z);
 
@@ -119,6 +120,10 @@ export const CreateRequestInputSchema = z
     scenario: ScenarioSchema,
     model: z.string().optional(),
     reasoningEffort: z.string().optional(),
+    /** Generic per-worker agent options bag (validated per-worker by the API).
+     *  A request-level input resolved against the profile via a per-key merge
+     *  (profile keys override request keys). */
+    options: AgentOptionsSchema.optional(),
     maxIterations: z.number().int().min(1).max(50).optional(),
     personaInstructions: z.string().optional(),
     persona: PersonaSchema.optional(),
@@ -148,7 +153,8 @@ export const RequestResponseSchema = z
     workerType: z.string(),
     model: z.string().optional(),
     reasoningEffort: z.string().optional(),
-    autopilot: z.boolean().optional(),
+    /** Resolved per-worker agent options bag (request+profile merged). */
+    options: AgentOptionsSchema.optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     maxIterations: z.number().optional(),

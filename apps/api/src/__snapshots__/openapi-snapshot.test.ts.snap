@@ -23,6 +23,41 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "type": "object",
       },
+      "AgentOptionDescriptor": {
+        "properties": {
+          "default": {},
+          "description": {
+            "type": "string",
+          },
+          "enum": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "key": {
+            "type": "string",
+          },
+          "label": {
+            "type": "string",
+          },
+          "type": {
+            "enum": [
+              "boolean",
+              "string",
+              "number",
+              "enum",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "key",
+          "type",
+          "label",
+        ],
+        "type": "object",
+      },
       "AgentResponse": {
         "properties": {
           "_id": {
@@ -59,6 +94,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "name": {
             "type": "string",
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/AgentOptionDescriptor",
+            },
+            "type": "array",
           },
           "supportedModels": {
             "items": {
@@ -615,6 +656,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "name": {
             "type": "string",
           },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/AgentOptionDescriptor",
+            },
+            "type": "array",
+          },
           "supportedModels": {
             "items": {
               "type": "string",
@@ -733,9 +780,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "agentVersion": {
             "type": "string",
           },
-          "autopilot": {
-            "type": "boolean",
-          },
           "description": {
             "maxLength": 512,
             "type": "string",
@@ -759,6 +803,10 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "maxLength": 128,
             "minLength": 1,
             "type": "string",
+          },
+          "options": {
+            "additionalProperties": {},
+            "type": "object",
           },
           "reasoningEffort": {
             "type": "string",
@@ -887,6 +935,10 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "model": {
             "type": "string",
+          },
+          "options": {
+            "additionalProperties": {},
+            "type": "object",
           },
           "persona": {
             "$ref": "#/components/schemas/Persona",
@@ -1899,9 +1951,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "agentVersion": {
             "type": "string",
           },
-          "autopilot": {
-            "type": "boolean",
-          },
           "createdAt": {
             "format": "date-time",
             "type": [
@@ -1923,6 +1972,10 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "model": {
             "type": "string",
+          },
+          "options": {
+            "additionalProperties": {},
+            "type": "object",
           },
           "profileId": {
             "type": "string",
@@ -2417,9 +2470,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "agentsMdPromptId": {
             "type": "string",
           },
-          "autopilot": {
-            "type": "boolean",
-          },
           "codebaseRevisionId": {
             "type": "string",
           },
@@ -2466,6 +2516,10 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "model": {
             "type": "string",
+          },
+          "options": {
+            "additionalProperties": {},
+            "type": "object",
           },
           "persona": {
             "$ref": "#/components/schemas/Persona",
@@ -3166,6 +3220,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "name": {
             "type": "string",
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/AgentOptionDescriptor",
+            },
+            "type": "array",
           },
           "supportedModels": {
             "items": {
@@ -6132,9 +6192,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   "agentVersion": {
                     "type": "string",
                   },
-                  "autopilot": {
-                    "type": "boolean",
-                  },
                   "extensions": {
                     "items": {
                       "type": "string",
@@ -6149,6 +6206,10 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   },
                   "model": {
                     "type": "string",
+                  },
+                  "options": {
+                    "additionalProperties": {},
+                    "type": "object",
                   },
                   "reasoningEffort": {
                     "type": "string",

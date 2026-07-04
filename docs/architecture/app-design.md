@@ -90,41 +90,65 @@ To support submitting an AGENTS.md prompt with a run, the request carries:
   (`[]`/absent = root, `[p]` = mutation, `[i, j]` = merge) for callers that know
   parentage at submit time.
 
-### Autopilot mode
+### Agent options (per-worker) — autopilot
 
-Profiles carry an optional **`autopilot`** flag that controls whether the coding
-agent runs in its **native autopilot mode** — fully autonomous, running to
-completion without ever pausing to ask the *user* clarifying or decision
-questions. This is distinct from tool-permission auto-approval (e.g. `--yolo`),
-which only auto-accepts individual permission prompts; autopilot governs whether
-the agent asks questions at all.
+Requests and profiles carry a generic **`options: Record<string, unknown>`** bag
+of per-worker agent settings, replacing what was originally a single hardcoded
+`autopilot` boolean. Each worker **advertises** the options it accepts as part of
+its agent registration; the portal renders them dynamically and the API validates
+a submitted bag against them. The first (and currently only) option is
+**`autopilot`**.
 
-- **Where it lives:** `ProfileVersionDocument.autopilot?: boolean` — a versioned,
-  reproducible sibling of `reasoningEffort`. It is **profile-only**: it is not
-  accepted as a direct request/run override (not in `CreateRequestInputSchema`).
-- **Default:** `false` (interactive). Autopilot is **opt-in**: an undefined field
-  resolves to `false` everywhere via the `autopilot === true` idiom, so existing
-  profile versions and profile-less runs keep their pre-existing (non-autopilot)
-  behavior. Only an explicit `true` enables the agent's native autopilot mode.
-  This keeps the feature backward-compatible.
-- **Resolution:** the API computes `effectiveAutopilot` from the resolved profile
-  version and stores it **unconditionally** on `RequestDocument.autopilot` as a
-  resolved boolean snapshot for the run. The queue-processor threads it into
-  `WorkerProcessorOptions.autopilot`; all readers use `autopilot === true`, so
-  legacy/undefined documents resolve to interactive.
+**Autopilot** controls whether the coding agent runs in its **native autopilot
+mode** — fully autonomous, running to completion without ever pausing to ask the
+*user* clarifying or decision questions. This is distinct from tool-permission
+auto-approval (e.g. `--yolo`, ACP session mode, VS Code `autoApprove`, Claude
+`bypassPermissions`), which only auto-accepts individual permission prompts and is
+**fixed worker infrastructure, never user-exposed**. Autopilot governs whether the
+agent asks questions at all.
+
+- **Options descriptor (registration):** each worker's `agent.yaml` carries an
+  `options:` list of descriptors `{ key, type, label, description?, default?,
+  enum? }`, a **sibling of `capabilities`** (not bolted onto it). This is an agent
+  *option* (a user-picked value), conceptually different from a capability *gate*
+  like `supportsReasoningEffort`. Descriptors are stored on the agent document and
+  returned by `GET /agents`. The canonical source-of-truth mirror lives in
+  `packages/shared/src/schemas/agent-options.ts` (`WORKER_AGENT_OPTIONS`), used as
+  an API/CLI fallback until an agent is re-seeded.
+- **Where the value lives:** `ProfileVersionDocument.options?` (versioned,
+  reproducible) **and** `RequestDocument.options?` (request-level snapshot).
+  Following every other controlled field (model, reasoningEffort, mcpServers,
+  skillRevisions, extensions), `options` is a first-class **request input** in
+  `CreateRequestInputSchema` — not profile-only.
+- **Default:** empty. Autopilot is **opt-in**: an absent `autopilot` key resolves
+  to off via the `autopilot === true` idiom, so existing profile versions and
+  profile-less runs keep their pre-existing (interactive) behavior.
+- **Validation (per-worker):** the API validates a submitted bag against the
+  worker's advertised descriptors via a strict zod object
+  (`validateAgentOptions`): unknown keys and wrong types are rejected. Copilot and
+  VS Code workers accept `{ autopilot?: boolean }`; Claude Code advertises **no**
+  options, so any submitted option is rejected for it.
+- **Resolution:** the API resolves request + profile with the existing
+  controlled-field semantics, implemented as a **per-key merge**
+  (`mergeAgentOptions(requestOptions, profileVersion.options)`) where **profile
+  keys override request keys**. The resolved bag is stored on
+  `RequestDocument.options` and threaded by the queue-processor into
+  `WorkerProcessorOptions.agentOptions` (named `agentOptions` at the worker
+  boundary to avoid an `options.options` foot-gun).
 - **Per-worker native mapping:**
   - **Copilot / Copilot-Windows** (`coder-acp-copilot`): pass the native
-    `--autopilot` CLI flag only when explicitly enabled (kept alongside `--yolo`,
-    which is permissions-only); omit it otherwise. The runtime ACP
-    `setSessionMode(#autopilot)` call is **unconditional** and independent of this
-    setting — it is a headless-execution/permissions concern (allowing the agent
-    to run bash/builds non-interactively) that must always run for backward
-    compatibility, not a HITL toggle.
-    resolved value in the per-run settings (defaults to `false`).
+    `--autopilot` CLI flag only when `agentOptions.autopilot === true` (kept
+    alongside `--yolo`, which is permissions-only); omit it otherwise. The runtime
+    ACP `setSessionMode(#autopilot)` call is **unconditional** and independent of
+    this option — it is a headless-execution/permissions concern (allowing the
+    agent to run bash/builds non-interactively) that must always run, not a HITL
+    toggle.
+    `agentOptions.autopilot === true` in the per-run settings (defaults to
+    `false`).
   - **Claude Code** (`coder-acp-claude-code`): no native autopilot toggle exists
-    (only permission modes); treated as a **capability gap**. It is autonomous in
-    headless ACP regardless; an informational log is emitted only when autopilot
-    is explicitly requested, and no prompt injection is used.
+    (only permission modes) and it advertises no options — a documented **no-op**.
+    It is autonomous in headless ACP regardless; an informational log is emitted
+    only if an autopilot value ever reaches it, and no prompt injection is used.
 
 ## Judge Pipeline
 

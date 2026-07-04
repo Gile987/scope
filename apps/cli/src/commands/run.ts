@@ -17,6 +17,8 @@ import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { runGetAction } from "../run-get-action.js";
 import { normalizeUrl, printFollowUpCommands, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 import { parseGatesOption } from "../utils/gates.js";
+import { parseAgentOptionPairs } from "../utils/parsers.js";
+import { collectOption, formatAgentOptions, AGENT_OPTION_HELP } from "../utils/agent-options.js";
 
 /**
  * Resolve a CLI option that may be either a literal string or a `@path`
@@ -52,6 +54,7 @@ run
   .option("--max-iterations <number>", "Max judge iterations for multi-turn mode", parseInt)
   .option("--model <model>", "Model to use for the coding agent")
   .option("--reasoning-effort <level>", "Reasoning effort level (e.g. low, medium, high)")
+  .option("--option <key=value>", `Set a per-worker agent option (repeatable). Example: --option autopilot=true.${AGENT_OPTION_HELP}`, collectOption, [])
   .option("--mcp-servers <slugs...>", "MCP server slugs to use for this run")
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
   .option("--codebase <ref>", "Codebase revision id, ref (slug@rN), or slug to use for this run")
@@ -65,7 +68,7 @@ run
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options, command) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, codebase: codebaseRef, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption, agentsMd: agentsMdInput } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, option: optionPairs, mcpServers: mcpServerSlugs, skills: skillSlugs, codebase: codebaseRef, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption, agentsMd: agentsMdInput } = options;
     // `--profile` is the documented flag; `--base-profile` is kept as a hidden
     // back-compat alias. Both resolve to the same request `profileId`.
     const profileId = profile ?? baseProfile;
@@ -112,6 +115,9 @@ run
       }
       if (reasoningEffort) {
         body.reasoningEffort = reasoningEffort;
+      }
+      if (optionPairs && optionPairs.length > 0) {
+        body.options = parseAgentOptionPairs(optionPairs);
       }
       if (personaInstructions) {
         body.personaInstructions = personaInstructions;
@@ -195,6 +201,9 @@ run
       console.log(`${label('Worker:')} ${value(result.workerType)}`);
       if (result.model) console.log(`${label('Model:')} ${value(result.model)}`);
       if (result.reasoningEffort) console.log(`${label('Reasoning Effort:')} ${value(result.reasoningEffort)}`);
+      if (body.options && Object.keys(body.options as Record<string, unknown>).length > 0) {
+        console.log(`${label('Options:')} ${value(formatAgentOptions(body.options as Record<string, unknown>))}`);
+      }
       console.log(`${label('Mode:')} ${value(result.mode || 'one-shot')}`);
       if (Array.isArray(body.gates)) console.log(`${label('Gates:')} ${value(String(body.gates.length))}`);
       console.log(`${label('Status:')} ${value(result.status)}`);

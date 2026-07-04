@@ -130,6 +130,7 @@ export const api = {
     worker?: string;
     model?: string;
     reasoningEffort?: string;
+    options?: Record<string, unknown>;
     maxIterations?: number;
     personaInstructions?: string;
     persona?: { personality: string; experience: string; verbosity: string; type: string };
@@ -1191,7 +1192,7 @@ export const api = {
     description?: string;
     workerType: string;
     model: string;
-    autopilot?: boolean;
+    options?: Record<string, unknown>;
     agentVersion?: string;
     mcpServers?: string[];
     skillRevisions?: string[];
@@ -1207,7 +1208,7 @@ export const api = {
   createProfileVersion: (profileId: string, body: {
     workerType: string;
     model: string;
-    autopilot?: boolean;
+    options?: Record<string, unknown>;
     agentVersion?: string;
     mcpServers?: string[];
     skillRevisions?: string[];

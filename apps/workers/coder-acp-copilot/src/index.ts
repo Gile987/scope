@@ -112,11 +112,12 @@ class CopilotProcessor implements WorkerProcessor {
     options?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
     const skillConfigs = options?.skillConfigs ?? [];
+    const autopilot = options?.agentOptions?.autopilot === true;
     await log("info", "Starting Copilot ACP processor", {
       inputLength: message.length,
       model: options?.model,
       reasoningEffort: options?.reasoningEffort,
-      autopilot: options?.autopilot === true,
+      autopilot,
       mcpServerCount: this.mcpConfigs.length,
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
       skillCount: skillConfigs.length,
@@ -164,7 +165,7 @@ class CopilotProcessor implements WorkerProcessor {
       // unconditionally in runACPSession (which enables headless command
       // execution).
       const args = buildCopilotBaseArgs({
-        autopilot: options?.autopilot,
+        autopilot,
         model: options?.model,
         reasoningEffort: options?.reasoningEffort,
       });

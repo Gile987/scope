@@ -69,7 +69,10 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     options?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
     const skillConfigs = options?.skillConfigs ?? [];
-    const autopilot = options?.autopilot === true;
+    // Claude Code advertises no agent options (see agent.yaml) — autopilot has no
+    // equivalent here. We still defensively read it so the documented no-op log
+    // fires if an autopilot value ever reaches this worker.
+    const autopilot = options?.agentOptions?.autopilot === true;
     await log("info", "Starting Claude Code ACP processor", {
       inputLength: message.length,
       model: options?.model,

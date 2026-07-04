@@ -343,6 +343,36 @@ export function AgentDetail() {
 
         <Card>
           <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Options</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {(() => {
+              const options = agent.options ?? [];
+              if (options.length === 0) {
+                return <p className="text-sm text-muted-foreground">No configurable options advertised.</p>;
+              }
+              return (
+                <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                  {options.map((o) => (
+                    <div key={o.key}>
+                      <dt className="flex items-center gap-2">
+                        <span className="font-medium">{o.label}</span>
+                        <Badge variant="outline" className="font-mono text-[10px]">{o.type}</Badge>
+                      </dt>
+                      <dd className="mt-0.5 font-mono text-xs text-muted-foreground">{o.key}</dd>
+                      {o.description && (
+                        <dd className="mt-0.5 text-xs text-muted-foreground">{o.description}</dd>
+                      )}
+                    </div>
+                  ))}
+                </dl>
+              );
+            })()}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
             <CardTitle className="text-sm">Deployed Versions</CardTitle>
           </CardHeader>
           <CardContent>

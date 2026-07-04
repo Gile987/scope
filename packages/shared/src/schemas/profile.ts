@@ -3,6 +3,7 @@
 
 import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
+import { AgentOptionsSchema } from "./agent-options.js";
 
 extendZodWithOpenApi(z);
 
@@ -13,7 +14,8 @@ export const CreateProfileInputSchema = z
     workerType: z.string(),
     model: z.string(),
     reasoningEffort: z.string().optional(),
-    autopilot: z.boolean().optional(),
+    /** Generic per-worker agent options bag (validated per-worker by the API). */
+    options: AgentOptionsSchema.optional(),
     agentVersion: z.string().optional(),
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
@@ -48,7 +50,8 @@ export const ProfileVersionResponseSchema = z
     workerType: z.string(),
     model: z.string(),
     reasoningEffort: z.string().optional(),
-    autopilot: z.boolean().optional(),
+    /** Generic per-worker agent options bag (validated per-worker by the API). */
+    options: AgentOptionsSchema.optional(),
     agentVersion: z.string().optional(),
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),

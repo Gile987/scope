@@ -99,10 +99,12 @@ export function ProfilePreviewPanel() {
                 <dt className="text-xs text-muted-foreground">Model</dt>
                 <dd className="mt-0.5 font-mono text-xs">{v.model}</dd>
               </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">Autopilot</dt>
-                <dd className="mt-0.5 font-mono text-xs">{v.autopilot === true ? "On" : "Off"}</dd>
-              </div>
+              {Object.entries(v.options ?? {}).map(([key, val]) => (
+                <div key={key}>
+                  <dt className="text-xs text-muted-foreground">{key}</dt>
+                  <dd className="mt-0.5 font-mono text-xs">{String(val)}</dd>
+                </div>
+              ))}
               {v.agentVersion && (
                 <div className="col-span-2">
                   <dt className="text-xs text-muted-foreground">Agent version</dt>

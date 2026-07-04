@@ -20,9 +20,11 @@ This document tracks which [coding worker requirements](worker-requirements.md) 
 | 12 | Support Skills | ✅ Filesystem discovery | ✅ Filesystem discovery | ✅ Filesystem discovery | ✅ Filesystem discovery |
 | 13 | Have integration tests | ✅ `copilot-cli.integration.test.ts` | ❌ Unit tests only | ✅ `vscode-web.integration.test.ts` (Docker) | ✅ `vscode-electron.integration.test.ts` (Docker) |
 | 14 | Support multi-turn conversations | ✅ Via queue processor | ✅ Via queue processor | ✅ Via `setup`/`teardown` + session reuse | ✅ Via `setup`/`teardown` + Electron reuse |
-| 15 | Auto-approve agent permissions | ✅ `--yolo` + ACP auto-approve (native `--autopilot` flag for autopilot mode) | ✅ ACP auto-approve | ✅ Playwright controls UI directly | ❌ Not implemented |
-| 16 | Sandbox workspace filesystem access | N/A (agent manages own FS) | ✅ Path traversal protection in `ACPClientHandler` | N/A (browser-driven) | N/A (VS Code manages FS) |
-| 17 | Persist auth state across iterations | N/A (stateless token) | N/A (stateless token) | ✅ Cookie state saved after each `processMessage()` | N/A (token minted once in `setup()`) |
+| 15 | Auto-approve agent permissions | ✅ `--yolo` + ACP session mode (always-on, not user-exposed) | ✅ ACP auto-approve / `bypassPermissions` | ✅ Playwright controls UI directly + `autoApprove` | ❌ Not implemented |
+| 16 | Advertise per-worker agent `options` | ✅ `autopilot` (agent.yaml) | ❌ None advertised (autopilot no-op) | ✅ `autopilot` (agent.yaml) | ✅ `autopilot` (agent.yaml) |
+| 17 | Honor native `autopilot` option | ✅ `--autopilot` flag when `agentOptions.autopilot === true` | ➖ No-op (headless ACP already autonomous) | ✅ `chat.autopilot.enabled` | ✅ `chat.autopilot.enabled` |
+| 18 | Sandbox workspace filesystem access | N/A (agent manages own FS) | ✅ Path traversal protection in `ACPClientHandler` | N/A (browser-driven) | N/A (VS Code manages FS) |
+| 19 | Persist auth state across iterations | N/A (stateless token) | N/A (stateless token) | ✅ Cookie state saved after each `processMessage()` | N/A (token minted once in `setup()`) |
 | — | Token usage reporting | ✅ Extracted from HAR | ✅ Extracted from HAR | ❌ Not implemented | ✅ Extracted from HAR |
 
 ## Worker Details

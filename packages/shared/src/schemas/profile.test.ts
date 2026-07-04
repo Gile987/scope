@@ -36,25 +36,25 @@ describe("CreateProfileInputSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("accepts autopilot flag (true and false)", () => {
+  it("accepts a generic options bag", () => {
     const base = {
       name: "Autopilot Profile",
       workerType: "coder-acp-copilot",
       model: "gpt-4o",
     };
-    const on = CreateProfileInputSchema.safeParse({ ...base, autopilot: true });
-    const off = CreateProfileInputSchema.safeParse({ ...base, autopilot: false });
+    const on = CreateProfileInputSchema.safeParse({ ...base, options: { autopilot: true } });
+    const off = CreateProfileInputSchema.safeParse({ ...base, options: { autopilot: false } });
     expect(on.success).toBe(true);
     expect(off.success).toBe(true);
-    if (off.success) expect(off.data.autopilot).toBe(false);
+    if (off.success) expect(off.data.options?.autopilot).toBe(false);
   });
 
-  it("rejects a non-boolean autopilot value", () => {
+  it("rejects a non-object options value", () => {
     const result = CreateProfileInputSchema.safeParse({
-      name: "Bad Autopilot",
+      name: "Bad Options",
       workerType: "coder-acp-copilot",
       model: "gpt-4o",
-      autopilot: "yes",
+      options: "yes",
     });
     expect(result.success).toBe(false);
   });
@@ -173,19 +173,19 @@ describe("ProfileVersionResponseSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("carries the autopilot flag through the response", () => {
+  it("carries the options bag through the response", () => {
     const data = {
       _id: "pv-123",
       profileId: "p-123",
       version: 1,
       workerType: "coder-acp-copilot",
       model: "gpt-4o",
-      autopilot: false,
+      options: { autopilot: false },
       createdAt: "2025-01-01T00:00:00Z",
     };
     const result = ProfileVersionResponseSchema.safeParse(data);
     expect(result.success).toBe(true);
-    if (result.success) expect(result.data.autopilot).toBe(false);
+    if (result.success) expect(result.data.options?.autopilot).toBe(false);
   });
 });
 

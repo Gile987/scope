@@ -101,7 +101,7 @@ class CopilotWindowsProcessor implements WorkerProcessor {
     await log("info", "Starting Copilot ACP processor (Windows)", {
       inputLength: message.length,
       model: options?.model,
-      autopilot: options?.autopilot === true,
+      autopilot: options?.agentOptions?.autopilot === true,
     });
 
     // Proxy integration — start recording if enabled (gateway backend only)
@@ -142,7 +142,7 @@ class CopilotWindowsProcessor implements WorkerProcessor {
       // unconditionally in runACPSession. The Windows worker does not append a
       // reasoning-effort flag (parity with its prior behavior).
       const args = buildCopilotBaseArgs({
-        autopilot: options?.autopilot,
+        autopilot: options?.agentOptions?.autopilot === true,
         model: options?.model,
       });
 

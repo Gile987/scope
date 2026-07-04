@@ -5,3 +5,11 @@ modelProvider: github-copilot
 available: true
 capabilities:
   supportsReasoningEffort: true
+options:
+  - key: autopilot
+    type: boolean
+    label: Autopilot mode
+    description: >-
+      Run the agent in its native autopilot mode — fully autonomous, never
+      pausing to ask clarifying questions. Off by default.
+    default: false

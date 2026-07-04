@@ -54,7 +54,7 @@ export interface ProfileVersionDocument {
   workerType: string;             // FK → CodingAgentDocument._id
   model: string;                  // Model identifier (required)
   reasoningEffort?: string;       // Reasoning effort level (e.g. "low", "medium", "high")
-  autopilot?: boolean;            // Run the agent in its native autopilot mode (autonomous, no HITL questions). Opt-in; undefined = default (off/interactive)
+  options?: Record<string, unknown>; // Per-worker agent options bag (validated per-worker; e.g. { autopilot: true }). Merged with request options at submit (profile keys win).
   agentVersion?: string;          // Agent version string
   mcpServers?: string[];          // MCP server slugs
   skillRevisions?: string[];      // Pinned skill revision refs (e.g. "source/skillName@commitHash")

@@ -342,17 +342,21 @@ All workers must ensure that their coding agent can execute tool calls and file 
 > - **Auto-approve (this requirement)** — accept individual tool/permission
 >   prompts non-interactively (`--yolo`, `requestPermission()` → first option,
 >   `chat.tools.global.autoApprove`). Always on; a headless worker cannot answer
->   permission dialogs.
+>   permission dialogs. This is **fixed worker infrastructure and never
+>   user-exposed** (Claude Code stays `bypassPermissions`).
 > - **Autopilot mode** — the agent's *native* autonomous mode where it never
 >   pauses to ask the user clarifying/decision questions and iterates to
->   completion. This is **profile-configurable** and **opt-in** via
->   `WorkerProcessorOptions.autopilot` (default `false`; only an explicit `true`
->   enables it); see [Autopilot mode](./app-design.md#autopilot-mode). Do **not**
->   emulate it with prompt injection — use each agent's native mechanism.
+>   completion. This is a **per-worker agent option** (`autopilot`) resolved from
+>   the request/profile `options` bag and threaded to the worker as
+>   `WorkerProcessorOptions.agentOptions.autopilot` (default off; only an explicit
+>   `true` enables it); see [Agent options (per-worker)](./app-design.md#agent-options-per-worker--autopilot).
+>   A worker that supports autopilot must **advertise** it in its `agent.yaml`
+>   `options:` list. Do **not** emulate it with prompt injection — use each
+>   agent's native mechanism.
 
 The mechanism varies by worker type:
 
-- **ACP-based workers** — implement `requestPermission()` to auto-approve all permission requests. For the **Copilot CLI**, pass the native **`--autopilot`** startup flag only when the resolved `autopilot` setting is explicitly enabled (opt-in; off by default). Independently — and **regardless** of the `autopilot` setting — the worker also sets the ACP session mode to `autopilot` after creating the session: this is a headless-execution requirement, not a HITL toggle. The `--yolo` flag alone does **not** change the ACP session mode, and an ACP session starts in `agent` mode where execute/bash tool calls (e.g. `npm run build`) are denied non-interactively, so this unconditional session-mode switch must always run. The Copilot CLI advertises modes by their canonical ACP URL ids (e.g. `https://agentclientprotocol.com/protocol/session-modes#autopilot`), so match on the full id:
+- **ACP-based workers** — implement `requestPermission()` to auto-approve all permission requests. For the **Copilot CLI**, pass the native **`--autopilot`** startup flag only when `agentOptions.autopilot === true` (opt-in; off by default). Independently — and **regardless** of the autopilot option — the worker also sets the ACP session mode to `autopilot` after creating the session: this is a headless-execution requirement, not a HITL toggle. The `--yolo` flag alone does **not** change the ACP session mode, and an ACP session starts in `agent` mode where execute/bash tool calls (e.g. `npm run build`) are denied non-interactively, so this unconditional session-mode switch must always run. The Copilot CLI advertises modes by their canonical ACP URL ids (e.g. `https://agentclientprotocol.com/protocol/session-modes#autopilot`), so match on the full id:
 
 ```typescript
 async requestPermission(
@@ -375,9 +379,9 @@ if (autopilot) {
 }
 ```
 
-- **Browser-based workers** (VS Code Web) — the agent operates through Playwright-driven UI automation; no explicit approval mechanism is needed since the automation controls the interaction directly.
+- **Browser-based workers** (VS Code Web) — the agent operates through Playwright-driven UI automation; no explicit approval mechanism is needed since the automation controls the interaction directly. For the native **autopilot** option, `writeVSCodeSettings` sets `chat.autopilot.enabled` to `agentOptions.autopilot === true` in the per-run settings; the always-on `chat.tools.global.autoApprove` (permissions) is independent and unconditional.
 
-- **Desktop IDE workers** (VS Code Electron) — must configure the IDE or agent extension to auto-approve tool calls without user confirmation (e.g., via VS Code settings or extension-specific yolo flags).
+- **Desktop IDE workers** (VS Code Electron) — must configure the IDE or agent extension to auto-approve tool calls without user confirmation (e.g., via VS Code settings or extension-specific yolo flags). For the native **autopilot** option, `buildVSCodeSettings` sets `chat.autopilot.enabled` to `agentOptions.autopilot === true`, independent of the always-on auto-approve settings.
 
 **When required:** Mandatory for all workers. The specific mechanism depends on the agent interface.
 
