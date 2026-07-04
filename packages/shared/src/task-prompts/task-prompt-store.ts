@@ -28,9 +28,12 @@ export function promptBlobName(id: string): string {
  * fresh UUID. The same `(projectId, type, text)` always resolves to the same
  * document — `findOrCreate` is idempotent **within a project**. Two projects
  * that share identical prompt text get **two distinct documents** (same
- * `keyId`, distinct `_id`, distinct `projectId`), enforced by a unique
- * `{ projectId, keyId }` index. `type` defaults to `"select"` so existing
- * task-prompt call sites are unaffected.
+ * `keyId`, distinct `_id`, distinct `projectId`). Per-project uniqueness is
+ * backed by a `{ projectId, keyId }` index — **unique** on real MongoDB, and (on
+ * Azure Cosmos DB for MongoDB, which cannot build a unique index on a populated
+ * collection) **non-unique**, with uniqueness enforced by `findOrCreate`.
+ * `type` defaults to `"select"` so existing task-prompt call sites are
+ * unaffected.
  *
  * The body is stored **inline** (`text`) when small, or in **blob storage**
  * (`contentBlobUrl`) when it exceeds the configured inline threshold. Storage

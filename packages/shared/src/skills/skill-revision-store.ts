@@ -10,10 +10,12 @@ import type { SkillRevisionDocument } from '../types/skill.js';
  *
  * Skill revisions are **immutable and per-project**: the `_id` is a fresh UUID,
  * and the human-readable `ref` (`{source}/{skillName}@{commitHash}`) is the
- * natural key **within a project**. Uniqueness is enforced per-project via a
- * `{ projectId, ref }` unique index — two projects that resolve the same skill
- * ref get **two distinct documents** (same `ref`, distinct `_id`, distinct
- * `projectId`).
+ * natural key **within a project**. Per-project uniqueness is backed by a
+ * `{ projectId, ref }` index — **unique** on real MongoDB, and (on Azure Cosmos
+ * DB for MongoDB, which cannot build a unique index on a populated collection)
+ * **non-unique**, with uniqueness enforced by `findOrCreate`. Two projects that
+ * resolve the same skill ref get **two distinct documents** (same `ref`,
+ * distinct `_id`, distinct `projectId`).
  *
  * `findOrCreate` is idempotent **within a project** — calling it multiple times
  * with the same `(projectId, ref)` returns the same document without

@@ -131,8 +131,10 @@ single-project list.
 
 `task-prompts` and `skill-revisions` are content/ref-addressed, so the same key can legitimately
 exist in multiple projects. Each keeps a **fresh-UUID `_id`** plus a stable key (`keyId` =
-`computePromptId(type,text)` for prompts; `ref` for skill-revisions) and a project-scoped
-**unique index** (`{projectId, keyId}` / `{projectId, ref}`). `findOrCreate`/`getByRef(s)`
+`computePromptId(type,text)` for prompts; `ref` for skill-revisions) and a project-scoped index
+(`{projectId, keyId}` / `{projectId, ref}`) — **unique on real MongoDB**, and **non-unique on
+Azure Cosmos DB** (which cannot build a unique index on a populated collection), where per-project
+uniqueness is enforced by `findOrCreate` instead. `findOrCreate`/`getByRef(s)`
 lookups are all scoped by `projectId`. Because skill refs resolve **per project**, the run's
 `projectId` is threaded through the shared queue-processor into `SkillClient.resolveSkills` /
 `downloadSkillArchive` (which append `?projectId=`) and the electron worker's own `setup()`.
@@ -151,7 +153,8 @@ Migration **`025-create-projects`** creates the `projects` collection, seeds **o
 initial project** (fresh `_id`, human name via optional `SCOPE_INITIAL_PROJECT_NAME`, **no
 `isDefault` flag**), backfills `projectId` on 100% of existing scoped docs, backfills
 `keyId`/`ref` on the special collections, and swaps the unique indexes to their
-project-scoped form. It is idempotent and RU-paced.
+project-scoped form (degrading to non-unique on Cosmos — see `db.md`). It is idempotent and
+RU-paced.
 
 Making `?projectId=` **required** is a breaking change for every existing caller, so rollout is
 strictly ordered **migrate-then-enforce**:

@@ -26,7 +26,18 @@
  *        - skill-revisions `{ref}` → `{projectId, ref}` (unique).
  *        - task-prompts add unique `{projectId, keyId}`.
  *      A pre-assert guards against pre-existing composite-key collisions (which
- *      would make unique-index creation fail on Cosmos).
+ *      would make unique-index creation fail on real MongoDB).
+ *
+ *      **Cosmos DB caveat (RU-based):** a unique index can only be created while
+ *      the collection is empty / at creation time (via the CreateCollection
+ *      extension command). `createIndex(..., {unique:true})` on a *populated*
+ *      collection fails with code 67 (`CannotCreateIndex`). We therefore degrade
+ *      gracefully: on code 67 we create a **non-unique** index on the same key
+ *      (kept for lookup performance) and rely on the application-level
+ *      `findOrCreate` for per-project dedup — which is already how these
+ *      collections behave on Cosmos today (migration 003's unique `{ref}` index
+ *      silently no-op'd there). Real MongoDB (local/CI) still gets true unique
+ *      indexes, so unit/integration tests continue to assert uniqueness.
  *   5. Add scoping indexes `{projectId}` and `{projectId, _id}` on every scoped
  *      collection (supports the required `?projectId=` list filter).
  *
@@ -74,6 +85,12 @@ const DEFAULT_INITIAL_PROJECT_NAME = "Initial Project";
 const ALREADY_EXISTS_CODES = new Set([85, 86, 68]);
 /** Index/namespace-not-found error codes. */
 const NOT_FOUND_CODES = new Set([26, 27]);
+/**
+ * Azure Cosmos DB (RU-based) rejects unique-index creation on a *populated*
+ * collection with code 67 (`CannotCreateIndex`, "Cannot create unique index
+ * when collection contains documents"). Real MongoDB has no such restriction.
+ */
+const CANNOT_CREATE_UNIQUE_ON_POPULATED = 67;
 
 /** Create an index, tolerating "already exists" but surfacing real failures. */
 async function ensureIndex(
@@ -112,6 +129,48 @@ async function dropIndexSafe(
       `  [025] could not drop index ${JSON.stringify(key)} on ${label}: ${err?.message ?? err}`,
     );
   }
+}
+
+/**
+ * Create a UNIQUE index, degrading gracefully on Azure Cosmos DB for MongoDB.
+ *
+ * On real MongoDB the unique index is created and enforced. On Cosmos (RU-based)
+ * a unique index can only be created while the collection is empty / at creation
+ * time (via the CreateCollection extension command), so `createIndex(...,
+ * {unique:true})` on a *populated* collection fails with code 67. In that case we
+ * fall back to a **non-unique** index on the same key (kept for lookup
+ * performance) and rely on the application-level `findOrCreate` for per-project
+ * dedup — which is already how these collections have always behaved on Cosmos
+ * (migration 003's unique `{ref}` index silently no-op'd there). A pre-flight
+ * `assertNoCompositeDuplicates` guards data quality regardless of backend, and
+ * genuine duplicate-key errors (code 11000, real MongoDB) are surfaced, not
+ * swallowed.
+ */
+async function ensureUniqueIndexOrFallback(
+  col: Collection,
+  key: Record<string, 1 | -1>,
+  label: string,
+): Promise<void> {
+  try {
+    const name = await col.createIndex(key, { unique: true });
+    console.log(`  [025] created UNIQUE index ${name} ${JSON.stringify(key)} on ${label}`);
+    return;
+  } catch (err: any) {
+    if (ALREADY_EXISTS_CODES.has(err?.code)) {
+      console.log(`  [025] unique index ${JSON.stringify(key)} on ${label} already exists`);
+      return;
+    }
+    if (err?.code !== CANNOT_CREATE_UNIQUE_ON_POPULATED) {
+      throw err;
+    }
+    console.warn(
+      `  [025] ⚠ ${label}: Cosmos DB cannot create a unique index on a populated ` +
+        `collection (code 67). Falling back to a NON-unique ${JSON.stringify(key)} ` +
+        `index; per-project uniqueness is enforced by the application (findOrCreate).`,
+    );
+  }
+  // Fallback path (Cosmos): create the same key as a non-unique lookup index.
+  await ensureIndex(col, key, {}, label);
 }
 
 /**
@@ -234,11 +293,11 @@ export class CreateProjects implements MigrationInterface {
     const skillRevisions = db.collection("skill-revisions");
     await assertNoCompositeDuplicates(skillRevisions, ["projectId", "ref"], "skill-revisions");
     await dropIndexSafe(skillRevisions, { ref: 1 }, "skill-revisions");
-    await ensureIndex(skillRevisions, { projectId: 1, ref: 1 }, { unique: true }, "skill-revisions");
+    await ensureUniqueIndexOrFallback(skillRevisions, { projectId: 1, ref: 1 }, "skill-revisions");
 
     const taskPrompts = db.collection("task-prompts");
     await assertNoCompositeDuplicates(taskPrompts, ["projectId", "keyId"], "task-prompts");
-    await ensureIndex(taskPrompts, { projectId: 1, keyId: 1 }, { unique: true }, "task-prompts");
+    await ensureUniqueIndexOrFallback(taskPrompts, { projectId: 1, keyId: 1 }, "task-prompts");
 
     // 5. Scoping indexes on every scoped collection.
     for (const name of SCOPED_COLLECTIONS) {

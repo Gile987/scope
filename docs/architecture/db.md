@@ -47,7 +47,7 @@ Canonical task definitions with prompt text. Runs link to a task prompt via `tas
 | `createdAt` | `{ createdAt: -1 }` | | 002 |
 | `projectId` | `{ projectId: 1 }` | | 025 |
 | `projectId__id` | `{ projectId: 1, _id: 1 }` | | 025 |
-| `projectId_keyId` | `{ projectId: 1, keyId: 1 }` | unique | 025 |
+| `projectId_keyId` | `{ projectId: 1, keyId: 1 }` | unique † | 025 |
 
 ### `reports`
 
@@ -101,13 +101,13 @@ Agent skill definitions (source + name).
 
 ### `skill-revisions`
 
-Immutable revisions of agent skills, referenced by runs. **Per-project copies:** `_id` is a fresh UUID and `ref` (`{source}/{skillName}@{commit}`) is unique *within* a project. Migration 025 replaces the global `{ ref }` unique index with `{ projectId, ref }` unique.
+Immutable revisions of agent skills, referenced by runs. **Per-project copies:** `_id` is a fresh UUID and `ref` (`{source}/{skillName}@{commit}`) is unique *within* a project. Migration 025 replaces the global `{ ref }` unique index with `{ projectId, ref }` (unique on MongoDB; see the Cosmos caveat † below).
 
 | Index | Key | Options | Migration |
 |-------|-----|---------|-----------|
 | `_id` | `{ _id: 1 }` | default | — |
 | `ref` (dropped in 025) | `{ ref: 1 }` | was unique | 003 |
-| `projectId_ref` | `{ projectId: 1, ref: 1 }` | unique | 025 |
+| `projectId_ref` | `{ projectId: 1, ref: 1 }` | unique † | 025 |
 | `source_skillName` | `{ source: 1, skillName: 1 }` | | 003 |
 | `resolvedAt` | `{ resolvedAt: -1 }` | | 003 |
 | `projectId` | `{ projectId: 1 }` | | 025 |
@@ -206,6 +206,8 @@ Two deterministic-key collections additionally get project-scoped **unique** ind
 - `task-prompts`: `{ projectId, keyId }` unique — replaces the global content-addressed `_id` uniqueness.
 - `skill-revisions`: `{ projectId, ref }` unique — replaces the global `{ ref }` unique.
 
-The migration **pre-asserts** there are no duplicate `{ projectId, keyId }` / `{ projectId, ref }` pairs before creating these unique indexes (a pre-existing collision would fail index creation on Cosmos). It seeds exactly one initial project (fresh UUID `_id`, **no `isDefault` flag**), reusing the oldest existing project on re-run for idempotency.
+The migration **pre-asserts** there are no duplicate `{ projectId, keyId }` / `{ projectId, ref }` pairs before creating these unique indexes. It seeds exactly one initial project (fresh UUID `_id`, **no `isDefault` flag**), reusing the oldest existing project on re-run for idempotency.
+
+> **† Cosmos DB unique-index caveat.** Azure Cosmos DB for MongoDB (RU-based) can only build a unique index while a collection is **empty** (at creation time, via the `CreateCollection` extension command); `createIndex(..., { unique: true })` on a **populated** collection fails with code 67 (`CannotCreateIndex`). Because migration 025 runs against collections that already hold data, it **degrades gracefully on Cosmos**: it creates a **non-unique** `{ projectId, keyId }` / `{ projectId, ref }` index (kept for lookup performance) and relies on the application-level `findOrCreate` for per-project dedup — which is already how these collections behaved on Cosmos before 025 (migration 003's `{ ref }` unique index silently no-op'd there). On real MongoDB (local/CI) the indexes are created **unique** as normal, so tests still assert true uniqueness. This deviation was found by validating 025 on real Cosmos (Gate V).
 
 Unscoped collections (`projects`, `agents`, `models`, `feature-flags`, `prompt-feature-extractions`, `accounts`, `_migrations`) do not carry `projectId`.
