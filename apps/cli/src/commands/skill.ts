@@ -6,7 +6,8 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, withProjectOption, getDefaultApiUrl } from "../utils/shared.js";
+import { requireProjectId } from "../utils/config.js";
 import { apiFetch } from "../utils/api-client.js";
 
 export function registerSkillCommands(program: Command): void {
@@ -21,16 +22,17 @@ const skill = program
 
 configureHelp(skill);
 
-withOutputOption(
+withProjectOption(withOutputOption(
 skill
   .command("list")
   .description("List all imported skills")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
-      const response = await apiFetch(options.url, `/skills`);
+      const response = await apiFetch(options.url, `/skills`, { projectId });
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -58,20 +60,21 @@ skill
     }
   });
 
-withOutputOption(
+withProjectOption(withOutputOption(
 skill
   .command("search")
   .description("Search skills in the internal library and the external skills.sh registry (content is always sourced from GitHub)")
   .requiredOption("-q, --query <query>", "Search query")
   .option("--limit <number>", "Maximum results", parseInt)
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
       const params = new URLSearchParams({ q: options.query });
       if (options.limit) params.set('limit', String(options.limit));
-      const response = await apiFetch(options.url, `/skills/search?${params}`);
+      const response = await apiFetch(options.url, `/skills/search?${params}`, { projectId });
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -156,8 +159,10 @@ skill
   .option("--description <desc>", "Description")
   .option("--origin <origin>", "Origin: skills-sh or manual", "manual")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (options) => {
     try {
+      const projectId = requireProjectId(options.project);
       const body: Record<string, unknown> = {
         source: options.source,
         skillName: options.skillName,
@@ -170,6 +175,7 @@ skill
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        projectId,
       });
       if (!response.ok) {
         const error = await response.json();

@@ -4,12 +4,13 @@
 import { readFileSync, existsSync } from "fs";
 import { basename, resolve } from "path";
 import { Command } from "commander";
-import type { CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, CreateCodebaseInput } from "shared";
+import type { CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType } from "shared";
 import { configureHelp } from "../utils/helpFormatter.js";
 import { errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { DisplayField, OutputFormat } from "../utils/types.js";
-import { getDefaultApiUrl, normalizeUrl, withOutputOption } from "../utils/shared.js";
+import { getDefaultApiUrl, normalizeUrl, withOutputOption, withProjectOption } from "../utils/shared.js";
+import { requireProjectId } from "../utils/config.js";
 
 type JsonDate = string | Date;
 type CodebaseApiDocument = Omit<CodebaseDocument, "createdAt" | "updatedAt" | "deletedAt"> & {
@@ -23,7 +24,22 @@ type CodebaseRevisionApiDocument = Omit<CodebaseRevisionDocument, "commitTimesta
   commitTimestamp?: JsonDate;
   resolvedAt: JsonDate;
   createdAt: JsonDate;
+  /** Response-only flag returned by resolve/upload endpoints (not stored). */
+  deduplicated?: boolean;
 };
+
+/**
+ * HTTP request body for `POST /api/v1/codebases`. Mirrors `CreateCodebaseInputSchema`
+ * (server-side); `projectId` is NOT part of the body — it is passed as the
+ * `?projectId=` query param and written onto the doc by the API.
+ */
+interface CreateCodebaseBody {
+  name: string;
+  sourceType: CodebaseSourceType;
+  source?: string;
+  description?: string;
+  defaultBranch?: string;
+}
 interface ApiErrorBody {
   error?: string;
 }
@@ -94,15 +110,16 @@ export function registerCodebaseCommands(program: Command): void {
 
   configureHelp(codebase);
 
-  withOutputOption(
+  withProjectOption(withOutputOption(
     codebase
       .command("list")
       .description("List codebases")
       .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-  ).action(async (options) => {
+  )).action(async (options) => {
     const format = (options.output ?? "table") as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
-      const codebases = await fetchJson<CodebaseApiDocument[]>(`${normalizeUrl(options.url)}/api/v1/codebases`);
+      const codebases = await fetchJson<CodebaseApiDocument[]>(`${normalizeUrl(options.url)}/api/v1/codebases?projectId=${encodeURIComponent(projectId)}`);
       if (codebases.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner("No codebases found."));
         return;
@@ -117,7 +134,7 @@ export function registerCodebaseCommands(program: Command): void {
     }
   });
 
-  withOutputOption(
+  withProjectOption(withOutputOption(
     codebase
       .command("create")
       .description("Create a codebase")
@@ -128,8 +145,9 @@ export function registerCodebaseCommands(program: Command): void {
       .option("--description <description>", "Description")
       .option("--default-branch <branch>", "Default branch for git codebases")
       .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-  ).action(async (options) => {
+  )).action(async (options) => {
     const format = (options.output ?? "table") as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
       const sourceType = options.sourceType as CodebaseSourceType;
       if (sourceType !== "git" && sourceType !== "archive") {
@@ -161,20 +179,20 @@ export function registerCodebaseCommands(program: Command): void {
         if (options.description) formData.append("description", options.description);
         const blob = new Blob([archiveBuffer], { type: "application/octet-stream" });
         formData.append("archive", blob, basename(resolvedPath));
-        const response = await fetch(`${baseUrl}/api/v1/codebases`, { method: "POST", body: formData });
+        const response = await fetch(`${baseUrl}/api/v1/codebases?projectId=${encodeURIComponent(projectId)}`, { method: "POST", body: formData });
         if (!response.ok) {
           throw new Error(await readError(response));
         }
         created = await response.json() as CodebaseApiDocument;
       } else {
-        const body: CreateCodebaseInput = {
+        const body: CreateCodebaseBody = {
           name: options.name,
           sourceType,
           ...(options.source ? { source: options.source } : {}),
           ...(options.description ? { description: options.description } : {}),
           ...(options.defaultBranch ? { defaultBranch: options.defaultBranch } : {}),
         };
-        created = await fetchJson<CodebaseApiDocument>(`${baseUrl}/api/v1/codebases`, {
+        created = await fetchJson<CodebaseApiDocument>(`${baseUrl}/api/v1/codebases?projectId=${encodeURIComponent(projectId)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),

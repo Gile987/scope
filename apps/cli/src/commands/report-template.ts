@@ -9,7 +9,8 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, withProjectOption, getDefaultApiUrl } from "../utils/shared.js";
+import { requireProjectId } from "../utils/config.js";
 import { apiFetch } from "../utils/api-client.js";
 import { mapYamlReportTemplate } from "../utils/yaml-mappers.js";
 
@@ -52,16 +53,17 @@ reportTemplate
     }
   });
 
-withOutputOption(
+withProjectOption(withOutputOption(
 reportTemplate
   .command("list")
   .description("List all report templates")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
-      const response = await apiFetch(options.url, `/report-templates`);
+      const response = await apiFetch(options.url, `/report-templates`, { projectId });
 
       if (!response.ok) {
         const error = await response.json();
@@ -187,8 +189,10 @@ reportTemplate
   .option("--trigger-ids <ids...>", "Trigger IDs (criteria IDs, task prompt IDs, or feature IDs)")
   .option("--trigger-match <match>", "Trigger match mode: any or all (default: all)")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (options) => {
     try {
+      const projectId = requireProjectId(options.project);
       const body: Record<string, unknown> = {
         id: options.id,
         name: options.name,
@@ -221,6 +225,7 @@ reportTemplate
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        projectId,
       });
 
       if (!response.ok) {
@@ -334,6 +339,7 @@ reportTemplate
   .argument("<path>", "Path to a .yaml file or directory of .yaml files")
   .option("--dry-run", "Preview what would be imported without sending to API")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID that newly created templates are filed into (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (inputPath: string, options) => {
     try {
       const absPath = resolve(inputPath);
@@ -406,6 +412,9 @@ reportTemplate
         return;
       }
 
+      // Newly created templates are root creates and must be filed into a project.
+      const projectId = requireProjectId(options.project);
+
       console.log();
       let created = 0;
       let updated = 0;
@@ -436,6 +445,7 @@ reportTemplate
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(t),
+            projectId,
           });
           if (resp.ok) {
             created++;
