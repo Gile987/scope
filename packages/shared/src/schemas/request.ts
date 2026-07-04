@@ -236,6 +236,7 @@ export const RunStateSchema = z
  */
 export const RunHistoryDocumentSchema = RunStateSchema.extend({
   requestId: z.string(),
+  projectId: z.string(),
 }).openapi("RunHistoryDocument");
 
 /**

@@ -64,8 +64,11 @@ export class CodebaseStore {
   }
 
   /** List codebases, newest first (excludes soft-deleted by default). */
-  async list(opts?: { includeDeleted?: boolean }): Promise<CodebaseDocument[]> {
-    const filter = opts?.includeDeleted ? {} : { deletedAt: { $exists: false } };
+  async list(opts?: { includeDeleted?: boolean; projectId?: string }): Promise<CodebaseDocument[]> {
+    const filter: Record<string, unknown> = opts?.includeDeleted ? {} : { deletedAt: { $exists: false } };
+    if (opts?.projectId) {
+      filter.projectId = opts.projectId;
+    }
     return this.collection.find(filter).sort({ createdAt: -1 }).toArray();
   }
 
