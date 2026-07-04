@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { FeatureFlagProvider } from "@/contexts/FeatureFlagContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { ProjectProvider } from "@/contexts/ProjectContext";
 import { Toaster } from "@/components/ui/sonner";
 import "./index.css";
 
@@ -25,10 +26,12 @@ createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
       <FeatureFlagProvider>
-        <BrowserRouter>
-          <App />
-          <Toaster />
-        </BrowserRouter>
+        <ProjectProvider>
+          <BrowserRouter>
+            <App />
+            <Toaster />
+          </BrowserRouter>
+        </ProjectProvider>
       </FeatureFlagProvider>
     </ThemeProvider>
   </QueryClientProvider>

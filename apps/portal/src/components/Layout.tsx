@@ -22,6 +22,7 @@ import {
   Menu,
   BookOpen,
   FolderGit2,
+  FolderKanban,
   GitBranch,
   Plug,
   Puzzle,
@@ -44,6 +45,7 @@ import {
 } from "@/components/ui/tooltip";
 import { VersionFooter } from "./VersionFooter";
 import { ThemeToggle } from "./ThemeToggle";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 
 interface NavItem {
@@ -97,6 +99,7 @@ const navGroups: NavGroup[] = [
     id: "resources",
     label: "Resources",
     items: [
+      { to: "/projects", label: "Projects", icon: FolderKanban },
       { to: "/agents", label: "Agents", icon: Bot, featureKey: "agents" },
       { to: "/models", label: "Models", icon: Cpu, featureKey: "models" },
       { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },
@@ -138,6 +141,7 @@ const FULL_BLEED_ROUTE_PATTERNS = [
   "/secrets/accounts",
   "/reports",
   "/reports/templates",
+  "/projects",
 ];
 
 interface SidebarIconLinkProps {
@@ -270,7 +274,10 @@ export function Layout() {
             <Activity className="h-5 w-5 text-action" />
             <span>Scope</span>
           </Link>
-          <ThemeToggle />
+          <div className="flex items-center gap-1">
+            <ProjectSwitcher />
+            <ThemeToggle />
+          </div>
         </header>
 
         <div className="flex min-h-0 flex-1">

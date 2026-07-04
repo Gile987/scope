@@ -5,20 +5,31 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { ProjectProvider } from "@/contexts/ProjectContext";
 import { Layout } from "./Layout";
 
 function renderLayout(path = "/runs") {
+  // Layout now hosts <ProjectSwitcher />, which reads react-query + ProjectContext,
+  // so the harness provides both (mirroring main.tsx).
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <ThemeProvider defaultTheme="light">
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route path="/runs" element={<div>Runs page</div>} />
-          </Route>
-        </Routes>
-      </MemoryRouter>
-    </ThemeProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider defaultTheme="light">
+        <ProjectProvider>
+          <MemoryRouter initialEntries={[path]}>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route path="/runs" element={<div>Runs page</div>} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </ProjectProvider>
+      </ThemeProvider>
+    </QueryClientProvider>,
   );
 }
 

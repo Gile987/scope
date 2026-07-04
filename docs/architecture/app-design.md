@@ -118,7 +118,7 @@ never defaulted. The single carrier is the **`?projectId=` query parameter**. He
 | Create a **root** entity | `?projectId=` query param | **400** |
 | Create a **child** entity | Copied from the referenced parent | **400** (parent missing / cross-project) |
 | **Top-level list** (`GET /api/v1/{requests,profiles,criteria,…}`) | `?projectId=` (**required**) | **400** |
-| **List-like reads** (`GET /api/v1/criteria/graph`, `/criteria/mdp`) | `?projectId=` (**required**) | **400** |
+| **List-like reads** (`GET /api/v1/criteria/graph`, `/criteria/mdp`, `/analysis`) | `?projectId=` (**required**) | **400** |
 | **Nested list** (under a parent in the path) | Derived from the parent id | n/a |
 | **Point read / by-`_id` mutation** (`GET/PATCH/DELETE /:id`) | Read from the stored doc (`_id` is globally unique) | n/a (query param ignored) |
 
@@ -385,6 +385,15 @@ Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API su
 
 The Portal desktop shell uses a persistent left navigation sidebar. It defaults to the compact icon rail, and users can expand it to show navigation labels; the choice is stored in `localStorage` under `scope:layout:sidebar-expanded`. Mobile navigation remains a sheet-based menu with labels always visible.
 
+### Project scoping (selected project, no default)
+
+The Portal mirrors the API's fail-fast model: it holds a **selected project** (never a default) and injects it as `?projectId=` on every scoped request.
+
+- **`contexts/ProjectContext.tsx`** persists the selection to `localStorage` (`scope:selectedProject`) and exposes `useProjectContext()` / `hasProject`. A module-level holder (`lib/project-scope.ts`) lets the non-hook `lib/api.ts` chokepoint read the current id; scoped methods are flagged `{ scoped: true }` and prepend `?projectId=` inside the shared `lib/api-client.ts` facade, throwing `ProjectRequiredError` when none is selected (no silent cross-project fetch).
+- **`components/ProjectSwitcher.tsx`** is the header control (beside `ThemeToggle`) that lists projects, switches the active one — invalidating all scoped queries via `hooks/useSelectProject.ts`, since query keys don't embed `projectId` — and offers inline create + a link to `/projects`. Its presentational `ProjectSwitcherView` is story/play-tested.
+- **`components/ProjectGate.tsx`** guards scoped routes: when no project is selected it renders a first-run pick/create screen (`ProjectFirstRunView`) instead of firing a scoped request that would 400. Point-read detail routes (resolve by `_id`) and unscoped areas (agents, models, secrets, admin, `/projects`) stay ungated.
+- **`pages/Projects.tsx`** (`/projects`, unscoped) manages projects themselves — create / rename / describe / soft-delete, with a friendly 409 message when a non-empty project can't be deleted.
+
 ### Hover-preview + navigate badges
 
 Criteria and task prompts appear across many surfaces (Run Detail, Runs list and its
@@ -438,7 +447,7 @@ See [`ENV_VARIABLES.md`](../../scope-mt-app/ENV_VARIABLES.md) for related config
 
 ## Statistics Analysis
 
-The Statistics page (`apps/portal/src/pages/Statistics.tsx`) is backed by `GET /api/v1/analysis` (`computeAnalysis` in `apps/api/src/analysis.ts`), which aggregates pass rates, iteration distribution, and duration stats across runs. It supports two independent, composable filters via query params:
+The Statistics page (`apps/portal/src/pages/Statistics.tsx`) is backed by `GET /api/v1/analysis` (`computeAnalysis` in `apps/api/src/analysis.ts`), which aggregates pass rates, iteration distribution, and duration stats across runs. The endpoint is **project-scoped**: it requires `?projectId=` (400 if absent) and aggregates only the selected project's done runs, so Statistics is a per-project dashboard (the Portal gates it behind project selection). It supports two independent, composable filters via query params:
 
 | Param | Filter | Semantics |
 |-------|--------|-----------|

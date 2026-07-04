@@ -1,0 +1,345 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FolderKanban, Pencil, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+
+import { ProjectCreateForm } from "@/components/ProjectCreateForm";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { DataTable, ListLayout, type DataTableColumn } from "@/components/list-layout";
+import { useProjectContext } from "@/contexts/ProjectContext";
+import { useSelectProject } from "@/hooks/useSelectProject";
+import { api } from "@/lib/api";
+import { formatDate } from "@/lib/utils";
+import type { Project } from "@/types";
+
+/** Stable id accessor — the API mirrors `_id` onto `id`, but fall back defensively. */
+function projectId(project: Project): string {
+  return project.id ?? project._id;
+}
+
+const NAME_MAX = 128;
+const DESCRIPTION_MAX = 512;
+
+/** Inline rename / re-describe dialog. */
+function EditProjectDialog({
+  project,
+  open,
+  onOpenChange,
+}: {
+  project: Project;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description ?? "");
+
+  const updateMutation = useMutation({
+    mutationFn: () =>
+      api.updateProject(projectId(project), {
+        name: name.trim(),
+        description: description.trim(),
+      }),
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      toast.success(`Project "${updated.name}" updated`);
+      onOpenChange(false);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to update project");
+    },
+  });
+
+  const nameTooLong = name.length > NAME_MAX;
+  const descriptionTooLong = description.length > DESCRIPTION_MAX;
+  const canSubmit = !!name.trim() && !nameTooLong && !descriptionTooLong;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit project</DialogTitle>
+          <DialogDescription>Rename or re-describe this project.</DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canSubmit && !updateMutation.isPending) updateMutation.mutate();
+          }}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="edit-project-name">Name *</Label>
+            <Input
+              id="edit-project-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={nameTooLong ? "border-destructive" : undefined}
+            />
+            {nameTooLong && (
+              <p className="text-xs text-destructive">
+                Name must be {NAME_MAX} characters or fewer
+              </p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-project-description">Description</Label>
+            <Textarea
+              id="edit-project-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+              className={descriptionTooLong ? "border-destructive" : undefined}
+            />
+            {descriptionTooLong && (
+              <p className="text-xs text-destructive">
+                Description must be {DESCRIPTION_MAX} characters or fewer
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!canSubmit || updateMutation.isPending}>
+              Save changes
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Projects management page — list, create, rename/describe, and soft-delete
+ * projects. Projects are the top-level **unscoped** container, so this page is
+ * not wrapped in `ProjectGate` and works with no project selected.
+ */
+export function Projects() {
+  const queryClient = useQueryClient();
+  const { selectedProjectId } = useProjectContext();
+  const selectProject = useSelectProject();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<Project | null>(null);
+
+  const { data: projects = [], isLoading } = useQuery({
+    queryKey: ["projects"],
+    queryFn: api.listProjects,
+  });
+
+  const activeProjects = useMemo(
+    () => projects.filter((p) => !p.deletedAt),
+    [projects],
+  );
+
+  const deleteMutation = useMutation({
+    mutationFn: (project: Project) => api.deleteProject(projectId(project)),
+    onSuccess: (_data, project) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      toast.success(`Project "${project.name}" deleted`);
+      // If the deleted project was the active selection, clear it so scoped
+      // pages fall back to the first-run gate instead of a dangling scope.
+      if (projectId(project) === selectedProjectId) selectProject(undefined);
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : "Failed to delete project";
+      // The API returns 409 while the project still owns scoped data.
+      toast.error(
+        /409|not empty|has scoped data|conflict/i.test(message)
+          ? "This project still contains data. Move or delete its runs and resources first."
+          : message,
+      );
+    },
+  });
+
+  const columns: DataTableColumn<Project>[] = [
+    {
+      id: "name",
+      header: "Name",
+      cell: (p) => {
+        const isActive = projectId(p) === selectedProjectId;
+        return (
+          <div className="flex items-center gap-2">
+            <FolderKanban className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="font-medium">{p.name}</span>
+            {isActive && (
+              <Badge variant="secondary" className="text-xs">
+                Active
+              </Badge>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      id: "description",
+      header: "Description",
+      cell: (p) => (
+        <span className="block max-w-[320px] truncate text-sm text-muted-foreground" title={p.description}>
+          {p.description || "—"}
+        </span>
+      ),
+    },
+    {
+      id: "created",
+      header: "Created",
+      width: "150px",
+      cell: (p) => <span className="text-xs text-muted-foreground">{formatDate(p.createdAt)}</span>,
+    },
+    {
+      id: "actions",
+      header: "",
+      width: "180px",
+      align: "right",
+      cell: (p) => {
+        const isActive = projectId(p) === selectedProjectId;
+        return (
+          <div className="flex items-center justify-end gap-1">
+            {!isActive && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8"
+                onClick={() => selectProject(projectId(p))}
+              >
+                Use
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              aria-label={`Edit ${p.name}`}
+              onClick={() => setEditing(p)}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-destructive"
+                  aria-label={`Delete ${p.name}`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete project “{p.name}”?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This soft-deletes the project. A project that still contains runs or other
+                    resources cannot be deleted until they are removed.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    onClick={() => deleteMutation.mutate(p)}
+                  >
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        );
+      },
+    },
+  ];
+
+  return (
+    <>
+      <ListLayout
+        title="Projects"
+        description="Organize runs, profiles, criteria, and more into isolated projects."
+        filterRail={null}
+        actions={
+          <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" />
+            New project
+          </Button>
+        }
+      >
+        <div className="p-4">
+          <DataTable
+            items={activeProjects}
+            columns={columns}
+            getRowId={(p) => projectId(p)}
+            activeId={selectedProjectId ?? null}
+            loading={isLoading}
+            emptyState={
+              <div className="flex flex-col items-center gap-2 py-10 text-center">
+                <FolderKanban className="h-8 w-8 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">
+                  No projects yet. Create one to get started.
+                </p>
+                <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
+                  <Plus className="h-4 w-4" />
+                  New project
+                </Button>
+              </div>
+            }
+          />
+        </div>
+      </ListLayout>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New project</DialogTitle>
+            <DialogDescription>
+              Create a project to organize runs, profiles, criteria, and more.
+            </DialogDescription>
+          </DialogHeader>
+          <ProjectCreateForm
+            onCancel={() => setCreateOpen(false)}
+            onCreated={() => {
+              setCreateOpen(false);
+              queryClient.invalidateQueries({ queryKey: ["projects"] });
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {editing && (
+        <EditProjectDialog
+          project={editing}
+          open={!!editing}
+          onOpenChange={(open) => {
+            if (!open) setEditing(null);
+          }}
+        />
+      )}
+    </>
+  );
+}
