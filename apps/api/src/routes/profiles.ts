@@ -17,6 +17,7 @@ import { apiRoute } from "../openapi/api-route.js";
 import type { RouteContext } from "../route-context.js";
 import { resolveSkillSpecs } from "../utils/skill-helpers.js";
 import { validateAgentForModel } from "../utils/agent-helpers.js";
+import { ProjectIdQuerySchema, getQueryProjectId } from "../utils/project-scope.js";
 
 export function registerProfilesRoutes(ctx: RouteContext): void {
 
@@ -31,10 +32,12 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Profiles"],
   summary: "Create a new profile",
   body: CreateProfileInputSchema,
+  query: ProjectIdQuerySchema,
   response: ProfileWithVersionResponseSchema,
   handler: async (req, res, next) => {
     try {
       const { name, description, workerType, model, reasoningEffort, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
+      const projectId = getQueryProjectId(req);
 
       // Extensions are only supported by VS Code workers
       if (extensions && extensions.length > 0 && !workerType.includes("vscode")) {
@@ -83,7 +86,7 @@ apiRoute(ctx.app, ctx.registry, {
       // Resolve skill specs to pinned revision refs
       let resolvedSkillRevisions: string[] | undefined;
       if (skillRevisions && skillRevisions.length > 0) {
-        const result = await resolveSkillSpecs(skillRevisions, ctx);
+        const result = await resolveSkillSpecs(skillRevisions, ctx, projectId);
         if (result.error) {
           res.status(422).json({ error: result.error });
           return;
@@ -93,6 +96,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       const profileDoc: ProfileDocument = {
         _id: profileId,
+        projectId,
         name,
         ...(description ? { description } : {}),
         latestVersion: 1,
@@ -101,6 +105,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       const versionDoc: ProfileVersionDocument = {
         _id: versionId,
+        projectId,
         profileId,
         version: 1,
         workerType,
@@ -129,11 +134,11 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/profiles",
   tags: ["Profiles"],
   summary: "List profiles",
-  query: z.object({ workerType: z.string().optional() }),
+  query: z.object({ workerType: z.string().optional() }).merge(ProjectIdQuerySchema),
   response: z.array(ProfileWithVersionResponseSchema),
   handler: async (req, res, next) => {
     try {
-      const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+      const filter: Record<string, unknown> = { projectId: getQueryProjectId(req), deletedAt: { $exists: false } };
       const profiles = await ctx.profileCollection.find(filter).sort({ name: 1 }).toArray();
 
       const result = await Promise.all(
@@ -308,7 +313,7 @@ apiRoute(ctx.app, ctx.registry, {
       // Resolve skill specs to pinned revision refs
       let resolvedSkillRevisions: string[] | undefined;
       if (skillRevisions && skillRevisions.length > 0) {
-        const result = await resolveSkillSpecs(skillRevisions, ctx);
+        const result = await resolveSkillSpecs(skillRevisions, ctx, profile.projectId);
         if (result.error) {
           res.status(422).json({ error: result.error });
           return;
@@ -318,6 +323,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       const versionDoc: ProfileVersionDocument = {
         _id: versionId,
+        projectId: profile.projectId,
         profileId: profile._id,
         version: newVersion,
         workerType,

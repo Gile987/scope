@@ -29,6 +29,7 @@ export interface SkillResolveContext {
 export async function resolveSkillSpecs(
   specs: string[],
   ctx: SkillResolveContext,
+  projectId: string,
 ): Promise<{ refs?: string[]; error?: string }> {
   if (!specs.length) return { refs: [] };
 
@@ -75,7 +76,7 @@ export async function resolveSkillSpecs(
     if (commitHash) {
       // Pinned to specific revision — validate it exists
       const ref = `${slug}@${commitHash}`;
-      const revision = await ctx.skillRevisionStore.getByRef(ref);
+      const revision = await ctx.skillRevisionStore.getByRef(projectId, ref);
       if (!revision) {
         return { error: `Skill revision not found: ${ref}` };
       }
@@ -84,6 +85,7 @@ export async function resolveSkillSpecs(
       // Resolve to latest revision
       try {
         const revision = await ctx.skillResolver.resolve(
+          projectId,
           skill.source,
           skill.skillName,
           ctx.skillRevisionStore,

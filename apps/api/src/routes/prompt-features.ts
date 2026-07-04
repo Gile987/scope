@@ -13,6 +13,7 @@ import { apiRoute } from "../openapi/api-route.js";
 import type { PromptFeatureDocument, RouteContext } from "../route-context.js";
 import { extractPromptFeatures, generatePromptFeaturePrompt, isLlmAvailable as isPromptFeatureLlmAvailable } from "../prompt-feature-llm.js";
 import { isInferenceError } from "../llm-token.js";
+import { ProjectIdQuerySchema, getQueryProjectId } from "../utils/project-scope.js";
 
 export function registerPromptFeaturesRoutes(ctx: RouteContext): void {
 
@@ -194,12 +195,12 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/prompt-features",
   tags: ["Prompt Features"],
   summary: "List features",
-  query: z.object({ q: z.string().optional(), type: z.enum(["select", "agents.md"]).optional() }),
+  query: z.object({ q: z.string().optional(), type: z.enum(["select", "agents.md"]).optional() }).merge(ProjectIdQuerySchema),
   response: z.array(PromptFeatureResponseSchema),
   handler: async (req, res) => {
     const q = req.query.q;
     const type = req.query.type;
-    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+    const filter: Record<string, unknown> = { projectId: getQueryProjectId(req), deletedAt: { $exists: false } };
     if (type) {
       // Absent `type` is treated as 'select' for backward compatibility.
       filter.$and = [
@@ -255,6 +256,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Prompt Features"],
   summary: "Create feature",
   body: CreatePromptFeatureInputSchema,
+  query: ProjectIdQuerySchema,
   response: PromptFeatureResponseSchema,
   successStatus: 201,
   errorResponses: {
@@ -263,6 +265,7 @@ apiRoute(ctx.app, ctx.registry, {
   },
   handler: async (req, res) => {
     const { id, prompt, type } = req.body;
+    const projectId = getQueryProjectId(req);
 
     if (!id || typeof id !== "string") {
       res.status(400).json({ error: "id is required and must be a string" });
@@ -284,6 +287,7 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     const doc: PromptFeatureDocument = {
+      projectId,
       id,
       prompt: prompt.trim(),
       ...(type ? { type } : {}),

@@ -13,6 +13,7 @@ import {
 import type { ExtensionSearchResult } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { ExtensionDocument, RouteContext } from "../route-context.js";
+import { ProjectIdQuerySchema, getQueryProjectId } from "../utils/project-scope.js";
 
 export function registerExtensionsRoutes(ctx: RouteContext): void {
 
@@ -26,10 +27,11 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/extensions",
   tags: ["Extensions"],
   summary: "List all extensions",
+  query: ProjectIdQuerySchema,
   response: z.array(ExtensionResponseSchema),
-  handler: async (_req, res) => {
+  handler: async (req, res) => {
     const extensions = await ctx.extensionCollection
-      .find({ deletedAt: { $exists: false } })
+      .find({ projectId: getQueryProjectId(req), deletedAt: { $exists: false } })
       .toArray();
     extensions.sort((a, b) => a._id.localeCompare(b._id));
     res.json(extensions.map((e) => ({ ...e, id: e._id })));
@@ -130,14 +132,22 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/extensions",
   tags: ["Extensions"],
   summary: "Create or import an extension",
+  query: ProjectIdQuerySchema,
   body: CreateExtensionInputSchema,
   response: ExtensionResponseSchema,
   handler: async (req, res) => {
+    const projectId = getQueryProjectId(req);
     const { _id, publisher, name, description, origin } = req.body;
     const now = new Date();
     const existing = await ctx.extensionCollection.findOne({ _id });
 
     if (existing) {
+      if (existing.projectId && existing.projectId !== projectId) {
+        res.status(409).json({
+          error: `Extension '${_id}' already exists in another project.`,
+        });
+        return;
+      }
       await ctx.extensionCollection.updateOne(
         { _id },
         {
@@ -156,6 +166,7 @@ apiRoute(ctx.app, ctx.registry, {
     } else {
       const extensionDoc: ExtensionDocument = {
         _id,
+        projectId,
         publisher,
         name,
         ...(description ? { description } : {}),

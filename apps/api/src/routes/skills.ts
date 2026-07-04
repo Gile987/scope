@@ -15,6 +15,7 @@ import {
 import type { SkillDocument, SkillSearchResult } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { RouteContext } from "../route-context.js";
+import { ProjectIdQuerySchema, getQueryProjectId } from "../utils/project-scope.js";
 
 export function registerSkillsRoutes(ctx: RouteContext): void {
 
@@ -55,11 +56,13 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/skills",
   tags: ["Skills"],
   summary: "List all skills",
+  query: ProjectIdQuerySchema,
   response: z.array(SkillResponseSchema),
-  handler: async (_req, res, next) => {
+  handler: async (req, res, next) => {
     try {
+      const projectId = getQueryProjectId(req);
       const skills = await ctx.skillCollection
-        .find({ deletedAt: { $exists: false } })
+        .find({ deletedAt: { $exists: false }, projectId })
         .toArray();
       skills.sort((a, b) => a._id.localeCompare(b._id));
       res.json(skills.map((s) => ({ ...s, id: s._id })));
@@ -79,7 +82,7 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/skills/search",
   tags: ["Skills"],
   summary: "Search skills (internal + external)",
-  query: z.object({ q: z.string(), limit: z.string().optional() }),
+  query: z.object({ q: z.string(), limit: z.string().optional() }).merge(ProjectIdQuerySchema),
   response: z.array(SkillSearchResultSchema),
   errorResponses: {
     400: { description: "Missing query parameter" },
@@ -87,6 +90,7 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res, next) => {
     try {
       const { q, limit: limitStr } = req.query;
+      const projectId = getQueryProjectId(req);
 
       if (!q || typeof q !== "string" || !q.trim()) {
         res.status(400).json({ error: "Query parameter 'q' is required" });
@@ -96,11 +100,12 @@ apiRoute(ctx.app, ctx.registry, {
       const limit = Math.min(Math.max(parseInt(limitStr as string, 10) || 10, 1), 50);
       const query = q.trim();
 
-      // Search internal DB (case-insensitive regex)
+      // Search internal DB (case-insensitive regex), scoped to the project
       const regex = { $regex: query, $options: "i" };
       const internalSkills = await ctx.skillCollection
         .find({
           deletedAt: { $exists: false },
+          projectId,
           $or: [
             { name: regex },
             { skillName: regex },
@@ -224,7 +229,7 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/skills/discover",
   tags: ["Skills"],
   summary: "Discover skills in a GitHub repository",
-  query: z.object({ source: z.string() }),
+  query: z.object({ source: z.string() }).merge(ProjectIdQuerySchema),
   response: z.array(SkillDiscoveryResultSchema),
   errorResponses: {
     400: { description: "Missing or malformed source parameter" },
@@ -233,6 +238,7 @@ apiRoute(ctx.app, ctx.registry, {
   },
   handler: async (req, res, next) => {
     try {
+      const projectId = getQueryProjectId(req);
       const source = (req.query.source as string | undefined)?.trim();
       if (!source) {
         res.status(400).json({ error: "Query parameter 'source' is required (e.g. 'owner/repo')" });
@@ -251,7 +257,7 @@ apiRoute(ctx.app, ctx.registry, {
         // upstream commit on `skillPath`. This drives the wizard's 3-state UI
         // (New / Up to date / Update available).
         const existingDocs = await ctx.skillCollection
-          .find({ source, deletedAt: { $exists: false } }, { projection: { skillName: 1 } })
+          .find({ source, projectId, deletedAt: { $exists: false } }, { projection: { skillName: 1 } })
           .toArray();
         const existingNames = new Set(existingDocs.map((d) => d.skillName));
 
@@ -262,7 +268,7 @@ apiRoute(ctx.app, ctx.registry, {
             }
             // Both calls are independent — run in parallel.
             const [latestRevs, upstreamSha] = await Promise.all([
-              ctx.skillRevisionStore.listBySkill(source, r.skillName, { limit: 1 }),
+              ctx.skillRevisionStore.listBySkill(projectId, source, r.skillName, { limit: 1 }),
               ctx.skillResolver.getLatestCommitSha(source, r.skillPath).catch(() => undefined),
             ]);
             const latest = latestRevs[0];
@@ -319,7 +325,7 @@ apiRoute(ctx.app, ctx.registry, {
       const limitStr = req.query.limit as string | undefined;
       const limit = Math.min(Math.max(parseInt(limitStr ?? "20", 10), 1), 100);
 
-      const revisions = await ctx.skillRevisionStore.listBySkill(skill.source, skill.skillName, { limit });
+      const revisions = await ctx.skillRevisionStore.listBySkill(skill.projectId, skill.source, skill.skillName, { limit });
       res.json(revisions);
     } catch (error) {
       next(error);
@@ -359,6 +365,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Skills"],
   summary: "Create or import a skill",
   body: CreateSkillInputSchema,
+  query: ProjectIdQuerySchema,
   response: SkillResponseSchema,
   handler: async (req, res, next) => {
     try {
@@ -382,8 +389,18 @@ apiRoute(ctx.app, ctx.registry, {
       }
 
       const _id = `${source}/${skillName}`;
+      const projectId = getQueryProjectId(req);
       const now = new Date();
       const existing = await ctx.skillCollection.findOne({ _id });
+
+      // Skill slugs are globally-unique `_id`s, so a slug already filed under a
+      // different project cannot be re-imported here — reject cross-project reuse.
+      if (existing && existing.projectId && existing.projectId !== projectId) {
+        res.status(409).json({
+          error: `Skill '${_id}' already exists in a different project`,
+        });
+        return;
+      }
 
       let responseSkill: SkillDocument & { id: string };
       let status = 200;
@@ -408,6 +425,7 @@ apiRoute(ctx.app, ctx.registry, {
       } else {
         const skillDoc: SkillDocument = {
           _id,
+          projectId,
           source,
           skillName,
           name,
@@ -424,7 +442,7 @@ apiRoute(ctx.app, ctx.registry, {
       // Failures are non-fatal: the skill is already saved and the user can
       // retry resolution manually via POST /skills/:id/resolve.
       try {
-        await ctx.skillResolver.resolve(source, skillName, ctx.skillRevisionStore, uploadSkillArchive);
+        await ctx.skillResolver.resolve(projectId, source, skillName, ctx.skillRevisionStore, uploadSkillArchive);
       } catch (resolveError) {
         const message = resolveError instanceof Error ? resolveError.message : String(resolveError);
         console.warn(`Auto-resolve failed for skill ${_id}: ${message}`);
@@ -464,8 +482,8 @@ apiRoute(ctx.app, ctx.registry, {
         { $set: { deletedAt: new Date(), updatedAt: new Date() } }
       );
 
-      // Also delete all associated skill revisions
-      await ctx.skillRevisionStore.deleteBySkill(existing.source, existing.skillName);
+      // Also delete all associated skill revisions within the skill's project
+      await ctx.skillRevisionStore.deleteBySkill(existing.projectId, existing.source, existing.skillName);
 
       res.status(204).send();
     } catch (error) {
@@ -484,6 +502,7 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/skill-revisions/by-ref/:ref(*)/archive",
   tags: ["Skill Revisions"],
   summary: "Download skill revision archive",
+  query: ProjectIdQuerySchema,
   response: z.any(),
   rawResponse: true,
   responseDescription: "Binary tar.gz archive",
@@ -496,7 +515,7 @@ apiRoute(ctx.app, ctx.registry, {
       const ref = req.params.ref ?? req.params[0];
       // Strip trailing "/archive" that Express includes in the wildcard match
       const cleanRef = ref.replace(/\/archive$/, "");
-      const revision = await ctx.skillRevisionStore.getByRef(cleanRef);
+      const revision = await ctx.skillRevisionStore.getByRef(getQueryProjectId(req), cleanRef);
       if (!revision) {
         res.status(404).json({ error: "Skill revision not found" });
         return;
@@ -566,6 +585,7 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/skill-revisions/by-ref/:ref(*)",
   tags: ["Skill Revisions"],
   summary: "Get skill revision by ref",
+  query: ProjectIdQuerySchema,
   response: SkillRevisionResponseSchema,
   errorResponses: {
     404: { description: "Skill revision not found" },
@@ -573,7 +593,7 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res, next) => {
     try {
       const ref = req.params.ref ?? req.params[0];
-      const revision = await ctx.skillRevisionStore.getByRef(ref);
+      const revision = await ctx.skillRevisionStore.getByRef(getQueryProjectId(req), ref);
       if (!revision) {
         res.status(404).json({ error: "Skill revision not found" });
         return;
@@ -630,7 +650,7 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
 
-      const revision = await ctx.skillResolver.resolve(skill.source, skill.skillName, ctx.skillRevisionStore, uploadSkillArchive);
+      const revision = await ctx.skillResolver.resolve(skill.projectId, skill.source, skill.skillName, ctx.skillRevisionStore, uploadSkillArchive);
       res.json(revision);
     } catch (error) {
       next(error);

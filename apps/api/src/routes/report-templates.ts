@@ -12,6 +12,7 @@ import {
 import { apiRoute } from "../openapi/api-route.js";
 import type { ReportTemplateDocument, RouteContext } from "../route-context.js";
 import { validateTrigger } from "../utils/validate-trigger.js";
+import { ProjectIdQuerySchema, getQueryProjectId } from "../utils/project-scope.js";
 
 export function registerReportTemplatesRoutes(ctx: RouteContext): void {
 
@@ -55,12 +56,12 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/report-templates",
   tags: ["Report Templates"],
   summary: "List report templates",
-  query: z.object({ q: z.string().optional() }),
+  query: z.object({ q: z.string().optional() }).merge(ProjectIdQuerySchema),
   response: z.array(ReportTemplateResponseSchema),
   handler: async (req, res, next) => {
     try {
       const q = req.query.q as string | undefined;
-      const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+      const filter: Record<string, unknown> = { projectId: getQueryProjectId(req), deletedAt: { $exists: false } };
       if (q) {
         filter.$or = [
           { id: { $regex: q, $options: "i" } },
@@ -110,6 +111,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Report Templates"],
   summary: "Create report template",
   body: CreateReportTemplateInputSchema,
+  query: ProjectIdQuerySchema,
   response: ReportTemplateResponseSchema,
   errorResponses: {
     409: { description: "Report template already exists" },
@@ -117,6 +119,7 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res, next) => {
     try {
       const { id, name, description, userPrompt, systemPrompt, trigger, model, timeoutMs } = req.body;
+      const projectId = getQueryProjectId(req);
 
       if (!id || typeof id !== "string") {
         res.status(400).json({ error: "id is required and must be a string" });
@@ -176,6 +179,12 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(409).json({ error: `Report template '${id}' already exists` });
         return;
       }
+      // `id` is a global slug; a soft-deleted template owned by another project
+      // must not be revived into a different one (projectId is immutable).
+      if (existing && existing.projectId && existing.projectId !== projectId) {
+        res.status(409).json({ error: `Report template '${id}' exists in a different project` });
+        return;
+      }
 
       const now = new Date();
 
@@ -201,6 +210,7 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(201).json(updated);
       } else {
         const templateDoc: ReportTemplateDocument = {
+          projectId,
           id,
           name,
           ...(description ? { description } : {}),

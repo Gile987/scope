@@ -23,6 +23,8 @@ import type {
   McpSecretClient,
   ProfileDocument,
   ProfileVersionDocument,
+  ProjectStore,
+  ProjectDocument,
   // Zod response schemas → inferred types replace hand-written interfaces
   CriteriaResponseSchema,
   ExtensionResponseSchema,
@@ -87,6 +89,7 @@ export interface RouteContext {
   db: Db;
   requestCollection: Collection<RequestDocument>;
   runsCollection: Collection<RunHistoryDocument>;
+  projectCollection: Collection<ProjectDocument>;
   criteriaCollection: Collection<CriteriaDocument>;
   promptFeatureCollection: Collection<PromptFeatureDocument>;
   promptFeatureExtractionCollection: Collection<PromptFeatureExtractionDocument>;
@@ -113,6 +116,7 @@ export interface RouteContext {
   codebaseStore: CodebaseStore;
   codebaseRevisionStore: CodebaseRevisionStore;
   codebaseResolver: CodebaseResolver;
+  projectStore: ProjectStore;
 
   // Token Manager client (null when TOKEN_MANAGER_URL not set)
   mcpSecretClient: McpSecretClient | null;

@@ -19,6 +19,7 @@ import { computeMdp } from "../criteria-mdp.js";
 import type { MdpAnalyzableRun } from "../criteria-mdp.js";
 import { generateCriteriaPrompt, isLlmAvailable } from "../llm.js";
 import { isInferenceError } from "../llm-token.js";
+import { ProjectIdQuerySchema, getQueryProjectId } from "../utils/project-scope.js";
 
 /**
  * Map a thrown {@link CriteriaStoreError} to an HTTP response. Returns true when
@@ -210,7 +211,7 @@ apiRoute(ctx.app, ctx.registry, {
     q: z.string().optional(),
     ids: z.string().optional().describe("Comma-separated criterion IDs to include"),
     ancestors: z.enum(["true", "false"]).optional().describe("When true and ids is set, also include dependency ancestors"),
-  }),
+  }).merge(ProjectIdQuerySchema),
   response: z.array(CriteriaResponseSchema),
   handler: async (req, res) => {
     const q = req.query.q;
@@ -224,7 +225,10 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+    const filter: Record<string, unknown> = {
+      projectId: getQueryProjectId(req),
+      deletedAt: { $exists: false },
+    };
     if (q) {
       filter.$or = [
         { id: { $regex: q, $options: "i" } },
@@ -414,6 +418,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Criteria"],
   summary: "Create criterion",
   body: CreateCriteriaInputSchema,
+  query: ProjectIdQuerySchema,
   response: CriteriaResponseSchema,
   errorResponses: {
     409: { description: "Criterion already exists" },
@@ -421,7 +426,7 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res) => {
     const { id, prompt, dependsOn = [], gates } = req.body;
     try {
-      const doc = await getCriteriaStore().create({ id, prompt, dependsOn, gates });
+      const doc = await getCriteriaStore().create({ projectId: getQueryProjectId(req), id, prompt, dependsOn, gates });
       res.status(201).json(doc);
     } catch (err) {
       if (!sendStoreError(res, err)) throw err;

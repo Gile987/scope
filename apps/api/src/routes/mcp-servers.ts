@@ -10,6 +10,7 @@ import {
 } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { McpServerDocument, RouteContext } from "../route-context.js";
+import { ProjectIdQuerySchema, getQueryProjectId } from "../utils/project-scope.js";
 
 export function registerMcpServersRoutes(ctx: RouteContext): void {
 
@@ -37,10 +38,11 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/mcp/servers",
   tags: ["MCP Servers"],
   summary: "List MCP servers",
+  query: ProjectIdQuerySchema,
   response: z.array(McpServerResponseSchema),
-  handler: async (_req, res) => {
+  handler: async (req, res) => {
     const servers = await ctx.mcpServerCollection
-      .find({ deletedAt: { $exists: false } })
+      .find({ projectId: getQueryProjectId(req), deletedAt: { $exists: false } })
       .toArray();
     servers.sort((a, b) => a._id.localeCompare(b._id));
     res.json(servers.map((s) => ({ ...s, id: s._id })));
@@ -92,9 +94,11 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/mcp/servers",
   tags: ["MCP Servers"],
   summary: "Create MCP server",
+  query: ProjectIdQuerySchema,
   body: CreateMcpServerBodySchema,
   response: McpServerResponseSchema,
   handler: async (req, res) => {
+    const projectId = getQueryProjectId(req);
     const { _id, name, type, url, command, args, env, headers, sessionMode, version, description } = req.body;
 
     const hasSecrets = (env && Object.keys(env).length > 0) || (headers && headers.length > 0);
@@ -107,6 +111,15 @@ apiRoute(ctx.app, ctx.registry, {
     const existing = await ctx.mcpServerCollection.findOne({ _id });
 
     if (existing) {
+      // `_id` is a globally-unique slug. Re-creating a slug that already lives in
+      // a different project would silently rewrite that project's server, so
+      // reject it — projectId is immutable.
+      if (existing.projectId && existing.projectId !== projectId) {
+        res.status(409).json({
+          error: `MCP server '${_id}' already exists in another project.`,
+        });
+        return;
+      }
       // Upsert: un-delete if soft-deleted, update non-secret fields
       await ctx.mcpServerCollection.updateOne(
         { _id },
@@ -131,6 +144,7 @@ apiRoute(ctx.app, ctx.registry, {
     } else {
       const serverDoc: McpServerDocument = {
         _id,
+        projectId,
         name,
         type,
         ...(url ? { url } : {}),
