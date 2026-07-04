@@ -15,7 +15,7 @@
     "directory": "apps/cli"
   },
   "scripts": {
-    "build": "tsx build.ts",
+    "build": "tsc --noEmit && tsx build.ts",
     "build:tsc": "tsc --noEmit",
     "dev": "tsx src/index.ts",
     "start": "node dist/scope.mjs",

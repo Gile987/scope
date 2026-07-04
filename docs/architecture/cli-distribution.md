@@ -24,6 +24,33 @@ pnpm build            # from apps/cli/
 
 This produces `apps/cli/dist/scope.mjs` (~1MB minified).
 
+### Typecheck gate
+
+esbuild strips types **without** typechecking and treats unknown identifiers as globals, so a
+type error or an undefined identifier bundles cleanly and only fails at runtime. To close that gap,
+the CLI's `build` script runs `tsc --noEmit` **before** esbuild:
+
+```jsonc
+// apps/cli/package.json
+"build": "tsc --noEmit && tsx build.ts",
+"build:tsc": "tsc --noEmit",   // standalone typecheck alias
+```
+
+Because every CI/release entry point invokes the CLI `build` script — `pnpm build` (`pnpm -r build`,
+used by the CI **Build** job and `publish-cli.yml`) and `pnpm build:cli` (used by the
+**CLI Bundle Integration Tests** job) — the CLI is now typechecked automatically wherever it is
+built, with no separate CI step. `tsc` requires the `shared` package's `dist` to exist; every one
+of these entry points builds `shared` first (topologically for `pnpm -r`, explicitly for
+`build:cli`), which esbuild already required, so there is no new ordering constraint.
+
+> **Motivation:** In PR #1151 an import of `normalizeUrl` was removed from `criteria.ts` while a
+> call site remained, so `scope criteria export` threw `normalizeUrl is not defined` at runtime —
+> yet CI stayed green because nothing typechecked the esbuild-bundled CLI. `tsc --noEmit` catches
+> this class of error (`TS2304: Cannot find name 'normalizeUrl'`) and now fails the build.
+
+`apps/cli` is the only esbuild-bundled TypeScript app; all other apps/workers/packages build with
+`tsc` and are therefore already typechecked by `pnpm build`.
+
 ### Build-time injection
 
 | Define | Source | Purpose |

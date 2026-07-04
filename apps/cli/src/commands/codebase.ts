@@ -23,6 +23,9 @@ type CodebaseRevisionApiDocument = Omit<CodebaseRevisionDocument, "commitTimesta
   commitTimestamp?: JsonDate;
   resolvedAt: JsonDate;
   createdAt: JsonDate;
+  // Present only on resolve/upload responses (see CodebaseRevisionResponseSchema);
+  // true when the revision was reused rather than newly created.
+  deduplicated?: boolean;
 };
 interface ApiErrorBody {
   error?: string;
