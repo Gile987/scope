@@ -1,0 +1,1553 @@
+[
+  {
+    "number": 5,
+    "title": "Insight agent",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/api/src/routes/insights.ts; portal InsightsList; CLI insight; PR#948",
+    "reason": "Insight agent fully built: API routes, portal pages, CLI command, ATIF post-processor",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/5",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #948\n\n**Why:** Insight agent fully built: API routes, portal pages, CLI command, ATIF post-processor\n\n**Evidence:** apps/api/src/routes/insights.ts; portal InsightsList; CLI insight; PR #948\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      948
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 6,
+    "title": "Support interrupting coding workers",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/api/src/routes/requests/cancel.ts; PR#886",
+    "reason": "Run cancellation implemented via cancel API route + CLI cancel signalling active workers",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/6",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #886\n\n**Why:** Run cancellation implemented via cancel API route + CLI cancel signalling active workers\n\n**Evidence:** apps/api/src/routes/requests/cancel.ts; PR #886\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      886
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 10,
+    "title": "Run each criteria in parallel",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [
+      "optimization"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/judge/src/judge-strategies.ts:814; PR#327",
+    "reason": "Judge evaluates ready criteria in parallel (Promise.all up to maxParallelism)",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/10",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #327\n\n**Why:** Judge evaluates ready criteria in parallel (Promise.all up to maxParallelism)\n\n**Evidence:** apps/judge/src/judge-strategies.ts:814; PR #327\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      327
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 11,
+    "title": "Fix poison pill not being deleted from queue",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [
+      "urgent"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "packages/shared/src/queue/base-queue-processor.ts:434; PR#793",
+    "reason": "deleteMessage called after processing + fail-fast on redelivery prevents poison-pill loop",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/11",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #793\n\n**Why:** deleteMessage called after processing + fail-fast on redelivery prevents poison-pill loop\n\n**Evidence:** packages/shared/src/queue/base-queue-processor.ts:434; PR #793\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      793
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 20,
+    "title": "Copy logs in the portal",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/components/LogViewer.tsx:89-172; PR#252",
+    "reason": "LogViewer has handleCopy + 'Copy logs' button using navigator.clipboard",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/20",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #252\n\n**Why:** LogViewer has handleCopy + 'Copy logs' button using navigator.clipboard\n\n**Evidence:** apps/portal/src/components/LogViewer.tsx:89-172; PR #252\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      252
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 23,
+    "title": "The portal should display connected workers (coding agents and judges)",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/pages/AgentList.tsx; PR#303",
+    "reason": "AgentList shows registered agents w/ availability + models; workers self-register",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/23",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #303\n\n**Why:** AgentList shows registered agents w/ availability + models; workers self-register\n\n**Evidence:** apps/portal/src/pages/AgentList.tsx; PR #303\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      303
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 42,
+    "title": "Pull Azure AI Markplace models for Copilot CLI",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/model-scanners/copilot/; PR#974",
+    "reason": "Copilot model scanner app + K8s manifest collect models from provider API",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/42",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #974\n\n**Why:** Copilot model scanner app + K8s manifest collect models from provider API\n\n**Evidence:** apps/model-scanners/copilot/; PR #974\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      974
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 43,
+    "title": "Pull Claude Code models",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/model-scanners/anthropic/; PR#974",
+    "reason": "Anthropic (Claude Code) model scanner app + K8s manifest exist",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/43",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #974\n\n**Why:** Anthropic (Claude Code) model scanner app + K8s manifest exist\n\n**Evidence:** apps/model-scanners/anthropic/; PR #974\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      974
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 47,
+    "title": "Add support for Skills",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [
+      "customer: CosmosDB Team"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/pages/SkillList.tsx; PR#866,#763,#865",
+    "reason": "Full Skills feature: portal list/detail, API, CLI, import wizard, run selection",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/47",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #866, #763, #865\n\n**Why:** Full Skills feature: portal list/detail, API, CLI, import wizard, run selection\n\n**Evidence:** apps/portal/src/pages/SkillList.tsx; PR #866, #763, #865\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      866,
+      763,
+      865
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 78,
+    "title": "It should be possible to periodically scan the models that coding agents support",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/model-scanners/*; PR#974",
+    "reason": "Periodic model scanner workers for Copilot + Anthropic deployed as K8s workers",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/78",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #974\n\n**Why:** Periodic model scanner workers for Copilot + Anthropic deployed as K8s workers\n\n**Evidence:** apps/model-scanners/*; PR #974\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      974
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 81,
+    "title": "Support scanning models supported by VS Code Copilot",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "deploy/base/workers/model-scanner-copilot.yaml; PR#974",
+    "reason": "VS Code Copilot model scanner deployed as K8s job scanning provider API",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/81",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #974\n\n**Why:** VS Code Copilot model scanner deployed as K8s job scanning provider API\n\n**Evidence:** deploy/base/workers/model-scanner-copilot.yaml; PR #974\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      974
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 89,
+    "title": "Make sure we collect the coding agents logs",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "packages/shared/src/storage/blob-storage.ts:63; PR#541",
+    "reason": "Worker logs appended as JSONL blobs (migrated from CosmosDB to blob storage)",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/89",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #541\n\n**Why:** Worker logs appended as JSONL blobs (migrated from CosmosDB to blob storage)\n\n**Evidence:** packages/shared/src/storage/blob-storage.ts:63; PR #541\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      541
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 122,
+    "title": "Github workflow to auto upgrade coding agent workers",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": ".github/workflows/check-worker-versions.yml; PR#291,#292,#296",
+    "reason": "All 3 checkboxes [x]: version detection + auto PR creation + unified matrix workflow",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/122",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #291, #292, #296\n\n**Why:** All 3 checkboxes [x]: version detection + auto PR creation + unified matrix workflow\n\n**Evidence:** .github/workflows/check-worker-versions.yml; PR #291, #292, #296\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      291,
+      292,
+      296
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 126,
+    "title": "[PR] [PR] Exclude failed runs from analysis report",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [
+      "imported-pr"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/api/src/routes/requests/index.ts:1675",
+    "reason": "Analysis endpoint already queries run.status:done, inherently excluding failed runs",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/126",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Why:** Analysis endpoint already queries run.status:done, inherently excluding failed runs\n\n**Evidence:** apps/api/src/routes/requests/index.ts:1675\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 128,
+    "title": "Automatically detect which images to rebuild in CI",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": ".github/workflows/ci.yml:598-636; PR#254",
+    "reason": "ci.yml detect-changes job (paths-filter) drives conditional per-service image builds",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/128",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #254\n\n**Why:** ci.yml detect-changes job (paths-filter) drives conditional per-service image builds\n\n**Evidence:** .github/workflows/ci.yml:598-636; PR #254\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      254
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 133,
+    "title": "The statistics page should allow filtering by prompt feature in addition to criterias",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/pages/Statistics.tsx:868; PR#1202",
+    "reason": "Statistics filters overhauled w/ searchable criteria + task-prompt-feature pickers",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/133",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #1202\n\n**Why:** Statistics filters overhauled w/ searchable criteria + task-prompt-feature pickers\n\n**Evidence:** apps/portal/src/pages/Statistics.tsx:868; PR #1202\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      1202
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 134,
+    "title": "[PR] [PR] Add prompt feature filter to Insights statistics page",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [
+      "imported-pr"
+    ],
+    "category": "Implemented",
+    "confidence": "Med",
+    "evidence": "apps/portal/src/pages/Statistics.tsx; PR#1202",
+    "reason": "Imported-PR artifact for the prompt-feature filter, now live via PR#1202",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/134",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #1202\n\n**Why:** Imported-PR artifact for the prompt-feature filter, now live via PR #1202\n\n**Evidence:** apps/portal/src/pages/Statistics.tsx; PR #1202\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      1202
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 135,
+    "title": "Copilot coding agent worker failed to upload HAR in K8S",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "deploy/base/workers/coder-acp-copilot.yaml (DEV_PROXY_HAR_DIR); PR#446,#463,#702",
+    "reason": "DevProxy sidecar w/ HAR dir configured in K8s manifests, fixing HAR upload in AKS",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/135",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #446, #463, #702\n\n**Why:** DevProxy sidecar w/ HAR dir configured in K8s manifests, fixing HAR upload in AKS\n\n**Evidence:** deploy/base/workers/coder-acp-copilot.yaml (DEV_PROXY_HAR_DIR); PR #446, #463, #702\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      446,
+      463,
+      702
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 138,
+    "title": "Batch add pending runs and reports in queues rather than immediately",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/scheduler/; PR#689",
+    "reason": "Request scheduler app dispatches from MongoDB to queues in priority order (pause/resume)",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/138",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #689\n\n**Why:** Request scheduler app dispatches from MongoDB to queues in priority order (pause/resume)\n\n**Evidence:** apps/scheduler/; PR #689\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      689
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 140,
+    "title": "CLI should support YAML in addition to JSON for list and get sub commands",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/cli/src/utils/yaml-mappers.ts; PR#141",
+    "reason": "--output json|yaml added to CLI list/get subcommands",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/140",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #141\n\n**Why:** --output json|yaml added to CLI list/get subcommands\n\n**Evidence:** apps/cli/src/utils/yaml-mappers.ts; PR #141\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      141
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 151,
+    "title": "Docker compose per worktree port offset",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "Med",
+    "evidence": "docker-compose.yml (${MONGODB_PORT:-27000}…); PR#949",
+    "reason": "docker-compose uses env port overrides per service; PR#949 added per-worktree CosmosDB isolation",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/151",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #949\n\n**Why:** docker-compose uses env port overrides per service; PR #949 added per-worktree CosmosDB isolation\n\n**Evidence:** docker-compose.yml (${MONGODB_PORT:-27000}…); PR #949\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      949
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 152,
+    "title": "Real time MDP view of codebase criteria based states accross all runs",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/pages/CriteriaMdpView.tsx:418",
+    "reason": "MDP view polls w/ setInterval + mergeMdpResponses for live incremental updates",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/152",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Why:** MDP view polls w/ setInterval + mergeMdpResponses for live incremental updates\n\n**Evidence:** apps/portal/src/pages/CriteriaMdpView.tsx:418\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 157,
+    "title": "In the MDP diagram, transitions should be directional",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/pages/CriteriaMdpView.tsx:482",
+    "reason": "Edges use MarkerType.ArrowClosed making MDP transitions directional",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/157",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Why:** Edges use MarkerType.ArrowClosed making MDP transitions directional\n\n**Evidence:** apps/portal/src/pages/CriteriaMdpView.tsx:482\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 165,
+    "title": "Remove the run demo command",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "PR#947",
+    "reason": "'run demo' command + deps removed (DemoApp.tsx gone)",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/165",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #947\n\n**Why:** 'run demo' command + deps removed (DemoApp.tsx gone)\n\n**Evidence:** PR #947\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      947
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 166,
+    "title": "[PR] [PR] Remove `run demo` command",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [
+      "imported-pr"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "PR#947",
+    "reason": "Imported-PR artifact; removal completed by PR#947",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/166",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #947\n\n**Why:** Imported-PR artifact; removal completed by PR #947\n\n**Evidence:** PR #947\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      947
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 168,
+    "title": "The portal should use HTTPS in integration and prod - aka TLS termination",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "deploy/base/portal-ingress.yaml; closed #896",
+    "reason": "Portal ingress uses TLS via cert-manager/letsencrypt; tracking issue #896 marked COMPLETED",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/168",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Why:** Portal ingress uses TLS via cert-manager/letsencrypt; tracking issue #896 marked COMPLETED\n\n**Evidence:** deploy/base/portal-ingress.yaml; closed #896\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [],
+    "refIssues": [
+      896
+    ]
+  },
+  {
+    "number": 228,
+    "title": "Automate MFA renewal of Github cookie auth file",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-10",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/key-updaters/github-cookie-updater/; PR#230",
+    "reason": "TOTP MFA cookie renewal automation implemented w/ tests",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/228",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #230\n\n**Why:** TOTP MFA cookie renewal automation implemented w/ tests\n\n**Evidence:** apps/key-updaters/github-cookie-updater/; PR #230\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      230
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 274,
+    "title": "Version workers",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-17",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "packages/shared/src/resolve-agent-version.ts; closed #288,#289",
+    "reason": "Versioned worker system deployed (registry + self-registration + version-targeted runs)",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/274",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Why:** Versioned worker system deployed (registry + self-registration + version-targeted runs)\n\n**Evidence:** packages/shared/src/resolve-agent-version.ts; closed #288, #289\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [],
+    "refIssues": [
+      288,
+      289
+    ]
+  },
+  {
+    "number": 356,
+    "title": "Allow Github Actions to create PRs",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-20",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "Med",
+    "evidence": "PR#310; daily-test-improver.lock.yml (pull-requests: write)",
+    "reason": "skip-bots filter removed + PR-write permission granted, unblocking agentic PR creation",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/356",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #310\n\n**Why:** skip-bots filter removed + PR-write permission granted, unblocking agentic PR creation\n\n**Evidence:** PR #310; daily-test-improver.lock.yml (pull-requests: write)\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      310
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 410,
+    "title": "The criteria should only be mandatory when max iterations > 1",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-24",
+    "labels": [
+      "question"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "PR#608",
+    "reason": "'optional criteria for single-iteration runs' — criteria now only mandatory when maxIterations>1",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/410",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #608\n\n**Why:** 'optional criteria for single-iteration runs' — criteria now only mandatory when maxIterations>1\n\n**Evidence:** PR #608\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      608
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 492,
+    "title": "refactor: consolidate \"iterating\" and \"processing\" request statuses",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-04-04",
+    "labels": [
+      "enhancement",
+      "optimization",
+      "easy"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "packages/shared/src/schemas/request.ts; PR#504",
+    "reason": "'iterating' status removed/consolidated; split into status + outcome field",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/492",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #504\n\n**Why:** 'iterating' status removed/consolidated; split into status + outcome field\n\n**Evidence:** packages/shared/src/schemas/request.ts; PR #504\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      504
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 493,
+    "title": "fix: worker resilience — heartbeat, status guard, graceful shutdown (Phase 1 of #486)",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-04-04",
+    "labels": [
+      "bug",
+      "reliability"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "packages/shared/src/queue/visibility-heartbeat.ts; PR#761",
+    "reason": "Heartbeat + status guard + SIGTERM graceful shutdown all implemented (Phase 1)",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/493",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #761\n\n**Why:** Heartbeat + status guard + SIGTERM graceful shutdown all implemented (Phase 1)\n\n**Evidence:** packages/shared/src/queue/visibility-heartbeat.ts; PR #761\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      761
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 494,
+    "title": "fix: stale run sweeper CronJob (Phase 2 of #486)",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-04-04",
+    "labels": [
+      "bug",
+      "reliability"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/scheduler/src/stuck-run-reaper.ts; PR#1052",
+    "reason": "Stale-run sweeper (StuckRunReaper) implemented + deployed (Phase 2)",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/494",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #1052\n\n**Why:** Stale-run sweeper (StuckRunReaper) implemented + deployed (Phase 2)\n\n**Evidence:** apps/scheduler/src/stuck-run-reaper.ts; PR #1052\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      1052
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 556,
+    "title": "UI Bug: Horizontal scroll on Runs page only accessible after scrolling to the bottom",
+    "author": "garrytrinder_microsoft",
+    "created": "2026-04-10",
+    "labels": [
+      "bug",
+      "UX"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/components/list-layout/DataTable.tsx; PR#1049",
+    "reason": "Sticky horizontal scrollbar (IntersectionObserver) added to DataTable",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/556",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #1049\n\n**Why:** Sticky horizontal scrollbar (IntersectionObserver) added to DataTable\n\n**Evidence:** apps/portal/src/components/list-layout/DataTable.tsx; PR #1049\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      1049
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 590,
+    "title": "In the runs list page, display the runs within a view so that the scrolling bars are always visible",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-04-13",
+    "labels": [],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/.../DataTable.tsx; PR#1049",
+    "reason": "Same PR#1049 sticky scrollbar addresses runs-list viewport scroll visibility",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/590",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #1049\n\n**Why:** Same PR #1049 sticky scrollbar addresses runs-list viewport scroll visibility\n\n**Evidence:** apps/portal/.../DataTable.tsx; PR #1049\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      1049
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 601,
+    "title": "bug: MCP server secret resolution and gateway registration use display name instead of slug",
+    "author": "jduffney_microsoft",
+    "created": "2026-04-15",
+    "labels": [
+      "bug"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "packages/shared/src/queue/queue-processor.ts:304; PR#594",
+    "reason": "MCP secret resolution + gateway registration now use config.slug not display name",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/601",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #594\n\n**Why:** MCP secret resolution + gateway registration now use config.slug not display name\n\n**Evidence:** packages/shared/src/queue/queue-processor.ts:304; PR #594\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      594
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 672,
+    "title": "Unable to remove dependencies using the Criteria UI",
+    "author": "garrytrinder_microsoft",
+    "created": "2026-04-21",
+    "labels": [
+      "bug",
+      "portal",
+      "judge"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/components/CriteriaPicker.tsx:192",
+    "reason": "Dependency badges now have onClick removeItem — the missing remove control",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/672",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Why:** Dependency badges now have onClick removeItem — the missing remove control\n\n**Evidence:** apps/portal/src/components/CriteriaPicker.tsx:192\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 739,
+    "title": "The portal runs table should allow sorting rows",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-05-01",
+    "labels": [
+      "good first issue",
+      "moderate",
+      "portal"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/pages/RunsList.tsx:69; PR#1066",
+    "reason": "Server-side sorting: SERVER_SORT_FIELDS + usePersistentSort + sortBy/sortDir to API",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/739",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #1066\n\n**Why:** Server-side sorting: SERVER_SORT_FIELDS + usePersistentSort + sortBy/sortDir to API\n\n**Evidence:** apps/portal/src/pages/RunsList.tsx:69; PR #1066\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      1066
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 766,
+    "title": "Improve UX when listing all runs",
+    "author": "wachegha_microsoft",
+    "created": "2026-05-05",
+    "labels": [
+      "good first issue",
+      "UX",
+      "portal"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/pages/RunsList.tsx:20,143",
+    "reason": "Radix Tooltip + OverflowBadges (+N dropdown) implemented across run table columns",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/766",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Why:** Radix Tooltip + OverflowBadges (+N dropdown) implemented across run table columns\n\n**Evidence:** apps/portal/src/pages/RunsList.tsx:20,143\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 775,
+    "title": "When nagivating between run attempts, the URL should always reflect the selected attempt",
+    "author": "wachegha_microsoft",
+    "created": "2026-05-07",
+    "labels": [
+      "good first issue",
+      "easy",
+      "UX",
+      "portal"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/pages/RunDetail.tsx:858",
+    "reason": "Tab switch preserves ?runId=<attempt> in URL so selected attempt never lost",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/775",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Why:** Tab switch preserves ?runId=<attempt> in URL so selected attempt never lost\n\n**Evidence:** apps/portal/src/pages/RunDetail.tsx:858\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 829,
+    "title": "Criteria DAG: enforce cycle detection at API write time (create/update/seed)",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-05-11",
+    "labels": [
+      "bug",
+      "reliability",
+      "judge"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "packages/shared/src/criteria/criteria-store.ts:75-77,141",
+    "reason": "validateNoCycles() called inside create() and update() used by all API writes",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/829",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Why:** validateNoCycles() called inside create() and update() used by all API writes\n\n**Evidence:** packages/shared/src/criteria/criteria-store.ts:75-77,141\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 864,
+    "title": "Stay on logs tab during a multi iterations run",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-05-15",
+    "labels": [
+      "portal"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/pages/RunDetail.tsx:857",
+    "reason": "Default tab = 'turns' only when run done; stays on 'logs' during active iterations",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/864",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Why:** Default tab = 'turns' only when run done; stays on 'logs' during active iterations\n\n**Evidence:** apps/portal/src/pages/RunDetail.tsx:857\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 878,
+    "title": "Heartbeat info should be displayed in the processing status badge overlay in run lists",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-05-16",
+    "labels": [
+      "portal"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/pages/RunsList.tsx:1621; PR#856",
+    "reason": "lastHeartbeatAt passed to StatusBadge on every runs-list row",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/878",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #856\n\n**Why:** lastHeartbeatAt passed to StatusBadge on every runs-list row\n\n**Evidence:** apps/portal/src/pages/RunsList.tsx:1621; PR #856\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      856
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 907,
+    "title": "It should be possible to search for runs by date and time range",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-05-20",
+    "labels": [
+      "portal"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/portal/src/pages/RunsList.tsx:37; apps/api/.../index.ts:1273",
+    "reason": "DateRangeFilter + dateFrom/dateTo params map to createdAfter/createdBefore in API",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/907",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Why:** DateRangeFilter + dateFrom/dateTo params map to createdAfter/createdBefore in API\n\n**Evidence:** apps/portal/src/pages/RunsList.tsx:37; apps/api/.../index.ts:1273\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 920,
+    "title": "VS Code Copilot Windows worker",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-05-21",
+    "labels": [
+      "agent-worker"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/workers/coder-acp-copilot-windows/agent.yaml; PR#897",
+    "reason": "Windows Copilot worker exists w/ agent.yaml, Dockerfile.windows, available:true",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/920",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #897\n\n**Why:** Windows Copilot worker exists w/ agent.yaml, Dockerfile.windows, available:true\n\n**Evidence:** apps/workers/coder-acp-copilot-windows/agent.yaml; PR #897\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      897
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 990,
+    "title": "post-processor image missing from prod ACR — ImagePullBackOff in scoped namespace",
+    "author": "jduffney_microsoft",
+    "created": "2026-05-29",
+    "labels": [
+      "bug"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "promote.yml:20; PR#1021,#960",
+    "reason": "post-processor added to CI build + prod promotion ALL_APPS list",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/990",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #1021, #960\n\n**Why:** post-processor added to CI build + prod promotion ALL_APPS list\n\n**Evidence:** promote.yml:20; PR #1021, #960\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      1021,
+      960
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 997,
+    "title": "VS Code Copilot add support for Websocket",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-05-30",
+    "labels": [
+      "agent-worker"
+    ],
+    "category": "Implemented",
+    "confidence": "Med",
+    "reason": "Gateway TLS layer gained WebSocket support; electron worker uses PROXY_BACKEND=gateway",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/997",
+    "closeReason": "completed",
+    "prs": [
+      996
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 1000,
+    "title": "ATIF post processor should support HAR's `_webSocketMessages` field",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-05-30",
+    "labels": [
+      "portal",
+      "post-processing"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "apps/workers/post-processor/src/handlers/atif-handler.websocket.test.ts; PR#1090",
+    "reason": "ATIF handler extracts _webSocketMessages from HAR (dedicated test file)",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/1000",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #1090\n\n**Why:** ATIF handler extracts _webSocketMessages from HAR (dedicated test file)\n\n**Evidence:** apps/workers/post-processor/src/handlers/atif-handler.websocket.test.ts; PR #1090\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      1090
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 1193,
+    "title": "Creating criteria stuck",
+    "author": "wmastyka_microsoft",
+    "created": "2026-06-29",
+    "labels": [
+      "bug"
+    ],
+    "category": "Implemented",
+    "confidence": "High",
+    "evidence": "PR#1212",
+    "reason": "Cosmos sort index added so creating/updating criteria w/ dependencies no longer fails",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/1193",
+    "closeReason": "completed",
+    "closeComment": "Closing as **completed** — this looks already implemented.\n\n**Resolved by:** #1212\n\n**Why:** Cosmos sort index added so creating/updating criteria w/ dependencies no longer fails\n\n**Evidence:** PR #1212\n\n_Triaged during a stale-issue review. Please reopen if I missed remaining scope._",
+    "prs": [
+      1212
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 58,
+    "title": "Migrate SCOPE runs to SCOPE-MT runs",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Superseded",
+    "confidence": "Med",
+    "evidence": "PR#343,#349",
+    "reason": "SCOPE→SCOPE-MT migration moot: project renamed again to Scope Core / Scope",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/58",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Superseded by:** #343, #349\n\n**Why:** SCOPE→SCOPE-MT migration moot: project renamed again to Scope Core / Scope\n\n**Evidence:** PR #343, #349\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [
+      343,
+      349
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 119,
+    "title": "Upgrade to the new Zed Claude Code ACP node package",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [
+      "upgrade"
+    ],
+    "category": "Superseded",
+    "confidence": "High",
+    "evidence": "apps/workers/coder-acp-claude-code/Dockerfile:100; PR#615",
+    "reason": "Adopted @agentclientprotocol/claude-agent-acp instead of the requested Zed package",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/119",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Superseded by:** #615\n\n**Why:** Adopted @agentclientprotocol/claude-agent-acp instead of the requested Zed package\n\n**Evidence:** apps/workers/coder-acp-claude-code/Dockerfile:100; PR #615\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [
+      615
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 180,
+    "title": "Upgrade VS Code worker to the latest VS Code and Copilot extension harness",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-05",
+    "labels": [],
+    "category": "Superseded",
+    "confidence": "Med",
+    "evidence": "PR#291,#292",
+    "reason": "One-time upgrade obsolete: auto-upgrade agentic workflow now handles VS Code/Copilot bumps",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/180",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Superseded by:** #291, #292\n\n**Why:** One-time upgrade obsolete: auto-upgrade agentic workflow now handles VS Code/Copilot bumps\n\n**Evidence:** PR #291, #292\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [
+      291,
+      292
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 308,
+    "title": "[aw] No-Op Runs",
+    "author": "app/github-actions",
+    "created": "2026-03-18",
+    "labels": [
+      "agentic-workflows"
+    ],
+    "category": "Superseded",
+    "confidence": "High",
+    "evidence": "auto-generated bot sink",
+    "reason": "[aw] perpetual no-op-run comment sink — ongoing noise, no actionable task",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/308",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Why:** [aw] perpetual no-op-run comment sink — ongoing noise, no actionable task\n\n**Evidence:** auto-generated bot sink\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 324,
+    "title": "[Test Improver] test: add DependencyGraph unit tests (30 tests)",
+    "author": "app/github-actions",
+    "created": "2026-03-20",
+    "labels": [
+      "agentic-workflows",
+      "automation",
+      "testing"
+    ],
+    "category": "Superseded",
+    "confidence": "High",
+    "evidence": "#329,#365,#367,#369",
+    "reason": "Oldest of 5 identical bot Test-Improver requests; superseded by newer duplicates",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/324",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Superseded by:** #329, #365, #367, #369\n\n**Why:** Oldest of 5 identical bot Test-Improver requests; superseded by newer duplicates\n\n**Evidence:** #329, #365, #367, #369\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [],
+    "refIssues": [
+      329,
+      365,
+      367,
+      369
+    ]
+  },
+  {
+    "number": 325,
+    "title": "[Test Improver] Monthly Activity 2026-03",
+    "author": "app/github-actions",
+    "created": "2026-03-20",
+    "labels": [
+      "automation",
+      "testing"
+    ],
+    "category": "Superseded",
+    "confidence": "High",
+    "evidence": "stale monthly report",
+    "reason": "Bot Monthly Activity report for March 2026 — months out of date",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/325",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Why:** Bot Monthly Activity report for March 2026 — months out of date\n\n**Evidence:** stale monthly report\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 329,
+    "title": "[Test Improver] Add unit tests for DependencyGraph and normalizeCriteria",
+    "author": "app/github-actions",
+    "created": "2026-03-20",
+    "labels": [
+      "agentic-workflows",
+      "automation",
+      "testing"
+    ],
+    "category": "Superseded",
+    "confidence": "High",
+    "evidence": "#365,#367,#369",
+    "reason": "2nd of 5 identical bot Test-Improver requests; superseded by newer duplicates",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/329",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Superseded by:** #365, #367, #369\n\n**Why:** 2nd of 5 identical bot Test-Improver requests; superseded by newer duplicates\n\n**Evidence:** #365, #367, #369\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [],
+    "refIssues": [
+      365,
+      367,
+      369
+    ]
+  },
+  {
+    "number": 365,
+    "title": "[Test Improver] test(shared): add unit tests for DependencyGraph, normalizeCriteria, FileSystemCriteriaProvider",
+    "author": "app/github-actions",
+    "created": "2026-03-21",
+    "labels": [
+      "agentic-workflows",
+      "automation",
+      "testing"
+    ],
+    "category": "Superseded",
+    "confidence": "High",
+    "evidence": "#367,#369",
+    "reason": "3rd of 5 identical bot Test-Improver requests; superseded",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/365",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Superseded by:** #367, #369\n\n**Why:** 3rd of 5 identical bot Test-Improver requests; superseded\n\n**Evidence:** #367, #369\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [],
+    "refIssues": [
+      367,
+      369
+    ]
+  },
+  {
+    "number": 367,
+    "title": "[Test Improver] test(shared): add unit tests for DependencyGraph, normalizeCriteria, FileSystemCriteriaProvider",
+    "author": "app/github-actions",
+    "created": "2026-03-22",
+    "labels": [
+      "agentic-workflows",
+      "automation",
+      "testing"
+    ],
+    "category": "Superseded",
+    "confidence": "High",
+    "evidence": "#369",
+    "reason": "4th of 5 identical bot Test-Improver requests; superseded by newest #369",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/367",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Superseded by:** #369\n\n**Why:** 4th of 5 identical bot Test-Improver requests; superseded by newest #369\n\n**Evidence:** #369\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [],
+    "refIssues": [
+      369
+    ]
+  },
+  {
+    "number": 387,
+    "title": "[aw] Worker Version Upgrade failed",
+    "author": "app/github-actions",
+    "created": "2026-03-23",
+    "labels": [
+      "agentic-workflows"
+    ],
+    "category": "Superseded",
+    "confidence": "High",
+    "evidence": "point-in-time failure notice",
+    "reason": "One-time [aw] Worker Version Upgrade failure alert from March; stale",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/387",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Why:** One-time [aw] Worker Version Upgrade failure alert from March; stale\n\n**Evidence:** point-in-time failure notice\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 392,
+    "title": "[repo-status] Daily Status — March 23, 2026",
+    "author": "app/github-actions",
+    "created": "2026-03-24",
+    "labels": [
+      "report",
+      "daily-status"
+    ],
+    "category": "Superseded",
+    "confidence": "High",
+    "evidence": "date-bound daily report",
+    "reason": "Auto-generated Daily Status snapshot (Mar 23) — historical, no action items",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/392",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Why:** Auto-generated Daily Status snapshot (Mar 23) — historical, no action items\n\n**Evidence:** date-bound daily report\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 415,
+    "title": "[aw] Daily Repo Status failed",
+    "author": "app/github-actions",
+    "created": "2026-03-24",
+    "labels": [
+      "agentic-workflows"
+    ],
+    "category": "Superseded",
+    "confidence": "High",
+    "evidence": "one workflow run 2026-03-24",
+    "reason": "One-time [aw] Daily Repo Status failure notice; transient",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/415",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Why:** One-time [aw] Daily Repo Status failure notice; transient\n\n**Evidence:** one workflow run 2026-03-24\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 965,
+    "title": "Optimize CI: build images in parallel with integration tests",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-05-27",
+    "labels": [
+      "optimization",
+      "cicd"
+    ],
+    "category": "Superseded",
+    "confidence": "High",
+    "evidence": "#964",
+    "reason": "Near-exact duplicate of #964 (same author, same day); #964 is fuller spec",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/965",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Superseded by:** #964\n\n**Why:** Near-exact duplicate of #964 (same author, same day); #964 is fuller spec\n\n**Evidence:** #964\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [],
+    "refIssues": [
+      964
+    ]
+  },
+  {
+    "number": 1179,
+    "title": "Runs hang 60 min on Copilot CLI 1.0.63 (ACP timeout, 0 AI calls)",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-06-26",
+    "labels": [],
+    "category": "Superseded",
+    "confidence": "High",
+    "evidence": "PR#1176; versions.env COPILOT_CLI_VERSION=1.0.65",
+    "reason": "Bug was specific to Copilot CLI 1.0.63; worker upgraded past it to 1.0.65",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/1179",
+    "closeReason": "not planned",
+    "closeComment": "Closing as **not planned** — superseded / obsolete.\n\n**Superseded by:** #1176\n\n**Why:** Bug was specific to Copilot CLI 1.0.63; worker upgraded past it to 1.0.65\n\n**Evidence:** PR #1176; versions.env COPILOT_CLI_VERSION=1.0.65\n\n_Triaged during a stale-issue review. Please reopen if it's still relevant._",
+    "prs": [
+      1176
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 48,
+    "title": "Support for stdio MCP servers",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [
+      "enhancement"
+    ],
+    "category": "Partial",
+    "confidence": "Med",
+    "reason": "stdio MCP added for electron worker + MCP gateway for ACP; some checkboxes remain",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/48",
+    "closeReason": "completed",
+    "prs": [
+      595,
+      521
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 85,
+    "title": "Run submission policy",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Partial",
+    "confidence": "Med",
+    "evidence": "packages/shared/src/types/types.ts:236; PR#874",
+    "reason": "Activate/deactivate (available flag) done; scheduling + selection policy checkboxes open",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/85",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Addressed by:** #874\n\n**Done:** Activate/deactivate (available flag) done; scheduling + selection policy checkboxes open\n\n**Evidence:** packages/shared/src/types/types.ts:236; PR #874\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [
+      874
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 132,
+    "title": "Stacks for Coding Agents",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Partial",
+    "confidence": "Med",
+    "evidence": "apps/workers/coder-acp-claude-code/Dockerfile:21-50; PR#857,#897",
+    "reason": ".NET SDK + Windows worker done; Azure Functions stack checkbox not implemented",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/132",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Addressed by:** #857, #897\n\n**Done:** .NET SDK + Windows worker done; Azure Functions stack checkbox not implemented\n\n**Evidence:** apps/workers/coder-acp-claude-code/Dockerfile:21-50; PR #857, #897\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [
+      857,
+      897
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 163,
+    "title": "The runs page should allow filtering by criteria and task prompt feature",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-03",
+    "labels": [],
+    "category": "Partial",
+    "confidence": "High",
+    "evidence": "apps/portal/src/pages/RunsList.tsx:53; PR#764,#1177",
+    "reason": "Criteria filter on Runs list done; task-prompt feature-label filtering still absent",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/163",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Addressed by:** #764, #1177\n\n**Done:** Criteria filter on Runs list done; task-prompt feature-label filtering still absent\n\n**Evidence:** apps/portal/src/pages/RunsList.tsx:53; PR #764, #1177\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [
+      764,
+      1177
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 234,
+    "title": "Periodic job which runs the cookie collection code and stores it in the Key Manager",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-11",
+    "labels": [],
+    "category": "Partial",
+    "confidence": "Med",
+    "evidence": "apps/key-updaters/github-cookie-updater/",
+    "reason": "Cookie collection code exists but no K8s CronJob/scheduled deployment found",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/234",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Done:** Cookie collection code exists but no K8s CronJob/scheduled deployment found\n\n**Evidence:** apps/key-updaters/github-cookie-updater/\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 249,
+    "title": "Add support for Marketplace plugins",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-03-12",
+    "labels": [],
+    "category": "Partial",
+    "confidence": "Med",
+    "evidence": "PR#476",
+    "reason": "VS Code marketplace ext discovery+pinning done; broader plugin system not implemented",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/249",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Addressed by:** #476\n\n**Done:** VS Code marketplace ext discovery+pinning done; broader plugin system not implemented\n\n**Evidence:** PR #476\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [
+      476
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 398,
+    "title": "[Test Improver] test(shared): add 34 unit tests for CriteriaStore",
+    "author": "app/github-actions",
+    "created": "2026-03-24",
+    "labels": [
+      "agentic-workflows",
+      "automation",
+      "testing"
+    ],
+    "category": "Partial",
+    "confidence": "Med",
+    "evidence": "packages/shared/src/criteria/criteria-store.test.ts",
+    "reason": "19 tests exist vs 34 requested by Test Improver; unlinked to a merged PR",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/398",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Done:** 19 tests exist vs 34 requested by Test Improver; unlinked to a merged PR\n\n**Evidence:** packages/shared/src/criteria/criteria-store.test.ts\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 486,
+    "title": "bug: worker restart leaves stale \"iterating\" runs and blocks new work",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-04-03",
+    "labels": [
+      "bug",
+      "reliability",
+      "difficult"
+    ],
+    "category": "Partial",
+    "confidence": "High",
+    "evidence": "PR#761,#1052 (children #493,#494 done)",
+    "reason": "Both child phases implemented+deployed, but parent tracking issue still open",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/486",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Addressed by:** #761, #1052\n\n**Done:** Both child phases implemented+deployed, but parent tracking issue still open\n\n**Evidence:** PR #761, #1052 (children #493, #494 done)\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [
+      761,
+      1052
+    ],
+    "refIssues": [
+      493,
+      494
+    ]
+  },
+  {
+    "number": 519,
+    "title": "Workers hitting TooManyRequests (429) CosmosDB Slows down runs and sometimes fails them",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-04-06",
+    "labels": [
+      "optimization",
+      "moderate"
+    ],
+    "category": "Partial",
+    "confidence": "Med",
+    "evidence": "packages/shared/src/utils/retry.ts; PR#320",
+    "reason": "CosmosDB 429 retry w/ backoff added; underlying throughput throttling remains",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/519",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Addressed by:** #320\n\n**Done:** CosmosDB 429 retry w/ backoff added; underlying throughput throttling remains\n\n**Evidence:** packages/shared/src/utils/retry.ts; PR #320\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [
+      320
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 659,
+    "title": "Proactively manage Claude Code subscription remaining capacity to avoid hitting rate limits",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-04-20",
+    "labels": [
+      "claude-code"
+    ],
+    "category": "Partial",
+    "confidence": "High",
+    "evidence": "deploy/base/workers/coder-acp-claude-code.yaml (maxReplicaCount:2); PR#664",
+    "reason": "Reactive worker cap at 2; proactive remaining-capacity monitoring not implemented",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/659",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Addressed by:** #664\n\n**Done:** Reactive worker cap at 2; proactive remaining-capacity monitoring not implemented\n\n**Evidence:** deploy/base/workers/coder-acp-claude-code.yaml (maxReplicaCount:2); PR #664\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [
+      664
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 721,
+    "title": "AI Gateway Phase 2.a: Integrate gateway with Claude Code worker",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-04-30",
+    "labels": [
+      "enhancement",
+      "claude-code",
+      "gateway"
+    ],
+    "category": "Partial",
+    "confidence": "Med",
+    "evidence": "packages/shared/src/devproxy/index.ts:28",
+    "reason": "Shared client supports PROXY_BACKEND=gateway, but claude-code K8s manifest still DevProxy",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/721",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Done:** Shared client supports PROXY_BACKEND=gateway, but claude-code K8s manifest still DevProxy\n\n**Evidence:** packages/shared/src/devproxy/index.ts:28\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [],
+    "refIssues": []
+  },
+  {
+    "number": 723,
+    "title": "AI Gateway Phase 3: Integrate gateway with GitHub Copilot worker",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-04-30",
+    "labels": [
+      "enhancement",
+      "rust",
+      "gateway"
+    ],
+    "category": "Partial",
+    "confidence": "Med",
+    "evidence": "deploy/.../coder-acp-copilot-windows.yaml:55; PR#1058",
+    "reason": "Windows copilot switched to gateway; regular coder-acp-copilot still on DevProxy",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/723",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Addressed by:** #1058\n\n**Done:** Windows copilot switched to gateway; regular coder-acp-copilot still on DevProxy\n\n**Evidence:** deploy/.../coder-acp-copilot-windows.yaml:55; PR #1058\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [
+      1058
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 820,
+    "title": "Gateway safe to run with multiple replicas",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-05-11",
+    "labels": [
+      "gateway"
+    ],
+    "category": "Partial",
+    "confidence": "Med",
+    "evidence": "apps/gateway/src/session_store.rs; PR#742",
+    "reason": "Redis save()/delete() added but no load(); gateway still 1 replica pending #798/#819",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/820",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Addressed by:** #742\n\n**Done:** Redis save()/delete() added but no load(); gateway still 1 replica pending #798/ #819\n\n**Evidence:** apps/gateway/src/session_store.rs; PR #742\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [
+      742
+    ],
+    "refIssues": [
+      798,
+      819
+    ]
+  },
+  {
+    "number": 881,
+    "title": "Run stuck in processing state with no active worker",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-05-16",
+    "labels": [
+      "bug",
+      "reliability",
+      "agent-worker"
+    ],
+    "category": "Partial",
+    "confidence": "Med",
+    "evidence": "apps/scheduler/src/stuck-run-reaper.ts; PR#1052,#1074",
+    "reason": "Reaper implemented but disabled by default (needs SCOPE_REAPER_ENABLED=true)",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/881",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Addressed by:** #1052, #1074\n\n**Done:** Reaper implemented but disabled by default (needs SCOPE_REAPER_ENABLED=true)\n\n**Evidence:** apps/scheduler/src/stuck-run-reaper.ts; PR #1052, #1074\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [
+      1052,
+      1074
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 952,
+    "title": "Security: Remediate 27 open Dependabot alerts (1 critical, 7 high)",
+    "author": "wachegha_microsoft",
+    "created": "2026-05-26",
+    "labels": [
+      "bug",
+      "dependencies",
+      "urgent",
+      "critical",
+      "security"
+    ],
+    "category": "Partial",
+    "confidence": "Med",
+    "evidence": "package.json pnpm.overrides; PR#1081",
+    "reason": "~20 overrides added for 'groups 1-5' of 27 alerts; full remediation uncertain",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/952",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Addressed by:** #1081\n\n**Done:** ~20 overrides added for 'groups 1-5' of 27 alerts; full remediation uncertain\n\n**Evidence:** package.json pnpm.overrides; PR #1081\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [
+      1081
+    ],
+    "refIssues": []
+  },
+  {
+    "number": 1178,
+    "title": "VS Code Electron worker: fatal pre-chat.open model preflight causes total run outage (`Available models: <none>`)",
+    "author": "cedricvidal_microsoft",
+    "created": "2026-06-26",
+    "labels": [
+      "bug"
+    ],
+    "category": "Partial",
+    "confidence": "Med",
+    "evidence": "PR#1050,#1059 (deep cause open #1198)",
+    "reason": "Fail-fast preflight + model-derivation fix landed; deep gateway-auth hang tracked in open #1198",
+    "url": "https://github.com/growth-ecosystems/scope-core/issues/1178",
+    "closeReason": "completed",
+    "closeComment": "Closing — **largely addressed**. Any residual scope should be tracked in a fresh, focused issue.\n\n**Addressed by:** #1050, #1059\n\n**Done:** Fail-fast preflight + model-derivation fix landed; deep gateway-auth hang tracked in open #1198\n\n**Evidence:** PR #1050, #1059 (deep cause open #1198)\n\n_Triaged during a stale-issue review. Please reopen if the remaining work should stay tracked here._",
+    "prs": [
+      1050,
+      1059
+    ],
+    "refIssues": [
+      1198
+    ]
+  }
+]
