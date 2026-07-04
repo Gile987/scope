@@ -40,7 +40,7 @@ import {
   validateAgentOptions,
   mergeAgentOptions,
 } from "shared";
-import type { ProfileDocument, ProfileVersionDocument, GateConfig, GateId } from "shared";
+import type { ProfileDocument, ProfileVersionDocument, GateConfig, GateId, AgentOptionDescriptor } from "shared";
 import { apiRoute } from "../../openapi/api-route.js";
 import { VALID_WORKERS } from "../../route-context.js";
 import type {
@@ -460,6 +460,7 @@ apiRoute(ctx.app, ctx.registry, {
         mcpServers?: string[];
         skillRevisions?: string[];
         extensions?: string[];
+        optionDescriptors?: AgentOptionDescriptor[];
       };
 
       // Pass 1: validate and resolve every variation. No writes yet.
@@ -610,6 +611,7 @@ apiRoute(ctx.app, ctx.registry, {
           mcpServers: validatedMcpServers,
           skillRevisions: resolvedSkillRevisions,
           extensions: validatedExtensions,
+          optionDescriptors: agentDoc?.options,
         });
       }
 
@@ -628,9 +630,10 @@ apiRoute(ctx.app, ctx.registry, {
         // options (profile keys win) — mirrors the reasoningEffort precedence.
         const variationOptions = mergeAgentOptions(requestedOptions, r.profileVersion.options);
         // Validate the merged bag against the variation worker's advertised
-        // options (profile options were already validated at creation, but the
-        // request-level bag has not been checked against this worker).
-        const variationOptionsCheck = validateAgentOptions(r.workerType, variationOptions);
+        // options (from its agent registration — no hardcoded fallback). Profile
+        // options were already validated at creation, but the request-level bag
+        // has not been checked against this worker.
+        const variationOptionsCheck = validateAgentOptions(variationOptions, r.optionDescriptors);
         if (!variationOptionsCheck.success) {
           res.status(400).json({ error: `Invalid options for worker "${r.workerType}": ${variationOptionsCheck.error}` });
           return;
@@ -970,7 +973,7 @@ apiRoute(ctx.app, ctx.registry, {
     // option descriptors (unknown keys / wrong types are rejected). Mirrors the
     // per-worker validation done on profile create; here it covers request-level
     // options and the merged request+profile result.
-    const optionsCheck = validateAgentOptions(workerType, effectiveOptions, agentDoc?.options);
+    const optionsCheck = validateAgentOptions(effectiveOptions, agentDoc?.options);
     if (!optionsCheck.success) {
       res.status(400).json({ error: `Invalid options for worker "${workerType}": ${optionsCheck.error}` });
       return;

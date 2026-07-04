@@ -58,7 +58,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       // Validate the generic options bag against the worker's advertised
       // option descriptors (unknown keys / wrong types are rejected).
-      const optionsCheck = validateAgentOptions(workerType, options, agentCheck.agent.options);
+      const optionsCheck = validateAgentOptions(options, agentCheck.agent.options);
       if (!optionsCheck.success) {
         res.status(400).json({ error: `Invalid options for worker "${workerType}": ${optionsCheck.error}` });
         return;
@@ -293,7 +293,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       // Validate the generic options bag against the worker's advertised
       // option descriptors (unknown keys / wrong types are rejected).
-      const optionsCheck = validateAgentOptions(workerType, options, agentCheck.agent.options);
+      const optionsCheck = validateAgentOptions(options, agentCheck.agent.options);
       if (!optionsCheck.success) {
         res.status(400).json({ error: `Invalid options for worker "${workerType}": ${optionsCheck.error}` });
         return;

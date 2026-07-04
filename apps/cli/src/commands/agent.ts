@@ -81,6 +81,7 @@ agent
           { key: 'description', label: 'Description', formatter: (a: any) => a.description || '' },
           { key: 'supportedModels', label: 'Supported Models', formatter: (a: any) => (a.supportedModels || []).join(', ') },
           { key: 'defaultModel', label: 'Default Model', formatter: (a: any) => a.defaultModel || '' },
+          { key: 'options', label: 'Options', formatter: (a: any) => (a.options || []).map((o: any) => `${o.key}=${o.type}`).join(', ') },
           { key: 'createdAt', label: 'Created' },
           { key: 'updatedAt', label: 'Updated' },
         ];
@@ -93,6 +94,18 @@ agent
       if (agentDoc.description) console.log(`${label('Description:')} ${agentDoc.description}`);
       console.log(`${label('Supported Models:')} ${(agentDoc.supportedModels || []).join(', ') || '(none)'}`);
       console.log(`${label('Default Model:')} ${agentDoc.defaultModel || '(none)'}`);
+      const advertisedOptions = Array.isArray(agentDoc.options) ? agentDoc.options : [];
+      if (advertisedOptions.length > 0) {
+        console.log(label('Options:'));
+        for (const opt of advertisedOptions) {
+          const enumSuffix = Array.isArray(opt.enum) && opt.enum.length > 0 ? ` [${opt.enum.join(" | ")}]` : "";
+          const defaultSuffix = opt.default !== undefined ? ` (default: ${String(opt.default)})` : "";
+          const labelText = opt.label ? ` — ${opt.label}` : "";
+          console.log(`  ${value(opt.key)}: ${opt.type}${enumSuffix}${defaultSuffix}${labelText}`);
+        }
+      } else {
+        console.log(`${label('Options:')} (none)`);
+      }
       console.log(`${label('Created:')} ${new Date(agentDoc.createdAt).toLocaleString()}`);
       if (agentDoc.updatedAt) console.log(`${label('Updated:')} ${new Date(agentDoc.updatedAt).toLocaleString()}`);
     } catch (error) {

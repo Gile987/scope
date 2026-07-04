@@ -4,60 +4,30 @@
 import { describe, it, expect } from "vitest";
 
 import {
-  AUTOPILOT_OPTION_DESCRIPTOR,
-  WORKER_AGENT_OPTIONS,
-  getAgentOptionDescriptors,
   buildAgentOptionsSchema,
   validateAgentOptions,
   mergeAgentOptions,
   type AgentOptionDescriptor,
 } from "./agent-options.js";
 
-describe("WORKER_AGENT_OPTIONS", () => {
-  it("advertises autopilot for Copilot and VS Code workers", () => {
-    for (const worker of [
-      "coder-acp-copilot",
-      "coder-acp-copilot-windows",
-      "coder-vscode-web",
-      "coder-vscode-electron-driver-ext",
-    ]) {
-      expect(WORKER_AGENT_OPTIONS[worker]).toEqual([AUTOPILOT_OPTION_DESCRIPTOR]);
-    }
-  });
-
-  it("advertises no options for Claude Code (autonomous, no autopilot axis)", () => {
-    expect(WORKER_AGENT_OPTIONS["coder-acp-claude-code"]).toEqual([]);
-  });
-});
-
-describe("getAgentOptionDescriptors", () => {
-  it("prefers advertised descriptors from the agent document", () => {
-    const advertised: AgentOptionDescriptor[] = [
-      { key: "custom", type: "string", label: "Custom" },
-    ];
-    expect(getAgentOptionDescriptors("coder-acp-copilot", advertised)).toBe(advertised);
-  });
-
-  it("falls back to the canonical map when none advertised", () => {
-    expect(getAgentOptionDescriptors("coder-acp-copilot")).toEqual([
-      AUTOPILOT_OPTION_DESCRIPTOR,
-    ]);
-  });
-
-  it("returns [] for an unknown worker with no advertised descriptors", () => {
-    expect(getAgentOptionDescriptors("unknown-worker")).toEqual([]);
-  });
-});
+// Inline fixture standing in for whatever a worker advertises at registration.
+// The module no longer hardcodes any worker's options — descriptors always come
+// from the agent document, so tests supply them explicitly.
+const autopilotDescriptor: AgentOptionDescriptor = {
+  key: "autopilot",
+  type: "boolean",
+  label: "Autopilot mode",
+};
 
 describe("buildAgentOptionsSchema", () => {
   it("accepts a valid boolean option and rejects the wrong type", () => {
-    const schema = buildAgentOptionsSchema([AUTOPILOT_OPTION_DESCRIPTOR]);
+    const schema = buildAgentOptionsSchema([autopilotDescriptor]);
     expect(schema.safeParse({ autopilot: true }).success).toBe(true);
     expect(schema.safeParse({ autopilot: "yes" }).success).toBe(false);
   });
 
   it("rejects unknown keys (strict)", () => {
-    const schema = buildAgentOptionsSchema([AUTOPILOT_OPTION_DESCRIPTOR]);
+    const schema = buildAgentOptionsSchema([autopilotDescriptor]);
     expect(schema.safeParse({ nope: true }).success).toBe(false);
   });
 
@@ -78,24 +48,29 @@ describe("buildAgentOptionsSchema", () => {
 
 describe("validateAgentOptions", () => {
   it("treats undefined options as an empty bag", () => {
-    expect(validateAgentOptions("coder-acp-copilot", undefined)).toEqual({
+    expect(validateAgentOptions(undefined, [autopilotDescriptor])).toEqual({
       success: true,
       data: {},
     });
   });
 
-  it("accepts autopilot for Copilot", () => {
-    const result = validateAgentOptions("coder-acp-copilot", { autopilot: true });
+  it("accepts an advertised option", () => {
+    const result = validateAgentOptions({ autopilot: true }, [autopilotDescriptor]);
     expect(result).toEqual({ success: true, data: { autopilot: true } });
   });
 
-  it("rejects autopilot for Claude Code (advertises no options)", () => {
-    const result = validateAgentOptions("coder-acp-claude-code", { autopilot: true });
+  it("rejects any option when the worker advertises none", () => {
+    const result = validateAgentOptions({ autopilot: true }, []);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects any option when descriptors are undefined (no fallback)", () => {
+    const result = validateAgentOptions({ autopilot: true }, undefined);
     expect(result.success).toBe(false);
   });
 
   it("returns a human-readable error string on failure", () => {
-    const result = validateAgentOptions("coder-acp-copilot", { autopilot: "nope" });
+    const result = validateAgentOptions({ autopilot: "nope" }, [autopilotDescriptor]);
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error).toContain("autopilot");

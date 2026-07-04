@@ -111,10 +111,15 @@ agent asks questions at all.
   `options:` list of descriptors `{ key, type, label, description?, default?,
   enum? }`, a **sibling of `capabilities`** (not bolted onto it). This is an agent
   *option* (a user-picked value), conceptually different from a capability *gate*
-  like `supportsReasoningEffort`. Descriptors are stored on the agent document and
-  returned by `GET /agents`. The canonical source-of-truth mirror lives in
-  `packages/shared/src/schemas/agent-options.ts` (`WORKER_AGENT_OPTIONS`), used as
-  an API/CLI fallback until an agent is re-seeded.
+  like `supportsReasoningEffort`. Descriptors are stored on the agent document at
+  registration and returned by `GET /agents`. Worker registration is the **single
+  source of truth**: the API validates submitted options against the descriptors
+  on the agent document, the portal renders them dynamically, and the CLI
+  discovers them via `scope agent get`. There is **no hardcoded fallback map** —
+  `packages/shared/src/schemas/agent-options.ts` provides only the generic
+  mechanism (`buildAgentOptionsSchema`, `validateAgentOptions`, `mergeAgentOptions`),
+  never per-worker option definitions. A worker that advertises nothing rejects
+  every option.
 - **Where the value lives:** `ProfileVersionDocument.options?` (versioned,
   reproducible) **and** `RequestDocument.options?` (request-level snapshot).
   Following every other controlled field (model, reasoningEffort, mcpServers,

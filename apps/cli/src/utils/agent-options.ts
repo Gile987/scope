@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { WORKER_AGENT_OPTIONS } from "shared";
-
 /**
  * Commander collector for a repeatable `--option key=value` flag. Accumulates
  * each occurrence into a string[] that {@link parseAgentOptionPairs} later turns
@@ -13,22 +11,12 @@ export function collectOption(val: string, previous: string[]): string[] {
 }
 
 /**
- * Static discoverability string listing every option the known workers advertise,
- * derived from the shared canonical {@link WORKER_AGENT_OPTIONS} map. Appended to
- * the `--option` flag help so `--help` shows what keys are accepted per worker.
+ * Static help text for the `--option` flag. Deliberately generic: the set of
+ * options a worker accepts is advertised by the worker at registration, not
+ * hardcoded here. Point users to `scope agent get` to discover them dynamically.
  */
-export const AGENT_OPTION_HELP: string = (() => {
-  const parts: string[] = [];
-  for (const [worker, descriptors] of Object.entries(WORKER_AGENT_OPTIONS)) {
-    if (!descriptors || descriptors.length === 0) continue;
-    const keys = descriptors
-      .map((d) => `${d.key}=<${d.type}${d.enum ? `:${d.enum.join("|")}` : ""}>`)
-      .join(", ");
-    parts.push(`${worker}: ${keys}`);
-  }
-  if (parts.length === 0) return "";
-  return ` Known worker options — ${parts.join("; ")}.`;
-})();
+export const AGENT_OPTION_HELP =
+  " Options are per-worker; run `scope agent get --id <worker>` to list the options a worker advertises.";
 
 /** Format an options bag for human-readable single-line display. */
 export function formatAgentOptions(options: Record<string, unknown> | undefined): string {
