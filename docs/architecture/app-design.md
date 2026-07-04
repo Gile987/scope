@@ -90,6 +90,82 @@ To support submitting an AGENTS.md prompt with a run, the request carries:
   (`[]`/absent = root, `[p]` = mutation, `[i, j]` = merge) for callers that know
   parentage at submit time.
 
+## Data Organization: Projects
+
+A **Project** (`projects` collection, `ProjectStore`) is the top-level container that
+partitions all user-facing data. Every scoped entity carries one **immutable `projectId`**,
+set at creation and never changed. This is the data-organization layer only — it is a
+**filter, not a security boundary** (access control lives in `auth-rbac.md`; any caller may
+pass any `projectId`).
+
+### Scoped vs. unscoped entities
+
+| Class | Collections | How `projectId` is set |
+|-------|-------------|------------------------|
+| **Root** (no parent) | `requests`, `profiles`, `criteria`, `prompt-features`, `mcp-servers`, `report-templates`, `skills`, `extensions`, `codebases` | From the `?projectId=` query param at create time |
+| **Child** (references a parent) | `runs` (history), `profile-versions`, `codebase-revisions`, `reports`, `insights` | Copied from the parent doc's `projectId` |
+| **Special** (deterministic key → per-project copies) | `task-prompts`, `skill-revisions` | From the run's `projectId`; see below |
+| **Unscoped** | `projects`, `agents`, `models`, tokens/accounts, feature-flags | n/a — never filtered by project |
+
+### Resolution model (no default, fail-fast)
+
+`projectId` is always **explicit and visible** — never a header, never ambient middleware,
+never defaulted. The single carrier is the **`?projectId=` query parameter**. Helpers live in
+`apps/api/src/utils/project-scope.ts`.
+
+| Operation | `projectId` source | If unresolvable |
+|-----------|--------------------|-----------------|
+| Create a **root** entity | `?projectId=` query param | **400** |
+| Create a **child** entity | Copied from the referenced parent | **400** (parent missing / cross-project) |
+| **Top-level list** (`GET /api/v1/{requests,profiles,criteria,…}`) | `?projectId=` (**required**) | **400** |
+| **List-like reads** (`GET /api/v1/criteria/graph`, `/criteria/mdp`) | `?projectId=` (**required**) | **400** |
+| **Nested list** (under a parent in the path) | Derived from the parent id | n/a |
+| **Point read / by-`_id` mutation** (`GET/PATCH/DELETE /:id`) | Read from the stored doc (`_id` is globally unique) | n/a (query param ignored) |
+
+The **runs list** (`GET /api/v1/requests`) requires `?projectId=` and AND-filters every page,
+probe, facet, and grouping pipeline by it (`flat.projectId` → `composeFilter`). The
+`groupBy: "project"` option and the project facet were **removed** — moot under a required
+single-project list.
+
+### Per-project copies for deterministic-key entities
+
+`task-prompts` and `skill-revisions` are content/ref-addressed, so the same key can legitimately
+exist in multiple projects. Each keeps a **fresh-UUID `_id`** plus a stable key (`keyId` =
+`computePromptId(type,text)` for prompts; `ref` for skill-revisions) and a project-scoped
+**unique index** (`{projectId, keyId}` / `{projectId, ref}`). `findOrCreate`/`getByRef(s)`
+lookups are all scoped by `projectId`. Because skill refs resolve **per project**, the run's
+`projectId` is threaded through the shared queue-processor into `SkillClient.resolveSkills` /
+`downloadSkillArchive` (which append `?projectId=`) and the electron worker's own `setup()`.
+Extensions resolve by globally-unique `_id`, so they need **no** projectId change.
+
+### Cross-service write paths
+
+Entities the pipeline **creates** are persisted with the run's `projectId` (derived from the
+request doc, never a query param): reports (report-generator / trigger endpoint), insights
+(judge / agent-authored via `sourceReportId`), demoted retry attempts (`insertHistoricalRun`),
+codebase-revisions, and profile-versions. The DoD asserts these land in the right project.
+
+### Migration & rollout (migrate-then-enforce)
+
+Migration **`025-create-projects`** creates the `projects` collection, seeds **one ordinary
+initial project** (fresh `_id`, human name via optional `SCOPE_INITIAL_PROJECT_NAME`, **no
+`isDefault` flag**), backfills `projectId` on 100% of existing scoped docs, backfills
+`keyId`/`ref` on the special collections, and swaps the unique indexes to their
+project-scoped form. It is idempotent and RU-paced.
+
+Making `?projectId=` **required** is a breaking change for every existing caller, so rollout is
+strictly ordered **migrate-then-enforce**:
+
+1. **Deploy migration 025 first** — backfills `projectId` on all pre-existing docs, so there is
+   never an "unset" window and no read-time coalescing is needed. Any doc still missing
+   `projectId` afterward is a bug to surface, not silently bucketed.
+2. **Ship the `projectId`-aware clients** (API + CLI + Portal) together.
+3. **Then enforce.** Because all first-party callers ship in this monorepo and deploy together
+   (there are no external API consumers), enforcement is **hard-400 from day one** — a scoped
+   request without a resolvable project is rejected immediately rather than run through a
+   soft log-and-warn window. Deploying the migration before the enforcing API guarantees live
+   traffic never 400s on already-stored data.
+
 ## Judge Pipeline
 
 The judge evaluates coding agent output against criteria. Two strategies are supported:
