@@ -339,7 +339,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       }
       const skillClient = new SkillClient(apiBaseUrl);
       await log("info", `Resolving ${requestDoc.skillRevisions.length} skill revision(s)`, { skillRevisions: requestDoc.skillRevisions });
-      skillConfigs = await skillClient.resolveSkills(requestDoc.skillRevisions);
+      skillConfigs = await skillClient.resolveSkills(requestDoc.projectId, requestDoc.skillRevisions);
       await log("info", `Resolved skills: ${skillConfigs.map(s => s.name).join(", ")}`);
     }
 
@@ -409,6 +409,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       refs: requestDoc.skillRevisions,
       skillConfigs,
       skillClient,
+      projectId: requestDoc.projectId,
       workspacePath,
       agentType,
       log: async (msg) => { await log("info", msg); },
@@ -584,7 +585,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     // Setup: create workspace, extract skills, upload setup videos
     if (this.processor.setup) {
-      const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs, extensionConfigs });
+      const setupResult = await this.processor.setup(log, { model: requestDoc.model, projectId: requestDoc.projectId, mcpServerConfigs, skillConfigs, extensionConfigs });
 
       if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
         try {
