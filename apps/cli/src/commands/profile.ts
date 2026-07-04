@@ -6,7 +6,8 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { apiFetch } from "../utils/api-client.js";
 
 export function registerProfileCommands(program: Command): void {
 // ─── Profile commands ──────────────────────────────────────────────────────────
@@ -29,7 +30,7 @@ profile
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/profiles`);
+      const response = await apiFetch(options.url, `/profiles`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -68,7 +69,7 @@ profile
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/profiles/${options.id}`);
+      const response = await apiFetch(options.url, `/profiles/${options.id}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -132,7 +133,7 @@ profile
       if (options.skills) body.skillRevisions = options.skills;
       if (options.extensions) body.extensions = options.extensions;
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/profiles`, {
+      const response = await apiFetch(options.url, `/profiles`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -160,7 +161,7 @@ profile
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/profiles/${options.id}`, {
+      const response = await apiFetch(options.url, `/profiles/${options.id}`, {
         method: "DELETE",
       });
       if (!response.ok) {
@@ -196,7 +197,7 @@ version
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/profiles/${options.id}/versions`);
+      const response = await apiFetch(options.url, `/profiles/${options.id}/versions`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -234,7 +235,7 @@ version
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/profiles/${options.id}/versions/${options.version}`);
+      const response = await apiFetch(options.url, `/profiles/${options.id}/versions/${options.version}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -291,7 +292,7 @@ version
       if (options.skills) body.skillRevisions = options.skills;
       if (options.extensions) body.extensions = options.extensions;
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/profiles/${options.id}`, {
+      const response = await apiFetch(options.url, `/profiles/${options.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
