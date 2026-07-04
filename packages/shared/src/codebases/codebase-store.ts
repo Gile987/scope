@@ -22,6 +22,7 @@ function isSlugDuplicateKeyError(error: unknown): boolean {
 
 /** Input for creating a new codebase entity. */
 export interface CreateCodebaseInput {
+  projectId: string;
   name: string;
   slug?: string;
   description?: string;
@@ -95,6 +96,7 @@ export class CodebaseStore {
       const slug = await this.ensureUniqueSlug(baseSlug);
       const doc: CodebaseDocument = {
         _id: randomUUID(),
+        projectId: input.projectId,
         slug,
         name: input.name,
         ...(input.description ? { description: input.description } : {}),

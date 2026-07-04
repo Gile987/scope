@@ -30,6 +30,7 @@ export type SkillOrigin = "skills-sh" | "manual";
  */
 export interface SkillDocument {
   _id: string;                    // Slug: "{source}/{skillName}"
+  projectId: string;              // FK → ProjectDocument._id (immutable scope)
   source: string;                 // GitHub repo (e.g. "vercel-labs/agent-skills")
   skillName: string;              // Skill name within the repo (e.g. "vercel-react-best-practices")
   name: string;                   // Human-readable display name (from SKILL.md or user input)
@@ -50,6 +51,7 @@ export interface SkillDocument {
  */
 export interface SkillRevisionDocument {
   _id: string;                    // UUIDv5 computed from `ref`
+  projectId: string;              // FK → ProjectDocument._id (immutable scope; per-project copy)
   ref: string;                    // Human-readable ref: "{source}/{skillName}@{commitHash}"
   source: string;                 // GitHub repo (e.g. "vercel-labs/agent-skills")
   skillName: string;              // Skill name (matches parent directory name per spec)

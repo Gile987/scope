@@ -44,12 +44,13 @@ export class CriteriaStore {
 
   /** Create a new criterion. Validates uniqueness and dependency references. */
   async create(input: {
+    projectId: string;
     id: string;
     prompt: string;
     dependsOn?: string[];
     gates?: GateId[];
   }): Promise<CriteriaDocument> {
-    const { id, prompt, dependsOn = [], gates } = input;
+    const { projectId, id, prompt, dependsOn = [], gates } = input;
 
     // Validate ID format
     if (!/^[a-z][a-z0-9_]*$/.test(id)) {
@@ -84,6 +85,7 @@ export class CriteriaStore {
     await this.validateGateCompatibility(id, dependsOn, gates);
 
     const doc: CriteriaDocument = {
+      projectId,
       id,
       prompt: prompt.trim(),
       dependsOn,

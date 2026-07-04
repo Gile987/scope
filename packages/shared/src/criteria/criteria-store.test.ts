@@ -76,53 +76,53 @@ function fakeCollection(seed: CriteriaDocument[] = []) {
 describe("CriteriaStore gate-compatibility invariant", () => {
   it("allows a child whose gates are a subset of its parent's gates", async () => {
     const col = fakeCollection([
-      { id: "parent", prompt: "p", dependsOn: [], gates: ["select", "build"], createdAt: new Date() },
+      { projectId: "proj-test", id: "parent", prompt: "p", dependsOn: [], gates: ["select", "build"], createdAt: new Date() },
     ]);
     const store = new CriteriaStore(col);
 
     await expect(
-      store.create({ id: "child", prompt: "c", dependsOn: ["parent"], gates: ["build"] }),
+      store.create({ projectId: "proj-test", id: "child", prompt: "c", dependsOn: ["parent"], gates: ["build"] }),
     ).resolves.toMatchObject({ id: "child", gates: ["build"] });
   });
 
   it("rejects a child compatible with a gate its parent is not", async () => {
     const col = fakeCollection([
-      { id: "parent", prompt: "p", dependsOn: [], gates: ["select"], createdAt: new Date() },
+      { projectId: "proj-test", id: "parent", prompt: "p", dependsOn: [], gates: ["select"], createdAt: new Date() },
     ]);
     const store = new CriteriaStore(col);
 
     await expect(
-      store.create({ id: "child", prompt: "c", dependsOn: ["parent"], gates: ["select", "build"] }),
+      store.create({ projectId: "proj-test", id: "child", prompt: "c", dependsOn: ["parent"], gates: ["select", "build"] }),
     ).rejects.toThrow(/not/i);
   });
 
   it("rejects an unrestricted child of a restricted parent", async () => {
     const col = fakeCollection([
-      { id: "parent", prompt: "p", dependsOn: [], gates: ["select"], createdAt: new Date() },
+      { projectId: "proj-test", id: "parent", prompt: "p", dependsOn: [], gates: ["select"], createdAt: new Date() },
     ]);
     const store = new CriteriaStore(col);
 
     // No gates on child => universal (all gates) => must fail against select-only parent.
     await expect(
-      store.create({ id: "child", prompt: "c", dependsOn: ["parent"] }),
+      store.create({ projectId: "proj-test", id: "child", prompt: "c", dependsOn: ["parent"] }),
     ).rejects.toThrow();
   });
 
   it("allows an unrestricted child of an unrestricted parent", async () => {
     const col = fakeCollection([
-      { id: "parent", prompt: "p", dependsOn: [], createdAt: new Date() },
+      { projectId: "proj-test", id: "parent", prompt: "p", dependsOn: [], createdAt: new Date() },
     ]);
     const store = new CriteriaStore(col);
 
     await expect(
-      store.create({ id: "child", prompt: "c", dependsOn: ["parent"] }),
+      store.create({ projectId: "proj-test", id: "child", prompt: "c", dependsOn: ["parent"] }),
     ).resolves.toMatchObject({ id: "child" });
   });
 
   it("enforces the invariant on update too", async () => {
     const col = fakeCollection([
-      { id: "parent", prompt: "p", dependsOn: [], gates: ["select"], createdAt: new Date() },
-      { id: "child", prompt: "c", dependsOn: ["parent"], gates: ["select"], createdAt: new Date() },
+      { projectId: "proj-test", id: "parent", prompt: "p", dependsOn: [], gates: ["select"], createdAt: new Date() },
+      { projectId: "proj-test", id: "child", prompt: "c", dependsOn: ["parent"], gates: ["select"], createdAt: new Date() },
     ]);
     const store = new CriteriaStore(col);
 
@@ -133,8 +133,8 @@ describe("CriteriaStore gate-compatibility invariant", () => {
 
   it("rejects narrowing a parent below an existing dependent's gates (parent side)", async () => {
     const col = fakeCollection([
-      { id: "parent", prompt: "p", dependsOn: [], gates: ["select", "build"], createdAt: new Date() },
-      { id: "child", prompt: "c", dependsOn: ["parent"], gates: ["select", "build"], createdAt: new Date() },
+      { projectId: "proj-test", id: "parent", prompt: "p", dependsOn: [], gates: ["select", "build"], createdAt: new Date() },
+      { projectId: "proj-test", id: "child", prompt: "c", dependsOn: ["parent"], gates: ["select", "build"], createdAt: new Date() },
     ]);
     const store = new CriteriaStore(col);
 
@@ -149,20 +149,20 @@ describe("CriteriaStore gate-compatibility invariant", () => {
 describe("CriteriaStore cycle detection", () => {
   it("rejects a direct cycle on create", async () => {
     const col = fakeCollection([
-      { id: "a", prompt: "a", dependsOn: ["b"], createdAt: new Date() },
+      { projectId: "proj-test", id: "a", prompt: "a", dependsOn: ["b"], createdAt: new Date() },
     ]);
     const store = new CriteriaStore(col);
 
     await expect(
-      store.create({ id: "b", prompt: "b", dependsOn: ["a"] }),
+      store.create({ projectId: "proj-test", id: "b", prompt: "b", dependsOn: ["a"] }),
     ).rejects.toThrow(CriteriaValidationError);
   });
 
   it("rejects a transitive cycle on update", async () => {
     const col = fakeCollection([
-      { id: "a", prompt: "a", dependsOn: [], createdAt: new Date() },
-      { id: "b", prompt: "b", dependsOn: ["a"], createdAt: new Date() },
-      { id: "c", prompt: "c", dependsOn: ["b"], createdAt: new Date() },
+      { projectId: "proj-test", id: "a", prompt: "a", dependsOn: [], createdAt: new Date() },
+      { projectId: "proj-test", id: "b", prompt: "b", dependsOn: ["a"], createdAt: new Date() },
+      { projectId: "proj-test", id: "c", prompt: "c", dependsOn: ["b"], createdAt: new Date() },
     ]);
     const store = new CriteriaStore(col);
 
@@ -174,7 +174,7 @@ describe("CriteriaStore cycle detection", () => {
 
   it("rejects a self-reference", async () => {
     const col = fakeCollection([
-      { id: "a", prompt: "a", dependsOn: [], createdAt: new Date() },
+      { projectId: "proj-test", id: "a", prompt: "a", dependsOn: [], createdAt: new Date() },
     ]);
     const store = new CriteriaStore(col);
 
@@ -187,17 +187,17 @@ describe("CriteriaStore cycle detection", () => {
 describe("CriteriaStore typed errors", () => {
   it("throws CriteriaValidationError for an invalid id format", async () => {
     const store = new CriteriaStore(fakeCollection());
-    await expect(store.create({ id: "Bad-Id", prompt: "p" })).rejects.toThrow(
+    await expect(store.create({ projectId: "proj-test", id: "Bad-Id", prompt: "p" })).rejects.toThrow(
       CriteriaValidationError,
     );
   });
 
   it("throws CriteriaDuplicateError when the id already exists", async () => {
     const col = fakeCollection([
-      { id: "dup", prompt: "p", dependsOn: [], createdAt: new Date() },
+      { projectId: "proj-test", id: "dup", prompt: "p", dependsOn: [], createdAt: new Date() },
     ]);
     const store = new CriteriaStore(col);
-    await expect(store.create({ id: "dup", prompt: "p" })).rejects.toThrow(
+    await expect(store.create({ projectId: "proj-test", id: "dup", prompt: "p" })).rejects.toThrow(
       CriteriaDuplicateError,
     );
   });
@@ -205,7 +205,7 @@ describe("CriteriaStore typed errors", () => {
   it("throws CriteriaValidationError when a dependency does not exist", async () => {
     const store = new CriteriaStore(fakeCollection());
     await expect(
-      store.create({ id: "a", prompt: "p", dependsOn: ["missing"] }),
+      store.create({ projectId: "proj-test", id: "a", prompt: "p", dependsOn: ["missing"] }),
     ).rejects.toThrow(CriteriaValidationError);
   });
 
@@ -223,8 +223,8 @@ describe("CriteriaStore typed errors", () => {
 
   it("throws CriteriaHasDependentsError carrying dependent ids on delete", async () => {
     const col = fakeCollection([
-      { id: "parent", prompt: "p", dependsOn: [], createdAt: new Date() },
-      { id: "child", prompt: "c", dependsOn: ["parent"], createdAt: new Date() },
+      { projectId: "proj-test", id: "parent", prompt: "p", dependsOn: [], createdAt: new Date() },
+      { projectId: "proj-test", id: "child", prompt: "c", dependsOn: ["parent"], createdAt: new Date() },
     ]);
     const store = new CriteriaStore(col);
 
@@ -238,7 +238,7 @@ describe("CriteriaStore typed errors", () => {
 
   it("deletes a criterion that has no dependents", async () => {
     const col = fakeCollection([
-      { id: "lonely", prompt: "p", dependsOn: [], createdAt: new Date() },
+      { projectId: "proj-test", id: "lonely", prompt: "p", dependsOn: [], createdAt: new Date() },
     ]);
     const store = new CriteriaStore(col);
     await store.delete("lonely");
@@ -251,6 +251,7 @@ describe("CriteriaStore revives soft-deleted ids on re-create", () => {
     const col = fakeCollection([
       {
         id: "revive_me",
+        projectId: "proj-test",
         prompt: "old",
         dependsOn: [],
         createdAt: new Date("2020-01-01"),
@@ -260,7 +261,7 @@ describe("CriteriaStore revives soft-deleted ids on re-create", () => {
     ]);
     const store = new CriteriaStore(col);
 
-    const created = await store.create({ id: "revive_me", prompt: "new" });
+    const created = await store.create({ projectId: "proj-test", id: "revive_me", prompt: "new" });
 
     expect(created.prompt).toBe("new");
     expect((created as any).deletedAt).toBeUndefined();
@@ -278,9 +279,10 @@ describe("CriteriaStore revives soft-deleted ids on re-create", () => {
 
   it("still enforces validation when reviving (cycle rejected, tombstone untouched)", async () => {
     const col = fakeCollection([
-      { id: "a", prompt: "a", dependsOn: ["b"], createdAt: new Date() },
+      { projectId: "proj-test", id: "a", prompt: "a", dependsOn: ["b"], createdAt: new Date() },
       {
         id: "b",
+        projectId: "proj-test",
         prompt: "old",
         dependsOn: [],
         createdAt: new Date("2020-01-01"),
@@ -291,7 +293,7 @@ describe("CriteriaStore revives soft-deleted ids on re-create", () => {
 
     // Reviving "b" with a dependency on "a" would form a cycle a->b->a.
     await expect(
-      store.create({ id: "b", prompt: "new", dependsOn: ["a"] }),
+      store.create({ projectId: "proj-test", id: "b", prompt: "new", dependsOn: ["a"] }),
     ).rejects.toThrow(CriteriaValidationError);
 
     // The tombstone must remain soft-deleted and unchanged.
@@ -302,10 +304,10 @@ describe("CriteriaStore revives soft-deleted ids on re-create", () => {
 
   it("an active duplicate still throws CriteriaDuplicateError (not revived)", async () => {
     const col = fakeCollection([
-      { id: "active", prompt: "p", dependsOn: [], createdAt: new Date() },
+      { projectId: "proj-test", id: "active", prompt: "p", dependsOn: [], createdAt: new Date() },
     ]);
     const store = new CriteriaStore(col);
-    await expect(store.create({ id: "active", prompt: "q" })).rejects.toThrow(
+    await expect(store.create({ projectId: "proj-test", id: "active", prompt: "q" })).rejects.toThrow(
       CriteriaDuplicateError,
     );
   });

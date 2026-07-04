@@ -29,6 +29,7 @@ export const SkillResponseSchema = z
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     deletedAt: z.coerce.date().optional(),
+    projectId: z.string(),
   })
   .openapi("SkillResponse");
 
@@ -52,6 +53,7 @@ export const SkillRevisionResponseSchema = z
     validationWarnings: z.array(z.string()).optional(),
     resolvedAt: z.coerce.date(),
     createdAt: z.coerce.date(),
+    projectId: z.string(),
   })
   .openapi("SkillRevisionResponse");
 

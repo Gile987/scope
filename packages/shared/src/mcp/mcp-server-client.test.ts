@@ -12,6 +12,7 @@ vi.stubGlobal("fetch", mockFetch);
 function makeServerDoc(overrides: Partial<McpServerDocument> = {}): McpServerDocument {
   return {
     _id: "test-server",
+    projectId: "proj-test",
     name: "Test Server",
     type: "http",
     url: "https://example.com/mcp",

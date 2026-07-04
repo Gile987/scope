@@ -8,6 +8,7 @@ describe("McpServerDocument", () => {
   it("supports all required fields for an HTTP server", () => {
     const server: McpServerDocument = {
       _id: "my-search",
+      projectId: "proj-test",
       name: "My Search Server",
       type: "http",
       url: "https://search.example.com/mcp",
@@ -26,6 +27,7 @@ describe("McpServerDocument", () => {
   it("supports SSE type with headers", () => {
     const server: McpServerDocument = {
       _id: "auth-search",
+      projectId: "proj-test",
       name: "Authenticated Search",
       type: "sse",
       url: "https://search.example.com/sse",
@@ -46,6 +48,7 @@ describe("McpServerDocument", () => {
   it("supports soft-delete with deletedAt", () => {
     const server: McpServerDocument = {
       _id: "old-server",
+      projectId: "proj-test",
       name: "Old Server",
       type: "http",
       url: "https://old.example.com/mcp",

@@ -18,6 +18,7 @@ export type ExtensionOrigin = "marketplace" | "manual";
  */
 export interface ExtensionDocument {
   _id: string;                    // Extension ID: "{publisher}.{name}" (e.g. "ms-python.python")
+  projectId: string;              // FK → ProjectDocument._id (immutable scope)
   publisher: string;              // Publisher name (e.g. "ms-python")
   name: string;                   // Human-readable display name (e.g. "Python")
   description?: string;           // From marketplace

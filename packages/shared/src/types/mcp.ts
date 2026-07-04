@@ -18,6 +18,7 @@ export interface McpServerHeader {
 /** MCP server document stored in MongoDB */
 export interface McpServerDocument {
   _id: string;                    // Slug identifier (e.g. "my-search-server")
+  projectId: string;              // FK → ProjectDocument._id (immutable scope)
   name: string;                   // Human-readable display name
   type: McpTransportType;         // Transport type
   url?: string;                   // Server URL (required for sse/http)

@@ -17,6 +17,7 @@ export * from "./mcp/index.js";
 export * from "./skills/index.js";
 export * from "./codebases/index.js";
 export * from "./extensions/index.js";
+export * from "./projects/index.js";
 export * from "./agent-version.js";
 export * from "./resolve-agent-version.js";
 export * from "./devproxy/index.js";

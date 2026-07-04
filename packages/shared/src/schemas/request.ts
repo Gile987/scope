@@ -172,6 +172,7 @@ export const RequestResponseSchema = z
     run: z
       .lazy(() => RunStateSchema)
       .optional(),
+    projectId: z.string(),
   })
   .openapi("RequestResponse");
 

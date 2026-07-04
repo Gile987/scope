@@ -35,6 +35,7 @@ export const ExtensionResponseSchema = z
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     deletedAt: z.coerce.date().optional(),
+    projectId: z.string(),
   })
   .openapi("ExtensionResponse");
 
