@@ -15,7 +15,7 @@ import {
 import type { SkillDocument, SkillSearchResult } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { RouteContext } from "../route-context.js";
-import { ProjectIdQuerySchema, getQueryProjectId } from "../utils/project-scope.js";
+import { ProjectIdQuerySchema, getQueryProjectId, getOptionalQueryProjectId } from "../utils/project-scope.js";
 
 export function registerSkillsRoutes(ctx: RouteContext): void {
 
@@ -168,7 +168,16 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/skills/search/external",
   tags: ["Skills"],
   summary: "Search external skills registry",
-  query: z.object({ q: z.string(), limit: z.string().optional() }),
+  query: z.object({
+    q: z.string(),
+    limit: z.string().optional(),
+    projectId: z.string().min(1).optional().openapi({
+      param: { name: "projectId", in: "query", required: false },
+      description:
+        "Optional project scope. When provided, external results are de-duplicated " +
+        "only against skills already installed in that project.",
+    }),
+  }),
   response: z.array(SkillSearchResultSchema),
   errorResponses: {
     400: { description: "Missing query parameter" },
@@ -195,9 +204,12 @@ apiRoute(ctx.app, ctx.registry, {
         if (externalRes.ok) {
           const data = await externalRes.json() as { skills?: Array<{ id: string; name: string; installs?: number; source?: string; description?: string }> };
           if (data.skills && Array.isArray(data.skills)) {
-            // Deduplicate against internal skills
+            // Deduplicate against internal skills (scoped to the project when provided)
+            const dedupProjectId = getOptionalQueryProjectId(req);
+            const internalFilter: Record<string, unknown> = { deletedAt: { $exists: false } };
+            if (dedupProjectId) internalFilter.projectId = dedupProjectId;
             const internalSlugs = new Set(
-              (await ctx.skillCollection.find({ deletedAt: { $exists: false } }, { projection: { _id: 1 } }).toArray()).map((s) => s._id)
+              (await ctx.skillCollection.find(internalFilter, { projection: { _id: 1 } }).toArray()).map((s) => s._id)
             );
             externalResults = data.skills
               .filter((s) => !internalSlugs.has(s.id))

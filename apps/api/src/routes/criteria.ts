@@ -283,7 +283,7 @@ apiRoute(ctx.app, ctx.registry, {
     since: z.string().optional(),
     worker: z.string().optional(),
     taskPromptId: z.string().optional(),
-  }),
+  }).merge(ProjectIdQuerySchema),
   response: z.object({}).passthrough(),
   handler: async (req, res) => {
     const selectedCriteria = req.query.criteria
@@ -295,6 +295,7 @@ apiRoute(ctx.app, ctx.registry, {
     const sinceDate = req.query.since ? new Date(req.query.since) : undefined;
 
     const mdpFilter: Record<string, unknown> = {
+      projectId: getQueryProjectId(req),
       "run.status": "done",
       deletedAt: { $exists: false },
     };
@@ -357,10 +358,11 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/criteria/graph",
   tags: ["Criteria"],
   summary: "Get criteria DAG",
+  query: ProjectIdQuerySchema,
   response: CriteriaGraphSchema,
-  handler: async (_req, res) => {
+  handler: async (req, res) => {
     const all = await ctx.criteriaCollection
-      .find({ deletedAt: { $exists: false } })
+      .find({ projectId: getQueryProjectId(req), deletedAt: { $exists: false } })
       .toArray();
     all.sort((a, b) => a.id.localeCompare(b.id));
     const nodes = all.map((c) => ({
