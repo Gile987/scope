@@ -4575,9 +4575,27 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "prompt": {
                       "type": "string",
                     },
+                    "suggestedChildren": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "suggestedId": {
+                      "type": "string",
+                    },
+                    "suggestedParents": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
                   },
                   "required": [
                     "prompt",
+                    "suggestedId",
+                    "suggestedParents",
+                    "suggestedChildren",
                   ],
                   "type": "object",
                 },

@@ -52,7 +52,7 @@ app.post(
     const startTime = Date.now();
 
     try {
-      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, projectId } = req.body;
+      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, projectId, currentAgentResponse } = req.body;
 
       // Validate required fields
       if (!snapshotUrl || typeof snapshotUrl !== "string") {
@@ -74,6 +74,11 @@ app.post(
 
       if (conversationHistory && !Array.isArray(conversationHistory)) {
         res.status(400).json({ error: "conversationHistory must be an array" });
+        return;
+      }
+
+      if (currentAgentResponse !== undefined && typeof currentAgentResponse !== "string") {
+        res.status(400).json({ error: "currentAgentResponse must be a string" });
         return;
       }
 
@@ -130,6 +135,7 @@ app.post(
           gate,
           toolCalls,
           projectId,
+          currentAgentResponse,
         });
 
         const elapsed = Date.now() - startTime;

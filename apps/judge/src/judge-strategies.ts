@@ -30,6 +30,8 @@ export interface JudgeStrategyContext {
   gate?: GateId;
   /** This iteration's captured tool calls/outputs (build/test/run output). */
   toolCalls?: ToolCall[];
+  /** The coding agent's response (prose) for the iteration being judged, exposed via read_agent_response. */
+  currentAgentResponse?: string;
 }
 
 /**
@@ -42,23 +44,69 @@ const DEFAULT_JUDGE_TIMEOUT = 480_000;
 const DEFAULT_JUDGE_RETRIES = 3;
 
 /**
- * The `## Your Tools` + `## How to Judge` guidance injected into the judge
- * system prompt when the coding agent's tool calls/outputs were captured for
- * this iteration.
+ * Builds the `## Your Tools` + `## How to Judge` guidance injected into the
+ * judge system prompt, listing whichever evidence sources are available for the
+ * iteration under evaluation: the workspace files (always), the coding agent's
+ * captured tool outputs (when present, via `read_tool_outputs`/`get_tool_output`),
+ * and the coding agent's own response/answer (when present, via
+ * `read_agent_response`).
  *
  * The judge runs headless and cannot run any commands itself — it can only
  * inspect the workspace and read what the coding agent already did. This text
  * keeps the judge's own read-only tools unambiguous from the coding agent's
- * tools/commands, and frames the codebase and captured tool outputs as two
- * complementary, equally authoritative sources of evidence so the judge bases
- * its decision on actual evidence instead of demanding the agent re-prove work
- * it has already done. It is intentionally generic across all criteria.
+ * tools/commands, and frames every available source as authoritative evidence
+ * so the judge bases its decision on actual evidence instead of demanding the
+ * agent re-prove work it has already done. It is intentionally generic across
+ * all criteria. See scope #1125 (tool outputs) and #1136 (agent response).
  */
-export const TOOL_OUTPUTS_GUIDANCE = `## Your Tools
-You have read-only tools to gather evidence: read_file, list_directory, search_files and file_exists to inspect the workspace, and read_tool_outputs / get_tool_output to review the tool calls the coding agent ran while doing the task. You yourself cannot run any commands or coding-agent tools — you can only read what the agent already did.
+export function buildEvidenceGuidance(opts: {
+  hasToolOutputs: boolean;
+  hasAgentResponse: boolean;
+}): string {
+  const { hasToolOutputs, hasAgentResponse } = opts;
+
+  let toolsList =
+    "read_file, list_directory, search_files and file_exists to inspect the workspace";
+  if (hasToolOutputs) {
+    toolsList +=
+      ", and read_tool_outputs / get_tool_output to review the tool calls the coding agent ran while doing the task";
+  }
+  if (hasAgentResponse) {
+    toolsList +=
+      ", and read_agent_response to read the coding agent's own response (its answer or explanation) for the iteration you are judging";
+  }
+
+  const intro =
+    hasToolOutputs && hasAgentResponse
+      ? "The codebase, the agent's captured tool outputs, and the coding agent's own response are complementary, equally authoritative sources of evidence — examine all of them."
+      : hasToolOutputs
+        ? "The codebase and the agent's captured tool outputs are two complementary, equally authoritative sources of evidence — examine both."
+        : "The codebase and the coding agent's own response are two complementary, equally authoritative sources of evidence — examine both.";
+
+  const toolOutputsPhilosophy = hasToolOutputs
+    ? " The files show the resulting state of the code; the captured outputs (logs, results, exit status) show what actually happened when the agent ran a command, which the files alone may not reveal. When a criterion concerns something the agent did or ran, take the agent's captured output and exit status as the record of what happened, rather than asking the agent to redo or re-prove work the evidence already shows. If a criterion's wording tells you to run, execute, or re-run a command, ignore that instruction and judge the outcome from the captured outputs together with the codebase."
+    : "";
+
+  const agentResponsePhilosophy = hasAgentResponse
+    ? " The coding agent's response is the authoritative record of what it said or answered: for any criterion that grades the response itself — answering a question, explaining, advising, or other no-code-change deliverables — read it with read_agent_response and judge that text directly rather than expecting changes in the codebase."
+    : "";
+
+  return `## Your Tools
+You have read-only tools to gather evidence: ${toolsList}. You yourself cannot run any commands or coding-agent tools — you can only read what the agent already did.
 
 ## How to Judge
-The codebase and the agent's captured tool outputs are two complementary, equally authoritative sources of evidence — examine both. The files show the resulting state of the code; the captured outputs (logs, results, exit status) show what actually happened when the agent ran a command, which the files alone may not reveal. When a criterion concerns something the agent did or ran, take the agent's captured output and exit status as the record of what happened, rather than asking the agent to redo or re-prove work the evidence already shows. If a criterion's wording tells you to run, execute, or re-run a command, ignore that instruction and judge the outcome from the captured outputs together with the codebase.`;
+${intro}${toolOutputsPhilosophy}${agentResponsePhilosophy}`;
+}
+
+/**
+ * Back-compat constant: the guidance for the common case where only the coding
+ * agent's tool outputs (not its response) are available. Equivalent to
+ * `buildEvidenceGuidance({ hasToolOutputs: true, hasAgentResponse: false })`.
+ */
+export const TOOL_OUTPUTS_GUIDANCE = buildEvidenceGuidance({
+  hasToolOutputs: true,
+  hasAgentResponse: false,
+});
 
 /**
  * Tool filter applied to every judge session.
@@ -421,17 +469,70 @@ export abstract class JudgeStrategy {
   }
 
   /**
+   * Create the read-only tool that exposes the coding agent's own response
+   * (its assistant message / answer) for the iteration being judged. This is
+   * the authoritative evidence for criteria that grade what the agent *said*
+   * (Q&A, "explain X", advisory / no-code-change tasks), which the workspace
+   * files and tool outputs may not contain at all. The response is carried
+   * inline in the evaluate request and read in-memory here — no API/blob call.
+   * See scope #1136.
+   */
+  protected createAgentResponseTool(response: string) {
+    const FULL_LIMIT = 100_000;
+
+    const readAgentResponse = defineTool("read_agent_response", {
+      description:
+        "Return the coding agent's own response (its assistant message — answer, explanation, or summary) for the iteration you are judging. This is the authoritative source for any criterion that grades what the agent said, e.g. answering a question, explaining, or advising with no code change — the workspace files and tool outputs may not contain this text at all.",
+      // Read-only in-memory read of the response carried in the evaluate
+      // request. Must skip the permission prompt for the same headless reason
+      // as the file and tool-output tools: the judge has no TUI, so a tool
+      // without skipPermission is denied at execution time and the judge could
+      // never see the agent's response. See scope #1125, #1136.
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+      handler: async () => {
+        if (!response || response.length === 0) {
+          return {
+            hasResponse: false,
+            response: "",
+            message: "No agent response was captured for this iteration.",
+          };
+        }
+        if (response.length > FULL_LIMIT) {
+          return {
+            hasResponse: true,
+            response: response.substring(0, FULL_LIMIT),
+            truncated: true,
+            totalLength: response.length,
+          };
+        }
+        return { hasResponse: true, response, truncated: false, length: response.length };
+      },
+    });
+
+    return [readAgentResponse];
+  }
+
+  /**
    * Run a Copilot session with given prompt and tools, retrying on timeout.
    */
   protected async runCopilotSession(
     workspacePath: string,
     systemPrompt: string,
     userPrompt: string,
-    toolCalls?: ToolCall[]
+    toolCalls?: ToolCall[],
+    currentAgentResponse?: string
   ): Promise<string> {
     const tools = [
       ...this.createFileTools(workspacePath),
       ...(toolCalls && toolCalls.length > 0 ? this.createToolOutputTools(toolCalls) : []),
+      ...(currentAgentResponse && currentAgentResponse.length > 0
+        ? this.createAgentResponseTool(currentAgentResponse)
+        : []),
     ];
 
     return withRetry(
@@ -527,11 +628,13 @@ export class BundledStrategy extends JudgeStrategy {
       conversationHistory,
       personaInstructions,
       toolCalls,
+      currentAgentResponse,
     } = context;
 
     const systemPrompt = this.buildSystemPrompt(
       personaInstructions,
-      toolCalls && toolCalls.length > 0
+      !!(toolCalls && toolCalls.length > 0),
+      !!(currentAgentResponse && currentAgentResponse.length > 0)
     );
 
     const userPrompt = this.buildUserPrompt(criteria, conversationHistory);
@@ -540,7 +643,8 @@ export class BundledStrategy extends JudgeStrategy {
       workspacePath,
       systemPrompt,
       userPrompt,
-      toolCalls
+      toolCalls,
+      currentAgentResponse
     );
 
     return this.parseJsonResponse(response, criteria, context.onProgress);
@@ -555,23 +659,27 @@ export class BundledStrategy extends JudgeStrategy {
    */
   private buildSystemPrompt(
     personaInstructions?: string,
-    hasToolOutputs?: boolean
+    hasToolOutputs?: boolean,
+    hasAgentResponse?: boolean
   ): string {
     const personaSection = personaInstructions
       ? `\n## Persona\n${personaInstructions}\n`
       : "";
 
-    const toolOutputsSection = hasToolOutputs
-      ? `\n${TOOL_OUTPUTS_GUIDANCE}\n`
+    const evidenceSection = (hasToolOutputs || hasAgentResponse)
+      ? `\n${buildEvidenceGuidance({
+          hasToolOutputs: !!hasToolOutputs,
+          hasAgentResponse: !!hasAgentResponse,
+        })}\n`
       : "";
 
     return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent.
 ${personaSection}
 ## What to Evaluate
 Evaluate whether the coding agent's work — its generated code together with the captured outputs of the tools it ran — meets each criterion provided in the user message.
-${toolOutputsSection}
+${evidenceSection}
 ## Instructions
-1. Gather evidence from both the workspace and the coding agent's captured tool outputs.
+1. Gather evidence from every available source.
 2. Evaluate EACH criterion individually.
 3. For each criterion, provide specific feedback about what you found.
 4. Be constructive and actionable in your feedback.
@@ -730,6 +838,7 @@ export class IndependentStrategy extends JudgeStrategy {
       onProgress,
       gate,
       toolCalls,
+      currentAgentResponse,
     } = context;
 
     // Get topological order
@@ -795,7 +904,8 @@ export class IndependentStrategy extends JudgeStrategy {
             personaInstructions,
             evalIndex++,
             gate,
-            toolCalls
+            toolCalls,
+            currentAgentResponse
           )
         );
 
@@ -836,11 +946,13 @@ export class IndependentStrategy extends JudgeStrategy {
     personaInstructions: string | undefined,
     index: number,
     gate?: GateId,
-    toolCalls?: ToolCall[]
+    toolCalls?: ToolCall[],
+    currentAgentResponse?: string
   ): Promise<CriterionResult> {
     const systemPrompt = this.buildSystemPrompt(
       personaInstructions,
-      toolCalls && toolCalls.length > 0
+      !!(toolCalls && toolCalls.length > 0),
+      !!(currentAgentResponse && currentAgentResponse.length > 0)
     );
 
     const userPrompt = this.buildUserPrompt(criterion, conversationHistory);
@@ -850,7 +962,8 @@ export class IndependentStrategy extends JudgeStrategy {
         workspacePath,
         systemPrompt,
         userPrompt,
-        toolCalls
+        toolCalls,
+        currentAgentResponse
       );
 
       const passed = this.detectPassFail(response);
@@ -884,23 +997,27 @@ export class IndependentStrategy extends JudgeStrategy {
    */
   protected buildSystemPrompt(
     personaInstructions?: string,
-    hasToolOutputs?: boolean
+    hasToolOutputs?: boolean,
+    hasAgentResponse?: boolean
   ): string {
     const personaSection = personaInstructions
       ? `\n## Persona\n${personaInstructions}\n`
       : "";
 
-    const toolOutputsSection = hasToolOutputs
-      ? `\n${TOOL_OUTPUTS_GUIDANCE}\n`
+    const evidenceSection = (hasToolOutputs || hasAgentResponse)
+      ? `\n${buildEvidenceGuidance({
+          hasToolOutputs: !!hasToolOutputs,
+          hasAgentResponse: !!hasAgentResponse,
+        })}\n`
       : "";
 
     return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent against ONE specific criterion.
 ${personaSection}
 ## What to Evaluate
 Evaluate the coding agent's work — its generated code together with the captured outputs of the tools it ran — against the criterion provided in the user message.
-${toolOutputsSection}
+${evidenceSection}
 ## Instructions
-1. Gather evidence from both the workspace and the coding agent's captured tool outputs.
+1. Gather evidence from every available source.
 2. Determine if the criterion is met (PASS) or not met (FAIL).
 3. Provide specific feedback about what you found.
 

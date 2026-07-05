@@ -82,6 +82,26 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
     expect(res.suggestedChildren).toEqual(["select_b"]);
   });
 
+  it("reconciles a contradictory id by keeping the parent edge and dropping it from children", async () => {
+    // The independent parent/child calls can both return the same id for a
+    // tightly-coupled pair (a logical 2-cycle). Reconciliation must prefer the
+    // parent edge and remove the id from the child set, while keeping any other
+    // legitimate child.
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") return reply({ prompt: "p", suggestedId: "x" });
+      if (kind === "parents") return reply({ suggestions: ["build_a"] });
+      // build_a is contradictory (also a parent); select_b is a genuine child.
+      return reply({ suggestions: ["build_a", "select_b"] });
+    });
+
+    const res = await generateCriteriaPrompt("behave", existing, ["select", "build"]);
+
+    expect(res.suggestedParents).toEqual(["build_a"]);
+    // build_a removed (kept as parent), the legitimate child retained.
+    expect(res.suggestedChildren).toEqual(["select_b"]);
+  });
+
   it("issues all three calls in parallel", async () => {
     postSpy.mockImplementation(async ({ body }: any) => {
       const kind = kindOf(body);

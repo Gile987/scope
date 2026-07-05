@@ -27,6 +27,8 @@ export interface EvaluationInput {
   toolCalls?: ToolCall[];
   /** The run's project — scopes criteria resolution to that project (per-project isolation). */
   projectId?: string;
+  /** The coding agent's response (prose) for the iteration being judged, exposed to the judge via read_agent_response. */
+  currentAgentResponse?: string;
 }
 
 export interface EvaluationResult {
@@ -105,6 +107,7 @@ export async function evaluateWorkspace(
       onProgress: input.onProgress,
       gate: input.gate,
       toolCalls: input.toolCalls,
+      currentAgentResponse: input.currentAgentResponse,
     });
 
     console.log(

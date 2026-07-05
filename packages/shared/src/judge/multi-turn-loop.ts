@@ -451,6 +451,7 @@ export async function runMultiTurnLoop(
         ...(gate && { gate }),
         ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
         ...(projectId && { projectId }),
+        ...(codingResponse && { currentAgentResponse: codingResponse }),
       });
       judgePassed = judgeResult.passed;
       judgeFeedback = judgeResult.feedback;

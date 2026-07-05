@@ -24,7 +24,10 @@ type CodebaseRevisionApiDocument = Omit<CodebaseRevisionDocument, "commitTimesta
   commitTimestamp?: JsonDate;
   resolvedAt: JsonDate;
   createdAt: JsonDate;
-  /** Response-only flag returned by resolve/upload endpoints (not stored). */
+  /**
+   * Response-only flag returned by resolve/upload endpoints (not stored);
+   * true when the revision was reused rather than newly created.
+   */
   deduplicated?: boolean;
 };
 

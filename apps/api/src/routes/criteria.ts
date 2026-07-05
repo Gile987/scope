@@ -66,7 +66,12 @@ apiRoute(ctx.app, ctx.registry, {
     currentId: z.string().optional(),
     gates: z.array(z.string()).optional(),
   }),
-  response: z.object({ prompt: z.string() }),
+  response: z.object({
+    prompt: z.string(),
+    suggestedId: z.string(),
+    suggestedParents: z.array(z.string()),
+    suggestedChildren: z.array(z.string()),
+  }),
   errorResponses: {
     400: { description: "Empty behavior string" },
     503: { description: "LLM not configured" },
