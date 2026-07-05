@@ -28,6 +28,7 @@ export const UpdateExtensionInputSchema = z
 export const ExtensionResponseSchema = z
   .object({
     _id: z.string(),
+    slug: z.string(),
     publisher: z.string(),
     name: z.string(),
     description: z.string().optional(),

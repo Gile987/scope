@@ -47,15 +47,16 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { Collection, Db } from "mongodb";
+import type { Db } from "mongodb";
 import type { MigrationInterface } from "mongo-migrate-ts";
+import { batchUpdate } from "../batch-update.js";
 import {
-  BATCH_SIZE,
-  INTER_BATCH_DELAY_MS,
-  batchUpdate,
-  getRetryAfterMs,
-  sleep,
-} from "../batch-update.js";
+  assertNoCompositeDuplicates,
+  backfillFieldFromId,
+  dropIndexSafe,
+  ensureIndex,
+  ensureUniqueIndexOrFallback,
+} from "../cosmos-index-helpers.js";
 
 /** Every scoped collection that receives a `projectId`. Source: A0 map. */
 const SCOPED_COLLECTIONS = [
@@ -82,203 +83,13 @@ const SCOPED_COLLECTIONS = [
 
 const DEFAULT_INITIAL_PROJECT_NAME = "Initial Project";
 
-/** Index-already-exists error codes (Mongo + Cosmos MongoDB API). */
-const ALREADY_EXISTS_CODES = new Set([85, 86, 68]);
-/** Index/namespace-not-found error codes. */
-const NOT_FOUND_CODES = new Set([26, 27]);
-/**
- * Azure Cosmos DB (RU-based) refuses to create/modify a unique index on an
- * *already-created* collection. This surfaces two different ways depending on
- * collection state:
- *   - **Populated** collection → code 67 (`CannotCreateIndex`, "Cannot create
- *     unique index when collection contains documents").
- *   - **Empty but already-created** collection → HTTP 403 Forbidden (mapped to
- *     Mongo error code 13) with the message "The unique index cannot be
- *     modified. To change the unique index, remove the collection and re-create
- *     a new one." — because Cosmos fixes a collection's unique-key policy at
- *     creation time (via the CreateCollection extension command) and will not
- *     alter it afterwards, even when the collection holds no documents.
- * Real MongoDB has neither restriction.
- */
-const CANNOT_CREATE_UNIQUE_ON_POPULATED = 67;
-
-/**
- * True when `err` is Cosmos refusing a unique index because the collection
- * already exists (populated → code 67, or empty-but-created → 403 "unique index
- * cannot be modified"). Matched by message for the 403 case so a genuine
- * authorization failure (also code 13) still surfaces instead of silently
- * degrading to a non-unique index.
- */
-function isCosmosUniqueIndexUnsupported(err: any): boolean {
-  if (err?.code === CANNOT_CREATE_UNIQUE_ON_POPULATED) return true;
-  return /unique index cannot be modified/i.test(String(err?.message ?? ""));
-}
-
-/** Create an index, tolerating "already exists" but surfacing real failures. */
-async function ensureIndex(
-  col: Collection,
-  key: Record<string, 1 | -1>,
-  options: { unique?: boolean } = {},
-  label = "",
-): Promise<void> {
-  try {
-    const name = await col.createIndex(key, options);
-    console.log(`  [025] created index ${name} ${JSON.stringify(key)} on ${label}`);
-  } catch (err: any) {
-    if (ALREADY_EXISTS_CODES.has(err?.code)) {
-      console.log(`  [025] index ${JSON.stringify(key)} on ${label} already exists`);
-      return;
-    }
-    throw err;
-  }
-}
-
-/** Drop an index by key spec, tolerating "not found". Best-effort. */
-async function dropIndexSafe(
-  col: Collection,
-  key: Record<string, 1 | -1>,
-  label = "",
-): Promise<void> {
-  try {
-    await col.dropIndex(key as any);
-    console.log(`  [025] dropped index ${JSON.stringify(key)} on ${label}`);
-  } catch (err: any) {
-    if (NOT_FOUND_CODES.has(err?.code)) {
-      console.log(`  [025] index ${JSON.stringify(key)} on ${label} not present (skip drop)`);
-      return;
-    }
-    console.log(
-      `  [025] could not drop index ${JSON.stringify(key)} on ${label}: ${err?.message ?? err}`,
-    );
-  }
-}
-
-/**
- * Create a UNIQUE index, degrading gracefully on Azure Cosmos DB for MongoDB.
- *
- * On real MongoDB the unique index is created and enforced. On Cosmos (RU-based)
- * a unique index can only be created while the collection is empty / at creation
- * time (via the CreateCollection extension command), so `createIndex(...,
- * {unique:true})` on an already-created collection fails — with code 67 when it
- * holds documents, or HTTP 403 "unique index cannot be modified" when it is empty
- * but already created. In either case we fall back to a **non-unique** index on
- * the same key (kept for lookup performance) and rely on the application-level
- * `findOrCreate` for per-project dedup — which is already how these collections
- * have always behaved on Cosmos (migration 003's unique `{ref}` index silently
- * no-op'd there). A pre-flight `assertNoCompositeDuplicates` guards data quality
- * regardless of backend, and genuine duplicate-key errors (code 11000, real
- * MongoDB) are surfaced, not swallowed.
- */
-async function ensureUniqueIndexOrFallback(
-  col: Collection,
-  key: Record<string, 1 | -1>,
-  label: string,
-): Promise<void> {
-  try {
-    const name = await col.createIndex(key, { unique: true });
-    console.log(`  [025] created UNIQUE index ${name} ${JSON.stringify(key)} on ${label}`);
-    return;
-  } catch (err: any) {
-    if (ALREADY_EXISTS_CODES.has(err?.code)) {
-      console.log(`  [025] unique index ${JSON.stringify(key)} on ${label} already exists`);
-      return;
-    }
-    if (!isCosmosUniqueIndexUnsupported(err)) {
-      throw err;
-    }
-    console.warn(
-      `  [025] ⚠ ${label}: Cosmos DB cannot create a unique index on an ` +
-        `already-created collection (code ${err?.code}: ${String(err?.message ?? "").slice(0, 80)}). ` +
-        `Falling back to a NON-unique ${JSON.stringify(key)} index; per-project ` +
-        `uniqueness is enforced by the application (findOrCreate).`,
-    );
-  }
-  // Fallback path (Cosmos): create the same key as a non-unique lookup index.
-  await ensureIndex(col, key, {}, label);
-}
-
-/**
- * Throw if any composite key `fields` occurs more than once — a pre-existing
- * collision would make a unique index on those fields fail to build (esp. on
- * Cosmos). Called before creating `{projectId,ref}` / `{projectId,keyId}`.
- */
-async function assertNoCompositeDuplicates(
-  col: Collection,
-  fields: string[],
-  label: string,
-): Promise<void> {
-  const groupId: Record<string, string> = {};
-  for (const f of fields) groupId[f] = `$${f}`;
-  const dups = await col
-    .aggregate([
-      { $group: { _id: groupId, count: { $sum: 1 } } },
-      { $match: { count: { $gt: 1 } } },
-      { $limit: 1 },
-    ])
-    .toArray();
-  if (dups.length > 0) {
-    throw new Error(
-      `[025] ${label}: found a duplicate ${JSON.stringify(fields)} — resolve before creating the unique index`,
-    );
-  }
-}
-
-/**
- * Copy each document's `_id` into a new `keyId` field, RU-paced and 429-retrying.
- * Only touches rows where `keyId` is absent (idempotent).
- */
-async function backfillKeyIdFromId(col: Collection, label: string): Promise<number> {
-  const ids: unknown[] = [];
-  const cursor = col.find({ keyId: { $exists: false } }, { projection: { _id: 1 } });
-  for await (const doc of cursor) ids.push(doc._id);
-
-  if (ids.length === 0) {
-    console.log(`  ${label}: 0 documents`);
-    return 0;
-  }
-  console.log(
-    `  ${label}: ${ids.length} documents in ${Math.ceil(ids.length / BATCH_SIZE)} batches`,
-  );
-
-  let total = 0;
-  for (let i = 0; i < ids.length; i += BATCH_SIZE) {
-    const batch = ids.slice(i, i + BATCH_SIZE);
-    if (i > 0) await sleep(INTER_BATCH_DELAY_MS);
-
-    let retries = 0;
-    const maxRetries = 10;
-    while (retries < maxRetries) {
-      try {
-        const result = await col.bulkWrite(
-          batch.map((id) => ({
-            updateOne: { filter: { _id: id as any }, update: { $set: { keyId: id } } },
-          })),
-        );
-        total += result.modifiedCount ?? 0;
-        break;
-      } catch (err: any) {
-        if (err?.code === 16500 && retries < maxRetries - 1) {
-          const delay = Math.max(getRetryAfterMs(err), 500);
-          console.log(`  ${label}: 429, retry ${retries + 1}, waiting ${delay}ms...`);
-          await sleep(delay);
-          retries++;
-        } else {
-          throw err;
-        }
-      }
-    }
-  }
-  console.log(`  ${label}: ${total} documents updated`);
-  return total;
-}
-
 export class CreateProjects implements MigrationInterface {
   async up(db: Db): Promise<void> {
     const projects = db.collection("projects");
 
     // 1. projects collection + indexes (createIndex auto-creates the collection).
-    await ensureIndex(projects, { createdAt: -1 }, {}, "projects");
-    await ensureIndex(projects, { deletedAt: 1 }, {}, "projects");
+    await ensureIndex(projects, { createdAt: -1 }, {}, "projects", "025");
+    await ensureIndex(projects, { deletedAt: 1 }, {}, "projects", "025");
 
     // 2. One initial project. Reuse the oldest on re-run (idempotent) — the
     //    initial project is always the oldest, since the migration creates it
@@ -311,23 +122,23 @@ export class CreateProjects implements MigrationInterface {
 
     // 4. Deterministic-key entities.
     // 4a. task-prompts keyId = _id (legacy _id is already the content-address).
-    await backfillKeyIdFromId(db.collection("task-prompts"), "[025] task-prompts.keyId=_id");
+    await backfillFieldFromId(db.collection("task-prompts"), "keyId", "[025] task-prompts.keyId=_id");
 
     // 4b. Unique-index swaps (guard against pre-existing collisions first).
     const skillRevisions = db.collection("skill-revisions");
-    await assertNoCompositeDuplicates(skillRevisions, ["projectId", "ref"], "skill-revisions");
-    await dropIndexSafe(skillRevisions, { ref: 1 }, "skill-revisions");
-    await ensureUniqueIndexOrFallback(skillRevisions, { projectId: 1, ref: 1 }, "skill-revisions");
+    await assertNoCompositeDuplicates(skillRevisions, ["projectId", "ref"], "skill-revisions", "025");
+    await dropIndexSafe(skillRevisions, { ref: 1 }, "skill-revisions", "025");
+    await ensureUniqueIndexOrFallback(skillRevisions, { projectId: 1, ref: 1 }, "skill-revisions", "025");
 
     const taskPrompts = db.collection("task-prompts");
-    await assertNoCompositeDuplicates(taskPrompts, ["projectId", "keyId"], "task-prompts");
-    await ensureUniqueIndexOrFallback(taskPrompts, { projectId: 1, keyId: 1 }, "task-prompts");
+    await assertNoCompositeDuplicates(taskPrompts, ["projectId", "keyId"], "task-prompts", "025");
+    await ensureUniqueIndexOrFallback(taskPrompts, { projectId: 1, keyId: 1 }, "task-prompts", "025");
 
     // 5. Scoping indexes on every scoped collection.
     for (const name of SCOPED_COLLECTIONS) {
       const col = db.collection(name);
-      await ensureIndex(col, { projectId: 1 }, {}, name);
-      await ensureIndex(col, { projectId: 1, _id: 1 }, {}, name);
+      await ensureIndex(col, { projectId: 1 }, {}, name, "025");
+      await ensureIndex(col, { projectId: 1, _id: 1 }, {}, name, "025");
     }
 
     console.log(`[025] Projects migration complete — initial project ${initialId}`);

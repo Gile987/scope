@@ -679,6 +679,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         requestId,
         runId,
         log,
+        projectId: requestDoc.projectId,
         personaInstructions: requestDoc.personaInstructions,
         model: requestDoc.model,
         reasoningEffort: requestDoc.reasoningEffort,

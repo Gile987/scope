@@ -25,6 +25,8 @@ export interface EvaluationInput {
   gate?: GateId;
   /** This iteration's captured tool calls/outputs, exposed to the judge via read_tool_outputs. */
   toolCalls?: ToolCall[];
+  /** The run's project — scopes criteria resolution to that project (per-project isolation). */
+  projectId?: string;
 }
 
 export interface EvaluationResult {
@@ -59,7 +61,7 @@ export async function evaluateWorkspace(
   // 3. Resolve criteria IDs from provider (with ancestor dependencies)
   let normalizedCriteria: CriteriaConfig[];
   try {
-    const provider = getCriteriaProvider();
+    const provider = getCriteriaProvider(input.projectId);
     normalizedCriteria = await provider.resolveWithAncestors(input.criteria);
     console.log(
       `[judge-agent] Loaded ${normalizedCriteria.length} criteria (including ancestors) from provider`

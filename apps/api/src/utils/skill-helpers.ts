@@ -37,11 +37,17 @@ export async function resolveSkillSpecs(
   const parsedSpecs = specs.map(parseSkillSpec);
   const slugs = [...new Set(parsedSpecs.map((p) => p.slug))];
 
-  // Validate all slugs exist in DB
+  // Validate all slugs exist in DB, scoped to the project. New rows key `_id`
+  // to a UUID and carry the human slug in `slug`; legacy rows (pre-migration 026)
+  // still have `_id === slug` — match either so both resolve within the project.
   const existingSkills = await ctx.skillCollection
-    .find({ _id: { $in: slugs }, deletedAt: { $exists: false } })
+    .find({
+      projectId,
+      deletedAt: { $exists: false },
+      $or: [{ slug: { $in: slugs } }, { _id: { $in: slugs } }],
+    })
     .toArray();
-  const existingMap = new Map(existingSkills.map((s: SkillDocument) => [s._id, s]));
+  const existingMap = new Map(existingSkills.map((s: SkillDocument) => [s.slug ?? s._id, s]));
   const missing = slugs.filter((slug) => !existingMap.has(slug));
   if (missing.length > 0) {
     return { error: `Skill(s) not found: ${missing.join(", ")}` };
@@ -93,7 +99,7 @@ export async function resolveSkillSpecs(
         );
         refs.push(revision.ref);
       } catch (resolveError) {
-        return { error: `Failed to resolve skill "${skill._id}": ${resolveError instanceof Error ? resolveError.message : String(resolveError)}` };
+        return { error: `Failed to resolve skill "${skill.slug ?? skill._id}": ${resolveError instanceof Error ? resolveError.message : String(resolveError)}` };
       }
     }
   }

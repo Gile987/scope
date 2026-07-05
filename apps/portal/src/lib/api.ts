@@ -35,6 +35,17 @@ interface RequestOpts {
    * (agents, models, secrets, projects) omit this.
    */
   scoped?: boolean;
+  /**
+   * **Soft** project scoping for backward-compatible point reads / by-slug
+   * mutations (skills, extensions, criteria, prompt-features). When a project
+   * is selected, its id is appended as `?projectId=` so the call resolves the
+   * **active project's copy**; when none is selected (e.g. a deep-link that
+   * renders outside {@link file://../components/ProjectGate.tsx ProjectGate}),
+   * the call falls back to the API's legacy global lookup **instead of
+   * throwing**. Use for routes that accept an *optional* `projectId` — never
+   * for routes that require it (those use {@link RequestOpts.scoped}).
+   */
+  softScoped?: boolean;
 }
 
 /**
@@ -93,6 +104,12 @@ async function request<T>(path: string, init?: RequestInit, opts?: RequestOpts):
     const projectId = getSelectedProjectId();
     if (!projectId) throw new ProjectRequiredError();
     finalPath = withProjectId(path, projectId);
+  } else if (opts?.softScoped) {
+    // Attach the active project so the call resolves that project's copy, but
+    // fall back to the API's legacy global lookup when none is selected rather
+    // than throwing — keeps deep-links to point-read detail pages working.
+    const projectId = getSelectedProjectId();
+    if (projectId) finalPath = withProjectId(path, projectId);
   }
   const res = await apiClient(`${BASE}${finalPath}`, {
     headers: { "Content-Type": "application/json" },
@@ -393,9 +410,9 @@ export const api = {
     return request(`/criteria${qs ? `?${qs}` : ""}`, undefined, { scoped: true });
   },
 
-  /** Get a single criterion by ID */
+  /** Get a single criterion by ID (soft-scoped: prefers the active project's copy, else legacy global) */
   getCriterion: (id: string): Promise<CriteriaDocument & { dependents: string[] }> => {
-    return request(`/criteria/${id}`);
+    return request(`/criteria/${id}`, undefined, { softScoped: true });
   },
 
   /** Create a new criterion */
@@ -406,17 +423,17 @@ export const api = {
     }, { scoped: true });
   },
 
-  /** Update an existing criterion */
+  /** Update an existing criterion (soft-scoped: prefers the active project's copy, else legacy global) */
   updateCriterion: (id: string, body: { prompt?: string; dependsOn?: string[]; gates?: GateId[] }): Promise<CriteriaDocument> => {
     return request(`/criteria/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
-    });
+    }, { softScoped: true });
   },
 
-  /** Delete a criterion */
+  /** Delete a criterion (soft-scoped: prefers the active project's copy, else legacy global) */
   deleteCriterion: (id: string): Promise<{ id: string; deleted: boolean }> => {
-    return request(`/criteria/${id}`, { method: "DELETE" });
+    return request(`/criteria/${id}`, { method: "DELETE" }, { softScoped: true });
   },
 
   /** Get the full criteria dependency graph */
@@ -443,9 +460,9 @@ export const api = {
     return request(`/prompt-features${qs ? `?${qs}` : ""}`, undefined, { scoped: true });
   },
 
-  /** Get a single prompt feature by ID */
+  /** Get a single prompt feature by ID (soft-scoped: prefers the active project's copy, else legacy global) */
   getPromptFeature: (id: string): Promise<PromptFeatureDocument & { dependents: string[] }> => {
-    return request(`/prompt-features/${id}`);
+    return request(`/prompt-features/${id}`, undefined, { softScoped: true });
   },
 
   /** Create a new prompt feature */
@@ -456,17 +473,17 @@ export const api = {
     }, { scoped: true });
   },
 
-  /** Update an existing prompt feature */
+  /** Update an existing prompt feature (soft-scoped: prefers the active project's copy, else legacy global) */
   updatePromptFeature: (id: string, body: { prompt?: string }): Promise<PromptFeatureDocument> => {
     return request(`/prompt-features/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
-    });
+    }, { softScoped: true });
   },
 
-  /** Delete a prompt feature */
+  /** Delete a prompt feature (soft-scoped: prefers the active project's copy, else legacy global) */
   deletePromptFeature: (id: string): Promise<{ id: string; deleted: boolean }> => {
-    return request(`/prompt-features/${id}`, { method: "DELETE" });
+    return request(`/prompt-features/${id}`, { method: "DELETE" }, { softScoped: true });
   },
 
   /** Generate a prompt feature prompt from a behavior description using AI */
@@ -997,9 +1014,9 @@ export const api = {
     return request("/skills", undefined, { scoped: true });
   },
 
-  /** Get a single skill by slug */
+  /** Get a single skill by slug (soft-scoped: prefers the active project's copy, else legacy global) */
   getSkill: (slug: string): Promise<SkillDocument> => {
-    return request(`/skills/${slug}`);
+    return request(`/skills/${slug}`, undefined, { softScoped: true });
   },
 
   /** Search skills in the internal library and the external skills.sh registry */
@@ -1030,19 +1047,19 @@ export const api = {
     }, { scoped: true });
   },
 
-  /** Soft-delete a skill */
+  /** Soft-delete a skill (soft-scoped: prefers the active project's copy, else legacy global) */
   deleteSkill: (slug: string): Promise<{ id: string; deleted: boolean }> => {
-    return request(`/skills/${slug}`, { method: "DELETE" });
+    return request(`/skills/${slug}`, { method: "DELETE" }, { softScoped: true });
   },
 
-  /** Resolve a skill (create/update revision from GitHub) */
+  /** Resolve a skill (create/update revision from GitHub) — soft-scoped to the active project */
   resolveSkill: (slug: string): Promise<SkillRevisionDocument> => {
-    return request(`/skills/${slug}/resolve`, { method: "POST" });
+    return request(`/skills/${slug}/resolve`, { method: "POST" }, { softScoped: true });
   },
 
-  /** List revisions for a skill */
+  /** List revisions for a skill (soft-scoped: prefers the active project's copy, else legacy global) */
   listSkillRevisions: (slug: string): Promise<SkillRevisionDocument[]> => {
-    return request(`/skills/${slug}/revisions`);
+    return request(`/skills/${slug}/revisions`, undefined, { softScoped: true });
   },
 
   // ─── Codebases ─────────────────────────────────────────────────────────────
@@ -1169,16 +1186,16 @@ export const api = {
     return request("/extensions", undefined, { scoped: true });
   },
 
-  /** Get a single extension by ID */
+  /** Get a single extension by ID (soft-scoped: prefers the active project's copy, else legacy global) */
   getExtension: (id: string): Promise<ExtensionDocument> => {
-    return request(`/extensions/${id}`);
+    return request(`/extensions/${id}`, undefined, { softScoped: true });
   },
 
-  /** Search extensions (internal + VS Code marketplace) */
+  /** Search extensions (internal + VS Code marketplace) — scoped to the active project */
   searchExtensions: (query: string, limit?: number): Promise<ExtensionSearchResult[]> => {
     const params = new URLSearchParams({ q: query });
     if (limit) params.set("limit", String(limit));
-    return request(`/extensions/search?${params}`);
+    return request(`/extensions/search?${params}`, undefined, { scoped: true });
   },
 
   /** Import an extension */
@@ -1196,9 +1213,9 @@ export const api = {
     return request(`/extensions/${id}/versions?${params}`);
   },
 
-  /** Soft-delete an extension */
+  /** Soft-delete an extension (soft-scoped: prefers the active project's copy, else legacy global) */
   deleteExtension: (id: string): Promise<{ id: string; deleted: boolean }> => {
-    return request(`/extensions/${id}`, { method: "DELETE" });
+    return request(`/extensions/${id}`, { method: "DELETE" }, { softScoped: true });
   },
 
   // ─── Profiles ────────────────────────────────────────────────────────────

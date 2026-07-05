@@ -10,7 +10,7 @@ import { criterionIcon, dimTimestamp, errorText, successText, label, value, warn
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { withOutputOption, withProjectOption, getDefaultApiUrl } from "../utils/shared.js";
-import { requireProjectId } from "../utils/config.js";
+import { requireProjectId, resolveProjectId } from "../utils/config.js";
 import { apiFetch } from "../utils/api-client.js";
 import { mapYamlCriterion } from "../utils/yaml-mappers.js";
 
@@ -83,17 +83,18 @@ promptFeature
     }
   });
 
-withOutputOption(
+withProjectOption(withOutputOption(
 promptFeature
   .command("get")
   .description("Get details of a single prompt feature")
   .requiredOption("-i, --id <id>", "Prompt feature ID")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await apiFetch(options.url, `/prompt-features/${options.id}`);
+      const projectId = resolveProjectId(options.project);
+      const response = await apiFetch(options.url, `/prompt-features/${options.id}`, { projectId });
 
       if (!response.ok) {
         const error = await response.json();
@@ -168,14 +169,17 @@ promptFeature
     }
   });
 
+withProjectOption(
 promptFeature
   .command("update")
   .description("Update an existing prompt feature")
   .requiredOption("-i, --id <id>", "Prompt feature ID")
   .option("--prompt <prompt>", "New detection prompt")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+)
   .action(async (options) => {
     try {
+      const projectId = resolveProjectId(options.project);
       const body: Record<string, unknown> = {};
       if (options.prompt !== undefined) body.prompt = options.prompt;
 
@@ -188,6 +192,7 @@ promptFeature
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        projectId,
       });
 
       if (!response.ok) {
@@ -203,15 +208,19 @@ promptFeature
     }
   });
 
+withProjectOption(
 promptFeature
   .command("delete")
   .description("Delete a prompt feature (soft-delete)")
   .requiredOption("-i, --id <id>", "Prompt feature ID")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+)
   .action(async (options) => {
     try {
+      const projectId = resolveProjectId(options.project);
       const response = await apiFetch(options.url, `/prompt-features/${options.id}`, {
         method: "DELETE",
+        projectId,
       });
 
       if (!response.ok) {

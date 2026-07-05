@@ -99,7 +99,6 @@ const navGroups: NavGroup[] = [
     id: "resources",
     label: "Resources",
     items: [
-      { to: "/projects", label: "Projects", icon: FolderKanban },
       { to: "/agents", label: "Agents", icon: Bot, featureKey: "agents" },
       { to: "/models", label: "Models", icon: Cpu, featureKey: "models" },
       { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },
@@ -334,6 +333,18 @@ export function Layout() {
                 active={location.pathname === "/runs/new"}
                 expanded={sidebarExpanded}
                 emphasized
+              />
+              <div
+                className={cn("my-1 h-px bg-border/60", sidebarExpanded ? "w-full" : "w-6")}
+                aria-hidden
+              />
+              {/* Projects — pinned above the Activity group; the active project scopes everything below */}
+              <SidebarIconLink
+                to="/projects"
+                label="Projects"
+                icon={FolderKanban}
+                active={location.pathname.startsWith("/projects")}
+                expanded={sidebarExpanded}
               />
               <div
                 className={cn("my-1 h-px bg-border/60", sidebarExpanded ? "w-full" : "w-6")}

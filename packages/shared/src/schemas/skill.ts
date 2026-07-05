@@ -21,6 +21,7 @@ export const CreateSkillInputSchema = z
 export const SkillResponseSchema = z
   .object({
     _id: z.string(),
+    slug: z.string(),
     source: z.string(),
     skillName: z.string(),
     name: z.string(),

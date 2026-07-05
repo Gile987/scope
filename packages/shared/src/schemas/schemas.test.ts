@@ -1197,6 +1197,7 @@ describe("skill schemas", () => {
     it("accepts valid response", () => {
       const result = SkillResponseSchema.parse({
         _id: "s1",
+        slug: "github/test",
         projectId: "proj-test",
         source: "github",
         skillName: "test",
@@ -1275,6 +1276,7 @@ describe("extension schemas", () => {
     it("accepts valid response", () => {
       const result = ExtensionResponseSchema.parse({
         _id: "ms-python.python",
+        slug: "ms-python.python",
         projectId: "proj-test",
         publisher: "ms-python",
         name: "Python",
@@ -1287,6 +1289,7 @@ describe("extension schemas", () => {
     it("accepts response with optional fields", () => {
       const result = ExtensionResponseSchema.parse({
         _id: "ms-python.python",
+        slug: "ms-python.python",
         projectId: "proj-test",
         publisher: "ms-python",
         name: "Python",

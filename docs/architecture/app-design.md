@@ -138,7 +138,8 @@ uniqueness is enforced by `findOrCreate` instead. `findOrCreate`/`getByRef(s)`
 lookups are all scoped by `projectId`. Because skill refs resolve **per project**, the run's
 `projectId` is threaded through the shared queue-processor into `SkillClient.resolveSkills` /
 `downloadSkillArchive` (which append `?projectId=`) and the electron worker's own `setup()`.
-Extensions resolve by globally-unique `_id`, so they need **no** projectId change.
+Skill and extension **catalog** entries are isolated per-project too, but via a different
+mechanism — see [Per-project catalog isolation (migration 026)](#per-project-catalog-isolation-migration-026) below.
 
 ### Cross-service write paths
 
@@ -168,6 +169,48 @@ strictly ordered **migrate-then-enforce**:
    request without a resolvable project is rejected immediately rather than run through a
    soft log-and-warn window. Deploying the migration before the enforcing API guarantees live
    traffic never 400s on already-stored data.
+
+### Per-project catalog isolation (migration 026)
+
+Migration 025 tagged every catalog with `projectId`, but four **catalog families** were still
+keyed/deduped **globally** by their human slug/id, so the same slug couldn't exist in two projects
+(a second create returned 409). Migration **`026-isolate-catalogs-per-project`** finishes the job
+for these four (**MCP servers are deferred** — see below):
+
+| Family | Global key (before) | Per-project key (after) | Create semantics |
+|--------|---------------------|-------------------------|------------------|
+| `skills` | `_id = "{source}/{skillName}"` | `_id` = UUID + `slug`, unique `{projectId, slug}` | scoped **upsert** (200 existing / 201 new) |
+| `extensions` | `_id = "{publisher}.{name}"` | `_id` = UUID + `slug`, unique `{projectId, slug}` | scoped **upsert** (200 / 201) |
+| `criteria` | unique `{id}` + global `findOne({id})` | unique `{projectId, id}` | scoped **create** (real same-project 409) |
+| `prompt-features` | unique `{id}` + global `findOne({id})` | unique `{projectId, id}` | scoped **create** (real same-project 409) |
+
+Key properties:
+
+- **API-observable ids are unchanged.** Skills/extensions still return `id = slug ?? _id`, so URLs
+  and payloads stay identical. Only the internal `_id` and the dedup scope change.
+- **Slug lookups are project-scoped.** `resolveSkillBySlug` / the extension equivalent match
+  `{projectId, slug}` with a legacy `{projectId, _id}` fallback for un-backfilled rows; a point read
+  **without** `?projectId=` falls back to the legacy global `findOne({_id: slug})` for
+  backward-compatibility. The Portal/CLI flag these slug point-reads `{scoped: true}` so
+  project-switching resolves the right copy.
+- **criteria** additionally confines DAG `dependsOn` resolution to the criterion's own `projectId`,
+  so a dependency edge can never cross projects.
+- **Judge threading.** Because criteria are now project-scoped, the judge threads the **run's
+  `projectId`** (from the request body) into `getCriteriaProvider(projectId)`, which binds a
+  per-project `RestApiCriteriaProvider` that appends `?projectId=` to its criteria fetches; the API
+  criteria route then resolves them via `getCriteriaStore(projectId)`. This mirrors the
+  skill-resolution precedent.
+
+Migration 026 is **additive and non-destructive** (no deletes, no `_id` changes): it backfills
+`slug = _id` on skills/extensions, swaps the `{id}` unique index to `{projectId, id}` on
+criteria/prompt-features, pre-asserts no composite duplicates, and reuses 025's Cosmos-safe helpers
+(so the composite indexes degrade to non-unique on Cosmos, unique on real MongoDB). `down()` unsets
+`slug`; index changes are log-only.
+
+**MCP deferred.** `mcp-servers` and MCP secrets are the fifth tagged-but-not-isolated family. They
+are intentionally excluded from 026 because the secret foreign key
+(`McpSecretDocument.mcpId = server._id`), gateway slug resolution, run-submit validation, and worker
+`resolveServers` threading make them a larger change tracked separately.
 
 ## Judge Pipeline
 

@@ -1203,6 +1203,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "publisher": {
             "type": "string",
           },
+          "slug": {
+            "type": "string",
+          },
           "updatedAt": {
             "format": "date-time",
             "type": [
@@ -1213,6 +1216,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "required": [
           "_id",
+          "slug",
           "publisher",
           "name",
           "origin",
@@ -3015,6 +3019,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "skillName": {
             "type": "string",
           },
+          "slug": {
+            "type": "string",
+          },
           "source": {
             "type": "string",
           },
@@ -3028,6 +3035,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "required": [
           "_id",
+          "slug",
           "source",
           "skillName",
           "name",
@@ -4518,6 +4526,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/criteria/generate-prompt": {
       "post": {
+        "parameters": [
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4688,6 +4710,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/criteria/seed": {
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4755,6 +4791,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -4801,6 +4849,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -4829,6 +4889,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "id",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -4963,6 +5035,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -4996,6 +5080,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "id",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -5035,6 +5131,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -5060,6 +5168,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "id",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -6840,6 +6960,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/prompt-features/extract-from-text": {
       "post": {
+        "parameters": [
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6914,6 +7048,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/prompt-features/generate-prompt": {
       "post": {
+        "parameters": [
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6968,6 +7116,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/prompt-features/seed": {
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -7032,6 +7194,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -7075,6 +7249,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -7103,6 +7289,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "id",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -10052,6 +10250,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/skills/{id}(*)": {
       "delete": {
+        "parameters": [
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "204": {
             "description": "Success",
@@ -10066,6 +10278,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
       "get": {
+        "parameters": [
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "200": {
             "content": {
@@ -10089,6 +10315,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/skills/{id}(*)/resolve": {
       "post": {
+        "parameters": [
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "201": {
             "content": {
@@ -10121,6 +10361,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "limit",
             "required": false,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },

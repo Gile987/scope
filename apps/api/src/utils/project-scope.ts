@@ -50,6 +50,27 @@ export const ProjectIdQuerySchema = z.object({
 });
 
 /**
+ * Optional variant of {@link ProjectIdQuerySchema}: documents `?projectId=` as an
+ * **optional** query parameter. Merge/spread it into point-read routes (get/delete
+ * by human slug) so the client can pass a project scope to disambiguate slugs that
+ * repeat across projects, while legacy callers that omit it still resolve globally.
+ */
+export const OptionalProjectIdQuerySchema = z.object({
+  projectId: z
+    .string()
+    .min(1)
+    .optional()
+    .openapi({
+      param: { name: "projectId", in: "query", required: false },
+      description:
+        "Optional project scope. When provided, a slug/id is resolved within that " +
+        "project (slugs may repeat across projects); when omitted, resolution falls " +
+        "back to a legacy global lookup for backward compatibility.",
+      example: "00000000-0000-0000-0000-000000000000",
+    }),
+});
+
+/**
  * Read the (schema-validated) `?projectId=` from a scoped request.
  *
  * Routes that spread {@link ProjectIdQuerySchema} into their `query` schema

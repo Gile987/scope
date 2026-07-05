@@ -3,6 +3,7 @@
 
 import { BlobServiceClient, RestError } from "@azure/storage-blob";
 import { DefaultAzureCredential } from "@azure/identity";
+import { randomUUID } from "node:crypto";
 import { join, basename } from "path";
 import { z } from "zod";
 import {
@@ -15,13 +16,55 @@ import {
 import type { SkillDocument, SkillSearchResult } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { RouteContext } from "../route-context.js";
-import { ProjectIdQuerySchema, getQueryProjectId, getOptionalQueryProjectId } from "../utils/project-scope.js";
+import { ProjectIdQuerySchema, OptionalProjectIdQuerySchema, getQueryProjectId, getOptionalQueryProjectId } from "../utils/project-scope.js";
 
 export function registerSkillsRoutes(ctx: RouteContext): void {
 
 // =====================================================================
 // Skills API
 // =====================================================================
+
+/** Public identifier for a skill = its human slug (falls back to legacy _id-as-slug rows). */
+const skillSlug = (s: SkillDocument): string => s.slug ?? s._id;
+
+/** Map a stored skill doc to the API response shape (`id` and `slug` both = the human slug). */
+const toSkillResponse = (s: SkillDocument): SkillDocument & { id: string } => ({
+  ...s,
+  slug: skillSlug(s),
+  id: skillSlug(s),
+});
+
+/**
+ * Resolve a skill by its human slug (`{source}/{skillName}`).
+ *
+ * New rows key `_id` to a random UUID and carry the slug in `slug`; legacy rows
+ * (pre-migration 026) still have `_id === slug`. When a `projectId` is provided
+ * the lookup is scoped to that project (slugs may repeat across projects), trying
+ * the `slug` field first then the legacy `_id` for un-backfilled rows. Without a
+ * `projectId` it falls back to a legacy global `_id` lookup for backward compat.
+ */
+const findSkillBySlug = async (
+  slug: string,
+  projectId: string | undefined,
+): Promise<SkillDocument | null> => {
+  if (projectId) {
+    const bySlug = await ctx.skillCollection.findOne({
+      projectId,
+      slug,
+      deletedAt: { $exists: false },
+    });
+    if (bySlug) return bySlug as SkillDocument;
+    return (await ctx.skillCollection.findOne({
+      projectId,
+      _id: slug,
+      deletedAt: { $exists: false },
+    })) as SkillDocument | null;
+  }
+  return (await ctx.skillCollection.findOne({
+    _id: slug,
+    deletedAt: { $exists: false },
+  })) as SkillDocument | null;
+};
 
 // Upload a skill archive to blob storage. Shared by manual /resolve and
 // the auto-resolve triggered after a skill is created or imported.
@@ -64,8 +107,8 @@ apiRoute(ctx.app, ctx.registry, {
       const skills = await ctx.skillCollection
         .find({ deletedAt: { $exists: false }, projectId })
         .toArray();
-      skills.sort((a, b) => a._id.localeCompare(b._id));
-      res.json(skills.map((s) => ({ ...s, id: s._id })));
+      skills.sort((a, b) => skillSlug(a as SkillDocument).localeCompare(skillSlug(b as SkillDocument)));
+      res.json(skills.map((s) => toSkillResponse(s as SkillDocument)));
     } catch (error) {
       next(error);
     }
@@ -116,7 +159,7 @@ apiRoute(ctx.app, ctx.registry, {
         .toArray();
 
       const internalResults: SkillSearchResult[] = internalSkills.map((s) => ({
-        id: s._id,
+        id: skillSlug(s as SkillDocument),
         name: s.name,
         source: s.source,
         description: s.description,
@@ -124,7 +167,7 @@ apiRoute(ctx.app, ctx.registry, {
       }));
 
       // Also track internal slugs to deduplicate
-      const internalSlugs = new Set(internalSkills.map((s) => s._id));
+      const internalSlugs = new Set(internalSkills.map((s) => skillSlug(s as SkillDocument)));
 
       // Search skills.sh (external registry)
       let externalResults: SkillSearchResult[] = [];
@@ -209,7 +252,7 @@ apiRoute(ctx.app, ctx.registry, {
             const internalFilter: Record<string, unknown> = { deletedAt: { $exists: false } };
             if (dedupProjectId) internalFilter.projectId = dedupProjectId;
             const internalSlugs = new Set(
-              (await ctx.skillCollection.find(internalFilter, { projection: { _id: 1 } }).toArray()).map((s) => s._id)
+              (await ctx.skillCollection.find(internalFilter, { projection: { slug: 1 } }).toArray()).map((s) => skillSlug(s as SkillDocument))
             );
             externalResults = data.skills
               .filter((s) => !internalSlugs.has(s.id))
@@ -320,7 +363,7 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/skills/:id(*)/revisions",
   tags: ["Skills"],
   summary: "List skill revisions",
-  query: z.object({ limit: z.string().optional() }),
+  query: z.object({ limit: z.string().optional() }).merge(OptionalProjectIdQuerySchema),
   response: z.array(SkillRevisionResponseSchema),
   errorResponses: {
     404: { description: "Skill not found" },
@@ -328,7 +371,7 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res, next) => {
     try {
       const id = req.params.id ?? req.params[0];
-      const skill = await ctx.skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      const skill = await findSkillBySlug(id, getOptionalQueryProjectId(req));
       if (!skill) {
         res.status(404).json({ error: "Skill not found" });
         return;
@@ -351,6 +394,7 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/skills/:id(*)",
   tags: ["Skills"],
   summary: "Get skill by slug",
+  query: OptionalProjectIdQuerySchema,
   response: SkillResponseSchema,
   errorResponses: {
     404: { description: "Skill not found" },
@@ -358,12 +402,12 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res, next) => {
     try {
       const id = req.params.id ?? req.params[0];
-      const skill = await ctx.skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      const skill = await findSkillBySlug(id, getOptionalQueryProjectId(req));
       if (!skill) {
         res.status(404).json({ error: "Skill not found" });
         return;
       }
-      res.json({ ...skill, id: skill._id });
+      res.json(toSkillResponse(skill));
     } catch (error) {
       next(error);
     }
@@ -400,28 +444,26 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
 
-      const _id = `${source}/${skillName}`;
+      const slug = `${source}/${skillName}`;
       const projectId = getQueryProjectId(req);
       const now = new Date();
-      const existing = await ctx.skillCollection.findOne({ _id });
-
-      // Skill slugs are globally-unique `_id`s, so a slug already filed under a
-      // different project cannot be re-imported here — reject cross-project reuse.
-      if (existing && existing.projectId && existing.projectId !== projectId) {
-        res.status(409).json({
-          error: `Skill '${_id}' already exists in a different project`,
-        });
-        return;
-      }
+      // Look up an existing skill with this slug WITHIN the project. New rows carry
+      // `slug`; legacy rows (pre-migration 026) still key `_id` to the slug — match either.
+      const existing = await ctx.skillCollection.findOne({
+        projectId,
+        $or: [{ slug }, { _id: slug }],
+      });
 
       let responseSkill: SkillDocument & { id: string };
       let status = 200;
       if (existing) {
-        // Upsert: un-delete if soft-deleted, update fields
+        // Upsert within the project: un-delete if soft-deleted, update fields,
+        // and backfill `slug` on legacy rows.
         await ctx.skillCollection.updateOne(
-          { _id },
+          { _id: existing._id },
           {
             $set: {
+              slug,
               name,
               source,
               skillName,
@@ -432,11 +474,12 @@ apiRoute(ctx.app, ctx.registry, {
             $unset: { deletedAt: "" },
           }
         );
-        const updated = await ctx.skillCollection.findOne({ _id });
-        responseSkill = { ...(updated as SkillDocument), id: updated!._id };
+        const updated = await ctx.skillCollection.findOne({ _id: existing._id });
+        responseSkill = toSkillResponse(updated as SkillDocument);
       } else {
         const skillDoc: SkillDocument = {
-          _id,
+          _id: randomUUID(),
+          slug,
           projectId,
           source,
           skillName,
@@ -446,7 +489,7 @@ apiRoute(ctx.app, ctx.registry, {
           createdAt: now,
         };
         await ctx.skillCollection.insertOne(skillDoc as any);
-        responseSkill = { ...skillDoc, id: skillDoc._id };
+        responseSkill = toSkillResponse(skillDoc);
         status = 201;
       }
 
@@ -457,7 +500,7 @@ apiRoute(ctx.app, ctx.registry, {
         await ctx.skillResolver.resolve(projectId, source, skillName, ctx.skillRevisionStore, uploadSkillArchive);
       } catch (resolveError) {
         const message = resolveError instanceof Error ? resolveError.message : String(resolveError);
-        console.warn(`Auto-resolve failed for skill ${_id}: ${message}`);
+        console.warn(`Auto-resolve failed for skill ${slug}: ${message}`);
       }
 
       res.status(status).json(responseSkill);
@@ -473,6 +516,7 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/skills/:id(*)",
   tags: ["Skills"],
   summary: "Soft-delete a skill",
+  query: OptionalProjectIdQuerySchema,
   response: z.any(),
   rawResponse: true,
   successStatus: 204,
@@ -483,14 +527,14 @@ apiRoute(ctx.app, ctx.registry, {
     try {
       const id = req.params.id ?? req.params[0];
 
-      const existing = await ctx.skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      const existing = await findSkillBySlug(id, getOptionalQueryProjectId(req));
       if (!existing) {
         res.status(404).json({ error: "Skill not found" });
         return;
       }
 
       await ctx.skillCollection.updateOne(
-        { _id: id },
+        { _id: existing._id },
         { $set: { deletedAt: new Date(), updatedAt: new Date() } }
       );
 
@@ -648,6 +692,7 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/skills/:id(*)/resolve",
   tags: ["Skills"],
   summary: "Trigger skill resolution",
+  query: OptionalProjectIdQuerySchema,
   response: SkillRevisionResponseSchema,
   errorResponses: {
     404: { description: "Skill not found" },
@@ -656,7 +701,7 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res, next) => {
     try {
       const id = req.params.id ?? req.params[0];
-      const skill = await ctx.skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      const skill = await findSkillBySlug(id, getOptionalQueryProjectId(req));
       if (!skill) {
         res.status(404).json({ error: "Skill not found" });
         return;

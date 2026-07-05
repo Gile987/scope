@@ -41,9 +41,11 @@ function fakeCollection(seed: CriteriaDocument[] = []) {
       return docs.find((d) => matches(d, filter)) ?? null;
     },
     async insertOne(doc: any) {
-      // Faithfully model the full unique index on `id` (migration 002): it does
-      // NOT exclude soft-deleted docs, so inserting over a tombstone collides.
-      if (docs.some((d) => d.id === doc.id)) {
+      // Faithfully model the unique index on `{ projectId, id }` (migration 026,
+      // which replaced migration 002's global `{ id }`): it does NOT exclude
+      // soft-deleted docs, so inserting over a tombstone in the SAME project
+      // collides, while the same id in a DIFFERENT project is allowed.
+      if (docs.some((d) => d.projectId === doc.projectId && d.id === doc.id)) {
         throw Object.assign(new Error("E11000 duplicate key error"), { code: 11000 });
       }
       docs.push({ ...doc });
@@ -310,6 +312,70 @@ describe("CriteriaStore revives soft-deleted ids on re-create", () => {
     await expect(store.create({ projectId: "proj-test", id: "active", prompt: "q" })).rejects.toThrow(
       CriteriaDuplicateError,
     );
+  });
+});
+
+describe("CriteriaStore per-project isolation (migration 026)", () => {
+  it("allows the same criterion id to exist independently in two projects", async () => {
+    // One shared underlying collection, two project-scoped stores.
+    const col = fakeCollection();
+    const storeA = new CriteriaStore(col, "proj-a");
+    const storeB = new CriteriaStore(col, "proj-b");
+
+    const a = await storeA.create({ projectId: "proj-a", id: "shared_id", prompt: "from A" });
+    const b = await storeB.create({ projectId: "proj-b", id: "shared_id", prompt: "from B" });
+
+    // No cross-project 409: both creates succeed and land as two distinct rows.
+    expect(a.id).toBe("shared_id");
+    expect(b.id).toBe("shared_id");
+    const rows = col._docs().filter((d: CriteriaDocument) => d.id === "shared_id");
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((d: CriteriaDocument) => d.projectId))).toEqual(
+      new Set(["proj-a", "proj-b"]),
+    );
+  });
+
+  it("still rejects a same-id duplicate WITHIN a project", async () => {
+    const col = fakeCollection();
+    const storeA = new CriteriaStore(col, "proj-a");
+    const storeB = new CriteriaStore(col, "proj-b");
+
+    await storeA.create({ projectId: "proj-a", id: "dup", prompt: "x" });
+    await storeB.create({ projectId: "proj-b", id: "dup", prompt: "y" });
+
+    // The second create in proj-a is a real in-project collision.
+    await expect(storeA.create({ projectId: "proj-a", id: "dup", prompt: "z" })).rejects.toThrow(
+      CriteriaDuplicateError,
+    );
+  });
+
+  it("scopes reads to the store's project (get returns that project's copy only)", async () => {
+    const col = fakeCollection();
+    const storeA = new CriteriaStore(col, "proj-a");
+    const storeB = new CriteriaStore(col, "proj-b");
+    await storeA.create({ projectId: "proj-a", id: "shared_id", prompt: "from A" });
+    await storeB.create({ projectId: "proj-b", id: "shared_id", prompt: "from B" });
+
+    expect((await storeA.get("shared_id"))!.prompt).toBe("from A");
+    expect((await storeB.get("shared_id"))!.prompt).toBe("from B");
+  });
+
+  it("confines DAG dependency resolution to the store's project", async () => {
+    // A "parent" exists only in proj-a. A create in proj-b that dependsOn "parent"
+    // must fail because the dependency is not visible in proj-b.
+    const col = fakeCollection();
+    const storeA = new CriteriaStore(col, "proj-a");
+    const storeB = new CriteriaStore(col, "proj-b");
+    await storeA.create({ projectId: "proj-a", id: "parent", prompt: "p" });
+
+    await expect(
+      storeB.create({ projectId: "proj-b", id: "child", prompt: "c", dependsOn: ["parent"] }),
+    ).rejects.toThrow(CriteriaValidationError);
+
+    // Within proj-a the same dependency resolves fine.
+    await expect(
+      storeA.create({ projectId: "proj-a", id: "child", prompt: "c", dependsOn: ["parent"] }),
+    ).resolves.toBeTruthy();
   });
 });
 

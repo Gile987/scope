@@ -52,7 +52,7 @@ app.post(
     const startTime = Date.now();
 
     try {
-      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl } = req.body;
+      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, projectId } = req.body;
 
       // Validate required fields
       if (!snapshotUrl || typeof snapshotUrl !== "string") {
@@ -129,6 +129,7 @@ app.post(
           onProgress,
           gate,
           toolCalls,
+          projectId,
         });
 
         const elapsed = Date.now() - startTime;

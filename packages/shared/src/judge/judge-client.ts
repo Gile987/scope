@@ -17,6 +17,8 @@ export interface JudgeEvaluateRequest {
   gate?: GateId;
   /** Blob URL of this iteration's captured tool calls/outputs (build/test/run output). */
   toolCallsUrl?: string;
+  /** The run's project — scopes the judge's criteria resolution to that project. */
+  projectId?: string;
 }
 
 /**

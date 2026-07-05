@@ -64,6 +64,7 @@ import {
   sortValueOf,
 } from "./run-query.js";
 import { resolveSkillSpecs } from "../../utils/skill-helpers.js";
+import { findMissingExtensionSlugs } from "../../utils/extension-helpers.js";
 import { resolveCodebaseSpec, createCodebaseArchiveUploader } from "../../utils/codebase-helpers.js";
 import {
   packRunIntoTar,
@@ -551,11 +552,7 @@ apiRoute(ctx.app, ctx.registry, {
         if (effectiveExtensions !== undefined && effectiveExtensions.length > 0) {
           const parsedSpecs = effectiveExtensions.map((spec: string) => parseExtensionSpec(spec));
           const bareIds = parsedSpecs.map((s) => s.id);
-          const existingExtensions = await ctx.extensionCollection
-            .find({ _id: { $in: bareIds }, deletedAt: { $exists: false } })
-            .toArray();
-          const existingIds = new Set(existingExtensions.map((e: ExtensionDocument) => e._id));
-          const missingIds = bareIds.filter((id: string) => !existingIds.has(id));
+          const missingIds = await findMissingExtensionSlugs(bareIds, ctx.extensionCollection, projectId);
           if (missingIds.length > 0) {
             res.status(400).json({
               error: `Extension(s) not found: ${missingIds.join(", ")}`,
@@ -980,11 +977,7 @@ apiRoute(ctx.app, ctx.registry, {
         // Parse specs to extract bare IDs for DB validation
         const parsedSpecs = effectiveExtensions.map((spec: string) => parseExtensionSpec(spec));
         const bareIds = parsedSpecs.map((s) => s.id);
-        const existingExtensions = await ctx.extensionCollection
-          .find({ _id: { $in: bareIds }, deletedAt: { $exists: false } })
-          .toArray();
-        const existingIds = new Set(existingExtensions.map((e: ExtensionDocument) => e._id));
-        const missingIds = bareIds.filter((id: string) => !existingIds.has(id));
+        const missingIds = await findMissingExtensionSlugs(bareIds, ctx.extensionCollection, projectId);
         if (missingIds.length > 0) {
           res.status(400).json({ error: `Extension(s) not found: ${missingIds.join(", ")}` });
           return;

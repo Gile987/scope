@@ -19,7 +19,21 @@ import {
  * Criteria documents are soft-deleted (deletedAt) rather than removed.
  */
 export class CriteriaStore {
-  constructor(private collection: Collection<CriteriaDocument>) {}
+  constructor(
+    private collection: Collection<CriteriaDocument>,
+    /**
+     * Project scope for every read/write. When set, all lookups, uniqueness
+     * checks and DAG traversals are confined to this project so the same human
+     * `id` can exist independently in different projects. When omitted the store
+     * operates globally (legacy behaviour, used by unscoped callers/tests).
+     */
+    private projectId?: string,
+  ) {}
+
+  /** Merge the active project scope into a Mongo filter (no-op when unscoped). */
+  private scoped(filter: Record<string, unknown>): Record<string, unknown> {
+    return this.projectId ? { projectId: this.projectId, ...filter } : filter;
+  }
 
   /** List all active (non-deleted) criteria */
   async getAll(): Promise<CriteriaDocument[]> {
@@ -32,14 +46,14 @@ export class CriteriaStore {
     // updating a criterion with dependencies (both call validateNoCycles() ->
     // getAll()) failed on int/prod but not against local Azurite/Mongo.
     return this.collection
-      .find({ deletedAt: { $exists: false } })
+      .find(this.scoped({ deletedAt: { $exists: false } }))
       .sort({ id: 1 })
       .toArray();
   }
 
   /** Get a single criterion by ID */
   async get(id: string): Promise<CriteriaDocument | null> {
-    return this.collection.findOne({ id, deletedAt: { $exists: false } });
+    return this.collection.findOne(this.scoped({ id, deletedAt: { $exists: false } }));
   }
 
   /** Create a new criterion. Validates uniqueness and dependency references. */
@@ -59,17 +73,17 @@ export class CriteriaStore {
       );
     }
 
-    // Check for duplicates among *active* criteria.
-    const existing = await this.collection.findOne({ id, deletedAt: { $exists: false } });
+    // Check for duplicates among *active* criteria — scoped to this project so
+    // the same id can exist in another project without a cross-project 409.
+    const existing = await this.collection.findOne(this.scoped({ id, deletedAt: { $exists: false } }));
     if (existing) {
       throw new CriteriaDuplicateError(`Criteria '${id}' already exists`);
     }
 
-    // A soft-deleted criterion may still hold this id. The collection has a full
-    // unique index on `id` (it does not exclude soft-deleted docs), so a plain
-    // insert would collide (E11000). Detect this case and *revive* the tombstone
-    // as a fresh criterion instead of failing.
-    const softDeleted = await this.collection.findOne({ id, deletedAt: { $exists: true } });
+    // A soft-deleted criterion in *this project* may still hold this id. With a
+    // per-project unique index a plain insert would collide (E11000); detect the
+    // tombstone and revive it instead of failing.
+    const softDeleted = await this.collection.findOne(this.scoped({ id, deletedAt: { $exists: true } }));
 
     // Validate dependency references exist
     if (dependsOn.length > 0) {
@@ -99,7 +113,7 @@ export class CriteriaStore {
         // the soft-delete marker (and any stale updatedAt) so the revived
         // criterion is indistinguishable from a brand-new one.
         await this.collection.updateOne(
-          { id, deletedAt: { $exists: true } },
+          this.scoped({ id, deletedAt: { $exists: true } }),
           {
             $set: { ...doc },
             $unset: { deletedAt: '', updatedAt: '' },
@@ -163,7 +177,7 @@ export class CriteriaStore {
     if (patch.gates !== undefined) update.gates = patch.gates;
 
     await this.collection.updateOne(
-      { id, deletedAt: { $exists: false } },
+      this.scoped({ id, deletedAt: { $exists: false } }),
       { $set: update }
     );
 
@@ -180,12 +194,12 @@ export class CriteriaStore {
       throw new CriteriaNotFoundError(`Criteria '${id}' not found`);
     }
 
-    // Check for dependents
+    // Check for dependents (within the same project)
     const dependents = await this.collection
-      .find({
+      .find(this.scoped({
         dependsOn: id,
         deletedAt: { $exists: false },
-      })
+      }))
       .toArray();
 
     if (dependents.length > 0) {
@@ -197,7 +211,7 @@ export class CriteriaStore {
     }
 
     await this.collection.updateOne(
-      { id, deletedAt: { $exists: false } },
+      this.scoped({ id, deletedAt: { $exists: false } }),
       { $set: { deletedAt: new Date() } }
     );
   }
@@ -271,9 +285,10 @@ export class CriteriaStore {
   async seed(configs: CriteriaConfig[]): Promise<number> {
     let inserted = 0;
     for (const config of configs) {
-      const existing = await this.collection.findOne({ id: config.id });
+      const existing = await this.collection.findOne(this.scoped({ id: config.id }));
       if (!existing) {
         await this.collection.insertOne({
+          ...(this.projectId ? { projectId: this.projectId } : {}),
           id: config.id,
           prompt: config.prompt,
           dependsOn: config.dependsOn || [],
@@ -372,7 +387,7 @@ export class CriteriaStore {
     gates: GateId[] | undefined,
   ): Promise<void> {
     const dependents = await this.collection
-      .find({ dependsOn: criterionId, deletedAt: { $exists: false } })
+      .find(this.scoped({ dependsOn: criterionId, deletedAt: { $exists: false } }))
       .toArray();
 
     for (const child of dependents) {
