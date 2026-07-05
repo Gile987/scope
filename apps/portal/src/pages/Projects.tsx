@@ -2,8 +2,9 @@
 // Licensed under the MIT License.
 
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderKanban, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowRight, Check, CircleCheck, FolderKanban, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { ProjectCreateForm } from "@/components/ProjectCreateForm";
@@ -144,10 +145,23 @@ function EditProjectDialog({
  */
 export function Projects() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { selectedProjectId } = useProjectContext();
   const selectProject = useSelectProject();
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
+
+  /**
+   * Select a project and open its dashboard. Selecting scopes the whole portal
+   * to that project (see `useSelectProject`); we then redirect to `/statistics`
+   * so the user lands on the project's overview. Wired to both the row click and
+   * the "Use project" button so the two entry points behave identically.
+   */
+  const openProject = (project: Project) => {
+    const id = projectId(project);
+    if (id !== selectedProjectId) selectProject(id);
+    navigate("/statistics");
+  };
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["projects"],
@@ -190,7 +204,8 @@ export function Projects() {
             <FolderKanban className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span className="font-medium">{p.name}</span>
             {isActive && (
-              <Badge variant="secondary" className="text-xs">
+              <Badge className="gap-1 text-xs">
+                <Check className="h-3 w-3" />
                 Active
               </Badge>
             )}
@@ -216,20 +231,28 @@ export function Projects() {
     {
       id: "actions",
       header: "",
-      width: "180px",
+      width: "220px",
       align: "right",
       cell: (p) => {
         const isActive = projectId(p) === selectedProjectId;
         return (
-          <div className="flex items-center justify-end gap-1">
-            {!isActive && (
+          <div
+            className="flex items-center justify-end gap-1"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {isActive ? (
+              <span className="mr-1 inline-flex items-center gap-1 text-xs font-medium text-primary">
+                <CircleCheck className="h-4 w-4" />
+                In use
+              </span>
+            ) : (
               <Button
-                variant="ghost"
                 size="sm"
-                className="h-8"
-                onClick={() => selectProject(projectId(p))}
+                className="h-8 gap-1.5"
+                onClick={() => openProject(p)}
               >
-                Use
+                Use project
+                <ArrowRight className="h-4 w-4" />
               </Button>
             )}
             <Button
@@ -291,11 +314,21 @@ export function Projects() {
         }
       >
         <div className="p-4">
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+            <FolderKanban className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>
+              Select a project to scope the whole portal &mdash; runs, profiles, criteria, MCP
+              servers, and more &mdash; to it. Selecting opens the project&rsquo;s{" "}
+              <span className="font-medium text-foreground">Statistics</span>, and your active
+              project stays switchable from the top bar.
+            </p>
+          </div>
           <DataTable
             items={activeProjects}
             columns={columns}
             getRowId={(p) => projectId(p)}
             activeId={selectedProjectId ?? null}
+            onRowClick={openProject}
             loading={isLoading}
             emptyState={
               <div className="flex flex-col items-center gap-2 py-10 text-center">
