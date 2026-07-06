@@ -4,6 +4,7 @@
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { api } from "@/lib/api";
+import { apiClient } from "@/lib/api-client";
 import type { ConversationTurn } from "@/types";
 import {
   extractChronologicalSegments,
@@ -26,7 +27,7 @@ export function useHarData<T = unknown>(runId: string, iteration?: number, enabl
     queryKey: ["har", runId, iteration, attemptRunId],
     queryFn: async () => {
       const url = attemptRunId ? api.runHarUrl(runId, attemptRunId, iteration) : api.harUrl(runId, iteration);
-      const res = await fetch(url);
+      const res = await apiClient(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
@@ -102,7 +103,7 @@ export function useAllTurnsToolCalls(
       queryKey: ["tool-calls", runId, q.iteration, attemptRunId],
       queryFn: async () => {
         const url = attemptRunId ? api.runToolCallsUrl(runId, attemptRunId, q.iteration) : api.toolCallsUrl(runId, q.iteration);
-        const res = await fetch(url);
+        const res = await apiClient(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
         return text
@@ -144,7 +145,7 @@ export function useAllTurnsToolCalls(
       queryKey: ["har", runId, q.iteration, attemptRunId],
       queryFn: async () => {
         const url = attemptRunId ? api.runHarUrl(runId, attemptRunId, q.iteration) : api.harUrl(runId, q.iteration);
-        const res = await fetch(url);
+        const res = await apiClient(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<HarFile>;
       },
