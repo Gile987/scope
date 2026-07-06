@@ -7,8 +7,18 @@ import { registerRunCommands } from "./run.js";
 
 interface MockResponse {
   ok: boolean;
+  status: number;
   json: () => Promise<unknown>;
 }
+
+/** Captures the outgoing request that the `ky` engine handed to `fetch`. */
+interface CapturedRequest {
+  url: string;
+  method: string;
+  body: string;
+}
+
+let lastRequest: CapturedRequest | undefined;
 
 function makeProgram(): Command {
   const program = new Command();
@@ -17,11 +27,20 @@ function makeProgram(): Command {
 }
 
 function mockFetchWith(body: unknown): void {
-  const response: MockResponse = {
-    ok: true,
-    json: async () => body,
-  };
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+  lastRequest = undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (req: Request) => {
+      // `ky` calls `fetch(request, options)`; capture the request before it is consumed.
+      lastRequest = { url: req.url, method: req.method, body: await req.text() };
+      const response: MockResponse = {
+        ok: true,
+        status: 200,
+        json: async () => body,
+      };
+      return response;
+    }),
+  );
 }
 
 async function runListAndCaptureOutput(args: string[] = []): Promise<string> {
@@ -157,6 +176,64 @@ describe("run list", () => {
   });
 });
 
+describe("run submit", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function captureSubmit(): { url: string; body: Record<string, unknown> } {
+    if (!lastRequest) throw new Error("No request was captured");
+    return { url: lastRequest.url, body: JSON.parse(lastRequest.body) as Record<string, unknown> };
+  }
+
+  it("includes agentsMd in the submit body", async () => {
+    mockFetchWith({ id: "req-submit-1", workerType: "coder-acp-copilot", status: "queued" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync(
+        [
+          "run", "submit",
+          "-m", "do the thing",
+          "--agents-md", "# Be helpful",
+          "--no-stream",
+          "-u", "http://localhost:3100",
+        ],
+        { from: "user" },
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    const { url, body } = captureSubmit();
+    expect(url).toContain("/api/v1/requests?worker=coder-acp-copilot");
+    expect(body.agentsMd).toBe("# Be helpful");
+  });
+
+  it("omits agentsMd when not provided", async () => {
+    mockFetchWith({ id: "req-submit-2", workerType: "coder-acp-copilot", status: "queued" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync(
+        ["run", "submit", "-m", "plain task", "--no-stream", "-u", "http://localhost:3100"],
+        { from: "user" },
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    const { body } = captureSubmit();
+    expect(body).not.toHaveProperty("agentsMd");
+  });
+});
+
 describe("run retry", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -225,13 +302,9 @@ describe("run retry", () => {
     }
 
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:3100/api/v1/requests/req-retry-force/retry",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ force: true }),
-      }),
-    );
+    expect(lastRequest?.url).toBe("http://localhost:3100/api/v1/requests/req-retry-force/retry");
+    expect(lastRequest?.method).toBe("POST");
+    expect(lastRequest?.body).toBe(JSON.stringify({ force: true }));
   });
 });
 
@@ -283,18 +356,70 @@ describe("run submit gates", () => {
     }
 
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:3100/api/v1/requests?worker=coder-acp-copilot",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          scenario: { task: "Implement the task", criteria: [] },
-          maxIterations: 3,
-          gates: [
-            { gate: "select", criteria: ["implements_task"] },
-            { gate: "build", promptId: "build-prompt", criteria: [], maxIterations: 1 },
-          ],
-        }),
+    expect(lastRequest?.url).toBe("http://localhost:3100/api/v1/requests?worker=coder-acp-copilot");
+    expect(lastRequest?.method).toBe("POST");
+    expect(lastRequest?.body).toBe(
+      JSON.stringify({
+        scenario: { task: "Implement the task", criteria: [] },
+        maxIterations: 3,
+        gates: [
+          { gate: "select", criteria: ["implements_task"] },
+          { gate: "build", promptId: "build-prompt", criteria: [], maxIterations: 1 },
+        ],
+      }),
+    );
+  });
+});
+
+describe("run submit codebase", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends codebase in the request body", async () => {
+    mockFetchWith({
+      id: "req-codebase-1",
+      workerType: "coder-acp-copilot",
+      mode: "one-shot",
+      status: "queued",
+    });
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code}) called`);
+    }) as never);
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync([
+        "run",
+        "submit",
+        "--message",
+        "Implement the task",
+        "--codebase",
+        "scope-core@r3",
+        "--no-stream",
+        "-u",
+        "http://localhost:3100",
+      ], { from: "user" });
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(lastRequest?.url).toBe("http://localhost:3100/api/v1/requests?worker=coder-acp-copilot");
+    expect(lastRequest?.method).toBe("POST");
+    expect(lastRequest?.body).toBe(
+      JSON.stringify({
+        scenario: { task: "Implement the task", criteria: [] },
+        codebase: "scope-core@r3",
       }),
     );
   });

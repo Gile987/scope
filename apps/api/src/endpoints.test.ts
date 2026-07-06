@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import request from "supertest";
 import { app, _injectTestDependencies } from "./index.js";
+import { _resetRunFacetsCacheForTests } from "./routes/requests/index.js";
 import { createAllMockDependencies, createMockCollection } from "./test-helpers.js";
 
 // Stub checkMigrations before it can be imported by index.ts
@@ -43,6 +44,8 @@ describe("API Endpoints", () => {
     // Re-inject after clearAllMocks so the mock implementations are fresh
     mocks = createAllMockDependencies();
     _injectTestDependencies(mocks);
+    // Facets are memoized in a module-level cache; clear it so each test starts cold
+    _resetRunFacetsCacheForTests();
   });
 
   // ===================================================================
@@ -647,6 +650,221 @@ describe("API Endpoints", () => {
         }),
       );
     });
+
+    // ── #1138: server-side multi-value / sentinel / search / new dimensions ──
+
+    /** Mock the find().sort().limit().toArray() chain; returns the sort spy. */
+    const mockFindChain = (docs: any[] = []) => {
+      const sortSpy = vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue(docs) }),
+      });
+      (mocks.collection.find as any).mockReturnValue({ sort: sortSpy });
+      return sortSpy;
+    };
+
+    it("turns a multi-value status into an $in clause", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?status=done&status=pending");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ "run.status": { $in: ["done", "pending"] } }),
+      );
+    });
+
+    it("accepts comma-separated multi-value selections", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?outcome=succeeded,failed");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ "run.outcome": { $in: ["succeeded", "failed"] } }),
+      );
+    });
+
+    it("maps the (Unknown) sentinel to a missing-or-null $and clause", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?outcome=__empty__");
+      const filter = (mocks.collection.find as any).mock.calls.at(-1)[0];
+      expect(filter.$and).toEqual(
+        expect.arrayContaining([
+          { $or: [{ "run.outcome": { $exists: false } }, { "run.outcome": null }] },
+        ]),
+      );
+    });
+
+    it("adds a case-insensitive regex $or for free-text search", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?search=gpt-5");
+      const filter = (mocks.collection.find as any).mock.calls.at(-1)[0];
+      const searchClause = (filter.$and as any[]).find((c) => Array.isArray(c.$or) && c.$or.some((o: any) => o.model));
+      expect(searchClause).toBeDefined();
+      expect(searchClause.$or).toEqual(
+        expect.arrayContaining([{ model: { $regex: "gpt-5", $options: "i" } }]),
+      );
+    });
+
+    it("filters by model, os, and agentVersion", async () => {
+      mockFindChain();
+      await request(app).get(
+        "/api/v1/requests?model=gpt-5&os=linux&agentVersion=copilot-0.0.415",
+      );
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "gpt-5",
+          "run.os.platform": "linux",
+          agentVersion: "copilot-0.0.415",
+        }),
+      );
+    });
+
+    it("coerces a priority filter to a number", async () => {
+      mockFindChain();
+      await request(app).get("/api/v1/requests?priority=3");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ priority: 3 }),
+      );
+    });
+
+    it("applies a createdAt range for createdAfter/createdBefore", async () => {
+      mockFindChain();
+      await request(app).get(
+        "/api/v1/requests?createdAfter=2026-01-01T00:00:00Z&createdBefore=2026-12-31T00:00:00Z",
+      );
+      const filter = (mocks.collection.find as any).mock.calls.at(-1)[0];
+      expect(filter.createdAt.$gte).toBeInstanceOf(Date);
+      expect(filter.createdAt.$lte).toBeInstanceOf(Date);
+    });
+
+    it("rejects an inverted createdAt range with 400", async () => {
+      mockFindChain();
+      const res = await request(app).get(
+        "/api/v1/requests?createdAfter=2026-12-31T00:00:00Z&createdBefore=2026-01-01T00:00:00Z",
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects an invalid createdAfter datetime with 400", async () => {
+      mockFindChain();
+      const res = await request(app).get("/api/v1/requests?createdAfter=not-a-date");
+      expect(res.status).toBe(400);
+    });
+
+    it("sorts by an allowlisted field and direction over { field, _id }", async () => {
+      const sortSpy = mockFindChain();
+      await request(app).get("/api/v1/requests?sortBy=priority&sortDir=asc");
+      expect(sortSpy).toHaveBeenCalledWith({ priority: 1, _id: 1 });
+    });
+
+    it("defaults to createdAt desc when no sortBy is given", async () => {
+      const sortSpy = mockFindChain();
+      await request(app).get("/api/v1/requests");
+      expect(sortSpy).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
+    });
+
+    it("returns an accurate countDocuments total when a filter is active", async () => {
+      mockFindChain();
+      (mocks.collection.countDocuments as any).mockResolvedValue(7);
+      (mocks.collection.estimatedDocumentCount as any).mockResolvedValue(99);
+      const res = await request(app).get("/api/v1/requests?status=done");
+      expect(res.body.estimatedTotal).toBe(7);
+      expect(mocks.collection.countDocuments).toHaveBeenCalled();
+    });
+
+    it("uses the O(1) estimate when no filter is active", async () => {
+      mockFindChain();
+      (mocks.collection.countDocuments as any).mockResolvedValue(7);
+      (mocks.collection.estimatedDocumentCount as any).mockResolvedValue(99);
+      const res = await request(app).get("/api/v1/requests");
+      expect(res.body.estimatedTotal).toBe(99);
+      expect(mocks.collection.countDocuments).not.toHaveBeenCalled();
+    });
+
+    it("omits estimatedTotal and skips run-count queries in grouped mode", async () => {
+      // Grouped mode is paginated by group cursors, not a run count — the API
+      // must not return estimatedTotal nor run countDocuments/estimatedDocumentCount.
+      (mocks.collection.aggregate as any)
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ _id: "tp-1" }]) }) // keys
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ key: "tp-1", aggregates: { count: 1 }, uniform: {} }]) }) // phase2
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }) // hasMoreAfter
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }); // hasMoreBefore
+      (mocks.collection.countDocuments as any).mockResolvedValue(7);
+      (mocks.collection.estimatedDocumentCount as any).mockResolvedValue(99);
+
+      const res = await request(app).get("/api/v1/requests?groupBy=task");
+      expect(res.status).toBe(200);
+      expect(res.body).not.toHaveProperty("estimatedTotal");
+      expect(mocks.collection.countDocuments).not.toHaveBeenCalled();
+      expect(mocks.collection.estimatedDocumentCount).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("GET /api/v1/requests/facets", () => {
+    it("returns absolute per-dimension counts with a derived total", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([
+          { _id: "coder-acp-copilot", count: 8 },
+          { _id: null, count: 4 },
+        ]),
+      });
+
+      const res = await request(app).get("/api/v1/requests/facets");
+      expect(res.status).toBe(200);
+      // total is derived by summing a single dimension's buckets (8 + 4), not a
+      // separate count query.
+      expect(res.body.total).toBe(12);
+      expect(mocks.collection.countDocuments as any).not.toHaveBeenCalled();
+      expect(mocks.collection.estimatedDocumentCount as any).not.toHaveBeenCalled();
+      expect(res.body.facets).toHaveProperty("workerType");
+      expect(res.body.facets).toHaveProperty("status");
+      expect(res.body.facets).toHaveProperty("outcome");
+      expect(res.body.facets).toHaveProperty("model");
+      expect(res.body.facets).toHaveProperty("os");
+      expect(res.body.facets).toHaveProperty("priority");
+      expect(res.body.facets).toHaveProperty("agentVersion");
+      expect(res.body.facets).toHaveProperty("profileId");
+      // null _id buckets map to the (Unknown) sentinel; rows sort by count desc.
+      expect(res.body.facets.workerType).toEqual([
+        { value: "coder-acp-copilot", count: 8 },
+        { value: "__empty__", count: 4 },
+      ]);
+    });
+
+    it("runs one $group aggregation per categorical dimension", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      await request(app).get("/api/v1/requests/facets");
+      // 8 categorical dimensions → 8 parallel aggregations (no $facet).
+      expect((mocks.collection.aggregate as any).mock.calls.length).toBe(8);
+    });
+
+    it("ignores search, date, iteration, and categorical query params (absolute counts)", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      await request(app).get(
+        "/api/v1/requests/facets?search=foo&status=done&model=gpt-4&createdAfter=2024-01-01T00:00:00Z&turns=3&turnsOp=gte",
+      );
+      // Every aggregation matches only the constant non-deleted predicate; no
+      // search regex / date / numeric / categorical clause leaks into $match.
+      const calls = (mocks.collection.aggregate as any).mock.calls;
+      expect(calls.length).toBe(8);
+      for (const [pipeline] of calls) {
+        expect(pipeline[0]).toEqual({ $match: { deletedAt: { $exists: false } } });
+      }
+    });
+
+    it("serves repeated requests from a single cached computation", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([{ _id: "x", count: 1 }]),
+      });
+
+      const first = await request(app).get("/api/v1/requests/facets");
+      const second = await request(app).get("/api/v1/requests/facets");
+      expect(first.status).toBe(200);
+      expect(second.body).toEqual(first.body);
+      // Second call hits the in-memory cache → no additional aggregations.
+      expect((mocks.collection.aggregate as any).mock.calls.length).toBe(8);
+    });
   });
 
   describe("GET /api/v1/requests/:id", () => {
@@ -945,6 +1163,44 @@ describe("API Endpoints", () => {
 
       expect(res.status).toBe(400);
     });
+
+    it("persists type=agents.md when creating a feature", async () => {
+      (mocks.promptFeatureCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post("/api/v1/prompt-features")
+        .send({ id: "agents_feat", prompt: "Does AGENTS.md mention tests?", type: "agents.md" });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("type", "agents.md");
+      const doc = (mocks.promptFeatureCollection.insertOne as any).mock.calls[0][0];
+      expect(doc).toHaveProperty("type", "agents.md");
+    });
+  });
+
+  describe("GET /api/v1/prompt-features?type=", () => {
+    it("scopes the query to agents.md features", async () => {
+      (mocks.promptFeatureCollection.find as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      const res = await request(app).get("/api/v1/prompt-features?type=agents.md");
+      expect(res.status).toBe(200);
+      const filter = (mocks.promptFeatureCollection.find as any).mock.calls[0][0];
+      expect(JSON.stringify(filter)).toContain("agents.md");
+    });
+
+    it("treats select type as including legacy untyped features", async () => {
+      (mocks.promptFeatureCollection.find as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      await request(app).get("/api/v1/prompt-features?type=select");
+      const filter = (mocks.promptFeatureCollection.find as any).mock.calls[0][0];
+      const json = JSON.stringify(filter);
+      expect(json).toContain("$exists");
+      expect(json).toContain("select");
+    });
   });
 
   describe("GET /api/v1/prompt-features/:id", () => {
@@ -1029,6 +1285,62 @@ describe("API Endpoints", () => {
         .send({});
 
       expect(res.status).toBe(400);
+    });
+  });
+
+  // ===================================================================
+  // Typed task prompts (task | agents.md) + content resolution
+  // ===================================================================
+
+  describe("Typed task prompts", () => {
+    it("passes ?type=agents.md through to the store getAll filter", async () => {
+      (mocks.taskPromptStore as any).getAll.mockResolvedValue({ items: [], total: 0 });
+
+      const res = await request(app).get("/api/v1/task-prompts?type=agents.md");
+      expect(res.status).toBe(200);
+      const arg = (mocks.taskPromptStore.getAll as any).mock.calls[0][0];
+      expect(arg).toHaveProperty("type", "agents.md");
+    });
+
+    it("creates a prompt with type=agents.md", async () => {
+      (mocks.taskPromptStore as any).findOrCreate.mockResolvedValue({
+        _id: "agents-1",
+        type: "agents.md",
+        text: "# AGENTS\nBe concise.",
+        createdAt: new Date(),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/task-prompts")
+        .send({ text: "# AGENTS\nBe concise.", type: "agents.md" });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("type", "agents.md");
+      const arg = (mocks.taskPromptStore.findOrCreate as any).mock.calls[0];
+      expect(arg[0]).toBe("# AGENTS\nBe concise.");
+      expect(arg[1]).toBe("agents.md");
+    });
+
+    it("GET /:id/content resolves the prompt body via resolvePromptText", async () => {
+      (mocks.taskPromptStore as any).get.mockResolvedValue({
+        _id: "agents-1",
+        type: "agents.md",
+        contentBlobUrl: "https://blob/prompts/agents-1.txt",
+        createdAt: new Date(),
+      });
+      (mocks.taskPromptStore as any).resolvePromptText.mockResolvedValue("resolved body");
+
+      const res = await request(app).get("/api/v1/task-prompts/agents-1/content");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ id: "agents-1", text: "resolved body" });
+      expect(mocks.taskPromptStore.resolvePromptText).toHaveBeenCalled();
+    });
+
+    it("GET /:id/content returns 404 when the prompt does not exist", async () => {
+      (mocks.taskPromptStore as any).get.mockResolvedValue(null);
+
+      const res = await request(app).get("/api/v1/task-prompts/missing/content");
+      expect(res.status).toBe(404);
     });
   });
 
@@ -1240,6 +1552,86 @@ describe("API Endpoints", () => {
   });
 
   // ===================================================================
+  // AGENTS.md on request creation
+  // ===================================================================
+
+  describe("POST /api/v1/requests?worker=... (AGENTS.md)", () => {
+    const setupCopilotAgent = () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
+        supportedModels: ["claude-haiku-4.5"],
+      });
+    };
+
+    it("resolves agentsMd via findOrCreate(agents.md) and stores agentsMdPromptId", async () => {
+      setupCopilotAgent();
+      (mocks.taskPromptStore as any).findOrCreate.mockResolvedValue({
+        _id: "agents-xyz",
+        type: "agents.md",
+        text: "# AGENTS\nBe terse.",
+        createdAt: new Date(),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          model: "claude-haiku-4.5",
+          agentsMd: "# AGENTS\nBe terse.",
+        });
+
+      expect(res.status).toBe(201);
+      const foc = (mocks.taskPromptStore.findOrCreate as any).mock.calls.find(
+        (c: any[]) => c[1] === "agents.md"
+      );
+      expect(foc).toBeDefined();
+      expect(foc[0]).toBe("# AGENTS\nBe terse.");
+      const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
+      expect(doc).toHaveProperty("agentsMdPromptId", "agents-xyz");
+    });
+
+    it("persists agentsMdParentIds lineage on the request", async () => {
+      setupCopilotAgent();
+      (mocks.taskPromptStore as any).findOrCreate.mockResolvedValue({
+        _id: "agents-child",
+        type: "agents.md",
+        text: "child",
+        createdAt: new Date(),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          model: "claude-haiku-4.5",
+          agentsMd: "child",
+          agentsMdParentIds: ["agents-p1", "agents-p2"],
+        });
+
+      expect(res.status).toBe(201);
+      const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
+      expect(doc).toHaveProperty("agentsMdParentIds", ["agents-p1", "agents-p2"]);
+    });
+
+    it("omits AGENTS.md fields when not provided", async () => {
+      setupCopilotAgent();
+
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          model: "claude-haiku-4.5",
+        });
+
+      expect(res.status).toBe(201);
+      const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
+      expect(doc.agentsMdPromptId).toBeUndefined();
+      expect(doc.agentsMdParentIds).toBeUndefined();
+    });
+  });
+
+  // ===================================================================
   // Submit with gates — free-text gate prompt materialization
   // ===================================================================
 
@@ -1318,6 +1710,110 @@ describe("API Endpoints", () => {
 
       expect(res.status).toBe(400);
       expect(res.body.error).toContain("missing a prompt");
+    });
+  });
+
+  // ===================================================================
+  // Submit with profile variations AND gates (regression: #1214)
+  // Gates are the shared evaluation harness applied to every variation
+  // (including the base), not a per-variation controlled field.
+  // ===================================================================
+
+  describe("POST /api/v1/requests (profile variations + gates)", () => {
+    beforeEach(() => {
+      // Base + variation profiles resolved by _id.
+      (mocks.profileCollection.findOne as any).mockImplementation(
+        async (q: { _id: string }) => {
+          if (q._id === "base-profile") return { _id: "base-profile", name: "Base", latestVersion: 1 };
+          if (q._id === "var-profile") return { _id: "var-profile", name: "Var", latestVersion: 1 };
+          return null;
+        },
+      );
+      // Profile versions resolved by profileId — each variation supplies its own
+      // controlled config (worker/model) so no top-level fields are needed.
+      (mocks.profileVersionCollection.findOne as any).mockImplementation(
+        async (q: { profileId: string }) => {
+          if (q.profileId === "base-profile")
+            return { _id: "pv-base", profileId: "base-profile", version: 1, workerType: "coder-acp-copilot", model: "m1", mcpServers: [], skillRevisions: [], extensions: [] };
+          if (q.profileId === "var-profile")
+            return { _id: "pv-var", profileId: "var-profile", version: 1, workerType: "coder-acp-copilot", model: "m2", mcpServers: [], skillRevisions: [], extensions: [] };
+          return null;
+        },
+      );
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
+        supportedModels: [],
+      });
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([
+          { id: "builds_clean", gates: ["build"] },
+          { id: "works", gates: [] },
+        ]),
+      });
+      (mocks.taskPromptStore.findOrCreate as any).mockImplementation(
+        async (text: string, type?: string) => ({ _id: type ? `tp-${type}` : "tp-select", text, type }),
+      );
+      (mocks.taskPromptCollection.findOne as any).mockImplementation(
+        async (q: { _id: string }) => ({ _id: q._id, type: q._id.replace("tp-", "") }),
+      );
+    });
+
+    it("persists the same resolved gates on every variation request doc", async () => {
+      const res = await request(app)
+        .post("/api/v1/requests")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          profileId: "base-profile",
+          profileVariations: ["var-profile"],
+          gates: [
+            { gate: "select", criteria: ["works"] },
+            { gate: "build", promptText: "  Build the project and fix errors.  ", criteria: ["builds_clean"] },
+          ],
+        });
+
+      expect(res.status).toBe(201);
+      // Free-text gate prompt is materialized into a typed prompt.
+      expect(mocks.taskPromptStore.findOrCreate).toHaveBeenCalledWith("Build the project and fix errors.", "build");
+
+      const docs = (mocks.collection.insertMany as any).mock.calls[0][0];
+      // base + 1 variation = 2 request docs, each carrying the gates.
+      expect(docs).toHaveLength(2);
+      expect(new Set(docs.map((d: { profileId: string }) => d.profileId))).toEqual(
+        new Set(["base-profile", "var-profile"]),
+      );
+      for (const doc of docs) {
+        expect(Array.isArray(doc.gates)).toBe(true);
+        const selectGate = doc.gates.find((g: { gate: string }) => g.gate === "select");
+        const buildGate = doc.gates.find((g: { gate: string }) => g.gate === "build");
+        // Select gate's prompt is stamped with the resolved task prompt id.
+        expect(selectGate.promptId).toBe("tp-select");
+        // Non-select gate's free-text prompt is resolved to a typed prompt id
+        // and the transient promptText is stripped before persistence.
+        expect(buildGate.promptId).toBe("tp-build");
+        expect(buildGate.promptText).toBeUndefined();
+      }
+      // Response surfaces the configured gate count.
+      expect(res.body.gates).toBe(2);
+    });
+
+    it("fails the whole submit (400) without inserting when a gate is invalid", async () => {
+      const res = await request(app)
+        .post("/api/v1/requests")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          profileId: "base-profile",
+          profileVariations: ["var-profile"],
+          gates: [
+            { gate: "select", criteria: ["works"] },
+            // Build gate has neither promptId nor promptText → invalid.
+            { gate: "build", criteria: ["builds_clean"] },
+          ],
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("missing a prompt");
+      expect(mocks.collection.insertMany).not.toHaveBeenCalled();
     });
   });
 

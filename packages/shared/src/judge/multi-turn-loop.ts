@@ -443,6 +443,7 @@ export async function runMultiTurnLoop(
         requestId,
         ...(gate && { gate }),
         ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
+        ...(codingResponse && { currentAgentResponse: codingResponse }),
       });
       judgePassed = judgeResult.passed;
       judgeFeedback = judgeResult.feedback;

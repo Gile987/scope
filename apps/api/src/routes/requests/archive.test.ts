@@ -779,6 +779,7 @@ describe("run import/export — round-trip (export → import)", () => {
         updatedAt: new Date("2026-05-11T23:04:47.446Z"),
         startedAt: new Date("2026-05-11T23:04:37.172Z"),
         finishedAt: new Date("2026-05-11T23:04:47.446Z"),
+        durationMs: 10274, // finishedAt − startedAt; computed on write at import time
         workerVersion: "copilot-unknown-unknown-unknown",
         aiCallCount: 2,
         os: { platform: "linux", release: "6.6.114.1", arch: "x64" },

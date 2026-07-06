@@ -82,6 +82,26 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
     expect(res.suggestedChildren).toEqual(["select_b"]);
   });
 
+  it("reconciles a contradictory id by keeping the parent edge and dropping it from children", async () => {
+    // The independent parent/child calls can both return the same id for a
+    // tightly-coupled pair (a logical 2-cycle). Reconciliation must prefer the
+    // parent edge and remove the id from the child set, while keeping any other
+    // legitimate child.
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") return reply({ prompt: "p", suggestedId: "x" });
+      if (kind === "parents") return reply({ suggestions: ["build_a"] });
+      // build_a is contradictory (also a parent); select_b is a genuine child.
+      return reply({ suggestions: ["build_a", "select_b"] });
+    });
+
+    const res = await generateCriteriaPrompt("behave", existing, ["select", "build"]);
+
+    expect(res.suggestedParents).toEqual(["build_a"]);
+    // build_a removed (kept as parent), the legitimate child retained.
+    expect(res.suggestedChildren).toEqual(["select_b"]);
+  });
+
   it("issues all three calls in parallel", async () => {
     postSpy.mockImplementation(async ({ body }: any) => {
       const kind = kindOf(body);
@@ -131,5 +151,39 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
 
     expect(seen.parents).toBe(existing.length);
     expect(seen.children).toBe(existing.length);
+  });
+
+  it("steers the author prompt toward captured tool output for tool-output gates", async () => {
+    let authorUserMsg = "";
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") {
+        authorUserMsg = body.messages[1].content;
+        return reply({ prompt: "p", suggestedId: "x" });
+      }
+      return reply({ suggestions: [] });
+    });
+
+    await generateCriteriaPrompt("project builds", existing, ["build"]);
+
+    expect(authorUserMsg).toContain("build gate");
+    expect(authorUserMsg).toMatch(/tool output/i);
+  });
+
+  it("steers the author prompt toward the codebase for the select gate", async () => {
+    let authorUserMsg = "";
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") {
+        authorUserMsg = body.messages[1].content;
+        return reply({ prompt: "p", suggestedId: "x" });
+      }
+      return reply({ suggestions: [] });
+    });
+
+    await generateCriteriaPrompt("uses typescript", existing, ["select"]);
+
+    expect(authorUserMsg).toContain("select gate");
+    expect(authorUserMsg).not.toMatch(/captured tool output/i);
   });
 });

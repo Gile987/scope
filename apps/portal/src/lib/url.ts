@@ -13,11 +13,18 @@ export function encodeQsValue(v: string): string {
   return v.replace(/[%&=+#\s]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
 }
 
-/** Build a query string from non-undefined params. */
-export function qs(params: Record<string, string | undefined>): string {
+/** Build a query string from non-undefined params. Arrays become repeated keys. */
+export function qs(params: Record<string, string | string[] | undefined>): string {
   const parts: string[] = [];
   for (const [k, v] of Object.entries(params)) {
-    if (v != null) parts.push(`${k}=${encodeQsValue(v)}`);
+    if (v == null) continue;
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (item != null) parts.push(`${k}=${encodeQsValue(item)}`);
+      }
+    } else {
+      parts.push(`${k}=${encodeQsValue(v)}`);
+    }
   }
   return parts.length ? `?${parts.join("&")}` : "";
 }

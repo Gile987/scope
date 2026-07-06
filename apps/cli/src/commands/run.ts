@@ -12,11 +12,24 @@ import { Readable } from "stream";
 import { resolveScenarioAndPersona } from "../config-loader.js";
 import { configureHelp } from "../utils/helpFormatter.js";
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon, styleText } from "../utils/style.js";
-import { formatData, isMachineReadable } from "../utils/formatters.js";
+import { formatData, isMachineReadable, formatDate } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { runGetAction } from "../run-get-action.js";
 import { normalizeUrl, printFollowUpCommands, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { apiFetch, getApiBasePath } from "../utils/api-client.js";
 import { parseGatesOption } from "../utils/gates.js";
+
+/**
+ * Resolve a CLI option that may be either a literal string or a `@path`
+ * reference to a file whose contents should be read. Used for flags like
+ * `--agents-md` where large bodies are inconvenient to pass inline.
+ */
+function resolveTextOrFile(input: string): string {
+  if (input.startsWith("@")) {
+    return readFileSync(resolve(input.slice(1)), "utf8");
+  }
+  return input;
+}
 
 export function registerRunCommands(program: Command): void {
 const run = program
@@ -42,16 +55,18 @@ run
   .option("--reasoning-effort <level>", "Reasoning effort level (e.g. low, medium, high)")
   .option("--mcp-servers <slugs...>", "MCP server slugs to use for this run")
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
+  .option("--codebase <ref>", "Codebase revision id, ref (slug@rN), or slug to use for this run")
   .option("--extensions <ids...>", "VS Code extension IDs to install for this run (e.g. ms-python.python)")
   .option("--agent-version <version>", "Agent version to target (e.g. copilot-0.0.415); defaults to latest active")
   .option("--profile <id>", "Saved profile to apply (supplies worker, model, extensions, etc.)")
   .addOption(new Option("--base-profile <id>", "Deprecated alias for --profile.").hideHelp())
   .option("--profile-variations-file <path>", "Path to JSON file containing profile variation entries")
+  .option("--agents-md <text|@file>", "AGENTS.md content delivered to the workspace (prefix with @ to read from a file)")
   .option("--gates <jsonOrFile>", "GateConfig[] JSON or path/@path to a JSON file for gated runs")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options, command) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, codebase: codebaseRef, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption, agentsMd: agentsMdInput } = options;
     // `--profile` is the documented flag; `--base-profile` is kept as a hidden
     // back-compat alias. Both resolve to the same request `profileId`.
     const profileId = profile ?? baseProfile;
@@ -111,6 +126,9 @@ run
       if (skillSlugs && skillSlugs.length > 0) {
         body.skills = skillSlugs;
       }
+      if (codebaseRef) {
+        body.codebase = codebaseRef;
+      }
       if (extensionIds && extensionIds.length > 0) {
         body.extensions = extensionIds;
       }
@@ -119,6 +137,14 @@ run
       }
       if (profileId) {
         body.profileId = profileId;
+      }
+      if (agentsMdInput) {
+        // `@path` reads the AGENTS.md body from a file; otherwise the value is
+        // treated as the literal content.
+        const agentsMd = resolveTextOrFile(agentsMdInput);
+        if (agentsMd.trim().length > 0) {
+          body.agentsMd = agentsMd;
+        }
       }
       if (gatesOption) {
         body.gates = parseGatesOption(gatesOption, maxIterations);
@@ -148,11 +174,11 @@ run
       if (isVariationSubmit && command.getOptionValueSource("worker") === "cli") {
         console.warn(label("Warning:"), "--worker is ignored in variation mode; worker is derived per-variation from each profile's workerType.");
       }
-      const submitUrl = isVariationSubmit
-        ? `${normalizeUrl(url)}/api/v1/requests`
-        : `${normalizeUrl(url)}/api/v1/requests?worker=${worker}`;
+      const submitPath = isVariationSubmit
+        ? `/requests`
+        : `/requests?worker=${worker}`;
 
-      const response = await fetch(submitUrl, {
+      const response = await apiFetch(url, submitPath, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -188,7 +214,7 @@ run
       // Stream logs
       console.log(`\n${banner('--- Streaming logs ---')}\n`);
 
-      const eventSource = new EventSource(`${normalizeUrl(url)}/api/v1/requests/${result.id}/logs`);
+      const eventSource = new EventSource(`${normalizeUrl(url)}${getApiBasePath()}/requests/${result.id}/logs`);
 
       eventSource.onmessage = (event) => {
         try {
@@ -278,7 +304,7 @@ run
     const format = (options.output || 'table') as OutputFormat;
     const { id } = options;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${id}`);
+      const response = await apiFetch(options.url, `/requests/${id}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -334,8 +360,8 @@ run
   .action(async (options) => {
     const { id } = options;
     const url = options.fromStart
-      ? `${normalizeUrl(options.url)}/api/v1/requests/${id}/logs?fromStart=true`
-      : `${normalizeUrl(options.url)}/api/v1/requests/${id}/logs`;
+      ? `${normalizeUrl(options.url)}${getApiBasePath()}/requests/${id}/logs?fromStart=true`
+      : `${normalizeUrl(options.url)}${getApiBasePath()}/requests/${id}/logs`;
 
     const eventSource = new EventSource(url);
 
@@ -389,19 +415,58 @@ run
   .command("list")
   .description("List all requests")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-  .option("-w, --worker <worker>", "Filter by worker")
+  .option("-w, --worker <worker...>", "Filter by worker (repeatable)")
+  .option("--status <status...>", "Filter by run status (repeatable; '__empty__' = unknown)")
+  .option("--outcome <outcome...>", "Filter by run outcome (repeatable; '__empty__' = unknown)")
+  .option("--task <taskPromptId>", "Filter by task prompt ID")
+  .option("--profile <id...>", "Filter by profile ID (repeatable; '__empty__' = unknown)")
+  .option("--criteria <id>", "Filter by criteria ID")
+  .option("--model <model...>", "Filter by model (repeatable; '__empty__' = unknown)")
+  .option("--os <platform...>", "Filter by OS platform (repeatable; '__empty__' = unknown)")
+  .option("--priority <priority...>", "Filter by priority (repeatable; '__empty__' = unknown)")
+  .option("--agent-version <version...>", "Filter by agent version (repeatable; '__empty__' = unknown)")
+  .option("--search <text>", "Free-text search over id, task, model, and worker")
+  .option("--created-after <iso>", "Only runs created at/after this ISO-8601 datetime")
+  .option("--created-before <iso>", "Only runs created at/before this ISO-8601 datetime")
   .option("--submission-id <id>", "Filter by submission ID")
   .option("--turns <expr>", "Filter by actual turns (e.g. '>=5', '<=10', '=3')")
   .option("--max-iterations <expr>", "Filter by configured maxIterations (e.g. '>=5', '<=10', '=3')")
+  .option("--sort-by <field>", "Sort field: created, updated, priority, worker, status, id, duration")
+  .option("--sort-dir <dir>", "Sort direction: asc or desc")
   .option("--include-deleted", "Include soft-deleted runs")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      let url = `${normalizeUrl(options.url)}/api/v1/requests`;
+      let path = `/requests`;
       const params = new URLSearchParams();
-      if (options.worker) {
-        params.set("worker", options.worker);
+      const appendMulti = (key: string, vals?: string[] | string) => {
+        if (vals == null) return;
+        const arr = Array.isArray(vals) ? vals : [vals];
+        for (const v of arr) params.append(key, String(v));
+      };
+      appendMulti("worker", options.worker);
+      appendMulti("status", options.status);
+      appendMulti("outcome", options.outcome);
+      appendMulti("profileId", options.profile);
+      appendMulti("model", options.model);
+      appendMulti("os", options.os);
+      appendMulti("priority", options.priority);
+      appendMulti("agentVersion", options.agentVersion);
+      if (options.task) {
+        params.set("taskPromptId", options.task);
+      }
+      if (options.criteria) {
+        params.set("criteria", options.criteria);
+      }
+      if (options.search) {
+        params.set("search", options.search);
+      }
+      if (options.createdAfter) {
+        params.set("createdAfter", options.createdAfter);
+      }
+      if (options.createdBefore) {
+        params.set("createdBefore", options.createdBefore);
       }
       if (options.submissionId) {
         params.set("submissionId", options.submissionId);
@@ -428,10 +493,16 @@ run
       if (options.includeDeleted) {
         params.set("includeDeleted", "true");
       }
+      if (options.sortBy) {
+        params.set("sortBy", options.sortBy);
+      }
+      if (options.sortDir) {
+        params.set("sortDir", options.sortDir);
+      }
       const qs = params.toString();
-      if (qs) url += `?${qs}`;
+      if (qs) path += `?${qs}`;
 
-      const response = await fetch(url);
+      const response = await apiFetch(options.url, path);
 
       if (!response.ok) {
         const error = await response.json();
@@ -473,6 +544,12 @@ run
         { key: 'submissionId', label: 'Submission',
           formatter: (req: any) => req.submissionId ? req.submissionId.substring(0, 8) : '–',
         },
+        { key: 'createdAt', label: 'Created',
+          formatter: (req: any) => formatDate(req.createdAt),
+        },
+        { key: 'updatedAt', label: 'Updated',
+          formatter: (req: any) => formatDate(req.updatedAt),
+        },
       ];
 
       console.log(formatData(requests, displayFields, format));
@@ -490,7 +567,7 @@ run
   .action(async (options) => {
     const { id, url } = options;
     try {
-      const response = await fetch(`${normalizeUrl(url)}/api/v1/requests/${id}`, { method: "DELETE" });
+      const response = await apiFetch(url, `/requests/${id}`, { method: "DELETE" });
 
       if (!response.ok) {
         const error = await response.json();
@@ -512,10 +589,9 @@ run
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     const { id: ids, url } = options;
-    const baseUrl = normalizeUrl(url);
     try {
       if (ids.length === 1) {
-        const response = await fetch(`${baseUrl}/api/v1/requests/${ids[0]}/cancel`, { method: "POST" });
+        const response = await apiFetch(url, `/requests/${ids[0]}/cancel`, { method: "POST" });
         if (!response.ok) {
           const error = await response.json();
           console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -524,7 +600,7 @@ run
         const result = await response.json() as { id: string; previousStatus: string; status: string; outcome: string };
         console.log(`${successText('Cancelled run')} ${value(result.id)} (was ${result.previousStatus})`);
       } else {
-        const response = await fetch(`${baseUrl}/api/v1/requests/bulk-cancel`, {
+        const response = await apiFetch(url, `/requests/bulk-cancel`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ids }),
@@ -568,7 +644,7 @@ run
     try {
       // Step 1: Fetch request document (lightweight — for metadata display)
       console.log(`${label('Fetching run')} ${value(id)}...`);
-      const response = await fetch(`${normalizeUrl(url)}/api/v1/requests/${id}`);
+      const response = await apiFetch(url, `/requests/${id}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error);
@@ -588,7 +664,7 @@ run
 
       // Step 2: Download the full archive from the server
       console.log(`${label('Downloading archive')}...`);
-      const archiveResp = await fetch(`${normalizeUrl(url)}/api/v1/requests/${id}/archive`);
+      const archiveResp = await apiFetch(url, `/requests/${id}/archive`);
       if (!archiveResp.ok || !archiveResp.body) {
         const error = await archiveResp.json().catch(() => ({ error: archiveResp.statusText }));
         console.error(errorText("Error downloading archive:"), error);
@@ -649,7 +725,7 @@ run
 
       if (options.submissionId) {
         console.log(`${label('Fetching runs for submission')} ${value(options.submissionId)}...`);
-        const listResp = await fetch(`${normalizeUrl(url)}/api/v1/requests?submissionId=${encodeURIComponent(options.submissionId)}&limit=1000`);
+        const listResp = await apiFetch(url, `/requests?submissionId=${encodeURIComponent(options.submissionId)}&limit=1000`);
         if (!listResp.ok) {
           const error = await listResp.json();
           console.error(errorText("Error fetching runs:"), error);
@@ -679,7 +755,7 @@ run
       console.log(`${label('Downloading batch archive for')} ${value(String(ids.length))} runs...`);
 
       // POST to batch archive endpoint
-      const archiveResp = await fetch(`${normalizeUrl(url)}/api/v1/requests/archive`, {
+      const archiveResp = await apiFetch(url, `/requests/archive`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids }),
@@ -783,7 +859,7 @@ run
 
       if (dryRun) {
         console.log(warnBanner("Dry run - no data will be uploaded"));
-        console.log(`Would upload to: ${normalizeUrl(url)}/api/v1/runs/upload`);
+        console.log(`Would upload to: ${normalizeUrl(url)}${getApiBasePath()}/runs/upload`);
         
         // Cleanup temp dir if created
         if (tempDir) {
@@ -800,7 +876,7 @@ run
       const blob = new Blob([archiveBuffer], { type: "application/gzip" });
       formData.append("archive", blob, basename(archivePath));
 
-      const response = await fetch(`${normalizeUrl(url)}/api/v1/runs/upload`, {
+      const response = await apiFetch(url, `/runs/upload`, {
         method: "POST",
         body: formData,
       });
@@ -865,7 +941,7 @@ run
 
       if (dryRun) {
         console.log(warnBanner("Dry run - no data will be uploaded"));
-        console.log(`Would upload to: ${normalizeUrl(url)}/api/v1/runs/upload-batch`);
+        console.log(`Would upload to: ${normalizeUrl(url)}${getApiBasePath()}/runs/upload-batch`);
         return;
       }
 
@@ -876,7 +952,7 @@ run
       const blob = new Blob([archiveBuffer], { type: "application/gzip" });
       formData.append("archive", blob, basename(resolvedPath));
 
-      const response = await fetch(`${normalizeUrl(url)}/api/v1/runs/upload-batch`, {
+      const response = await apiFetch(url, `/runs/upload-batch`, {
         method: "POST",
         body: formData,
       });
@@ -926,7 +1002,7 @@ run
   .action(async (options) => {
     const { id, force } = options;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${id}/retry`, {
+      const response = await apiFetch(options.url, `/requests/${id}/retry`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: force ? JSON.stringify({ force: true }) : undefined,
@@ -967,7 +1043,7 @@ run
     const format = (options.output || 'table') as OutputFormat;
     const { id } = options;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${id}/runs`);
+      const response = await apiFetch(options.url, `/requests/${id}/runs`);
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: response.statusText }));
         console.error(errorText(`Error: ${errorData.error || response.statusText}`));

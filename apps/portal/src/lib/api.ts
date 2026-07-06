@@ -1,15 +1,67 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType } from "@/types";
+import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, RunFacetsResponse, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType, RunSortField, RunSortDir } from "@/types";
 
 import { qs } from "./url";
 import { recordServerDate } from "./serverClock";
+import { apiClient } from "./api-client";
+import { MAX_ARCHIVE_UPLOAD_LABEL } from "./codebaseUpload";
 
 const BASE = "/api/v1";
 
+/**
+ * Categorical + range filter params shared by the Runs list, grouped list, and
+ * facets endpoints (issue #1138). Categorical dimensions accept a single value
+ * or an array (multi-select); the `__empty__` sentinel matches missing values.
+ */
+export interface RunFilterParams {
+  worker?: string | string[];
+  status?: string | string[];
+  outcome?: string | string[];
+  model?: string | string[];
+  os?: string | string[];
+  priority?: string | string[];
+  agentVersion?: string | string[];
+  profileId?: string | string[];
+  taskPromptId?: string;
+  criteria?: string;
+  submissionId?: string;
+  search?: string;
+  createdAfter?: string;
+  createdBefore?: string;
+  turns?: number;
+  turnsOp?: IterationOp;
+  maxIterations?: number;
+  maxIterationsOp?: IterationOp;
+}
+
+/** Map RunFilterParams to a qs() params object (arrays become repeated keys). */
+function runFilterQs(f: RunFilterParams): Record<string, string | string[] | undefined> {
+  return {
+    worker: f.worker,
+    status: f.status,
+    outcome: f.outcome,
+    model: f.model,
+    os: f.os,
+    priority: f.priority,
+    agentVersion: f.agentVersion,
+    profileId: f.profileId,
+    taskPromptId: f.taskPromptId,
+    criteria: f.criteria,
+    submissionId: f.submissionId,
+    search: f.search,
+    createdAfter: f.createdAfter,
+    createdBefore: f.createdBefore,
+    turns: f.turns !== undefined ? String(f.turns) : undefined,
+    turnsOp: f.turns !== undefined ? f.turnsOp : undefined,
+    maxIterations: f.maxIterations !== undefined ? String(f.maxIterations) : undefined,
+    maxIterationsOp: f.maxIterations !== undefined ? f.maxIterationsOp : undefined,
+  };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await apiClient(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
@@ -17,9 +69,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // relative-time displays survive a misconfigured local clock.
   recordServerDate(res.headers.get("Date"));
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
+    const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string; details?: Array<{ path: string; message: string }> };
     const message = body.error || `HTTP ${res.status}`;
-    const details = body.details as Array<{ path: string; message: string }> | undefined;
+    const details = body.details;
     if (details?.length) {
       throw new Error(`${message}: ${details.map((d) => `${d.path || "body"}: ${d.message}`).join(", ")}`);
     }
@@ -30,20 +82,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  /** List runs with cursor-based pagination */
-  listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; profileId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<Run>> => {
+  /** List runs with cursor-based pagination, server-side filtering and sorting */
+  listRuns: (opts?: RunFilterParams & { sortBy?: RunSortField; sortDir?: RunSortDir; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<Run>> => {
     return request(`/requests${qs({
-      worker: opts?.worker,
-      taskPromptId: opts?.taskPromptId,
-      status: opts?.status,
-      outcome: opts?.outcome,
-      criteria: opts?.criteria,
-      submissionId: opts?.submissionId,
-      profileId: opts?.profileId,
-      turns: opts?.turns !== undefined ? String(opts.turns) : undefined,
-      turnsOp: opts?.turns !== undefined ? opts?.turnsOp : undefined,
-      maxIterations: opts?.maxIterations !== undefined ? String(opts.maxIterations) : undefined,
-      maxIterationsOp: opts?.maxIterations !== undefined ? opts?.maxIterationsOp : undefined,
+      ...runFilterQs(opts ?? {}),
+      sortBy: opts?.sortBy,
+      sortDir: opts?.sortDir,
       limit: opts?.limit ? String(opts.limit) : undefined,
       after: opts?.after,
       before: opts?.before,
@@ -51,25 +95,29 @@ export const api = {
     })}`);
   },
 
-  /** List runs grouped by task or submissionId, with cursor-based pagination */
-  listRunGroups: (opts: { groupBy: "task" | "submissionId" | "profile"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<RunGroup>> => {
+  /** List runs grouped by task/profile/submissionId, with cursor pagination and server-side filtering */
+  listRunGroups: (opts: RunFilterParams & { groupBy: "task" | "submissionId" | "profile"; sortBy?: RunSortField; sortDir?: RunSortDir; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<RunGroup>> => {
     return request(`/requests${qs({
       groupBy: opts.groupBy,
-      worker: opts.worker,
-      taskPromptId: opts.taskPromptId,
-      status: opts.status,
-      outcome: opts.outcome,
-      criteria: opts.criteria,
-      submissionId: opts.submissionId,
-      turns: opts.turns !== undefined ? String(opts.turns) : undefined,
-      turnsOp: opts.turns !== undefined ? opts.turnsOp : undefined,
-      maxIterations: opts.maxIterations !== undefined ? String(opts.maxIterations) : undefined,
-      maxIterationsOp: opts.maxIterations !== undefined ? opts.maxIterationsOp : undefined,
+      ...runFilterQs(opts),
+      sortBy: opts.sortBy,
+      sortDir: opts.sortDir,
       limit: opts.limit ? String(opts.limit) : undefined,
       after: opts.after,
       before: opts.before,
       last: opts.last ? "true" : undefined,
     })}`);
+  },
+
+  /**
+   * Fetch server-computed filter facets for the Runs list rail. Counts are
+   * absolute over all non-deleted runs and intentionally ignore the active
+   * search, date, iteration, and categorical selections, so every value stays
+   * visible with a stable full-dataset count. Being input-independent, the
+   * response is shared (one query key) and cached server-side for a short TTL.
+   */
+  listRunFacets: (): Promise<RunFacetsResponse> => {
+    return request(`/requests/facets`);
   },
 
   /** Get a single run by ID */
@@ -93,7 +141,11 @@ export const api = {
     agentVersion?: string;
     profileId?: string;
     profileVariations?: string[];
+    agentsMd?: string;
+    agentsMdParentIds?: string[];
     gates?: GateConfig[];
+    codebase?: string;
+    codebaseRevisionId?: string;
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
     const url = worker ? `/requests?worker=${encodeURIComponent(worker)}` : `/requests`;
@@ -221,14 +273,14 @@ export const api = {
 
   /** Download a batch archive of multiple runs as a single .tar.gz */
   batchArchive: async (ids: string[]): Promise<void> => {
-    const resp = await fetch(`${BASE}/requests/archive`, {
+    const resp = await apiClient(`${BASE}/requests/archive`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids }),
     });
     recordServerDate(resp.headers.get("Date"));
     if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      const err = await resp.json().catch(() => ({ error: resp.statusText })) as { error?: string };
       throw new Error(err.error ?? "Failed to download batch archive");
     }
     const blob = await resp.blob();
@@ -298,10 +350,12 @@ export const api = {
 
   // ─── Criteria ──────────────────────────────────────────────────────────────
 
-  /** List all criteria, optionally filtered by search query */
-  listCriteria: (q?: string): Promise<CriteriaDocument[]> => {
+  /** List all criteria, optionally filtered by search query or IDs with ancestor resolution */
+  listCriteria: (q?: string, opts?: { ids?: string[]; ancestors?: boolean }): Promise<CriteriaDocument[]> => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
+    if (opts?.ids && opts.ids.length > 0) params.set("ids", opts.ids.join(","));
+    if (opts?.ancestors) params.set("ancestors", "true");
     const qs = params.toString();
     return request(`/criteria${qs ? `?${qs}` : ""}`);
   },
@@ -348,9 +402,10 @@ export const api = {
   // ─── Prompt Features ───────────────────────────────────────────────────────
 
   /** List all prompt features, optionally filtered by search query */
-  listPromptFeatures: (q?: string): Promise<PromptFeatureDocument[]> => {
+  listPromptFeatures: (q?: string, type?: PromptType): Promise<PromptFeatureDocument[]> => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
+    if (type) params.set("type", type);
     const qs = params.toString();
     return request(`/prompt-features${qs ? `?${qs}` : ""}`);
   },
@@ -361,7 +416,7 @@ export const api = {
   },
 
   /** Create a new prompt feature */
-  createPromptFeature: (body: { id: string; prompt: string }): Promise<PromptFeatureDocument> => {
+  createPromptFeature: (body: { id: string; prompt: string; type?: PromptType }): Promise<PromptFeatureDocument> => {
     return request("/prompt-features", {
       method: "POST",
       body: JSON.stringify(body),
@@ -391,7 +446,7 @@ export const api = {
 
   // ─── Task Prompts ──────────────────────────────────────────────────────────
 
-  /** List all task prompts (paginated, optional search) */
+  /** List all task prompts (paginated, optional search + type filter) */
   listTaskPrompts: (opts?: { limit?: number; offset?: number; search?: string; type?: PromptType }): Promise<{ items: TaskPrompt[]; total: number }> => {
     const params = new URLSearchParams();
     if (opts?.limit) params.set("limit", String(opts.limit));
@@ -405,6 +460,11 @@ export const api = {
   /** Get a single task prompt by ID */
   getTaskPrompt: (id: string): Promise<TaskPrompt> => {
     return request(`/task-prompts/${encodeURIComponent(id)}`);
+  },
+
+  /** Resolve a task/AGENTS.md prompt's plain text (downloads blob if blob-backed) */
+  getTaskPromptContent: (id: string): Promise<{ id: string; text: string }> => {
+    return request(`/task-prompts/${encodeURIComponent(id)}/content`);
   },
 
   /** Create (or find existing) task prompt — idempotent */
@@ -528,11 +588,14 @@ export const api = {
   // ─── Analysis ──────────────────────────────────────────────────────────────
 
   /** Get analysis data for statistics dashboard */
-  getAnalysis: (kValues: number[] = [1, 2, 5], criteria?: string[]): Promise<AnalysisResponse> => {
+  getAnalysis: (kValues: number[] = [1, 2, 5], criteria?: string[], features?: string[]): Promise<AnalysisResponse> => {
     const params = new URLSearchParams();
     params.set("k", kValues.join(","));
     if (criteria && criteria.length > 0) {
       params.set("criteria", criteria.join(","));
+    }
+    if (features && features.length > 0) {
+      params.set("features", features.join(","));
     }
     return request(`/analysis?${params.toString()}`);
   },
@@ -697,6 +760,9 @@ export const api = {
 
   /** Get API readiness and migration status (hits root-level /ready, not /api/v1) */
   getReadiness: async (): Promise<{ status: string; migrations: { ready: boolean; applied: string[]; pending: string[]; totalApplied: number } }> => {
+    // Intentional direct-`fetch` exception (not routed through `apiClient`):
+    // the root-level `/ready` probe is unauthenticated, lives outside `/api/v1`,
+    // and needs bespoke 503 handling (a 503 still carries a useful JSON body).
     const res = await fetch("/ready");
     // /ready returns 503 when not ready — we still want the JSON body
     if (!res.ok && res.status !== 503) {
@@ -862,10 +928,11 @@ export const api = {
   // ─── Models ────────────────────────────────────────────────────────────────
 
   /** List all scanned models, optionally filtered by agentId or provider */
-  listModels: (params?: { agentId?: string; provider?: string }): Promise<Model[]> => {
+  listModels: (params?: { agentId?: string; provider?: string; status?: "active" | "disappeared" }): Promise<Model[]> => {
     const searchParams = new URLSearchParams();
     if (params?.agentId) searchParams.set("agentId", params.agentId);
     if (params?.provider) searchParams.set("provider", params.provider);
+    if (params?.status) searchParams.set("status", params.status);
     const qs = searchParams.toString();
     return request(`/models${qs ? `?${qs}` : ""}`);
   },
@@ -902,7 +969,7 @@ export const api = {
     return request(`/skills/${slug}`);
   },
 
-  /** Search skills (internal + skills.sh) */
+  /** Search skills in the internal library and the external skills.sh registry */
   searchSkills: (query: string, limit?: number): Promise<SkillSearchResult[]> => {
     const params = new URLSearchParams({ q: query });
     if (limit) params.set("limit", String(limit));
@@ -943,6 +1010,120 @@ export const api = {
   /** List revisions for a skill */
   listSkillRevisions: (slug: string): Promise<SkillRevisionDocument[]> => {
     return request(`/skills/${slug}/revisions`);
+  },
+
+  // ─── Codebases ─────────────────────────────────────────────────────────────
+
+  /** List all codebases */
+  listCodebases: (): Promise<CodebaseDocument[]> => {
+    return request("/codebases");
+  },
+
+  /** Get a single codebase by id */
+  getCodebase: (id: string): Promise<CodebaseDocument> => {
+    return request(`/codebases/${id}`);
+  },
+
+  /** Create a git codebase (JSON metadata only). The API best-effort resolves
+   *  the latest revision on creation, so the response may include firstRevision. */
+  createCodebase: (body: {
+    name: string;
+    sourceType: CodebaseSourceType;
+    source?: string;
+    description?: string;
+    defaultBranch?: string;
+    slug?: string;
+  }): Promise<CodebaseDocument & { firstRevision?: CodebaseRevisionDocument }> => {
+    return request("/codebases", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /**
+   * Create an archive codebase together with its first revision (multipart).
+   * The archive file is required; the server rolls back the codebase if the
+   * revision fails to materialize.
+   */
+  createArchiveCodebase: async (
+    meta: { name: string; description?: string; slug?: string },
+    file: File,
+  ): Promise<CodebaseDocument & { firstRevision?: CodebaseRevisionDocument }> => {
+    const form = new FormData();
+    form.append("sourceType", "archive");
+    form.append("name", meta.name);
+    if (meta.description) form.append("description", meta.description);
+    if (meta.slug) form.append("slug", meta.slug);
+    form.append("archive", file);
+    const res = await apiClient(`${BASE}/codebases`, {
+      method: "POST",
+      body: form,
+    });
+    recordServerDate(res.headers.get("Date"));
+    if (res.status === 413) {
+      throw new Error(`Archive exceeds the ${MAX_ARCHIVE_UPLOAD_LABEL} upload limit.`);
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+  /** Update a codebase */
+  updateCodebase: (
+    id: string,
+    body: Partial<Pick<CodebaseDocument, "name" | "description" | "defaultBranch">>,
+  ): Promise<CodebaseDocument> => {
+    return request(`/codebases/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete a codebase */
+  deleteCodebase: (id: string): Promise<void> => {
+    return request(`/codebases/${id}`, { method: "DELETE" });
+  },
+
+  /** List revisions for a codebase */
+  listCodebaseRevisions: (id: string, limit?: number): Promise<CodebaseRevisionDocument[]> => {
+    return request(`/codebases/${id}/revisions${limit ? `?limit=${limit}` : ""}`);
+  },
+
+  /** Resolve a new git codebase revision (snapshot the repo at a ref / "latest") */
+  resolveCodebaseRevision: (
+    id: string,
+    requestedRef?: string,
+  ): Promise<CodebaseRevisionDocument> => {
+    return request(`/codebases/${id}/revisions`, {
+      method: "POST",
+      body: JSON.stringify(requestedRef ? { requestedRef } : {}),
+    });
+  },
+
+  /** Upload an archive as a new codebase revision (multipart) */
+  uploadCodebaseArchive: async (id: string, file: File): Promise<CodebaseRevisionDocument> => {
+    const form = new FormData();
+    form.append("archive", file);
+    const res = await apiClient(`${BASE}/codebases/${id}/upload`, {
+      method: "POST",
+      body: form,
+    });
+    recordServerDate(res.headers.get("Date"));
+    if (res.status === 413) {
+      throw new Error(`Archive exceeds the ${MAX_ARCHIVE_UPLOAD_LABEL} upload limit.`);
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+  /** Get a single codebase revision by id */
+  getCodebaseRevision: (id: string): Promise<CodebaseRevisionDocument> => {
+    return request(`/codebase-revisions/${id}`);
   },
 
   // ─── Extensions ──────────────────────────────────────────────────────────

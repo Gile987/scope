@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useCriteriaWizard } from "./useCriteriaWizard";
 import { api } from "@/lib/api";
+import { toast } from "sonner";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -18,11 +19,27 @@ vi.mock("@/lib/api", () => ({
       suggestedParents: [],
       suggestedChildren: [],
     }),
+    createCriterion: vi.fn(),
+    getCriterion: vi.fn(),
+    updateCriterion: vi.fn(),
+  },
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    success: vi.fn(),
+    warning: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
   },
 }));
 
 const listCriteria = vi.mocked(api.listCriteria);
 const generateCriteriaPrompt = vi.mocked(api.generateCriteriaPrompt);
+const createCriterion = vi.mocked(api.createCriterion);
+const getCriterion = vi.mocked(api.getCriterion);
+const updateCriterion = vi.mocked(api.updateCriterion);
+const toastWarning = vi.mocked(toast.warning);
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({
@@ -134,6 +151,39 @@ describe("useCriteriaWizard generation passes target gates", () => {
   });
 });
 
+describe("useCriteriaWizard preserves the id across generation", () => {
+  afterEach(() => {
+    generateCriteriaPrompt.mockResolvedValue({
+      prompt: "generated",
+      suggestedId: "",
+      suggestedParents: [],
+      suggestedChildren: [],
+    });
+  });
+
+  it("does not overwrite the slugified id with the AI's suggestedId", async () => {
+    generateCriteriaPrompt.mockResolvedValue({
+      prompt: "generated",
+      suggestedId: "ai_invented_id",
+      suggestedParents: [],
+      suggestedChildren: [],
+    });
+
+    const { result } = renderHook(() => useCriteriaWizard({ onSuccess: () => {} }), { wrapper });
+
+    act(() => result.current.handleBehaviorChange("Project builds"));
+    expect(result.current.id).toBe("project_builds");
+
+    act(() => result.current.handleContinue());
+
+    // Wait until the generated prompt lands (generation resolved).
+    await waitFor(() => expect(result.current.aiGenerated).toBe(true));
+
+    // The id must remain the slugified behavior name, not the AI's suggestion.
+    expect(result.current.id).toBe("project_builds");
+  });
+});
+
 describe("useCriteriaWizard gate-compatibility pruning", () => {
   it("prunes a pre-selected parent incompatible with the chosen gates", async () => {
     // Parent applies only to 'select'; the new criterion applies to 'build', so the
@@ -190,5 +240,111 @@ describe("useCriteriaWizard gate-compatibility pruning", () => {
 
     act(() => result.current.setGates(["build"]));
     await waitFor(() => expect(result.current.acceptedChildren).toEqual([]));
+  });
+});
+
+describe("useCriteriaWizard candidate availability flags", () => {
+  it("reports no compatible parents or children for a tool gate against a select-only library", async () => {
+    listCriteria.mockResolvedValue([
+      { id: "a_select", prompt: "p", gates: ["select"], createdAt: "" },
+    ]);
+    const { result } = renderHook(
+      () => useCriteriaWizard({ initialGates: ["build"], onSuccess: () => {} }),
+      { wrapper },
+    );
+    await waitFor(() => expect(listCriteria).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(result.current.hasCompatibleParentCandidates).toBe(false);
+      expect(result.current.hasCompatibleChildCandidates).toBe(false);
+    });
+  });
+
+  it("reports compatible parents and children for a select criterion against a select library", async () => {
+    listCriteria.mockResolvedValue([
+      { id: "a_select", prompt: "p", gates: ["select"], createdAt: "" },
+    ]);
+    const { result } = renderHook(
+      () => useCriteriaWizard({ initialGates: ["select"], onSuccess: () => {} }),
+      { wrapper },
+    );
+    await waitFor(() => expect(listCriteria).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(result.current.hasCompatibleParentCandidates).toBe(true);
+      expect(result.current.hasCompatibleChildCandidates).toBe(true);
+    });
+  });
+});
+
+describe("useCriteriaWizard surfaces child-link failures", () => {
+  it("warns (but still succeeds) when an accepted child cannot be linked", async () => {
+    listCriteria.mockResolvedValue([
+      { id: "child_ok", prompt: "c", gates: ["select"], createdAt: "" },
+    ]);
+    createCriterion.mockResolvedValue({ id: "new_crit", prompt: "p", createdAt: "" });
+    getCriterion.mockResolvedValue({
+      id: "child_ok",
+      prompt: "c",
+      dependsOn: [],
+      gates: ["select"],
+      createdAt: "",
+      dependents: [],
+    });
+    updateCriterion.mockRejectedValue(new Error("would create a cycle"));
+
+    const onSuccess = vi.fn();
+    const { result } = renderHook(
+      () => useCriteriaWizard({ initialGates: ["select"], onSuccess }),
+      { wrapper },
+    );
+    await waitFor(() => expect(listCriteria).toHaveBeenCalled());
+    act(() => result.current.setAcceptedChildren(["child_ok"]));
+
+    await act(async () => {
+      await result.current.createMutation.mutateAsync({
+        id: "new_crit",
+        prompt: "p",
+        gates: ["select"],
+      });
+    });
+
+    await waitFor(() => expect(toastWarning).toHaveBeenCalledTimes(1));
+    expect(toastWarning.mock.calls[0][0]).toContain("child_ok");
+    expect(onSuccess).toHaveBeenCalledWith("new_crit");
+  });
+
+  it("does not warn when every accepted child links successfully", async () => {
+    listCriteria.mockResolvedValue([
+      { id: "child_ok", prompt: "c", gates: ["select"], createdAt: "" },
+    ]);
+    createCriterion.mockResolvedValue({ id: "new_crit", prompt: "p", createdAt: "" });
+    getCriterion.mockResolvedValue({
+      id: "child_ok",
+      prompt: "c",
+      dependsOn: [],
+      gates: ["select"],
+      createdAt: "",
+      dependents: [],
+    });
+    updateCriterion.mockResolvedValue({ id: "child_ok", prompt: "c", createdAt: "" });
+
+    const onSuccess = vi.fn();
+    const { result } = renderHook(
+      () => useCriteriaWizard({ initialGates: ["select"], onSuccess }),
+      { wrapper },
+    );
+    await waitFor(() => expect(listCriteria).toHaveBeenCalled());
+    act(() => result.current.setAcceptedChildren(["child_ok"]));
+
+    await act(async () => {
+      await result.current.createMutation.mutateAsync({
+        id: "new_crit",
+        prompt: "p",
+        gates: ["select"],
+      });
+    });
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith("new_crit"));
+    expect(updateCriterion).toHaveBeenCalledWith("child_ok", { dependsOn: ["new_crit"] });
+    expect(toastWarning).not.toHaveBeenCalled();
   });
 });

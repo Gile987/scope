@@ -137,11 +137,16 @@ export interface Run {
   mcpServers?: string[];
   skills?: string[];
   skillRevisions?: string[];
+  codebaseRevisionId?: string;
   extensions?: string[];
   priority?: number;
   submissionId?: string;
   profileId?: string;
   profileVersionId?: string;
+  /** Resolved AGENTS.md prompt id when an AGENTS.md was supplied. */
+  agentsMdPromptId?: string;
+  /** Parent AGENTS.md prompt ids forming the AGENTS.md lineage (mutation/merge edges). */
+  agentsMdParentIds?: string[];
   gates?: GateConfig[];
   gateSummaries?: GateRunSummary[];
 }
@@ -149,7 +154,12 @@ export interface Run {
 export interface CursorPaginatedResponse<T> {
   data: T[];
   limit: number;
-  estimatedTotal: number;
+  /**
+   * Run-count total for the flat list pager / "~N runs total" banner. Omitted
+   * in grouped mode, which is measured in groups (not runs) and paginated purely
+   * by cursors — so the client drives Next/Prev off `cursors` without a total.
+   */
+  estimatedTotal?: number;
   cursors: {
     next: string | null;
     prev: string | null;
@@ -157,7 +167,7 @@ export interface CursorPaginatedResponse<T> {
 }
 
 export type GateId = "select" | "build" | "test" | "run" | "deploy";
-export type PromptType = GateId;
+export type PromptType = GateId | "agents.md";
 
 export interface GateConfig {
   gate: GateId;
@@ -229,6 +239,8 @@ export interface GeneratePromptResponse {
 export interface PromptFeatureConfig {
   id: string;
   prompt: string;
+  /** Prompt type this feature applies to (absent ⇒ "select"). */
+  type?: PromptType;
 }
 
 export interface PromptFeatureDocument extends PromptFeatureConfig {
@@ -263,8 +275,9 @@ export interface PromptFeatureExtraction {
 // Task Prompt types (first-class entity for benchmark task texts)
 export interface TaskPrompt {
   _id: string;                          // UUIDv5 content-addressed ID
-  text: string;
-  type?: PromptType;                         // Full task prompt text
+  text?: string;                        // Full task prompt text (absent when blob-backed)
+  type?: PromptType;                    // Gate id or "agents.md"; absent ⇒ legacy "select"
+  contentBlobUrl?: string;              // Blob reference when body exceeds the inline threshold
   features?: PromptFeatureResult[];     // Detected prompt features
   featuresExtractedAt?: string;         // When features were last extracted
   createdAt: string;
@@ -320,6 +333,17 @@ export interface AnalysisResponse {
   availableCriteria: string[];
   /** Criteria IDs that were used to define success (empty = use turn.passed) */
   selectedCriteria: string[];
+  /** Union of all detected task-prompt feature IDs across all runs (before filtering) */
+  availableFeatures: string[];
+  /** Task-prompt feature IDs used to filter runs (empty = no feature filter) */
+  selectedFeatures: string[];
+  /**
+   * True when the analyzed run set was capped to a most-recent-N window to bound
+   * server memory. Older runs are excluded from the metrics; the UI shows a banner.
+   */
+  truncated?: boolean;
+  /** The configured run cap (max runs analyzed) — only meaningful when `truncated`. */
+  runLimit?: number;
 }
 
 // MDP state-transition graph types
@@ -871,6 +895,57 @@ export interface SkillDiscoveryResult {
 }
 
 // =============================================================================
+// Codebase types
+// =============================================================================
+
+/** The source a codebase revision is captured from. */
+export type CodebaseSourceType = "git" | "archive";
+
+/** A first-class codebase entity (mutable pointer/metadata). */
+export interface CodebaseDocument {
+  _id: string;
+  slug: string;
+  name: string;
+  description?: string;
+  sourceType: CodebaseSourceType;
+  source?: string;
+  defaultBranch?: string;
+  revisionCounter: number;
+  latestRevisionId?: string;
+  creator?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+/** An immutable, incremental codebase revision (snapshot). */
+export interface CodebaseRevisionDocument {
+  _id: string;
+  codebaseId: string;
+  slug: string;
+  revisionNumber: number;
+  ref: string;
+  sourceType: CodebaseSourceType;
+  source?: string;
+  requestedRef?: string;
+  resolvedCommitSha?: string;
+  commitTimestamp?: string;
+  originalFilename?: string;
+  contentSha256?: string;
+  archiveUrl: string;
+  sizeBytes?: number;
+  fileCount?: number;
+  creator?: string;
+  resolvedAt: string;
+  createdAt: string;
+  /**
+   * Present only on resolve/upload responses: true when the revision was reused
+   * (deduplicated) because nothing changed, false when newly created.
+   */
+  deduplicated?: boolean;
+}
+
+// =============================================================================
 // VS Code extension types
 // =============================================================================
 
@@ -992,3 +1067,41 @@ export interface RunGroup {
   aggregates: GroupAggregates;
   uniform: GroupUniformValues;
 }
+
+/** One selectable value + full-dataset count for a Runs-list filter dimension. */
+export interface RunFacetBucket {
+  value: string;
+  count: number;
+}
+
+/** Server-computed facet counts for the Runs list filter rail (issue #1138). */
+export interface RunFacetsResponse {
+  total: number;
+  facets: {
+    workerType: RunFacetBucket[];
+    status: RunFacetBucket[];
+    outcome: RunFacetBucket[];
+    model: RunFacetBucket[];
+    os: RunFacetBucket[];
+    priority: RunFacetBucket[];
+    agentVersion: RunFacetBucket[];
+    profileId: RunFacetBucket[];
+  };
+}
+
+/** The categorical dimensions exposed by the facets endpoint. */
+export type RunFacetDimension = keyof RunFacetsResponse["facets"];
+
+/** Sentinel value matching rows that are missing a categorical field ("(Unknown)"). */
+export const EMPTY_FILTER_VALUE = "__empty__";
+
+/** Server-side sort fields for the Runs list. */
+export type RunSortField =
+  | "created"
+  | "updated"
+  | "priority"
+  | "worker"
+  | "status"
+  | "id"
+  | "duration";
+export type RunSortDir = "asc" | "desc";

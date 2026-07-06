@@ -21,6 +21,7 @@ import {
   Settings,
   Menu,
   BookOpen,
+  FolderGit2,
   GitBranch,
   Plug,
   Puzzle,
@@ -84,11 +85,12 @@ const navGroups: NavGroup[] = [
     id: "library",
     label: "Library",
     items: [
-      { to: "/task-prompts", label: "Tasks", icon: MessageSquareText },
+      { to: "/task-prompts", label: "Prompts", icon: MessageSquareText },
       { to: "/criteria", label: "Criteria", icon: FlaskConical },
       { to: "/prompt-features", label: "Features", icon: Tags },
       { to: "/profiles", label: "Profiles", icon: SlidersHorizontal, featureKey: "profiles" },
       { to: "/skills", label: "Skills", icon: BookOpen, featureKey: "skills" },
+      { to: "/codebases", label: "Codebases", icon: FolderGit2 },
     ],
   },
   {

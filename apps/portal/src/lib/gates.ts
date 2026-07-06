@@ -40,7 +40,7 @@ export interface GateMetadata {
 export const GATE_METADATA: Record<GateId, GateMetadata> = {
   select: {
     id: "select",
-    label: "Select",
+    label: "Requirements",
     description: "Agent implements the task (current behaviour).",
   },
   build: {
@@ -144,4 +144,15 @@ export function formatGateList(gates: readonly GateId[] | undefined): string {
 
 export function orderGateIds(gates: readonly GateId[]): GateId[] {
   return [...gates].sort((a, b) => GATE_ORDER.indexOf(a) - GATE_ORDER.indexOf(b));
+}
+
+/**
+ * Display label for any prompt type, including the non-gate `agents.md` type.
+ * Falls back to the `select` gate label for missing/unknown values so callers
+ * can safely render legacy or auto-generated prompts.
+ */
+export function promptTypeLabel(type: string | undefined): string {
+  if (type === "agents.md") return "AGENTS.md";
+  if (isGateId(type)) return GATE_METADATA[type].label;
+  return GATE_METADATA.select.label;
 }

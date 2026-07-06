@@ -5,7 +5,15 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { IndependentStrategy, isWithinWorkspace } from "./judge-strategies.js";
+import {
+  IndependentStrategy,
+  BundledStrategy,
+  TOOL_OUTPUTS_GUIDANCE,
+  buildEvidenceGuidance,
+  isWithinWorkspace,
+  JUDGE_AVAILABLE_TOOLS,
+  JUDGE_EXCLUDED_TOOLS,
+} from "./judge-strategies.js";
 
 /**
  * Test subclass that exposes the protected `createFileTools` so we can assert
@@ -15,6 +23,24 @@ import { IndependentStrategy, isWithinWorkspace } from "./judge-strategies.js";
 class TestableStrategy extends IndependentStrategy {
   publicCreateFileTools(workspacePath: string) {
     return this.createFileTools(workspacePath);
+  }
+  publicCreateToolOutputTools(toolCalls: any[]) {
+    return this.createToolOutputTools(toolCalls);
+  }
+  publicCreateAgentResponseTool(response: string) {
+    return this.createAgentResponseTool(response);
+  }
+  publicBuildSessionConfig(tools: any[], systemPrompt: string) {
+    return this.buildSessionConfig(tools, systemPrompt);
+  }
+  publicBuildSystemPrompt(hasToolOutputs: boolean, hasAgentResponse?: boolean) {
+    return (this as any).buildSystemPrompt(undefined, hasToolOutputs, hasAgentResponse);
+  }
+  publicBuildUserPrompt(
+    criterion: { id: string; prompt: string },
+    history: any[] = []
+  ) {
+    return (this as any).buildUserPrompt(criterion, history);
   }
 }
 
@@ -60,6 +86,168 @@ describe("judge file tools", () => {
     expect(tools.length).toBeGreaterThan(0);
     for (const tool of tools) {
       expect(tool.skipPermission, `${tool.name} must skip the permission prompt`).toBe(true);
+    }
+  });
+});
+
+describe("judge tool-output tools (issue #1125)", () => {
+  const strategy = new TestableStrategy("test-model");
+  const toolCalls = [
+    {
+      id: "1",
+      name: "bash",
+      arguments: { command: "npm run build" },
+      response: "build ok",
+      timestamp: "",
+    },
+  ];
+  const tools = strategy.publicCreateToolOutputTools(toolCalls);
+
+  it("exposes read_tool_outputs and get_tool_output", () => {
+    const names = tools.map((t) => t.name).sort();
+    expect(names).toEqual(["get_tool_output", "read_tool_outputs"]);
+  });
+
+  // Regression guard for scope #1125: headless, any tool without skipPermission
+  // is denied at execution time ("could not request permission from user"). When
+  // this affected read_tool_outputs/get_tool_output, the judge could never see
+  // the coding agent's captured build/test output and wrongly demanded on-disk
+  // proof files, forcing the build gate to loop for many iterations.
+  it("marks every tool-output tool to skip the permission prompt", () => {
+    expect(tools.length).toBeGreaterThan(0);
+    for (const tool of tools) {
+      expect(tool.skipPermission, `${tool.name} must skip the permission prompt`).toBe(true);
+    }
+  });
+});
+
+describe("judge agent-response tool (issue #1136)", () => {
+  const strategy = new TestableStrategy("test-model");
+
+  async function callAgentResponse(response: string): Promise<any> {
+    const [tool] = strategy.publicCreateAgentResponseTool(response);
+    if (!tool?.handler) throw new Error("read_agent_response has no handler");
+    return (tool.handler as (a: unknown, b: unknown) => unknown)({}, stubInvocation);
+  }
+
+  it("exposes a single read_agent_response tool", () => {
+    const tools = strategy.publicCreateAgentResponseTool("the agent said hello");
+    expect(tools.map((t) => t.name)).toEqual(["read_agent_response"]);
+  });
+
+  // Same headless permission rationale as the file and tool-output tools: a tool
+  // without skipPermission is denied at execution time, so the judge could never
+  // read the agent's response. See scope #1125, #1136.
+  it("marks read_agent_response to skip the permission prompt", () => {
+    const [tool] = strategy.publicCreateAgentResponseTool("x");
+    expect(tool.skipPermission).toBe(true);
+  });
+
+  it("takes no parameters", () => {
+    const [tool] = strategy.publicCreateAgentResponseTool("x");
+    const params = tool.parameters as { required?: string[]; properties?: Record<string, unknown> };
+    expect(params.required ?? []).toEqual([]);
+    expect(params.properties ?? {}).toEqual({});
+  });
+
+  it("returns the full response text untruncated under the cap", async () => {
+    const result = await callAgentResponse("The factorial of 5 is 120.");
+    expect(result.hasResponse).toBe(true);
+    expect(result.response).toBe("The factorial of 5 is 120.");
+    expect(result.truncated).toBe(false);
+  });
+
+  it("reports no response for an empty string", async () => {
+    const result = await callAgentResponse("");
+    expect(result.hasResponse).toBe(false);
+    expect(result.response).toBe("");
+  });
+
+  // The full-text cap mirrors get_tool_output (FULL_LIMIT = 100_000): it bounds
+  // the payload while still delivering far more than the lossy 300-500 char
+  // prior-iteration truncation that motivated #1136.
+  it("truncates and flags responses that exceed the safety cap", async () => {
+    const huge = "a".repeat(100_001);
+    const result = await callAgentResponse(huge);
+    expect(result.hasResponse).toBe(true);
+    expect(result.truncated).toBe(true);
+    expect(result.totalLength).toBe(100_001);
+    expect(result.response.length).toBe(100_000);
+  });
+});
+
+describe("judge evidence guidance — agent response (issue #1136)", () => {
+  // buildEvidenceGuidance composes the system-prompt guidance from whichever
+  // evidence sources exist. The no-code / Q&A case has ZERO tool calls but a
+  // non-empty response, so the guidance + read_agent_response tool must appear
+  // even when hasToolOutputs is false.
+
+  it("names read_agent_response and frames the response as authoritative when present", () => {
+    const g = buildEvidenceGuidance({ hasToolOutputs: false, hasAgentResponse: true });
+    expect(g).toContain("## Your Tools");
+    expect(g).toContain("read_agent_response");
+    expect(g).toContain("## How to Judge");
+    expect(g.toLowerCase()).toContain("equally authoritative");
+    // It must NOT advertise tool-output tools that aren't available here.
+    expect(g).not.toContain("read_tool_outputs");
+    expect(g).not.toContain("get_tool_output");
+  });
+
+  it("lists all three sources when both tool outputs and a response are present", () => {
+    const g = buildEvidenceGuidance({ hasToolOutputs: true, hasAgentResponse: true });
+    expect(g).toContain("read_tool_outputs");
+    expect(g).toContain("get_tool_output");
+    expect(g).toContain("read_agent_response");
+    expect(g.toLowerCase()).toContain("equally authoritative");
+  });
+
+  it("is byte-identical to TOOL_OUTPUTS_GUIDANCE for the tool-outputs-only case", () => {
+    const g = buildEvidenceGuidance({ hasToolOutputs: true, hasAgentResponse: false });
+    expect(g).toBe(TOOL_OUTPUTS_GUIDANCE);
+    expect(g).not.toContain("read_agent_response");
+  });
+
+  it("injects guidance into the system prompt when only a response is present (no tool outputs)", () => {
+    const sys = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(false, true);
+    expect(sys).toContain("read_agent_response");
+    expect(sys).toContain("## How to Judge");
+  });
+
+  it("injects guidance for the IndependentStrategy when only a response is present", () => {
+    const sys = new TestableStrategy("test-model").publicBuildSystemPrompt(false, true);
+    expect(sys).toContain("read_agent_response");
+    expect(sys).toContain("## How to Judge");
+  });
+
+  it("omits all evidence guidance when neither tool outputs nor a response exist", () => {
+    const sys = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(false, false);
+    expect(sys).not.toContain("read_agent_response");
+    expect(sys).not.toContain("## How to Judge");
+  });
+
+  // Backward-compat guard: the `## Instructions` step 1 is now a single,
+  // source-agnostic line in EVERY configuration. Because it never names a
+  // specific source, it can't point a criterion at evidence the judge lacks
+  // (the pre-#1136 bug). Source/tool specifics live in the gated evidence
+  // section (buildEvidenceGuidance), which the byte-identical TOOL_OUTPUTS_GUIDANCE
+  // test above still pins for the tool-outputs-only case.
+  it("uses one source-agnostic '## Instructions' step 1 in every configuration (both strategies)", () => {
+    const expected = "1. Gather evidence from every available source.";
+    const step1 = (sys: string) => sys.split("\n").find((l) => l.startsWith("1. "));
+
+    for (const hasToolOutputs of [true, false]) {
+      for (const hasAgentResponse of [true, false]) {
+        const bundled = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(
+          hasToolOutputs,
+          hasAgentResponse
+        );
+        const independent = new TestableStrategy("test-model").publicBuildSystemPrompt(
+          hasToolOutputs,
+          hasAgentResponse
+        );
+        expect(step1(bundled)).toBe(expected);
+        expect(step1(independent)).toBe(expected);
+      }
     }
   });
 });
@@ -145,5 +333,199 @@ describe("judge file tool handlers (workspace scoping)", () => {
       pattern: "in-workspace",
     })) as { matches: string[] };
     expect(result.matches.some((m) => m.includes("inside.txt"))).toBe(true);
+  });
+});
+
+describe("judge session tool restriction (scope #1117)", () => {
+  const strategy = new TestableStrategy("test-model");
+  const config = strategy.publicBuildSessionConfig([], "system prompt");
+
+  // The headless judge must never be handed the SDK's built-in execute tools
+  // (bash/edit/...). Under mode:"copilot-cli" (the SDK default) those are
+  // injected and are NOT skipPermission, so the model trying to run a command
+  // itself gets denied with "could not request permission from user" and then
+  // mis-reports it as the coder's result. Restricting to custom:* prevents this.
+  it("restricts availableTools to custom tools only", () => {
+    expect(config.availableTools).toEqual(["custom:*"]);
+  });
+
+  it("explicitly excludes built-in and MCP tools", () => {
+    expect(config.excludedTools).toEqual(["builtin:*", "mcp:*"]);
+  });
+
+  it("never exposes the built-in bash tool to the judge", () => {
+    const available = config.availableTools as string[];
+    const excluded = config.excludedTools as string[];
+    expect(available).not.toContain("builtin:*");
+    expect(available).not.toContain("bash");
+    // excludedTools wins over availableTools, so builtin:* is hard-disabled.
+    expect(excluded).toContain("builtin:*");
+  });
+
+  it("uses a replace-mode system message with the provided prompt", () => {
+    expect(config.systemMessage).toEqual({ mode: "replace", content: "system prompt" });
+  });
+
+  it("exports the filter constants used to build the config", () => {
+    expect([...JUDGE_AVAILABLE_TOOLS]).toEqual(["custom:*"]);
+    expect([...JUDGE_EXCLUDED_TOOLS]).toEqual(["builtin:*", "mcp:*"]);
+  });
+});
+
+/**
+ * Exposes the protected `buildSystemPrompt` / `buildUserPrompt` so we can assert
+ * how captured tool outputs, criteria, and history are surfaced to the judge
+ * without running a real Copilot session.
+ */
+class TestableBundledStrategy extends BundledStrategy {
+  publicBuildSystemPrompt(hasToolOutputs: boolean, hasAgentResponse?: boolean) {
+    return (this as any).buildSystemPrompt(undefined, hasToolOutputs, hasAgentResponse);
+  }
+  publicBuildUserPrompt(
+    criteria: { id: string; prompt: string }[] = [
+      { id: "c1", prompt: "does the code work" },
+    ],
+    history: any[] = []
+  ) {
+    return (this as any).buildUserPrompt(criteria, history);
+  }
+}
+
+describe("judge tool-outputs guidance (issue #1125)", () => {
+  // The headless judge cannot run commands; it must decide from the codebase
+  // plus the coding agent's captured tool outputs. The guidance must be generic
+  // (not build/test specific) and must tell the judge to treat captured output
+  // as authoritative instead of demanding the agent redo or re-prove the work.
+  it("is generic, not tied to any one command type", () => {
+    const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
+    expect(g).not.toMatch(/build\.log|build_proof|\bnpm run build\b/);
+  });
+
+  it("tells the judge it cannot run commands itself", () => {
+    expect(TOOL_OUTPUTS_GUIDANCE.toLowerCase()).toContain("cannot run any commands");
+  });
+
+  it("names the judge's own read-only tools and disambiguates them from the agent's", () => {
+    expect(TOOL_OUTPUTS_GUIDANCE).toContain("## Your Tools");
+    expect(TOOL_OUTPUTS_GUIDANCE).toContain("read_file");
+    expect(TOOL_OUTPUTS_GUIDANCE).toContain("read_tool_outputs");
+    expect(TOOL_OUTPUTS_GUIDANCE).toContain("get_tool_output");
+    expect(TOOL_OUTPUTS_GUIDANCE.toLowerCase()).toContain("codebase");
+  });
+
+  it("frames the codebase and captured outputs as equally authoritative and to be examined together", () => {
+    expect(TOOL_OUTPUTS_GUIDANCE).toContain("## How to Judge");
+    const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
+    expect(g).toContain("equally authoritative");
+    expect(g).toContain("examine both");
+  });
+
+  it("treats captured output as the record of what happened and forbids redundant re-proving", () => {
+    const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
+    expect(g).toContain("record of what happened");
+    expect(g).toMatch(/redo or re-prove/);
+  });
+
+  it("overrides criteria wording that asks the judge to run commands", () => {
+    const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
+    expect(g).toContain("criterion");
+    expect(g).toMatch(/run, execute, or re-run/);
+    expect(g).toContain("ignore that instruction");
+  });
+
+  it("includes the guidance in the system prompt when tool outputs are present", () => {
+    const prompt = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(true);
+    expect(prompt).toContain(TOOL_OUTPUTS_GUIDANCE);
+  });
+
+  it("frames What to Evaluate around the agent's work and points at the user message", () => {
+    const prompt = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(true);
+    expect(prompt).toContain("## What to Evaluate");
+    expect(prompt).toMatch(/generated code together with the captured outputs of the tools it ran/);
+    expect(prompt).toMatch(/each criterion provided in the user message/);
+  });
+
+  it("omits the guidance when no tool outputs were captured", () => {
+    const prompt = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(false);
+    expect(prompt).not.toContain(TOOL_OUTPUTS_GUIDANCE);
+  });
+});
+
+describe("judge system/user prompt split (criteria + history are user data)", () => {
+  // The system prompt must stay invariant across criteria/iterations: it carries
+  // only the role, tools, judging method, instructions, and output format. The
+  // per-request data — the criterion/criteria and previous-iteration history —
+  // belongs in the user prompt.
+
+  describe("BundledStrategy", () => {
+    const sys = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(true);
+
+    it("keeps the criteria out of the system prompt", () => {
+      expect(sys).not.toContain("## Criteria");
+      expect(sys).not.toContain("does the code work");
+    });
+
+    it("keeps the previous-iteration history out of the system prompt", () => {
+      const sysWithHistoryPath = new TestableBundledStrategy("test-model").publicBuildSystemPrompt(false);
+      expect(sys).not.toContain("## Previous Iterations");
+      expect(sysWithHistoryPath).not.toContain("## Previous Iterations");
+    });
+
+    it("puts the criteria in the user prompt", () => {
+      const user = new TestableBundledStrategy("test-model").publicBuildUserPrompt();
+      expect(user).toContain("## Criteria");
+      expect(user).toContain("c1: does the code work");
+    });
+
+    it("appends previous-iteration history to the user prompt only when present", () => {
+      const strat = new TestableBundledStrategy("test-model");
+      const noHistory = strat.publicBuildUserPrompt();
+      expect(noHistory).not.toContain("## Previous Iterations");
+
+      const withHistory = strat.publicBuildUserPrompt(
+        [{ id: "c1", prompt: "does the code work" }],
+        [
+          {
+            iteration: 1,
+            codingAgentResponse: "did some work",
+            judgeFeedback: "needs more",
+            passed: false,
+          },
+        ]
+      );
+      expect(withHistory).toContain("## Previous Iterations");
+      expect(withHistory).toContain("### Iteration 1");
+    });
+  });
+
+  describe("IndependentStrategy", () => {
+    const strat = new TestableStrategy("test-model");
+    const sys = strat.publicBuildSystemPrompt(true);
+
+    it("keeps the criterion out of the system prompt", () => {
+      expect(sys).not.toContain("**Criterion**");
+      expect(sys).toMatch(/the criterion provided in the user message/);
+    });
+
+    it("keeps the previous-iteration history out of the system prompt", () => {
+      expect(sys).not.toContain("## Previous Iterations");
+    });
+
+    it("puts the criterion id and prompt in the user prompt", () => {
+      const user = strat.publicBuildUserPrompt({ id: "build-ok", prompt: "it builds" });
+      expect(user).toContain('Evaluate criterion "build-ok": it builds');
+    });
+
+    it("appends previous-iteration history to the user prompt only when present", () => {
+      const noHistory = strat.publicBuildUserPrompt({ id: "build-ok", prompt: "it builds" });
+      expect(noHistory).not.toContain("## Previous Iterations");
+
+      const withHistory = strat.publicBuildUserPrompt(
+        { id: "build-ok", prompt: "it builds" },
+        [{ iteration: 1, codingAgentResponse: "tried", passed: false }]
+      );
+      expect(withHistory).toContain("## Previous Iterations (for context)");
+      expect(withHistory).toContain("### Iteration 1");
+    });
   });
 });

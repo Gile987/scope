@@ -70,11 +70,90 @@ erDiagram
 - **SkillRevision** — An immutable, content-addressed snapshot of a skill at a specific commit. The `ref` format is `owner/repo/skillName@commitHash`.
 - **Run.skillRevisions** — Array of skill revision refs attached to a run. These are resolved at submit time and remain immutable throughout the run lifecycle.
 
+## Import Paths
+
+Skills can be added to Scope's internal library through two distinct flows. In both cases, **GitHub is always the source of skill content** — the actual SKILL.md files live in GitHub repositories. Skills.sh is a separate search/discovery registry that indexes publicly available skills.
+
+```mermaid
+flowchart LR
+    subgraph External["External Systems"]
+        GitHub["GitHub Repositories<br/>(skill content lives here)"]
+        SkillsSh["skills.sh Registry<br/>(search index only)"]
+    end
+
+    subgraph Scope["Scope"]
+        API["API"]
+        DB["MongoDB<br/>(skills + revisions)"]
+        Blob["Blob Storage<br/>(skill archives)"]
+    end
+
+    %% Path 1: GitHub Discovery
+    GitHub -->|"1. Discover (Trees API)"| API
+    API -->|"2. Fetch SKILL.md content"| GitHub
+    API -->|"3. Store"| DB
+    API -->|"4. Archive tar.gz"| Blob
+
+    %% Path 2: skills.sh Search
+    SkillsSh -->|"search results<br/>(id + metadata)"| API
+    API -->|"resolve from GitHub"| GitHub
+```
+
+### Path 1: GitHub Discovery (primary)
+
+Used when the user knows which GitHub repository contains skills.
+
+1. User provides a GitHub repo (`owner/repo`) via Portal wizard or CLI
+2. API calls `GET /api/v1/skills/discover?source=owner/repo` — scans the repo's well-known directories using the Trees API
+3. User selects one or more discovered skills
+4. API registers each skill (`POST /api/v1/skills`) and auto-resolves: fetches content from GitHub, archives it, and creates a `SkillRevision`
+
+This is the **Portal Import Wizard** flow and the **CLI `skill import`** flow. The skill's `origin` is set to `"manual"`.
+
+### Path 2: Skills.sh Search (discovery aid)
+
+Used when the user doesn't know which repo contains the skill they want.
+
+1. User searches via Portal or CLI (`skill search -q "react"`)
+2. API queries both the internal DB and the [skills.sh](https://skills.sh) external registry
+3. User selects a result from skills.sh
+4. API imports it the same way as Path 1 — registers the skill and resolves content from GitHub
+
+The skill's `origin` is set to `"skills-sh"` to indicate it was discovered through that registry.
+
+### Key distinction
+
+| Aspect | GitHub (Path 1) | Skills.sh (Path 2) |
+|--------|-----------------|---------------------|
+| What it provides | Actual skill content (SKILL.md files) | Search index / metadata |
+| When to use | Know the repo containing skills | Browsing/searching for skills |
+| Content source | Direct from GitHub | Still fetched from GitHub |
+| Origin value | `"manual"` | `"skills-sh"` |
+
 ## Lifecycle
 
 ### 1. Registration
 
 Skills are registered via the API by providing a GitHub source (`owner/repo`) and skill name. The API stores the skill record and immediately attempts to auto-resolve it: it fetches `SKILL.md` from GitHub at the latest commit, parses its YAML frontmatter (name, description, license, compatibility, etc.), uploads a tar.gz archive of the skill directory to Blob Storage, and creates the first `SkillRevision`. If auto-resolution fails (e.g., GitHub 404, network error), the skill record is still saved and the user can retry via `POST /api/v1/skills/:id/resolve`.
+
+#### Lenient spec validation
+
+Frontmatter is validated against the [Agent Skills spec](https://agentskills.io/specification), but validation is **non-blocking** for everything except a usable `description`. Spec *constraint* violations (length/format) do **not** fail the import — they are collected into the revision's `validationWarnings` array, which is surfaced in the Portal (`SkillDetail.tsx` banner + resolve toasts) and the CLI. This lets off-spec skills (e.g. an upstream skill with a 1057-char description) be imported while still flagging the deviation.
+
+The one hard requirement is a present, non-empty `description`. The `description` is the metadata an agent loads at startup to decide *when* to activate a skill (per the spec's progressive-disclosure model), and it has no fallback — a skill without one can never be invoked, so it is rejected at parse time (`skill-parser.ts`) rather than imported as a dead entry. A missing `name`, by contrast, is recoverable: the spec requires `name` to match the parent directory, so the parser tolerates an absent name and `SkillResolver.resolve` falls back to the directory name.
+
+| Frontmatter issue | Behavior |
+|-------------------|----------|
+| `name` longer than 64 characters | Warning, imports |
+| `name` not lowercase alphanumeric + hyphens (bad format) | Warning, imports |
+| `name` starts/ends with a hyphen or has consecutive hyphens | Warning, imports |
+| `name` does not match the parent directory | Warning, imports |
+| `name` missing | Recovered from the directory name, warning, imports |
+| `description` longer than 1024 characters | Warning, imports |
+| `compatibility` longer than 500 characters | Warning, imports |
+| **`description` missing or empty** | **Hard error — rejected** (skill would be unusable) |
+| **Unparseable YAML frontmatter** | **Hard error — rejected** |
+
+`validateSkillFrontmatter` (`skill-validator.ts`) returns an `error` only for a missing `description` and `warnings` for every other issue (a missing `name`, which is recovered from the parent directory, and every spec-constraint violation). `SkillResolver.resolve` never throws on validation; it merges any errors and warnings into the stored `validationWarnings`. (The empty-`description` case never reaches the validator because `skill-parser.ts` rejects it first.)
 
 #### Discovery
 
@@ -179,6 +258,9 @@ When runs are resubmitted:
 | `packages/shared/src/skills/skill-extractor.ts` | Download + extract skill archives to workspace |
 | `packages/shared/src/skills/skill-prompt.ts` | Discovery prompt generation (`<available_skills>` XML) |
 | `packages/shared/src/skills/skill-resolver.ts` | Resolve skill slugs → revision refs via GitHub |
+| `packages/shared/src/skills/skill-parser.ts` | Parse SKILL.md frontmatter (hard-requires `description`; recovers missing `name`) |
+| `packages/shared/src/skills/skill-validator.ts` | Lenient spec validation → non-blocking `validationWarnings` |
 | `packages/shared/src/queue/queue-processor.ts` | Orchestrates skill extraction before agent processing |
 | `apps/api/src/index.ts` | REST endpoints for skills, revisions, archives |
 | `apps/portal/src/pages/RunsList.tsx` | Skills column + resubmit override UI |
+| `apps/portal/src/pages/SkillDetail.tsx` | Skill detail view + `validationWarnings` banner/toasts |

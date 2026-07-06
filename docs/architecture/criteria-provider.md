@@ -4,6 +4,16 @@
 
 The **CriteriaProvider** abstraction unifies how the judge (and other consumers) load evaluation criteria. Instead of coupling the judge directly to a filesystem directory or a MongoDB collection, the provider interface allows transparent switching between different backends at runtime.
 
+> **Evidence available to criteria at evaluation time.** This doc covers how
+> criteria are *loaded*. When the judge *evaluates* a resolved criterion it can
+> gather evidence from three sources for the iteration under evaluation: the
+> workspace snapshot (always), the coding agent's captured tool outputs (via
+> `read_tool_outputs` / `get_tool_output`, when present), and the coding agent's
+> own response — its answer/explanation — via `read_agent_response` (issue #1136,
+> when present). This makes criteria that grade what the agent *said* (Q&A /
+> no-code-change deliverables) gradeable. See [gates §4.6](../design/gates.md) for
+> the request contract and tool details.
+
 ## Interface
 
 ```typescript
@@ -174,6 +184,27 @@ that the routes map to HTTP responses, avoiding fragile string matching:
 | `CriteriaNotFoundError` | 404 | Update/delete of an unknown id |
 | `CriteriaDuplicateError` | 409 | Create with an existing id |
 | `CriteriaHasDependentsError` | 409 | Delete blocked; carries `dependents: string[]` |
+
+### Cosmos index dependency for `getAll()`
+
+Every write invariant that inspects the existing set (`validateNoCycles`,
+`validateGateCompatibility`) calls `CriteriaStore.getAll()`, which lists active
+criteria with `.find({ deletedAt: { $exists: false } }).sort({ id: 1 })`. On
+Azure Cosmos DB for MongoDB (RU-based) an `ORDER BY` is only served by a **range
+index** on the sort path. The `criteria` collection's `unique { id: 1 }` index
+(migration `002`) is a uniqueness *constraint*, not a range index, so it does
+**not** satisfy `ORDER BY id` — the sort fails with `BadRequest (400) … "The
+index path corresponding to the specified order-by item is excluded."`
+
+Migration `024-add-criteria-sort-index.ts` adds a 2-field compound index
+`{ deletedAt: 1, id: 1 }` (distinct key pattern, so it coexists with the unique
+index) that matches the query shape and serves the sort. This is what makes
+creating a criterion with dependencies (#1192) and updating a criterion's
+dependencies (#1103) work on int/prod; locally Azurite/Mongo does not enforce
+Cosmos index semantics, so the bug only reproduced against real Cosmos. The fix
+was validated end-to-end against the shared dev Cosmos account (see
+[docs/shared-dev-infra.md](../shared-dev-infra.md)). Any future `.sort()` added
+to a `CriteriaStore` read must be backed by a matching Cosmos index.
 
 ### Bulk seed (`POST /api/v1/criteria/seed`)
 

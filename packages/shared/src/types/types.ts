@@ -32,7 +32,7 @@ export interface GateMetadata {
 export const GATE_METADATA: Record<GateId, GateMetadata> = {
   select: {
     id: "select",
-    label: "Select",
+    label: "Requirements",
     description: "Agent implements the task (current behaviour).",
   },
   build: {
@@ -62,11 +62,24 @@ export function isGateId(value: unknown): value is GateId {
   return typeof value === "string" && (GATES as readonly string[]).includes(value);
 }
 
+/** Non-gate prompt kinds — prompt types that are not pipeline gates. */
+export const NON_GATE_PROMPT_TYPES = ["agents.md"] as const;
+
+/** Every prompt-type discriminator: the gates plus non-gate kinds. */
+export const PROMPT_TYPES = [...GATES, ...NON_GATE_PROMPT_TYPES] as const;
+
 /**
- * A prompt's type discriminator — one literal per gate. The prompt that drives
- * a gate must have a `type` equal to that gate's id.
+ * A prompt's type discriminator. Either a gate id — the prompt that drives that
+ * gate, where `select` is the request's task prompt — or a non-gate kind such
+ * as `agents.md` (an AGENTS.md instruction file delivered into the agent
+ * workspace). Absent on a document ⇒ legacy `'select'`.
  */
-export type PromptType = GateId;
+export type PromptType = (typeof PROMPT_TYPES)[number];
+
+/** True when `value` is a valid prompt type (a gate id or a non-gate kind). */
+export function isPromptType(value: unknown): value is PromptType {
+  return typeof value === "string" && (PROMPT_TYPES as readonly string[]).includes(value);
+}
 
 /**
  * Per-gate configuration on a request. Describes which prompt drives the gate,
@@ -267,8 +280,22 @@ export interface RequestDocument {
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
   taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → TaskPromptDocument._id)
   promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
+  /**
+  * FK → TaskPromptDocument._id of an AGENTS.md-typed prompt to deliver into
+  * the agent's workspace for this run. When set, the worker writes the
+  * resolved content to `<workspace>/AGENTS.md` before the run starts.
+  */
+  agentsMdPromptId?: string;
+  /**
+  * Lineage edges for the AGENTS.md candidate: the parent AGENTS.md prompt ids
+  * this candidate was derived from. Empty/absent = root (seed); one entry =
+  * reflective mutation; two entries = merge. Recorded on the request so the
+  * full lineage DAG can be reconstructed by querying related requests.
+  */
+  agentsMdParentIds?: string[];
   mcpServers?: string[];          // MCP server slugs selected for this run
   skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
+  codebaseRevisionId?: string;    // FK → CodebaseRevisionDocument._id — seeds the workspace before the agent starts
   extensions?: string[];           // VS Code extension IDs selected for this run (e.g. "ms-python.python")
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
@@ -344,6 +371,9 @@ export interface RunState {
   outcome?: "succeeded" | "failed" | "finished";
   result?: string;
   error?: string;
+  /** Machine-readable error classification (e.g. "model_unavailable", "model_discovery_failed", "auth_failed").
+   *  Set alongside `error` when the failure has a well-known cause. */
+  errorCode?: string;
   /** Full blob URL pointing to this attempt's JSONL log blob in the `logs`
    *  container, e.g. `https://<account>.blob.core.windows.net/logs/{requestId}/runs/{runId}/run.jsonl`.
    *  Set at submit time so the SSE replay endpoint can read it directly from
@@ -731,8 +761,22 @@ export interface InsightDocument {
 /** Task prompt document stored in MongoDB. Immutable — text cannot be changed after creation. */
 export interface TaskPromptDocument {
   _id: string;                          // UUIDv5 (content-addressed; see computePromptId)
-  type?: PromptType;                    // Which gate this prompt drives. Absent = legacy "select".
-  text: string;                         // Full task prompt text
+  /**
+   * Inline prompt body. Present when the body is small enough to store in
+   * Mongo (≤ PROMPT_INLINE_MAX_BYTES). Mutually exclusive with
+   * `contentBlobUrl` — exactly one is set. Optional so large bodies can live
+   * in blob storage instead.
+   */
+  text?: string;
+  /**
+   * Blob reference to the prompt body when it exceeds the inline size
+   * threshold. Mutually exclusive with `text`. The body is fetched via
+   * `resolvePromptText` server-side.
+   */
+  contentBlobUrl?: string;
+  /** Which gate this prompt drives, or a non-gate kind (e.g. `agents.md`).
+   *  Absent ⇒ legacy `'select'` (the request's task prompt). */
+  type?: PromptType;
   features?: PromptFeatureResult[];     // Detected prompt features
   featuresExtractedAt?: Date;           // When features were last extracted
   createdAt: Date;
@@ -747,6 +791,12 @@ export interface TaskPromptDocument {
 export interface PromptFeatureConfig {
   id: string;
   prompt: string;
+  /**
+   * Which prompt type this feature applies to. Absent ⇒ `'select'` (backward
+   * compatible). Feature extraction only considers features whose `type`
+   * matches the prompt being extracted.
+   */
+  type?: PromptType;
 }
 
 /** Prompt feature document stored in MongoDB (extends PromptFeatureConfig with DB metadata) */

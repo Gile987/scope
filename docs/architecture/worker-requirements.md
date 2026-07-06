@@ -166,6 +166,8 @@ The queue processor automatically sanitizes HAR files (strips credentials) befor
 
 HAR files are parsed to extract `ToolCall[]` data (tool name, arguments, timestamps) for analytics. The `stopAndCollectHar()` method also extracts `TokenUsage` from HAR entries, enabling token usage reporting without agent-specific instrumentation.
 
+> **Anthropic prompt-cache tokens**: For Claude/Anthropic models the API response `usage.input_tokens` is only the *non-cached* remainder of the prompt — the bulk is reported separately in `cache_creation_input_tokens` and `cache_read_input_tokens`. The extractor sums all three into the prompt count, so prompt tokens reflect the full prompt size (cached + uncached). OpenAI/GitHub Models `prompt_tokens` already includes cached tokens and is used as-is.
+
 For native CLI binaries that don't honor `NODE_EXTRA_CA_CERTS` (e.g., the Copilot CLI binary), workers should create a combined CA bundle using `proxyClient.createCombinedCaBundle()` and inject it via `SSL_CERT_FILE`.
 
 **When required:** All CLI-based workers (Copilot, Claude Code) and desktop workers (VS Code Electron) should support HAR capture. Browser-based workers (VS Code Web) may use alternative approaches.
@@ -338,7 +340,7 @@ All workers must ensure that their coding agent can execute tool calls and file 
 
 The mechanism varies by worker type:
 
-- **ACP-based workers** — implement `requestPermission()` to auto-approve all permission requests, and pass CLI flags like `--yolo` where supported:
+- **ACP-based workers** — implement `requestPermission()` to auto-approve all permission requests, **and** set the ACP session mode to `autopilot` after creating the session. The `--yolo` CLI flag alone does **not** change the ACP session mode: an ACP session starts in `agent` mode, where execute/bash tool calls (e.g. `npm run build`) are denied non-interactively. Autopilot mode enables allow-all and runs without prompts. The Copilot CLI advertises modes by their canonical ACP URL ids (e.g. `https://agentclientprotocol.com/protocol/session-modes#autopilot`), so match on the full id:
 
 ```typescript
 async requestPermission(
@@ -349,6 +351,15 @@ async requestPermission(
     return { outcome: { outcome: "selected", optionId: firstOption.optionId } };
   }
   return { outcome: { outcome: "cancelled" } };
+}
+
+// After session/new — switch to autopilot so commands run headlessly.
+const AUTOPILOT_MODE_ID =
+  "https://agentclientprotocol.com/protocol/session-modes#autopilot";
+const autopilot = sessionResult.modes?.availableModes
+  ?.find((m) => m.id === AUTOPILOT_MODE_ID || m.id.endsWith("#autopilot"));
+if (autopilot) {
+  await connection.setSessionMode({ sessionId, modeId: autopilot.id });
 }
 ```
 

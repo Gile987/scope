@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { TaskPrompt } from "@/types";
+import type { TaskPrompt, PromptType } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -22,9 +22,10 @@ import { Badge } from "@/components/ui/badge";
 import { Trash2, Eye, Plus, List, ArrowRight, ArrowLeft, Info, Loader2, MessageSquareText } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
+import { TaskPromptBadge } from "@/components/TaskPromptBadge";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { Stepper } from "@/components/Stepper";
-import { GATE_METADATA, type PromptType } from "@/lib/gates";
+import { GATE_METADATA, promptTypeLabel } from "@/lib/gates";
 import { useVisibleGates } from "@/hooks/useVisibleGates";
 import { KbdBadge } from "@/components/KbdBadge";
 import {
@@ -166,10 +167,12 @@ export function TaskPromptList() {
       width: "140px",
       hidden: visibility.isHidden("id"),
       cell: (tp) => (
-        <span className="flex items-center gap-1.5 font-mono text-xs">
-          <MessageSquareText className="h-3.5 w-3.5 text-muted-foreground" />
-          {formatId(tp._id)}
-        </span>
+        <TaskPromptBadge taskPromptId={tp._id} prompt={tp}>
+          <span className="flex items-center gap-1.5 font-mono text-xs">
+            <MessageSquareText className="h-3.5 w-3.5 text-muted-foreground" />
+            {formatId(tp._id)}
+          </span>
+        </TaskPromptBadge>
       ),
     },
     {
@@ -177,7 +180,7 @@ export function TaskPromptList() {
       header: "Text",
       hidden: visibility.isHidden("text"),
       cell: (tp) => (
-        <span className="text-sm text-muted-foreground">{truncate(tp.text, 80)}</span>
+        <span className="text-sm text-muted-foreground">{truncate(tp.text ?? "", 80)}</span>
       ),
     },
     {
@@ -187,7 +190,7 @@ export function TaskPromptList() {
       hidden: visibility.isHidden("type"),
       cell: (tp) => (
         <Badge variant="secondary" className="text-xs">
-          {GATE_METADATA[tp.type ?? "select"].label}
+          {promptTypeLabel(tp.type)}
         </Badge>
       ),
     },
@@ -314,6 +317,7 @@ export function TaskPromptList() {
                           {GATE_METADATA[gate].label}
                         </SelectItem>
                       ))}
+                      <SelectItem value="agents.md">{promptTypeLabel("agents.md")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -399,7 +403,10 @@ export function TaskPromptList() {
         >
           <FilterSection title="Prompt type" defaultOpen>
             <CheckboxFilterGroup
-              options={visibleGates.map((gate) => ({ value: gate, label: GATE_METADATA[gate].label }))}
+              options={[
+                ...visibleGates.map((gate) => ({ value: gate, label: GATE_METADATA[gate].label })),
+                { value: "agents.md", label: promptTypeLabel("agents.md") },
+              ]}
               selected={selectedTypes}
               onToggle={(value) => state.setFilter("type", selectedTypes.includes(value as PromptType) ? [] : [value])}
             />

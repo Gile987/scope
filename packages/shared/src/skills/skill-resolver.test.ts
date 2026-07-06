@@ -193,3 +193,94 @@ description: Vector search skill
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// SkillResolver.resolve — lenient validation
+// ---------------------------------------------------------------------------
+
+describe("SkillResolver.resolve (lenient validation)", () => {
+  const originalFetch = globalThis.fetch;
+  let resolver: SkillResolver;
+
+  beforeEach(() => {
+    resolver = new SkillResolver();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  function res(status: number, body: unknown, isText = false): Response {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status === 200 ? "OK" : "Error",
+      headers: { get: () => null },
+      json: async () => body,
+      text: async () => (isText ? String(body) : JSON.stringify(body)),
+    } as unknown as Response;
+  }
+
+  /** Minimal in-memory store stub. */
+  function makeStore() {
+    return {
+      created: undefined as unknown,
+      async getByRef() {
+        return null;
+      },
+      async findOrCreate(doc: unknown) {
+        this.created = doc;
+        return doc;
+      },
+    };
+  }
+
+  it("imports a skill with an over-long description and stores it as a warning", async () => {
+    const longDescription = "x".repeat(1100);
+    const skillMd = `---\nname: my-skill\ndescription: ${longDescription}\n---\n\n# My Skill`;
+
+    const fetchMock = vi.fn(async (input: string) => {
+      const url = String(input);
+      // discoverSkillPath → first checks skills/my-skill/SKILL.md
+      if (url.endsWith("/contents/skills/my-skill/SKILL.md")) {
+        return res(200, { ok: true });
+      }
+      // getLatestCommit
+      if (url.includes("/commits?path=")) {
+        return res(200, [{ sha: "abc1234def", commit: { committer: { date: "2026-01-01T00:00:00Z" } } }]);
+      }
+      // downloadSkillFiles → directory listing for skills/my-skill
+      if (url.includes("/contents/skills/my-skill?ref=")) {
+        return res(200, [
+          {
+            name: "SKILL.md",
+            path: "skills/my-skill/SKILL.md",
+            type: "file",
+            download_url: "https://raw.example/skills/my-skill/SKILL.md",
+          },
+        ]);
+      }
+      // download_url content
+      if (url === "https://raw.example/skills/my-skill/SKILL.md") {
+        return res(200, skillMd, true);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const store = makeStore();
+    const revision = await resolver.resolve(
+      "owner/repo",
+      "my-skill",
+      store as never,
+      async () => "https://blob.example/archive.tar.gz"
+    );
+
+    expect(revision.description).toBe(longDescription);
+    expect(revision.validationWarnings).toBeDefined();
+    expect(revision.validationWarnings).toContainEqual(
+      expect.stringContaining("description must be at most 1024 characters")
+    );
+  });
+});

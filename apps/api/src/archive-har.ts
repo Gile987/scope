@@ -364,6 +364,21 @@ export interface BlobDownloader {
 /** A run document with the fields needed for archive packing. */
 export interface ArchivableRun {
   _id: string;
+  /** FK → CodebaseRevisionDocument._id when the run was seeded from a codebase. */
+  codebaseRevisionId?: string;
+  /**
+   * Codebase revision provenance, attached by the archive route when the run
+   * was seeded from a codebase. Serialized into run.yaml and its snapshot is
+   * bundled as `codebase.tar.gz`. `archiveUrl` is rewritten to the relative
+   * bundled path at pack time (the original blob URL is preserved in
+   * `archiveBlobUrl`).
+   */
+  codebase?: {
+    ref?: string;
+    archiveUrl?: string;
+    archiveBlobUrl?: string;
+    [key: string]: unknown;
+  };
   run?: {
     logsUrl?: string;
     harUrl?: string;
@@ -410,6 +425,14 @@ export async function packRunIntoTar(
 
   // Entry 1: run.yaml — the full run document (with relative HAR paths)
   const archiveResource = rewriteHarUrlsForArchive(resource);
+  // Rewrite the codebase archive URL to the bundled relative path so run.yaml
+  // references the packed `codebase.tar.gz`, while preserving the original blob
+  // URL under `archiveBlobUrl` for provenance.
+  const codebaseBlobUrl = resource.codebase?.archiveUrl;
+  if (archiveResource.codebase && codebaseBlobUrl) {
+    archiveResource.codebase.archiveBlobUrl = codebaseBlobUrl;
+    archiveResource.codebase.archiveUrl = "codebase.tar.gz";
+  }
   const yamlContent = yamlStringify(archiveResource, { lineWidth: 120 });
   const yamlBuf = Buffer.from(yamlContent, "utf-8");
   pack.entry({ name: `${id}/run.yaml`, size: yamlBuf.length }, yamlBuf);
@@ -436,6 +459,29 @@ export async function packRunIntoTar(
     } catch (blobError) {
       if (isBlobNotFound(blobError)) continue;
       throw blobError;
+    }
+  }
+
+  // Bundle the seeding codebase snapshot (the tar.gz the workspace was seeded
+  // from) as `codebase.tar.gz`, so the archive is a self-contained record of
+  // the exact starting point the agent worked from.
+  const codebaseUrl = resource.codebase?.archiveUrl;
+  if (codebaseUrl) {
+    try {
+      const blobName = blobNameFromSnapshotsUrl(codebaseUrl);
+      if (blobName) {
+        const blobClient = container.getBlockBlobClient(blobName);
+        const downloadResponse = await blobClient.download();
+        if (downloadResponse.readableStreamBody && downloadResponse.contentLength) {
+          const entry = pack.entry({
+            name: `${id}/codebase.tar.gz`,
+            size: downloadResponse.contentLength,
+          });
+          await pipeline(downloadResponse.readableStreamBody, entry);
+        }
+      }
+    } catch (blobError) {
+      if (!isBlobNotFound(blobError)) throw blobError;
     }
   }
 

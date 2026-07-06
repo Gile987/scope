@@ -62,7 +62,12 @@ apiRoute(ctx.app, ctx.registry, {
     currentId: z.string().optional(),
     gates: z.array(z.string()).optional(),
   }),
-  response: z.object({ prompt: z.string() }),
+  response: z.object({
+    prompt: z.string(),
+    suggestedId: z.string(),
+    suggestedParents: z.array(z.string()),
+    suggestedChildren: z.array(z.string()),
+  }),
   errorResponses: {
     400: { description: "Empty behavior string" },
     503: { description: "LLM not configured" },
@@ -186,6 +191,7 @@ apiRoute(ctx.app, ctx.registry, {
               ...(Array.isArray(config.gates) ? { gates: config.gates } : {}),
               createdAt: new Date(),
             },
+            $unset: { deletedAt: "" },
           },
           { upsert: true },
         );
@@ -199,16 +205,30 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
-// GET /api/v1/criteria — list all criteria (with optional ?q= search)
+// GET /api/v1/criteria — list all criteria (with optional ?q= search, ?ids= filter with ancestor resolution)
 apiRoute(ctx.app, ctx.registry, {
   method: "get",
   path: "/api/v1/criteria",
   tags: ["Criteria"],
   summary: "List criteria",
-  query: z.object({ q: z.string().optional() }),
+  query: z.object({
+    q: z.string().optional(),
+    ids: z.string().optional().describe("Comma-separated criterion IDs to include"),
+    ancestors: z.enum(["true", "false"]).optional().describe("When true and ids is set, also include dependency ancestors"),
+  }),
   response: z.array(CriteriaResponseSchema),
   handler: async (req, res) => {
     const q = req.query.q;
+    const idsParam = req.query.ids;
+
+    // `q` (regex search) and `ids` (exact set + optional ancestor resolution)
+    // are mutually exclusive: applying the regex filter first would silently
+    // drop ancestors that don't match `q`, yielding an incomplete dependency tree.
+    if (q && idsParam) {
+      res.status(400).json({ error: "Query params 'q' and 'ids' are mutually exclusive" });
+      return;
+    }
+
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (q) {
       filter.$or = [
@@ -216,8 +236,38 @@ apiRoute(ctx.app, ctx.registry, {
         { prompt: { $regex: q, $options: "i" } },
       ];
     }
-    const criteria = await ctx.criteriaCollection.find(filter).toArray();
+    let criteria = await ctx.criteriaCollection.find(filter).toArray();
     criteria.sort((a, b) => a.id.localeCompare(b.id));
+
+    // Filter by IDs with optional ancestor resolution
+    if (idsParam) {
+      const requestedIds = idsParam.split(",").map(s => s.trim()).filter(Boolean);
+      const includeAncestors = req.query.ancestors === "true";
+
+      if (includeAncestors) {
+        const byId = new Map(criteria.map(c => [c.id, c]));
+        const included = new Set<string>();
+
+        const resolve = (id: string) => {
+          if (included.has(id)) return;
+          const criterion = byId.get(id);
+          if (!criterion) return;
+          included.add(id);
+          for (const dep of criterion.dependsOn ?? []) {
+            resolve(dep);
+          }
+        };
+
+        for (const id of requestedIds) {
+          resolve(id);
+        }
+        criteria = criteria.filter(c => included.has(c.id));
+      } else {
+        const idSet = new Set(requestedIds);
+        criteria = criteria.filter(c => idSet.has(c.id));
+      }
+    }
+
     res.json(criteria);
   },
 });
