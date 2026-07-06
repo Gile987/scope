@@ -150,6 +150,27 @@ services:
     command: >
       sh -c "az storage container create --name har --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true"
 
+  # Entra Local — local, MSAL-compatible Microsoft Entra ID emulator used for
+  # Portal authentication in local dev (docs/architecture/auth-rbac.md §1/§8).
+  # Ships a deterministic seed directory (tenant 1111…, SPA app cccc…-0001,
+  # users alice@/bob@entralocal.dev / Password1!). Dev-only, intentionally
+  # insecure — never expose it beyond localhost. Pinned to the latest tag.
+  #
+  # Opt-in via the `auth` profile, e.g. `pnpm docker:up:auth`. Serves HTTPS on
+  # 8443 with a self-signed cert the browser must trust; see the auth docs.
+  entra-local:
+    image: ghcr.io/cmaneu/entra-local:0.0.3
+    profiles: [auth]
+    ports:
+      - "${ENTRA_LOCAL_PORT:-8443}:8443"
+    volumes:
+      - entra_local_data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('https').get({host:'localhost',port:8443,path:'/health',rejectUnauthorized:false},(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # ===========================================================================
   # Application services
   # ===========================================================================
@@ -743,6 +764,7 @@ volumes:
   mongodb_data:
   azurite_data:
   lowkey_vault_data:
+  entra_local_data:
   gateway_cert:
   copilot_har_output:
   copilot_devproxy_cert:

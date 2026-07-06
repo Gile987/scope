@@ -874,11 +874,26 @@ local dev exercises the same verification path as production. New env vars are d
    `--debug-zip` produces a zip, and a redaction test asserts no token/refresh-token/
    service key ever appears in the output. Depends on 7.
 
-10. ⬜ **Portal auth** — `@azure/msal-react`; `MsalProvider`; route guard; token
+10. 🟡 **Portal auth** — `@azure/msal-react`; `MsalProvider`; route guard; token
     injection in `api.ts`; `AuthContext` with `useMe()`; permission-aware nav/pages;
     **hardcoded IdP config** (no `/auth/config`). **No dev role switcher.** **Done when**
     unauthenticated users are redirected to login, runs list is self-scoped, and admin UI
     is hidden for `user`. Depends on 6.
+
+    > **MVP shipped (authentication only).** Delivered so far: MSAL sign-in
+    > (auth-code + PKCE redirect), `MsalProvider` + `AuthProvider`, a `RequireAuth`
+    > route guard, a header sign-in/sign-out `UserMenu`, and centralized token
+    > acquisition + silent refresh + `401`→re-auth handled entirely inside the
+    > `api-client` interceptor (`apps/portal/src/lib/api-client.ts`, via the
+    > `setApiTokenProvider`/`setReauthHandler` seams). IdP config is build-time
+    > (`VITE_AUTH_*`, see [ENV_VARIABLES.md](../../ENV_VARIABLES.md)) defaulting to
+    > the `entra-local` emulator for local dev.
+    >
+    > **Deferred (needs subtask 6 + API-side authn):** because the API does not
+    > verify tokens yet, enforcement is **client-side only** and identity shown in
+    > the UI comes from **MSAL account token claims**, not `GET /api/v1/users/me`
+    > (no `useMe()` yet). Self-scoped runs lists and permission-aware nav / admin-UI
+    > hiding are authorization concerns and are **out of scope for this MVP**.
 
 11. ⬜ **Service-to-service auth** *(co-requisite of subtask 5)* — **Per-service** principal
     recognition: per-service JWT (verified with the Scope public key) **or**

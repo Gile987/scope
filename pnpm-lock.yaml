@@ -313,6 +313,12 @@ importers:
 
   apps/portal:
     dependencies:
+      '@azure/msal-browser':
+        specifier: ^5.16.0
+        version: 5.16.0
+      '@azure/msal-react':
+        specifier: ^5.5.1
+        version: 5.5.1(@azure/msal-browser@5.16.0)(react@19.2.4)
       '@radix-ui/react-alert-dialog':
         specifier: ^1.1.4
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.13))(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -1027,13 +1033,28 @@ packages:
     resolution: {integrity: sha512-al2u2fTchbClq3L4C1NlqLm+vwKfhYCPtZN2LR/9xJVaQ4Mnrwf5vANvuyPSJHcGvw50UBmhuVmYUAhTEetTpA==}
     engines: {node: '>=0.8.0'}
 
+  '@azure/msal-browser@5.16.0':
+    resolution: {integrity: sha512-Wc75FGnQgYpsm5jsOqn1H8AXsh8vXruA6vwip1nhjrJxwby7juxKAIVLr7csepmHiwdZGr6EwI5BlSc3PizEtQ==}
+    engines: {node: '>=0.8.0'}
+
   '@azure/msal-common@15.14.1':
     resolution: {integrity: sha512-IkzF7Pywt6QKTS0kwdCv/XV8x8JXknZDvSjj/IccooxnP373T5jaadO3FnOrbWo3S0UqkfIDyZNTaQ/oAgRdXw==}
+    engines: {node: '>=0.8.0'}
+
+  '@azure/msal-common@16.11.0':
+    resolution: {integrity: sha512-UikJOtMwkFpZNzTH6Dqk8UTUPbow15zH3e0UjGYZy69lYENW/S05gMLhbxI2eonz66uALhIljvhsSMEb6+O30g==}
     engines: {node: '>=0.8.0'}
 
   '@azure/msal-node@3.8.6':
     resolution: {integrity: sha512-XTmhdItcBckcVVTy65Xp+42xG4LX5GK+9AqAsXPXk4IqUNv+LyQo5TMwNjuFYBfAB2GTG9iSQGk+QLc03vhf3w==}
     engines: {node: '>=16'}
+
+  '@azure/msal-react@5.5.1':
+    resolution: {integrity: sha512-HvbRojA2Fcgexy+4uLmyhzLJX50bqwzfdmVhAbfTb+IrnZNlGLlGbaEbwdbDQXXpyEa9bzeV5v/QuPmKEGg8cw==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@azure/msal-browser': ^5.16.0
+      react: ^16.8.0 || ^17 || ^18 || ^19.2.1
 
   '@azure/storage-blob@12.30.0':
     resolution: {integrity: sha512-peDCR8blSqhsAKDbpSP/o55S4sheNwSrblvCaHUZ5xUI73XA7ieUGGwrONgD/Fng0EoDe1VOa3fAQ7+WGB3Ocg==}
@@ -6898,13 +6919,24 @@ snapshots:
     dependencies:
       '@azure/msal-common': 15.14.1
 
+  '@azure/msal-browser@5.16.0':
+    dependencies:
+      '@azure/msal-common': 16.11.0
+
   '@azure/msal-common@15.14.1': {}
+
+  '@azure/msal-common@16.11.0': {}
 
   '@azure/msal-node@3.8.6':
     dependencies:
       '@azure/msal-common': 15.14.1
       jsonwebtoken: 9.0.3
       uuid: 8.3.2
+
+  '@azure/msal-react@5.5.1(@azure/msal-browser@5.16.0)(react@19.2.4)':
+    dependencies:
+      '@azure/msal-browser': 5.16.0
+      react: 19.2.4
 
   '@azure/storage-blob@12.30.0':
     dependencies:

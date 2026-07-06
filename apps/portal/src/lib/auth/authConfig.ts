@@ -1,0 +1,168 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+/**
+ * Portal authentication configuration (Microsoft Entra ID via MSAL).
+ *
+ * Per the auth spec ([docs/architecture/auth-rbac.md](../../../../../docs/architecture/auth-rbac.md)
+ * §8, subtask 10) the Portal's IdP config is **build-time** configuration, not
+ * fetched from the API. It is read from `VITE_AUTH_*` environment variables so
+ * retargeting the IdP (local `entra-local` emulator vs. production Entra ID) is
+ * a config change, mirroring the CLI.
+ *
+ * In `dev` builds the values default to the deterministic seed directory shipped
+ * by [entra-local](https://github.com/cmaneu/entra-local) (tag `v0.0.3`) so
+ * sign-in works out of the box after the emulator is running and its self-signed
+ * certificate is trusted. Production builds **must** supply the `VITE_AUTH_*`
+ * values (baked into the bundle at build time); when they are missing the config
+ * is reported as not configured so the app can surface a clear error instead of
+ * silently pointing at `localhost`.
+ *
+ * Only **Entra** is wired today. The shape mirrors the shared `AuthClientConfig`
+ * so adding another IdP later is a config + provider change, not a call-site one.
+ */
+import {
+  LogLevel,
+  ProtocolMode as MsalProtocolMode,
+  type Configuration,
+} from "@azure/msal-browser";
+
+export type ProtocolMode = "AAD" | "OIDC";
+
+/** Portal-facing view of the resolved auth configuration. */
+export interface PortalAuthConfig {
+  clientId: string;
+  authority: string;
+  knownAuthorities: string[];
+  /** Scopes requested for the API access token. */
+  scopes: string[];
+  redirectUri: string;
+  postLogoutRedirectUri: string;
+  protocolMode: ProtocolMode;
+  /** Where MSAL persists its token cache. */
+  cacheLocation: "localStorage" | "sessionStorage";
+  /**
+   * `true` when a usable configuration was resolved. In production this requires
+   * the `VITE_AUTH_*` env vars to be present at build time.
+   */
+  isConfigured: boolean;
+}
+
+/** entra-local (`v0.0.3`) seeded directory — used as dev-only defaults. */
+const ENTRA_LOCAL_DEFAULTS = {
+  /** Seeded public SPA app registration (redirect + `access_as_user` scope). */
+  clientId: "cccccccc-cccc-cccc-cccc-cccccccc0001",
+  /** Seeded fixed tenant, OIDC v2.0 authority served over local HTTPS. */
+  authority: "https://localhost:8443/11111111-1111-1111-1111-111111111111/v2.0",
+  /** Custom (non-Microsoft) authority host must be allow-listed for MSAL. */
+  knownAuthorities: ["localhost:8443"],
+  /** Scope exposed by the seeded SPA app. */
+  scopes: ["access_as_user"],
+  /** entra-local speaks generic OIDC, not the AAD-specific protocol. */
+  protocolMode: "OIDC" as ProtocolMode,
+};
+
+function envList(value: string | undefined): string[] | undefined {
+  if (!value) return undefined;
+  const items = value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return items.length ? items : undefined;
+}
+
+function resolveConfig(): PortalAuthConfig {
+  const env = import.meta.env;
+  const isDev = Boolean(env.DEV);
+
+  const clientId =
+    (env.VITE_AUTH_CLIENT_ID as string | undefined) ??
+    (isDev ? ENTRA_LOCAL_DEFAULTS.clientId : "");
+  const authority =
+    (env.VITE_AUTH_AUTHORITY as string | undefined) ??
+    (isDev ? ENTRA_LOCAL_DEFAULTS.authority : "");
+  const knownAuthorities =
+    envList(env.VITE_AUTH_KNOWN_AUTHORITIES as string | undefined) ??
+    (isDev ? ENTRA_LOCAL_DEFAULTS.knownAuthorities : []);
+  const scopes =
+    envList(env.VITE_AUTH_SCOPES as string | undefined) ??
+    (isDev ? ENTRA_LOCAL_DEFAULTS.scopes : []);
+  const protocolMode =
+    (env.VITE_AUTH_PROTOCOL_MODE as ProtocolMode | undefined) ??
+    (isDev ? ENTRA_LOCAL_DEFAULTS.protocolMode : "AAD");
+
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const redirectUri =
+    (env.VITE_AUTH_REDIRECT_URI as string | undefined) ?? origin;
+  const postLogoutRedirectUri =
+    (env.VITE_AUTH_POST_LOGOUT_REDIRECT_URI as string | undefined) ?? origin;
+
+  const cacheLocation =
+    (env.VITE_AUTH_CACHE_LOCATION as
+      | "localStorage"
+      | "sessionStorage"
+      | undefined) ?? "localStorage";
+
+  return {
+    clientId,
+    authority,
+    knownAuthorities,
+    scopes,
+    redirectUri,
+    postLogoutRedirectUri,
+    protocolMode,
+    cacheLocation,
+    isConfigured: Boolean(clientId && authority),
+  };
+}
+
+/** The resolved Portal auth configuration (evaluated once at module load). */
+export const authConfig: PortalAuthConfig = resolveConfig();
+
+/** Scopes requested when acquiring an API access token. */
+export const apiTokenRequestScopes: string[] = authConfig.scopes;
+
+/**
+ * Scopes requested at interactive login. `openid`/`profile` yield an ID token
+ * with the identity claims the UI displays; the API scopes are added so the
+ * first silent acquisition has a cached access token to return.
+ */
+export const loginRequestScopes: string[] = [
+  "openid",
+  "profile",
+  ...authConfig.scopes,
+];
+
+/** Build the MSAL browser {@link Configuration} from {@link authConfig}. */
+export function buildMsalConfiguration(): Configuration {
+  return {
+    auth: {
+      clientId: authConfig.clientId,
+      authority: authConfig.authority,
+      knownAuthorities: authConfig.knownAuthorities,
+      redirectUri: authConfig.redirectUri,
+      postLogoutRedirectUri: authConfig.postLogoutRedirectUri,
+    },
+    cache: {
+      cacheLocation: authConfig.cacheLocation,
+    },
+    system: {
+      // entra-local speaks generic OIDC; production Entra uses the AAD protocol.
+      // In msal-browser v5 this lives under `system`, not `auth`.
+      protocolMode:
+        authConfig.protocolMode === "OIDC"
+          ? MsalProtocolMode.OIDC
+          : MsalProtocolMode.AAD,
+      loggerOptions: {
+        logLevel: import.meta.env.DEV ? LogLevel.Warning : LogLevel.Error,
+        piiLoggingEnabled: false,
+        loggerCallback: (level, message, containsPii) => {
+          if (containsPii) return;
+          // eslint-disable-next-line no-console
+          if (level === LogLevel.Error) console.error(message);
+          else if (level === LogLevel.Warning) console.warn(message);
+        },
+      },
+    },
+  };
+}

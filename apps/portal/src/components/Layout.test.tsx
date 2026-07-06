@@ -5,20 +5,34 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { PublicClientApplication } from "@azure/msal-browser";
+import { MsalProvider } from "@azure/msal-react";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { AuthProvider } from "@/contexts/AuthContext";
 import { Layout } from "./Layout";
+
+// The header renders <UserMenu />, which reads auth state via useAuth ->
+// MsalProvider. Provide a minimal, un-authenticated MSAL instance so Layout can
+// render in isolation without a live IdP.
+const msalInstance = new PublicClientApplication({
+  auth: { clientId: "test-client-id" },
+});
 
 function renderLayout(path = "/runs") {
   return render(
-    <ThemeProvider defaultTheme="light">
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route path="/runs" element={<div>Runs page</div>} />
-          </Route>
-        </Routes>
-      </MemoryRouter>
-    </ThemeProvider>,
+    <MsalProvider instance={msalInstance}>
+      <AuthProvider>
+        <ThemeProvider defaultTheme="light">
+          <MemoryRouter initialEntries={[path]}>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route path="/runs" element={<div>Runs page</div>} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </ThemeProvider>
+      </AuthProvider>
+    </MsalProvider>,
   );
 }
 

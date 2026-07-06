@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/tooltip";
 import { VersionFooter } from "./VersionFooter";
 import { ThemeToggle } from "./ThemeToggle";
+import { UserMenu } from "./UserMenu";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 
 interface NavItem {
@@ -270,7 +271,10 @@ export function Layout() {
             <Activity className="h-5 w-5 text-action" />
             <span>Scope</span>
           </Link>
-          <ThemeToggle />
+          <div className="flex items-center gap-1">
+            <ThemeToggle />
+            <UserMenu />
+          </div>
         </header>
 
         <div className="flex min-h-0 flex-1">

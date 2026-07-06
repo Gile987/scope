@@ -58,6 +58,7 @@ import { TaskPromptPreviewPanel } from "@/pages/TaskPromptPreviewPanel";
 import { RunPreviewPanel } from "@/pages/RunPreviewPanel";
 import { Admin } from "@/pages/Admin";
 import { FeatureRoute } from "@/components/FeatureRoute";
+import { RequireAuth } from "@/components/auth/RequireAuth";
 import { useFavicon } from "@/hooks/useFavicon";
 
 export function App() {
@@ -65,7 +66,13 @@ export function App() {
 
   return (
     <Routes>
-      <Route element={<Layout />}>
+      <Route
+        element={
+          <RequireAuth>
+            <Layout />
+          </RequireAuth>
+        }
+      >
         <Route path="/" element={<Navigate to="/statistics" replace />} />
         <Route path="/runs" element={<RunsList />}>
           <Route path=":id/preview" element={<RunPreviewPanel />} />

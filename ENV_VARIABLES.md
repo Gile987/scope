@@ -263,6 +263,82 @@ Maximum number of completed runs loaded into memory for a single Statistics / `G
 
 When set to `"true"`, displays the Pass@k metrics table on the Insights page. By default, this table is hidden. This is a Vite env var and must be prefixed with `VITE_` to be exposed to the frontend.
 
+## Portal Authentication (Microsoft Entra ID / MSAL)
+
+Build-time (`VITE_*`) configuration for Portal sign-in via MSAL. These are
+inlined into the bundle at build time (retargeting the IdP is a rebuild, not a
+runtime change), matching the auth spec's "hardcoded per build" intent
+(`docs/architecture/auth-rbac.md` §8, subtask 10).
+
+In **dev** builds (`import.meta.env.DEV`) every value defaults to the seeded
+[entra-local](https://github.com/cmaneu/entra-local) emulator (tag `v0.0.3`), so
+sign-in works out of the box once the emulator is running (`pnpm docker:up:auth`)
+and its self-signed certificate is trusted by the browser. In **production**
+builds the config is only considered valid when `VITE_AUTH_CLIENT_ID` and
+`VITE_AUTH_AUTHORITY` are present; otherwise the Portal renders a
+"not configured" screen instead of silently pointing at `localhost`.
+
+> Authentication only — there is no authorization (roles/permissions) yet, and
+> the API does not verify the token yet. The token is attached to API requests
+> and the app is gated client-side; identity shown in the UI is derived from the
+> MSAL account token claims.
+
+### VITE_AUTH_CLIENT_ID
+**Default (dev):** `cccccccc-cccc-cccc-cccc-cccccccc0001` (entra-local seeded SPA app)
+**Type:** GUID string
+
+Client ID of the SPA app registration. Required in production.
+
+### VITE_AUTH_AUTHORITY
+**Default (dev):** `https://localhost:8443/11111111-1111-1111-1111-111111111111/v2.0`
+**Type:** URL string
+
+OIDC authority (issuer) URL. Required in production (e.g.
+`https://login.microsoftonline.com/<tenant-id>`).
+
+### VITE_AUTH_KNOWN_AUTHORITIES
+**Default (dev):** `localhost:8443`
+**Type:** comma-separated host list
+
+Hosts MSAL is allowed to talk to for non-Microsoft (custom OIDC) authorities.
+Required for entra-local; typically unset for production Entra.
+
+### VITE_AUTH_SCOPES
+**Default (dev):** `access_as_user`
+**Type:** comma-separated scope list
+
+Scopes requested for the API access token (in addition to `openid`/`profile`,
+which are always requested at login). Set to the API's exposed scope, e.g.
+`api://<api-client-id>/access_as_user`.
+
+### VITE_AUTH_PROTOCOL_MODE
+**Default (dev):** `OIDC` — **Default (prod):** `AAD`
+**Type:** `AAD` | `OIDC`
+
+MSAL protocol mode. entra-local speaks generic `OIDC`; production Microsoft
+Entra uses `AAD`.
+
+### VITE_AUTH_REDIRECT_URI
+**Default:** `window.location.origin`
+**Type:** URL string
+
+Redirect URI for the auth-code + PKCE flow. Must exactly match a redirect URI
+registered on the app. When developing the Portal on `http://localhost:5100`,
+register that URI in the entra-local admin portal (the seeded SPA app ships with
+`https://localhost:3000`), or rely on the `window.location.origin` default.
+
+### VITE_AUTH_POST_LOGOUT_REDIRECT_URI
+**Default:** `window.location.origin`
+**Type:** URL string
+
+Where MSAL navigates after sign-out.
+
+### VITE_AUTH_CACHE_LOCATION
+**Default:** `localStorage`
+**Type:** `localStorage` | `sessionStorage`
+
+Where MSAL persists its token cache.
+
 ## Portal Runtime Configuration
 
 ### SCOPE_DOCS_BASE_URL
