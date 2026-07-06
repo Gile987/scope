@@ -102,15 +102,6 @@ export async function clearAuthState(): Promise<void> {
   }
 }
 
-/**
- * Recover from a failed/wedged sign-in: clear the MSAL cache and start a fresh
- * interactive redirect. Backs the "Try again" action on the sign-in error screen.
- */
-export async function resetAuthAndLogin(): Promise<void> {
-  await clearAuthState();
-  await msalInstance.loginRedirect({ scopes: loginRequestScopes });
-}
-
 /** Start an interactive redirect sign-in. */
 export async function login(): Promise<void> {
   await initializeAuth();
