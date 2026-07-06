@@ -271,23 +271,52 @@ runtime change), matching the auth spec's "hardcoded per build" intent
 (`docs/architecture/auth-rbac.md` §8, subtask 10).
 
 In **dev** builds (`import.meta.env.DEV`) every value defaults to the seeded
-[entra-local](https://github.com/cmaneu/entra-local) emulator (tag `v0.0.3`), so
-sign-in works out of the box once the emulator is running (`pnpm docker:up:auth`)
-and its self-signed certificate is trusted by the browser. In **production**
-builds the config is only considered valid when `VITE_AUTH_CLIENT_ID` and
-`VITE_AUTH_AUTHORITY` are present; otherwise the Portal renders a
-"not configured" screen instead of silently pointing at `localhost`.
+[entra-local](https://github.com/cmaneu/entra-local) emulator (Docker tag
+`0.0.3`), so sign-in works out of the box once the one-time local setup below is
+done. In **production** builds the config is only considered valid when
+`VITE_AUTH_CLIENT_ID` and `VITE_AUTH_AUTHORITY` are present; otherwise the Portal
+renders a "not configured" screen instead of silently pointing at `localhost`.
 
 > Authentication only — there is no authorization (roles/permissions) yet, and
 > the API does not verify the token yet. The token is attached to API requests
 > and the app is gated client-side; identity shown in the UI is derived from the
 > MSAL account token claims.
 
+### Local dev setup (entra-local)
+
+The dev defaults target the emulator's seeded directory, but three one-time steps
+are needed before the browser can complete sign-in:
+
+1. **Start the emulator:** `pnpm docker:up:auth`. The compose service sets
+   `PUBLIC_ORIGIN=https://localhost:8443` so the OIDC discovery document's
+   `issuer`/endpoints use `localhost` (the container binds `0.0.0.0`, which would
+   otherwise leak into the issuer and fail MSAL's authority match).
+2. **Trust the self-signed certificate** so MSAL can fetch discovery/JWKS over
+   HTTPS. Extract and trust it (macOS example):
+   ```bash
+   docker cp <entra-local-container>:/app/data/tls/cert.pem /tmp/entra-local.pem
+   # or: echo | openssl s_client -connect localhost:8443 -servername localhost \
+   #       2>/dev/null | openssl x509 -out /tmp/entra-local.pem
+   security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db /tmp/entra-local.pem
+   ```
+3. **Register the Portal's redirect URI** on the seeded SPA app (it ships only
+   with `https://localhost:3000`). For the dev Portal on `http://localhost:5100`:
+   ```bash
+   curl -sk -X POST \
+     "https://localhost:8443/admin/api/apps/cccccccc-0000-0000-0000-000000000001/redirectUris" \
+     -H "Content-Type: application/json" \
+     -d '{"uri":"http://localhost:5100","type":"spa"}'
+   ```
+
+Sign in with a seeded user (`alice@entralocal.dev` / `bob@entralocal.dev`).
+
 ### VITE_AUTH_CLIENT_ID
-**Default (dev):** `cccccccc-cccc-cccc-cccc-cccccccc0001` (entra-local seeded SPA app)
+**Default (dev):** `cccccccc-0000-0000-0000-000000000001` (entra-local seeded "Sample SPA" app)
 **Type:** GUID string
 
-Client ID of the SPA app registration. Required in production.
+Client ID of the SPA app registration. entra-local uses the app's object id as
+its client id, so this is the value the emulator seeds and exposes at
+`/admin/api/apps`. Required in production.
 
 ### VITE_AUTH_AUTHORITY
 **Default (dev):** `https://localhost:8443/11111111-1111-1111-1111-111111111111/v2.0`
@@ -304,11 +333,12 @@ Hosts MSAL is allowed to talk to for non-Microsoft (custom OIDC) authorities.
 Required for entra-local; typically unset for production Entra.
 
 ### VITE_AUTH_SCOPES
-**Default (dev):** `access_as_user`
+**Default (dev):** `api://cccccccc-0000-0000-0000-000000000001/access_as_user`
 **Type:** comma-separated scope list
 
 Scopes requested for the API access token (in addition to `openid`/`profile`,
-which are always requested at login). Set to the API's exposed scope, e.g.
+which are always requested at login). Must be the API's exposed scope in
+resource-qualified form so MSAL can resolve the access token's audience, e.g.
 `api://<api-client-id>/access_as_user`.
 
 ### VITE_AUTH_PROTOCOL_MODE

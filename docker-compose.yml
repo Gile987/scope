@@ -163,6 +163,13 @@ services:
     profiles: [auth]
     ports:
       - "${ENTRA_LOCAL_PORT:-8443}:8443"
+    environment:
+      # The container binds 0.0.0.0 for host port mapping; without this the
+      # issuer/endpoints in the OIDC discovery document come back as
+      # https://0.0.0.0:8443, which fails MSAL's authority/issuer match. Pin the
+      # public origin so discovery/JWKS/token URLs and the token `iss` all use
+      # the host the browser actually reaches.
+      PUBLIC_ORIGIN: "${ENTRA_LOCAL_PUBLIC_ORIGIN:-https://localhost:8443}"
     volumes:
       - entra_local_data:/app/data
     healthcheck:

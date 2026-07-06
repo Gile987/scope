@@ -48,16 +48,25 @@ export interface PortalAuthConfig {
   isConfigured: boolean;
 }
 
-/** entra-local (`v0.0.3`) seeded directory — used as dev-only defaults. */
+/** entra-local (`0.0.3`) seeded directory — used as dev-only defaults. */
 const ENTRA_LOCAL_DEFAULTS = {
-  /** Seeded public SPA app registration (redirect + `access_as_user` scope). */
-  clientId: "cccccccc-cccc-cccc-cccc-cccccccc0001",
+  /**
+   * Seeded public SPA app registration ("Sample SPA"). entra-local uses the
+   * app's object id as the client id; this is the value the emulator seeds and
+   * exposes at `/admin/api/apps`. The dev Portal origin must be registered as a
+   * redirect URI on this app (see docs/ENV_VARIABLES.md).
+   */
+  clientId: "cccccccc-0000-0000-0000-000000000001",
   /** Seeded fixed tenant, OIDC v2.0 authority served over local HTTPS. */
   authority: "https://localhost:8443/11111111-1111-1111-1111-111111111111/v2.0",
   /** Custom (non-Microsoft) authority host must be allow-listed for MSAL. */
   knownAuthorities: ["localhost:8443"],
-  /** Scope exposed by the seeded SPA app. */
-  scopes: ["access_as_user"],
+  /**
+   * Fully-qualified scope for the seeded SPA's exposed `access_as_user` scope.
+   * MSAL needs the resource-qualified form (`api://<appId>/<scope>`) to resolve
+   * the access token's audience.
+   */
+  scopes: ["api://cccccccc-0000-0000-0000-000000000001/access_as_user"],
   /** entra-local speaks generic OIDC, not the AAD-specific protocol. */
   protocolMode: "OIDC" as ProtocolMode,
 };
