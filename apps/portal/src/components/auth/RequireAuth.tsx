@@ -16,7 +16,7 @@ import type { ReactNode } from "react";
 import { InteractionType } from "@azure/msal-browser";
 import { MsalAuthenticationTemplate } from "@azure/msal-react";
 import { loginRequestScopes } from "@/lib/auth/authConfig";
-import { isAuthConfigured } from "@/lib/auth/msalInstance";
+import { isAuthConfigured, resetAuthAndLogin } from "@/lib/auth/msalInstance";
 
 function AuthPending({ label }: { label: string }) {
   return (
@@ -33,14 +33,30 @@ function AuthPending({ label }: { label: string }) {
 }
 
 function AuthError() {
+  const onRetry = () => {
+    // Clear any wedged MSAL cache (a plain refresh keeps the poisoned state) and
+    // start a fresh interactive sign-in.
+    void resetAuthAndLogin().catch(() => {
+      window.location.reload();
+    });
+  };
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-6">
       <div className="max-w-md text-center">
         <h1 className="text-lg font-semibold text-foreground">Sign-in failed</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          We couldn&apos;t complete authentication. Refresh the page to try
-          again, or contact an administrator if the problem persists.
+          We couldn&apos;t complete authentication. This can happen if a previous
+          sign-in was interrupted. Try again to reset and sign in, or contact an
+          administrator if the problem persists.
         </p>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-4 inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          Try again
+        </button>
       </div>
     </div>
   );

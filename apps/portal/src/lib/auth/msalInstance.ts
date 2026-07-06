@@ -53,16 +53,62 @@ export async function initializeAuth(): Promise<void> {
 
   initPromise = (async () => {
     await msalInstance.initialize();
-    const result = await msalInstance.handleRedirectPromise();
-    if (result?.account) {
-      msalInstance.setActiveAccount(result.account);
-    } else {
-      ensureActiveAccount();
+    try {
+      const result = await msalInstance.handleRedirectPromise();
+      if (result?.account) {
+        msalInstance.setActiveAccount(result.account);
+      } else {
+        ensureActiveAccount();
+      }
+    } catch (error) {
+      // A stale/consumed redirect hash or a poisoned cache (e.g. left over from
+      // a previous misconfiguration) must not leave MSAL wedged. Clear the auth
+      // state so the app can start a clean interactive sign-in instead of
+      // bricking on every reload.
+      // eslint-disable-next-line no-console
+      console.error("MSAL redirect handling failed; resetting auth state", error);
+      await clearAuthState();
     }
     initialized = true;
   })();
 
   return initPromise;
+}
+
+/**
+ * Remove all MSAL browser state (token cache, accounts, and the
+ * `interaction_in_progress` marker that a plain refresh does NOT clear). Used to
+ * recover from a wedged/poisoned auth cache. Best-effort — never throws.
+ */
+export async function clearAuthState(): Promise<void> {
+  try {
+    await msalInstance.clearCache();
+  } catch {
+    // ignore — fall through to the raw storage sweep below
+  }
+  try {
+    for (const storage of [
+      window.localStorage,
+      window.sessionStorage,
+    ] as Storage[]) {
+      for (const key of Object.keys(storage)) {
+        if (key.startsWith("msal.") || key.startsWith("msal_")) {
+          storage.removeItem(key);
+        }
+      }
+    }
+  } catch {
+    // ignore — storage may be unavailable
+  }
+}
+
+/**
+ * Recover from a failed/wedged sign-in: clear the MSAL cache and start a fresh
+ * interactive redirect. Backs the "Try again" action on the sign-in error screen.
+ */
+export async function resetAuthAndLogin(): Promise<void> {
+  await clearAuthState();
+  await msalInstance.loginRedirect({ scopes: loginRequestScopes });
 }
 
 /** Start an interactive redirect sign-in. */
