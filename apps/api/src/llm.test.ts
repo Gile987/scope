@@ -170,7 +170,7 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
     expect(authorUserMsg).toMatch(/tool output/i);
   });
 
-  it("steers the author prompt toward the codebase for the select gate", async () => {
+  it("centers the select-gate author prompt on the codebase while still surfacing the tool-call history as available", async () => {
     let authorUserMsg = "";
     postSpy.mockImplementation(async ({ body }: any) => {
       const kind = kindOf(body);
@@ -184,6 +184,29 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
     await generateCriteriaPrompt("uses typescript", existing, ["select"]);
 
     expect(authorUserMsg).toContain("select gate");
-    expect(authorUserMsg).not.toMatch(/captured tool output/i);
+    // Primary evidence for a select criterion is the codebase...
+    expect(authorUserMsg).toMatch(/primarily from the codebase/i);
+    // ...but the select hint must NOT deny the captured tool-call history: the
+    // judge can read it whenever tool calls exist, regardless of gate. See #1225.
+    expect(authorUserMsg).toMatch(/tool-call history/i);
+  });
+
+  it("advertises the full captured tool-call history in the author system prompt, not just gate commands", async () => {
+    let authorSystemMsg = "";
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") {
+        authorSystemMsg = body.messages[0].content;
+        return reply({ prompt: "p", suggestedId: "x" });
+      }
+      return reply({ suggestions: [] });
+    });
+
+    await generateCriteriaPrompt("agent curled the running server", existing, ["select"]);
+
+    // The generator must convey that the judge sees the agent's ENTIRE captured
+    // tool-call history — not only build/test/run/deploy gate commands. See #1225.
+    expect(authorSystemMsg).toMatch(/tool-call history/i);
+    expect(authorSystemMsg).toMatch(/any other command or tool/i);
   });
 });
