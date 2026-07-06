@@ -184,7 +184,7 @@ jobs:
             test_pattern: apps/workers/coder-acp-copilot
             images: |
               source apps/workers/coder-acp-copilot/versions.env
-              docker build \
+              docker buildx build \
                 -t coder-acp-copilot-integration-test \
                 -f apps/workers/coder-acp-copilot/Dockerfile \
                 --target dev \
