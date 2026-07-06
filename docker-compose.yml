@@ -157,6 +157,9 @@ services:
   # Database migrations — runs once before the API starts.
   # Reuses the API builder stage (has tsx + source + compiled output).
   db-migrate:
+    # Resource limits mirror prod K8s (deploy/base/db-migration-job.yaml)
+    cpus: "0.5"
+    mem_limit: 256m
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -174,6 +177,10 @@ services:
 
   # API - REST + SSE endpoint (always starts)
   api:
+    # Resource limits mirror prod K8s (deploy/base/api.yaml)
+    cpus: "0.5"
+    mem_limit: 512m
+    mem_reservation: 256m
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -265,6 +272,9 @@ services:
 
   # Model scanner: GitHub Copilot - scans available models and syncs to API
   model-scanner-copilot:
+    # Resource limits mirror prod K8s (deploy/base/workers/model-scanner-copilot.yaml)
+    cpus: "0.25"
+    mem_limit: 256m
     build:
       context: .
       dockerfile: apps/model-scanners/copilot/Dockerfile
@@ -281,6 +291,9 @@ services:
 
   # Model scanner: Anthropic - scans available models and syncs to API
   model-scanner-anthropic:
+    # Resource limits mirror prod K8s (deploy/base/workers/model-scanner-anthropic.yaml)
+    cpus: "0.25"
+    mem_limit: 256m
     build:
       context: .
       dockerfile: apps/model-scanners/anthropic/Dockerfile
@@ -297,6 +310,10 @@ services:
 
   # Judge - evaluation service (always starts)
   judge:
+    # Resource limits mirror prod K8s (deploy/base/judge.yaml)
+    cpus: "1"
+    mem_limit: 1g
+    mem_reservation: 512m
     build:
       context: .
       dockerfile: apps/judge/Dockerfile
@@ -334,6 +351,10 @@ services:
 
   # Token Manager - token lifecycle and KeyVault integration
   token-manager:
+    # Resource limits mirror prod K8s (deploy/base/token-manager.yaml)
+    cpus: "0.2"
+    mem_limit: 256m
+    mem_reservation: 128m
     build:
       context: .
       dockerfile: apps/token-manager/Dockerfile
@@ -357,6 +378,10 @@ services:
 
   # Scheduler - polls MongoDB for pending requests and dispatches to queues
   scheduler:
+    # Resource limits mirror prod K8s (deploy/base/scheduler.yaml)
+    cpus: "0.2"
+    mem_limit: 256m
+    mem_reservation: 128m
     build:
       context: .
       dockerfile: apps/scheduler/Dockerfile
@@ -383,6 +408,10 @@ services:
 
   # Portal - Web UI for run management
   portal:
+    # Resource limits mirror prod K8s (deploy/base/portal.yaml)
+    cpus: "0.2"
+    mem_limit: 128m
+    mem_reservation: 64m
     build:
       context: .
       dockerfile: apps/portal/Dockerfile
@@ -398,6 +427,10 @@ services:
   # Enable with: PROXY_BACKEND=gateway
   # ===========================================================================
   gateway:
+    # Resource limits mirror prod K8s (deploy/base/gateway.yaml)
+    cpus: "0.5"
+    mem_limit: 512m
+    mem_reservation: 128m
     build:
       context: ./apps/gateway
       dockerfile: Dockerfile
@@ -438,6 +471,10 @@ services:
 
   # Claude Code worker (via ACP)
   coder-acp-claude-code:
+    # Resource limits mirror prod K8s main container (deploy/base/workers/coder-acp-claude-code.yaml)
+    cpus: "1"
+    mem_limit: 1g
+    mem_reservation: 512m
     build:
       context: .
       dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
@@ -470,6 +507,9 @@ services:
 
   # DevProxy sidecar for Claude Code worker (HAR capture)
   devproxy-claude-code:
+    # Resource limits mirror prod K8s devproxy sidecar (deploy/base/workers/coder-acp-claude-code.yaml)
+    cpus: "0.5"
+    mem_limit: 512m
     image: ghcr.io/dotnet/dev-proxy:2.1.0
     profiles: [claude-code]
     user: "1000:1000"
@@ -508,6 +548,9 @@ services:
 
   # MCPJungle sidecar for Claude Code worker (stdio + remote HTTP MCP aggregation)
   mcp-gateway-claude-code:
+    # Resource limits mirror prod K8s mcp-gateway sidecar (deploy/base/workers/coder-acp-claude-code.yaml)
+    cpus: "0.5"
+    mem_limit: 512m
     image: ghcr.io/mcpjungle/mcpjungle:latest-stdio
     # Suppress the ASCII art banner (written to stderr by Cobra's cmd.Print)
     entrypoint: ["/bin/sh", "-c"]
@@ -526,6 +569,12 @@ services:
 
   # GitHub Copilot worker (via ACP)
   coder-acp-copilot:
+    # Resource limits mirror prod K8s main container (deploy/base/workers/coder-acp-copilot.yaml).
+    # mem_limit 2.3g intentionally matches the raised manifest limit in this PR so local
+    # repros surface the same OOM ceiling that caused the "Worker presumed dead" failures.
+    cpus: "1"
+    mem_limit: 2.3g
+    mem_reservation: 1g
     build:
       context: .
       dockerfile: apps/workers/coder-acp-copilot/Dockerfile
@@ -558,6 +607,9 @@ services:
 
   # DevProxy sidecar for Copilot worker (HAR capture)
   devproxy-copilot:
+    # Resource limits mirror prod K8s devproxy sidecar (deploy/base/workers/coder-acp-copilot.yaml)
+    cpus: "0.5"
+    mem_limit: 512m
     build:
       context: ./apps/workers/coder-acp-copilot
       dockerfile: devproxy.Dockerfile
@@ -599,6 +651,9 @@ services:
 
   # MCPJungle sidecar for Copilot worker (stdio + remote HTTP MCP aggregation)
   mcp-gateway-copilot:
+    # Resource limits mirror prod K8s mcp-gateway sidecar (deploy/base/workers/coder-acp-copilot.yaml)
+    cpus: "0.5"
+    mem_limit: 512m
     image: ghcr.io/mcpjungle/mcpjungle:latest-stdio
     # Suppress the ASCII art banner (written to stderr by Cobra's cmd.Print)
     entrypoint: ["/bin/sh", "-c"]
@@ -618,6 +673,9 @@ services:
 
   # Report Generator worker (LLM-powered run reports via Copilot SDK)
   report-generator:
+    # Resource limits mirror prod K8s main container (deploy/base/workers/report-generator.yaml)
+    cpus: "1"
+    mem_limit: 1g
     build:
       context: .
       dockerfile: apps/workers/report-generator/Dockerfile
@@ -657,6 +715,9 @@ services:
     entrypoint: ["npx", "tsx", "apps/workers/post-processor/src/register-version.ts"]
 
   post-processor:
+    # Resource limits mirror prod K8s main container (deploy/base/workers/post-processor.yaml)
+    cpus: "1"
+    mem_limit: 1g
     build:
       context: .
       dockerfile: apps/workers/post-processor/Dockerfile
