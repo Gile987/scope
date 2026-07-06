@@ -170,7 +170,7 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
     expect(authorUserMsg).toMatch(/tool output/i);
   });
 
-  it("centers the select-gate author prompt on the codebase while still surfacing the tool-call history as available", async () => {
+  it("presents both sources for a select-gated criterion and elevates the captured tool-call history for agent-action behaviors", async () => {
     let authorUserMsg = "";
     postSpy.mockImplementation(async ({ body }: any) => {
       const kind = kindOf(body);
@@ -184,11 +184,16 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
     await generateCriteriaPrompt("uses typescript", existing, ["select"]);
 
     expect(authorUserMsg).toContain("select gate");
-    // Primary evidence for a select criterion is the codebase...
-    expect(authorUserMsg).toMatch(/primarily from the codebase/i);
-    // ...but the select hint must NOT deny the captured tool-call history: the
-    // judge can read it whenever tool calls exist, regardless of gate. See #1225.
+    // The codebase stays an option for structural / how-the-code-is-written behaviors...
+    expect(authorUserMsg).toMatch(/codebase/i);
+    // ...but the select hint must NOT force "primarily from the codebase": that lead
+    // made the model drop tool-history mentions for select-gated agent-action
+    // criteria (e.g. "ran npx bootstrap", "used a skill + MCP"). See #1225.
+    expect(authorUserMsg).not.toMatch(/primarily from the codebase/i);
+    // For behaviors about what the agent actually did or ran, the captured tool-call
+    // history is the PRIMARY evidence even under the select gate.
     expect(authorUserMsg).toMatch(/tool-call history/i);
+    expect(authorUserMsg).toMatch(/primary evidence/i);
   });
 
   it("advertises the full captured tool-call history in the author system prompt, not just gate commands", async () => {

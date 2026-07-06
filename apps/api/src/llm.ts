@@ -51,13 +51,18 @@ const GATE_EVIDENCE: Partial<Record<GateId, string>> = {
 
 /**
  * Builds a short, gate-aware steering note appended to the author user message.
- * The note sets which source is the *primary* evidence for the criterion; it
- * never restricts availability, because the judge can read the agent's full
+ * It never restricts availability, because the judge can read the agent's full
  * captured tool-call history whenever tool calls exist, regardless of gate (that
  * availability lives, unconditionally, in SYSTEM_PROMPT_AUTHOR). When the
  * criterion targets any tool-output gate (build/test/run/deploy) it centers the
- * prompt on captured command output; when it only targets `select` it centers on
- * the codebase while still noting the tool-call history is available. Omitted/
+ * prompt on captured command output. When it only targets `select` it presents
+ * BOTH sources and gives a per-behavior decision rule: structural / how-the-code-
+ * is-written behaviors are judged from the codebase, but behaviors about something
+ * the agent DID or RAN (a command it executed, a bootstrap/scaffold step, a
+ * tool/skill/MCP invocation) make the captured tool-call history the PRIMARY
+ * evidence even under the select gate. An earlier version led with "judge it
+ * primarily from the codebase", which the model obeyed and dropped tool-history
+ * mentions for exactly the select-gated action criteria #1225 targets. Omitted/
  * empty gates add no note so generic authoring (and backward-compatible callers)
  * is unaffected.
  */
@@ -68,7 +73,7 @@ function authorGateHint(gates?: GateId[]): string {
     .map((g) => (GATE_EVIDENCE[g] ? `the ${g} gate (evidence: ${GATE_EVIDENCE[g]})` : null))
     .filter((x): x is string => x !== null);
   if (toolEvidence.length === 0) {
-    return `\n\nThis criterion targets the select gate (evidence: ${GATE_EVIDENCE.select}); judge it primarily from the codebase the agent produced. If the behavior concerns something the agent actually did or ran, the agent's captured tool-call history is also available as evidence.`;
+    return `\n\nThis criterion targets the select gate (evidence: ${GATE_EVIDENCE.select}). Two equally authoritative sources of evidence are available; choose whichever fits the behavior. If the behavior is about how the resulting code is written, structured, or configured — files that exist, dependencies, patterns — judge it from the codebase. If the behavior is about something the agent DID or RAN — a command it executed, a bootstrap or scaffold step, or a tool, skill, or MCP server it invoked — then the agent's captured tool-call history is the PRIMARY evidence, even though this criterion is select-gated, because that action may not be visible in the resulting files alone; phrase the prompt around that captured tool-call history.`;
   }
   return `\n\nThis criterion targets ${toolEvidence.join(" and ")}. Center the evaluation prompt on that captured tool output and exit status rather than file inspection.`;
 }
