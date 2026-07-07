@@ -18,8 +18,8 @@ Given a natural-language description of a behavior or pattern to detect, you mus
 
 1. Write a concise evaluation prompt (1-3 sentences) that a judge LLM will use to decide whether the behavior is present. The judge weighs TWO complementary, equally authoritative sources of evidence:
    - The codebase — the resulting files, patterns, and configuration the agent produced.
-   - The agent's captured tool outputs — the logs, results, and exit status of the build, test, run, and deploy commands the agent actually executed.
-   Pick whichever source best fits the behavior and phrase the prompt around it. Behaviors about whether something builds, compiles, tests, runs, serves, or deploys are best judged from the captured command output and exit status, NOT from inspecting files. Behaviors about how the code is written or structured are best judged from the codebase. The judge cannot run any commands itself, so never instruct it to run, execute, or re-run anything — judge from evidence that already exists. Keep it factual and objective.
+   - The agent's captured tool-call history — the logs, results, and exit status of every command or tool the agent actually ran while doing the task. This covers the build, test, run, and deploy commands, but also any other command or tool it invoked (e.g. starting or curling a server, running a script, searching or inspecting the workspace).
+   Pick whichever source best fits the behavior and phrase the prompt around it. Behaviors about whether something builds, compiles, tests, runs, serves, or deploys are best judged from the captured command output and exit status, NOT from inspecting files. More generally, any behavior about what the agent actually did or ran — a command it executed, a check it performed, output it observed — is best judged from the captured tool-call history, which may reveal what the resulting files alone do not. Behaviors about how the code is written or structured are best judged from the codebase. The judge cannot run any commands itself, so never instruct it to run, execute, or re-run anything — judge from evidence that already exists. Keep it factual and objective.
 
 2. Suggest a short, descriptive snake_case identifier for this criterion. The ID must:
    - Start with a lowercase letter
@@ -31,6 +31,7 @@ Here are examples of good criteria prompts:
 - Codebase evidence: "The project uses Azure Bicep for infrastructure as code. Look for *.bicep files, bicepconfig.json, or a main.bicep entry point."
 - Tool-output evidence: "The project builds successfully. The captured output of the build command (e.g. npm run build) finishes with a zero exit status and no compilation errors."
 - Tool-output evidence: "The unit tests pass. The captured output of the test command shows the suite running with no failing tests and a successful exit status."
+- Tool-output evidence (non-gate command): "The agent verified the running server responds. The captured tool-call history contains a request to the local endpoint (e.g. a curl to http://localhost) that returned a 2xx status."
 
 Respond with ONLY a JSON object in this exact format (no markdown, no code fences):
 {"prompt": "your evaluation prompt here", "suggestedId": "your_suggested_id"}`;
@@ -50,10 +51,20 @@ const GATE_EVIDENCE: Partial<Record<GateId, string>> = {
 
 /**
  * Builds a short, gate-aware steering note appended to the author user message.
- * When the criterion targets any tool-output gate (build/test/run/deploy) it
- * directs the prompt toward captured command output; when it only targets
- * `select` it directs the prompt toward the codebase. Omitted/empty gates add no
- * note so generic authoring (and backward-compatible callers) is unaffected.
+ * It never restricts availability, because the judge can read the agent's full
+ * captured tool-call history whenever tool calls exist, regardless of gate (that
+ * availability lives, unconditionally, in SYSTEM_PROMPT_AUTHOR). When the
+ * criterion targets any tool-output gate (build/test/run/deploy) it centers the
+ * prompt on captured command output. When it only targets `select` it presents
+ * BOTH sources and gives a per-behavior decision rule: structural / how-the-code-
+ * is-written behaviors are judged from the codebase, but behaviors about something
+ * the agent DID or RAN (a command it executed, a bootstrap/scaffold step, a
+ * tool/skill/MCP invocation) make the captured tool-call history the PRIMARY
+ * evidence even under the select gate. An earlier version led with "judge it
+ * primarily from the codebase", which the model obeyed and dropped tool-history
+ * mentions for exactly the select-gated action criteria #1225 targets. Omitted/
+ * empty gates add no note so generic authoring (and backward-compatible callers)
+ * is unaffected.
  */
 function authorGateHint(gates?: GateId[]): string {
   if (!gates || gates.length === 0) return "";
@@ -62,9 +73,9 @@ function authorGateHint(gates?: GateId[]): string {
     .map((g) => (GATE_EVIDENCE[g] ? `the ${g} gate (evidence: ${GATE_EVIDENCE[g]})` : null))
     .filter((x): x is string => x !== null);
   if (toolEvidence.length === 0) {
-    return `\n\nThis criterion targets the select gate (evidence: ${GATE_EVIDENCE.select}); judge it from the codebase files the agent produced.`;
+    return `\n\nThis criterion targets the select gate (evidence: ${GATE_EVIDENCE.select}). Two equally authoritative sources of evidence are available; choose whichever fits the behavior. If the behavior is about how the resulting code is written, structured, or configured — files that exist, dependencies, patterns — judge it from the codebase. If the behavior is about something the agent DID or RAN — a command it executed, a bootstrap or scaffold step, or a tool, skill, or MCP server it invoked — then the agent's captured tool-call history is the PRIMARY evidence, even though this criterion is select-gated, because that action may not be visible in the resulting files alone; phrase the prompt around that captured tool-call history.`;
   }
-  return `\n\nThis criterion targets ${toolEvidence.join(" and ")}. Phrase the evaluation prompt around that captured tool output and exit status rather than file inspection.`;
+  return `\n\nThis criterion targets ${toolEvidence.join(" and ")}. Center the evaluation prompt on that captured tool output and exit status rather than file inspection.`;
 }
 
 interface SuggestDirectionCopy {

@@ -349,7 +349,8 @@ scope-core/
 │   ├── db-migrations/                          # MongoDB migration framework (mongo-migrate-ts)
 │   ├── github-auth/                            # GitHub OAuth / device-code utilities
 │   ├── model-scanning/                         # Shared model scanning logic
-│   └── version-checking/                       # Version comparison utilities
+│   ├── version-checking/                       # Version comparison utilities
+│   └── llm-eval/                               # LLM-graded eval harness (grader, sampling, rate-limit retry)
 ├── config/
 │   ├── criteria/                               # Evaluation criteria YAML definitions
 │   ├── personas/                               # Reviewer persona configurations
