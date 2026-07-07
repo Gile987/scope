@@ -727,6 +727,7 @@ jobs:
               - 'apps/api/src/llm-token.ts'
               - 'apps/api/src/llm.eval.test.ts'
               - 'vitest.eval.config.ts'
+              - 'packages/llm-eval/**'
 
   # ---------------------------------------------------------------------------
   # Build container images — gated on CI passing
