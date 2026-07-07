@@ -199,14 +199,17 @@ i.e. a parent must be compatible with at least every gate its child is compatibl
     > the real `generateCriteriaPrompt` against GitHub Models for the five prod
     > `rayfin_` criteria and asserts a **majority of N samples** steer each to the
     > correct source (agent-action → tool-call history; structural → codebase;
-    > build-gated → command output). Each generated prompt is classified by a
-    > **second LLM call** — an LLM grader that decides which evidence source the
-    > prompt makes *primary*, so it reads emphasis rather than mere keyword
-    > presence (a prompt that lists both sources but leads with the wrong one is
-    > scored correctly). The reusable eval framework — the grader, the
-    > sample-N/majority harness, and the 429 rate-limit retry — lives in the
-    > **`llm-eval` package** (`packages/llm-eval`); this eval supplies only the
-    > five cases and a `ChatComplete` adapter around the api's inference client.
+    > build-gated → command output). Each generated prompt is graded by a
+    > **second LLM call** — an LLM grader that returns a simple **pass/fail**:
+    > whether the prompt makes that case's expected source the *primary* evidence.
+    > It judges emphasis rather than mere keyword presence, so a prompt that lists
+    > both sources but leads with the wrong one **fails**. The reusable,
+    > **domain-agnostic** eval framework — the sample-N/majority harness and the
+    > 429 rate-limit retry — lives in the **`llm-eval` package**
+    > (`packages/llm-eval`). The evidence-source grader is specific to this eval,
+    > so it lives beside it in `apps/api/src/criteria-prompt-eval-grader.ts`; this
+    > eval supplies the five cases, that grader, and a `ChatComplete` adapter
+    > around the api's inference client.
     > Evals are a distinct category from unit/integration tests — non-deterministic,
     > sample-based, and quota-costing — so they have their own `vitest.eval.config.ts`
     > (`*.eval.test.ts`), are excluded from `pnpm test`, and self-skip when no LLM

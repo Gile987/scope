@@ -15,15 +15,18 @@
  *   1. Generation (the system under test): the REAL `generateCriteriaPrompt`
  *      against a real LLM (GitHub Models). Non-deterministic, so each case is
  *      sampled N times and asserted on a *majority*.
- *   2. Grading (an LLM judge): each generated prompt is classified by a second
- *      LLM call that decides which evidence source the prompt makes *primary*.
+ *   2. Grading (an LLM judge): each generated prompt is graded pass/fail by a
+ *      second LLM call that decides whether the prompt makes the case's EXPECTED
+ *      evidence source the *primary* basis for the judge's verdict.
  *
- * The reusable eval framework — the LLM grader, the sampling/majority harness,
- * and the rate-limit retry — lives in the `llm-eval` package. This file supplies
- * only the api-specific pieces: the five production `rayfin_` cases and a
- * `ChatComplete` adapter around the api's inference client. It runs only under
- * `vitest.eval.config.ts` (`pnpm eval:criteria-prompts`) and self-skips when no
- * LLM token is available (same gate as the judge integration test).
+ * The reusable eval framework — the sampling/majority harness and the
+ * rate-limit retry — lives in the generic `llm-eval` package. The
+ * evidence-source grader is domain-specific to *this* eval, so it lives beside
+ * it in `criteria-prompt-eval-grader.ts`. This file supplies the api-specific
+ * pieces: the five production `rayfin_` cases and a `ChatComplete` adapter
+ * around the api's inference client. It runs only under `vitest.eval.config.ts`
+ * (`pnpm eval:criteria-prompts`) and self-skips when no LLM token is available
+ * (same gate as the judge integration test).
  *
  * Overridable via env:
  *   - CRITERIA_EVAL_SAMPLES:      samples per case (default 5 local; CI sets 3).
@@ -38,12 +41,13 @@ import { isUnexpected } from "@azure-rest/ai-inference";
 import type { GateId } from "shared";
 import {
   collectSampledGrades,
-  gradeEvidenceSource,
   majority,
   type ChatComplete,
-  type EvidenceGrade,
-  type EvidenceSource,
 } from "llm-eval";
+import {
+  gradeCriteriaPrompt,
+  type EvidenceSource,
+} from "./criteria-prompt-eval-grader.js";
 import { generateCriteriaPrompt } from "./llm.js";
 import { acquireInferenceClient, isLlmAvailable } from "./llm-token.js";
 
@@ -152,7 +156,7 @@ describe.skipIf(!isLlmAvailable())(
     it.each(CRITERIA_PROMPT_EVAL_CASES)(
       "$id ($expect): a majority of samples steer to the right evidence source",
       async ({ behavior, gates, expect: expected }) => {
-        const grades = await collectSampledGrades<EvidenceGrade>({
+        const grades = await collectSampledGrades<boolean>({
           samples: SAMPLES,
           spacingMs: SPACING_MS,
           gradeSpacingMs: GRADE_SPACING_MS,
@@ -166,17 +170,20 @@ describe.skipIf(!isLlmAvailable())(
             return prompt;
           },
           grade: (prompt) =>
-            gradeEvidenceSource(complete, prompt, { model: GRADER_MODEL }),
+            gradeCriteriaPrompt(complete, prompt, expected, {
+              model: GRADER_MODEL,
+            }),
         });
 
-        // Strict majority of N samples must be graded as the expected primary
-        // evidence source. tool-history cases must cite the tool-call history;
-        // codebase cases must stay codebase-oriented. "unclear" counts as a miss.
-        const matches = grades.filter((g) => g === expected).length;
+        // Each sample is graded pass/fail against this case's expected primary
+        // evidence source (tool-history cases must cite the tool-call history;
+        // codebase cases must stay codebase-oriented). A strict majority of the
+        // N samples must pass; a fail or a hedging grade counts against it.
+        const passes = grades.filter(Boolean).length;
         const need = majority(SAMPLES);
         expect(
-          matches,
-          `expected >=${need}/${SAMPLES} prompts graded '${expected}', got ${matches} (grades: ${grades.join(", ")})`,
+          passes,
+          `expected >=${need}/${SAMPLES} prompts to pass for '${expected}', got ${passes} (grades: ${grades.join(", ")})`,
         ).toBeGreaterThanOrEqual(need);
       },
       300_000,
