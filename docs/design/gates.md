@@ -199,15 +199,23 @@ i.e. a parent must be compatible with at least every gate its child is compatibl
     > the real `generateCriteriaPrompt` against GitHub Models for the five prod
     > `rayfin_` criteria and asserts a **majority of N samples** steer each to the
     > correct source (agent-action → tool-call history; structural → codebase;
-    > build-gated → command output), classified by a deterministic regex. Evals are a
-    > distinct category from unit/integration tests — non-deterministic, sample-based,
-    > and quota-costing — so they have their own `vitest.eval.config.ts`
+    > build-gated → command output). Each generated prompt is classified by a
+    > **second LLM call** — an LLM grader that decides which evidence source the
+    > prompt makes *primary*, so it reads emphasis rather than mere keyword
+    > presence (a prompt that lists both sources but leads with the wrong one is
+    > scored correctly). The reusable eval framework — the grader, the
+    > sample-N/majority harness, and the 429 rate-limit retry — lives in the
+    > **`llm-eval` package** (`packages/llm-eval`); this eval supplies only the
+    > five cases and a `ChatComplete` adapter around the api's inference client.
+    > Evals are a distinct category from unit/integration tests — non-deterministic,
+    > sample-based, and quota-costing — so they have their own `vitest.eval.config.ts`
     > (`*.eval.test.ts`), are excluded from `pnpm test`, and self-skip when no LLM
     > token is present. In CI a path-filtered `criteria-prompt-eval` job runs only when
     > prompt-gen code changes and is **required via CI Summary** (success-or-skipped).
     > Add a case to `CRITERIA_PROMPT_EVAL_CASES` when a new behavior class needs a
-    > guard. Note: the job needs a real GitHub PAT (the legacy Models endpoint the code
-    > uses does not accept the ephemeral Actions `GITHUB_TOKEN`).
+    > guard. Note: each sample makes **two** LLM calls (generate + grade), and the job
+    > needs a real GitHub PAT (the legacy Models endpoint the code uses does not accept
+    > the ephemeral Actions `GITHUB_TOKEN`).
   2. **suggest parents** → the parent pool, pre-filtered to `gatesSatisfyInvariant(candidate.gates, newGates)`.
   3. **suggest children** → the child pool, pre-filtered to `gatesSatisfyInvariant(newGates, candidate.gates)`.
   The two suggestion calls share one symmetric `suggestDeps(direction, pool)` path; only the candidate pool and the relationship wording differ. Because the pools are pre-filtered, no gate/invariant wording is ever sent to the model. **Both suggestion prompts demand a true prerequisite edge** (`A → B` means "B cannot be meaningfully evaluated unless A passes first" — equivalently, B can never be true while A is false) and apply an **independence test**: if each criterion can be true or false irrespective of the other's outcome, they are independent and there is **no edge in either direction**. This makes the **sibling rejection** rigorous — `has_unit_tests` and `has_integration_tests` are each true/false regardless of the other, so neither is ever offered as a parent or child of the other. Crucially, the prompts also treat **specialization as a genuine one-directional edge**: when the new criterion is a narrower form of a candidate (or vice-versa) such that the narrower one being true guarantees the broader one is also true, that is a real dependency — the broader criterion is the **parent** and the narrower one the **child**. So a new `has_unit_tests` correctly detects `has_tests` as a **parent** (no tests ⇒ no unit tests), and a new `has_tests` detects `has_unit_tests` as a **child** — kept distinct from the co-equal `has_unit_tests`/`has_integration_tests` siblings above. The model is told to prefer an empty array over a weak or speculative edge. Each returned list is post-filtered against its pool's IDs as a backstop. Because the parent and child calls are **independent**, the model can return the same id in both directions for a tightly-coupled pair (a contradictory 2-cycle); a **deterministic reconciliation** then drops any such id from the child set and keeps the parent edge — declaring a parent only affects the new criterion, whereas a child edge would mutate an existing one, so on directional ambiguity the safer parent edge wins. The author call failing throws (the prompt is indispensable); a suggestion call failing degrades that list to `[]` so it never blocks creation. When the request omits `gates` (e.g. older clients) both pools fall back to the full criteria list — fully backward compatible. Client-side pruning remains the final guarantee for any post-generation gate edits.

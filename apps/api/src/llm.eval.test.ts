@@ -11,27 +11,41 @@
  *     history, which the judge can read via read_tool_outputs / get_tool_output.
  *   - structural behaviors (how the code is written) -> the codebase.
  *
- * This is an **eval**, not a unit test: it calls the REAL generator against a
- * real LLM (GitHub Models), so it is non-deterministic and asserted on a
- * *majority* of N samples rather than a single deterministic output. It runs
- * only under `vitest.eval.config.ts` (`pnpm eval:criteria-prompts`) and
- * self-skips when no LLM token is available (same gate as the judge integration
- * test). It guards against regressions like the inert first fix for #1225, where
- * the `select`-gate hint steered agent-action criteria to files-only and dropped
- * the tool-call history the judge actually has.
+ * This is an **eval**, not a unit test. Two layers of LLM are involved:
+ *   1. Generation (the system under test): the REAL `generateCriteriaPrompt`
+ *      against a real LLM (GitHub Models). Non-deterministic, so each case is
+ *      sampled N times and asserted on a *majority*.
+ *   2. Grading (an LLM judge): each generated prompt is classified by a second
+ *      LLM call that decides which evidence source the prompt makes *primary*.
+ *
+ * The reusable eval framework — the LLM grader, the sampling/majority harness,
+ * and the rate-limit retry — lives in the `llm-eval` package. This file supplies
+ * only the api-specific pieces: the five production `rayfin_` cases and a
+ * `ChatComplete` adapter around the api's inference client. It runs only under
+ * `vitest.eval.config.ts` (`pnpm eval:criteria-prompts`) and self-skips when no
+ * LLM token is available (same gate as the judge integration test).
  *
  * Overridable via env:
- *   - CRITERIA_EVAL_SAMPLES: samples per case (default 5 local; CI sets 3).
- *   - CRITERIA_EVAL_MODEL:   model id (default gpt-4.1).
- * GitHub Models free tier is 15 req/60s, so calls are spaced and 429s retried
- * with exponential backoff.
+ *   - CRITERIA_EVAL_SAMPLES:      samples per case (default 5 local; CI sets 3).
+ *   - CRITERIA_EVAL_MODEL:        generator model id (default gpt-4.1).
+ *   - CRITERIA_EVAL_GRADER_MODEL: grader model id (default: the inference client's
+ *                                 model, else gpt-4.1).
+ * GitHub Models free tier is 15 req/60s; each sample makes 2 calls (generate +
+ * grade), so calls are spaced and 429s retried with exponential backoff.
  */
 import { describe, it, expect } from "vitest";
-import { withRetry, type GateId } from "shared";
+import { isUnexpected } from "@azure-rest/ai-inference";
+import type { GateId } from "shared";
+import {
+  collectSampledGrades,
+  gradeEvidenceSource,
+  majority,
+  type ChatComplete,
+  type EvidenceGrade,
+  type EvidenceSource,
+} from "llm-eval";
 import { generateCriteriaPrompt } from "./llm.js";
-import { isLlmAvailable } from "./llm-token.js";
-
-type EvidenceSource = "tool-history" | "codebase";
+import { acquireInferenceClient, isLlmAvailable } from "./llm-token.js";
 
 interface EvalCase {
   id: string;
@@ -85,28 +99,52 @@ const CRITERIA_PROMPT_EVAL_CASES: EvalCase[] = [
   },
 ];
 
-/**
- * True if the generated prompt tells the judge to consult the agent's captured
- * tool-call history / command output. Deterministic classifier (no second LLM
- * layer): validated against the real generated prompts with no false negatives.
- */
-export function mentionsToolCallHistory(prompt: string): boolean {
-  return /tool[- ]?call|tool[- ]?calling|tool output|captured (?:tool|command|output)|command(?:'s)? output|exit status|output history|execution (?:log|history)|terminal output|\blogs?\b|history of (?:tool|command|the agent)/i.test(
-    prompt,
-  );
-}
-
 const SAMPLES = Math.max(1, Number(process.env.CRITERIA_EVAL_SAMPLES ?? "5"));
 const MODEL = process.env.CRITERIA_EVAL_MODEL || "gpt-4.1";
-const SPACING_MS = 4_500; // GitHub Models free tier: 15 req/60s per user-model.
+// Undefined unless explicitly overridden, so the adapter can fall back to the
+// inference client's own model (foundry/token-manager path) before gpt-4.1.
+const GRADER_MODEL = process.env.CRITERIA_EVAL_GRADER_MODEL;
+const DEFAULT_MODEL = "gpt-4.1";
+// Each sample makes TWO calls (generate + grade), so the free-tier 15 req/60s
+// budget is hit twice as fast. Space samples generously; the framework's default
+// rate-limit retry absorbs any transient 429 so a required check stays green.
+const SPACING_MS = 6_000; // Between samples.
+const GRADE_SPACING_MS = 1_500; // Between a sample's generate and grade call.
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** Retry only on rate-limit errors; real orientation failures must surface. */
-function isRateLimit(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return /429|rate limit|too many requests/i.test(msg);
+// Reuse a single inference client across all grader calls (same token path as
+// the generator). Acquired lazily so the describe-level skip still short-circuits
+// when no token is present.
+let clientHandle: Awaited<ReturnType<typeof acquireInferenceClient>> | null = null;
+async function inferenceClient() {
+  if (!clientHandle) clientHandle = await acquireInferenceClient();
+  return clientHandle;
 }
+
+/**
+ * Adapt the api's GitHub Models / Azure inference client to the `llm-eval`
+ * `ChatComplete` transport. This adapter stays in the test (not the package)
+ * because it is api-specific: it depends on `acquireInferenceClient` and
+ * `@azure-rest/ai-inference`, which the transport-agnostic package must not.
+ */
+const complete: ChatComplete = async ({ messages, model, temperature, maxTokens }) => {
+  const { client, model: handleModel } = await inferenceClient();
+  const response = await client.path("/chat/completions").post({
+    body: {
+      messages,
+      model: model ?? handleModel ?? DEFAULT_MODEL,
+      temperature,
+      max_tokens: maxTokens,
+    },
+  });
+
+  if (isUnexpected(response)) {
+    const errBody = response.body as { error?: { message?: string } };
+    throw new Error(
+      `LLM request failed: ${errBody?.error?.message || response.status}`,
+    );
+  }
+  return response.body.choices?.[0]?.message?.content ?? "";
+};
 
 describe.skipIf(!isLlmAvailable())(
   "criteria-prompt generator orientation (eval, #1225)",
@@ -114,36 +152,32 @@ describe.skipIf(!isLlmAvailable())(
     it.each(CRITERIA_PROMPT_EVAL_CASES)(
       "$id ($expect): a majority of samples steer to the right evidence source",
       async ({ behavior, gates, expect: expected }) => {
-        let hits = 0;
-        for (let i = 0; i < SAMPLES; i++) {
-          if (i > 0) await sleep(SPACING_MS);
-          const { prompt } = await withRetry(
-            () => generateCriteriaPrompt(behavior, [], gates, MODEL),
-            {
-              maxRetries: 5,
-              baseDelayMs: 5_000,
-              maxDelayMs: 60_000,
-              isRetryable: isRateLimit,
-            },
-          );
-          if (mentionsToolCallHistory(prompt)) hits++;
-        }
+        const grades = await collectSampledGrades<EvidenceGrade>({
+          samples: SAMPLES,
+          spacingMs: SPACING_MS,
+          gradeSpacingMs: GRADE_SPACING_MS,
+          generate: async () => {
+            const { prompt } = await generateCriteriaPrompt(
+              behavior,
+              [],
+              gates,
+              MODEL,
+            );
+            return prompt;
+          },
+          grade: (prompt) =>
+            gradeEvidenceSource(complete, prompt, { model: GRADER_MODEL }),
+        });
 
-        // Strict majority of N. tool-history cases must cite the tool-call
-        // history in most samples; codebase cases must NOT (they stay
-        // files-oriented) in most samples.
-        const majority = Math.ceil(SAMPLES / 2);
-        if (expected === "tool-history") {
-          expect(
-            hits,
-            `expected >=${majority}/${SAMPLES} prompts to cite the tool-call history, got ${hits}`,
-          ).toBeGreaterThanOrEqual(majority);
-        } else {
-          expect(
-            hits,
-            `expected <=${SAMPLES - majority}/${SAMPLES} prompts to cite the tool-call history (codebase-oriented), got ${hits}`,
-          ).toBeLessThan(majority);
-        }
+        // Strict majority of N samples must be graded as the expected primary
+        // evidence source. tool-history cases must cite the tool-call history;
+        // codebase cases must stay codebase-oriented. "unclear" counts as a miss.
+        const matches = grades.filter((g) => g === expected).length;
+        const need = majority(SAMPLES);
+        expect(
+          matches,
+          `expected >=${need}/${SAMPLES} prompts graded '${expected}', got ${matches} (grades: ${grades.join(", ")})`,
+        ).toBeGreaterThanOrEqual(need);
       },
       300_000,
     );
