@@ -144,6 +144,73 @@ jobs:
           name: ctrf-test-results-node-${{ matrix.node-version }}
           path: ctrf/
 
+  # ---------------------------------------------------------------------------
+  # Criteria-prompt orientation eval (#1225). Calls the REAL generator against a
+  # real LLM and asserts a majority of N samples steer the judge to the correct
+  # evidence source (agent-action -> tool-call history; structural -> codebase).
+  # Path-filtered to prompt-gen code and required via CI Summary (success-or-
+  # skipped). Self-skips when no LLM token is present.
+  # ---------------------------------------------------------------------------
+  criteria-prompt-eval:
+    name: Criteria Prompt Eval (#1225)
+    needs: [detect-changes]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.criteria-prompt-gen == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      models: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # pnpm/action-setup@v4 is not allowed on EMU
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.29.1 --activate
+          pnpm --version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared packages
+        run: pnpm --filter shared build
+
+      - name: Run criteria-prompt orientation eval
+        run: npx vitest run --config vitest.eval.config.ts --silent=false apps/api/src/llm.eval.test.ts
+        env:
+          # A real GitHub PAT is required here: the generator calls the legacy
+          # GitHub Models endpoint (models.inference.ai.azure.com), which the
+          # ephemeral Actions GITHUB_TOKEN is NOT valid against (that only works
+          # with the newer models.github.ai/inference endpoint). COPILOT_GITHUB_TOKEN
+          # is an existing PAT secret. If it lacks model access, add a dedicated
+          # GITHUB_MODELS_API_KEY secret (a PAT with models scope) and read it here.
+          GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          CRITERIA_EVAL_SAMPLES: "3"
+
+      - name: Generate GitHub test summary from CTRF
+        if: always()
+        run: |
+          pnpm exec github-actions-ctrf "ctrf/*-eval-ctrf-report.json" --title "Criteria Prompt Eval Results" || true
+
+      - name: Upload CTRF eval results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ctrf-eval-results
+          path: ctrf/
+          if-no-files-found: ignore
+
   integration-test:
     name: Integration Tests (${{ matrix.worker.name }})
     needs: [detect-changes]
@@ -599,6 +666,7 @@ jobs:
       coder-acp-copilot-windows: ${{ steps.changes.outputs.coder-acp-copilot-windows }}
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
       typescript: ${{ steps.changes.outputs.typescript }}
+      criteria-prompt-gen: ${{ steps.changes.outputs.criteria-prompt-gen }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'push' || github.event_name == 'pull_request'
@@ -654,6 +722,11 @@ jobs:
               - 'tsconfig.base.json'
               - 'vitest.config.ts'
               - 'vitest.integration.config.ts'
+            criteria-prompt-gen:
+              - 'apps/api/src/llm.ts'
+              - 'apps/api/src/llm-token.ts'
+              - 'apps/api/src/llm.eval.test.ts'
+              - 'vitest.eval.config.ts'
 
   # ---------------------------------------------------------------------------
   # Build container images — gated on CI passing
@@ -1009,7 +1082,7 @@ jobs:
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [test, integration-test, integration-test-queue, lint, build, cli-bundle-test, gateway]
+    needs: [test, integration-test, integration-test-queue, lint, build, cli-bundle-test, gateway, criteria-prompt-eval]
     if: always()
 
     steps:
@@ -1021,6 +1094,7 @@ jobs:
              [ "${{ needs.lint.result }}" = "success" ] && \
              [ "${{ needs.build.result }}" = "success" ] && \
              [ "${{ needs.cli-bundle-test.result }}" = "success" -o "${{ needs.cli-bundle-test.result }}" = "skipped" ] && \
+             [ "${{ needs.criteria-prompt-eval.result }}" = "success" -o "${{ needs.criteria-prompt-eval.result }}" = "skipped" ] && \
              [ "${{ needs.gateway.result }}" = "success" -o "${{ needs.gateway.result }}" = "skipped" ]; then
             echo "✅ All checks passed!"
             exit 0
@@ -1032,6 +1106,7 @@ jobs:
             echo "  Lint: ${{ needs.lint.result }}"
             echo "  Build: ${{ needs.build.result }}"
             echo "  CLI Bundle Tests: ${{ needs.cli-bundle-test.result }}"
+            echo "  Criteria Prompt Eval: ${{ needs.criteria-prompt-eval.result }}"
             echo "  Gateway: ${{ needs.gateway.result }}"
             exit 1
           fi
