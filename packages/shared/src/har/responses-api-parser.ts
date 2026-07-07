@@ -18,6 +18,7 @@
  */
 
 import type { ToolCall } from "./types.js";
+import type { ParsedBody } from "./parsed-body.js";
 
 /**
  * Build a ToolCall from an OpenAI Responses API item.
@@ -74,7 +75,7 @@ function responsesApiItemToToolCall(
 }
 
 /**
- * Extract Responses API tool calls from a *response* body.
+ * Extract Responses API tool calls from a parsed *response* body.
  *
  * gpt-5.x via Copilot uses the Responses API (POST /responses). Tool calls are
  * emitted as `response.output_item.done` SSE events whose `.item` is a
@@ -82,52 +83,49 @@ function responsesApiItemToToolCall(
  * the complete item, so no streaming-delta accumulation is needed. Non-streaming
  * responses carry the same items in a top-level `output[]` array.
  *
+ * Takes a {@link ParsedBody} (the response body parsed once by the caller): the
+ * non-streaming `output[]` is read from `parsed.json`, and the streaming events
+ * from `parsed.sseEvents`.
+ *
  * Response events are the only place the terminal call (e.g. `task_complete`)
  * appears, since the agent stops afterwards and never echoes it into a later
  * request transcript.
  */
 export function extractResponsesApiToolCallsFromBody(
-  body: string,
+  parsed: ParsedBody,
   timestamp: string,
   toolCalls: Map<string, ToolCall>,
 ): void {
   // Non-streaming Responses API: { output: [ {type:"function_call", ...}, ... ] }
-  try {
-    const json = JSON.parse(body);
-    if (Array.isArray(json.output)) {
-      for (const item of json.output) {
+  if (parsed.json && typeof parsed.json === "object") {
+    const output = (parsed.json as Record<string, unknown>).output;
+    if (Array.isArray(output)) {
+      for (const item of output) {
         if (item && typeof item === "object") {
           const call = responsesApiItemToToolCall(item as Record<string, unknown>, timestamp);
           if (call && !toolCalls.has(call.id)) toolCalls.set(call.id, call);
         }
       }
-      return;
     }
-  } catch {
-    // Not a single JSON object — try SSE streaming below.
   }
 
   // Streaming SSE: data: {"type":"response.output_item.done","item":{...}}
-  const lines = body.split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("data: ") || trimmed === "data: [DONE]") continue;
-
-    try {
-      const json = JSON.parse(trimmed.slice(6));
-      if (json.type !== "response.output_item.done") continue;
-      const item = json.item;
-      if (!item || typeof item !== "object") continue;
-      const call = responsesApiItemToToolCall(item as Record<string, unknown>, timestamp);
-      if (call && !toolCalls.has(call.id)) toolCalls.set(call.id, call);
-    } catch {
-      continue;
-    }
+  // (parsed.sseEvents is empty for a non-streaming body, so the two branches
+  // are mutually exclusive.)
+  for (const event of parsed.sseEvents) {
+    if (!event || typeof event !== "object") continue;
+    const ev = event as Record<string, unknown>;
+    if (ev.type !== "response.output_item.done") continue;
+    const item = ev.item;
+    if (!item || typeof item !== "object") continue;
+    const call = responsesApiItemToToolCall(item as Record<string, unknown>, timestamp);
+    if (call && !toolCalls.has(call.id)) toolCalls.set(call.id, call);
   }
 }
 
 /**
- * Extract Responses API tool calls *and* their outputs from a *request* body.
+ * Extract Responses API tool calls *and* their outputs from a parsed *request*
+ * body.
  *
  * Each `/responses` request re-sends the full running transcript in `input[]`,
  * which accumulates every prior `function_call` / `custom_tool_call` and the
@@ -137,25 +135,19 @@ export function extractResponsesApiToolCallsFromBody(
  * complete than the sparse per-turn response events. Calls are added (deduped by
  * `call_id`); outputs are recorded in `toolResponses` for later matching.
  *
- * Parses the body once and dispatches on item type. `input` may also be a plain
- * string (simple prompts) — those bodies are ignored.
+ * Takes the request body already parsed by the caller (request bodies are never
+ * SSE). Non-object values (including a literal `null`, or a plain-string
+ * `input`) are ignored.
  */
 export function extractResponsesApiFromRequestBody(
-  body: string,
+  json: unknown,
   timestamp: string,
   toolCalls: Map<string, ToolCall>,
   toolResponses: Map<string, string>,
 ): void {
-  let json: unknown;
-  try {
-    json = JSON.parse(body);
-  } catch {
-    return;
-  }
-  // JSON.parse("null") returns null without throwing, and primitives like
-  // `123`/`true`/`"str"` parse to non-objects — guard before property access so
-  // a stray non-object request body can't throw and abort extraction for the
-  // whole HAR.
+  // The caller parses once; guard before property access so a stray non-object
+  // request body (e.g. a literal `null`) can't throw and abort extraction for
+  // the whole HAR.
   if (!json || typeof json !== "object") return;
 
   const input = (json as Record<string, unknown>).input;
