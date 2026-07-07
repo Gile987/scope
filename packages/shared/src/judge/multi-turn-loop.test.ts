@@ -322,7 +322,7 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     expect((config.blobStorage as any).writeToolCalls).not.toHaveBeenCalled();
   });
 
-  it("does not record toolCallsUrl when extraction returns empty array", async () => {
+  it("does not record toolCallsUrl but warns when extraction returns empty array", async () => {
     mockSanitizeHarFile.mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
     mockExtractToolCalls.mockReturnValue([]);
 
@@ -338,6 +338,14 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     expect(result.turns[0].toolCallsUrl).toBeUndefined();
     expect(result.turns[0].toolCallCount).toBeUndefined();
     expect((config.blobStorage as any).writeToolCalls).not.toHaveBeenCalled();
+    // Gate 4: a captured HAR that yields zero tool calls must NOT be silent —
+    // it is almost always an unsupported wire format starving the judge of
+    // tool-call evidence, so the loop must emit a loud warning.
+    expect(mockLog).toHaveBeenCalledWith(
+      "warn",
+      expect.stringContaining("0 tool calls extracted"),
+      expect.anything()
+    );
   });
 
   it("logs warning but continues when tool call extraction fails", async () => {

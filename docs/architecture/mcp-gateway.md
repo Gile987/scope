@@ -22,7 +22,7 @@ MCPJungle sidecar
   → remote HTTP (context7, etc.)         — direct outbound
 ```
 
-Dev Proxy captures tool calls from the **Copilot API response body** (`tool_calls[]`). It never sees MCP wire traffic — that's fine, the tool names and arguments are fully captured in the LLM's response.
+Dev Proxy captures tool calls from the **Copilot API response body**. It never sees MCP wire traffic — that's fine, the tool names and arguments are fully captured in the LLM's response. The exact shape depends on the model's API: chat-completions models use `tool_calls[]`, while gpt-5.x uses the **Responses API** (`function_call` / `custom_tool_call` items). `extractToolCalls` (`packages/shared/src/har/har-parser.ts`) parses all supported formats — see [gates.md](../design/gates.md) §3 for the full list.
 
 ---
 

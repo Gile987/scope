@@ -81,6 +81,21 @@ Key facts the design builds on:
   (`blobStorage.writeToolCalls` → `toolCallsUrl`). Each entry carries
   `{ name, arguments, response }`. This is **HAR-derived** today and is *not*
   surfaced to the judge.
+  - `extractToolCalls` (`packages/shared/src/har/har-parser.ts`) understands three
+    LLM wire formats: OpenAI **chat-completions** (`choices[].message.tool_calls`),
+    **Anthropic Messages** (`content[].type === "tool_use"`), and the OpenAI
+    **Responses API** (`/responses`, SSE) used by **gpt-5.x** via Copilot — whose
+    calls are `function_call` / `custom_tool_call` items keyed by `call_id`. The
+    Responses API is parsed from **both** the response `output_item.done` / `output[]`
+    items **and** the request `input[]` accumulated transcript (which also carries
+    `function_call_output` / `custom_tool_call_output` results), then deduped by
+    `call_id`; the request transcript is the authoritative complete source because a
+    HAR may retain only the tail of a long session. Adding a new agent that speaks a
+    different wire format requires a new extractor here, or the judge is silently
+    starved of tool-call evidence (see #1250).
+  - When a HAR is present but `extractToolCalls` returns `[]`, `multi-turn-loop.ts`
+    now emits a `warn` log so this class of failure (an unrecognized wire format) is
+    never silent.
 - **`ConversationTurn`** records per-iteration artifacts (snapshot, HAR, tool
   calls, tokens). Turns live under `run.turns` on the request document.
 
@@ -694,6 +709,13 @@ Per the CLI ↔ Portal parity rule, both must expose gate selection.
    *log* tool calls (`acp-client.ts`) — they are not persisted as structured
    outputs. Reliable per-iteration capture across **all** worker types is a
    prerequisite for Build/Test/Deploy gates and may need worker changes.
+   *Update (#1250):* `extractToolCalls` now also parses the OpenAI **Responses API**
+   (gpt-5.x via Copilot), which previously yielded **zero** tool calls and starved
+   the judge of evidence on those runs. Coverage is still **wire-format-specific** —
+   each new agent/API shape needs its own extractor, and the parser is the single
+   choke point where a missed format silently produces an empty tool-call history.
+   See also #1225 (make criteria-prompt generation *aware* of the judge's tool-call
+   access) — complementary: #1250 fixes runtime capture, #1225 fixes prompt wording.
 3. **Default gate prompts.** Non-Select gates are driven by typed prompt entities
    (§4.5); the platform should seed sensible defaults. Open: exact default text,
    and whether prompts can be parameterised by scenario (e.g. build command).
