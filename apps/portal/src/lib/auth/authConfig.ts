@@ -12,11 +12,15 @@
  *
  * In `dev` builds the values default to the deterministic seed directory shipped
  * by [entra-local](https://github.com/cmaneu/entra-local) (tag `v0.0.3`) so
- * sign-in works out of the box after the emulator is running and its self-signed
- * certificate is trusted. Production builds **must** supply the `VITE_AUTH_*`
- * values (baked into the bundle at build time); when they are missing the config
- * is reported as not configured so the app can surface a clear error instead of
- * silently pointing at `localhost`.
+ * sign-in works out of the box after the emulator is running. The dev emulator
+ * serves **HTTPS** using a locally-trusted mkcert certificate (provisioned by
+ * `scripts/ensure-dev-certs.sh`), so no manual certificate trust is required —
+ * MSAL requires an https authority. Under Docker the compose stack injects
+ * `VITE_AUTH_AUTHORITY` / `VITE_AUTH_KNOWN_AUTHORITIES` with the per-worktree
+ * host port, overriding these defaults. Production builds **must** supply the
+ * `VITE_AUTH_*` values (baked into the bundle at build time); when they are
+ * missing the config is reported as not configured so the app can surface a
+ * clear error instead of silently pointing at `localhost`.
  *
  * Only **Entra** is wired today. The shape mirrors the shared `AuthClientConfig`
  * so adding another IdP later is a config + provider change, not a call-site one.
@@ -53,8 +57,8 @@ const ENTRA_LOCAL_DEFAULTS = {
   /**
    * Seeded public SPA app registration ("Sample SPA"). entra-local uses the
    * app's object id as the client id; this is the value the emulator seeds and
-   * exposes at `/admin/api/apps`. The dev Portal origin must be registered as a
-   * redirect URI on this app (see docs/ENV_VARIABLES.md).
+   * exposes at `/admin/api/apps`. The dev Portal origin is auto-registered as a
+   * redirect URI on this app by the `entra-local-init` compose service.
    */
   clientId: "cccccccc-0000-0000-0000-000000000001",
   /** Seeded fixed tenant, OIDC v2.0 authority served over local HTTPS. */

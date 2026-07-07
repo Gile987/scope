@@ -284,31 +284,41 @@ renders a "not configured" screen instead of silently pointing at `localhost`.
 
 ### Local dev setup (entra-local)
 
-The dev defaults target the emulator's seeded directory, but three one-time steps
-are needed before the browser can complete sign-in:
+Sign-in works from a **single command** — no manual profile flag, no manual cert
+trust, and no manual redirect-URI registration. Any `pnpm docker:dev:*` script
+that starts the Portal (e.g. `pnpm docker:dev:copilot`, `pnpm docker:dev:portal`,
+`pnpm docker:dev:all`) automatically:
 
-1. **Start the emulator:** `pnpm docker:up:auth`. The compose service sets
-   `PUBLIC_ORIGIN=https://localhost:8443` so the OIDC discovery document's
-   `issuer`/endpoints use `localhost` (the container binds `0.0.0.0`, which would
-   otherwise leak into the issuer and fail MSAL's authority match).
-2. **Trust the self-signed certificate** so MSAL can fetch discovery/JWKS over
-   HTTPS. Extract and trust it (macOS example):
-   ```bash
-   docker cp <entra-local-container>:/app/data/tls/cert.pem /tmp/entra-local.pem
-   # or: echo | openssl s_client -connect localhost:8443 -servername localhost \
-   #       2>/dev/null | openssl x509 -out /tmp/entra-local.pem
-   security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db /tmp/entra-local.pem
-   ```
-3. **Register the Portal's redirect URI** on the seeded SPA app (it ships only
-   with `https://localhost:3000`). For the dev Portal on `http://localhost:5100`:
-   ```bash
-   curl -sk -X POST \
-     "https://localhost:8443/admin/api/apps/cccccccc-0000-0000-0000-000000000001/redirectUris" \
-     -H "Content-Type: application/json" \
-     -d '{"uri":"http://localhost:5100","type":"spa"}'
-   ```
+1. Ensures a locally-trusted TLS cert exists via **mkcert** (`scripts/ensure-dev-certs.sh`,
+   invoked by `scripts/dev-compose.sh`). mkcert installs a local root CA into the
+   OS/browser trust store and mints `.certs/entra-local.pem` for `localhost`, so
+   `https://localhost:<ENTRA_LOCAL_PORT>` is trusted with no cert warning. MSAL
+   requires the authority to be served over HTTPS, which is why the emulator uses
+   TLS rather than plain HTTP.
+2. Starts the `entra-local` emulator (compose `auth` profile, added automatically
+   by the dev scripts). `PUBLIC_ORIGIN`/`ISSUER` are pinned to
+   `https://localhost:${ENTRA_LOCAL_PORT}` so the OIDC discovery document's
+   `issuer`/endpoints use the host-facing port (the container binds `8443`
+   internally; per-worktree port offsets would otherwise leak into the issuer and
+   fail MSAL's authority match).
+3. Runs the one-shot `entra-local-init` service, which waits for the emulator to
+   become healthy and idempotently registers `http://localhost:${PORTAL_PORT}` as
+   a `spa` redirect URI on the seeded Sample SPA app (the seed ships only
+   `https://localhost:3000`, and each worktree gets its own `PORTAL_PORT`).
 
-Sign in with a seeded user (`alice@entralocal.dev` / `bob@entralocal.dev`).
+**Prerequisite:** [mkcert](https://github.com/FiloSottile/mkcert) must be
+installed (`brew install mkcert nss`). The first run triggers `mkcert -install`,
+which asks for your password once to add the local CA to the system trust store.
+This is the only interactive step.
+
+Then open the Portal at `http://localhost:${PORTAL_PORT}`, click **Log in**, and
+sign in with a seeded user (`alice@entralocal.dev` / `bob@entralocal.dev`).
+
+> `ENTRA_LOCAL_PORT` and `PORTAL_PORT` are derived per-worktree by
+> `scripts/worktree-env.sh` from the `*_PORT` base values in `.env.base`
+> (`ENTRA_LOCAL_PORT` base is `8500`). The compose files inject the resolved
+> `VITE_AUTH_AUTHORITY`/`VITE_AUTH_KNOWN_AUTHORITIES` into the Portal dev
+> container so the browser always targets the correct per-worktree emulator.
 
 ### VITE_AUTH_CLIENT_ID
 **Default (dev):** `cccccccc-0000-0000-0000-000000000001` (entra-local seeded "Sample SPA" app)
@@ -353,9 +363,9 @@ Entra uses `AAD`.
 **Type:** URL string
 
 Redirect URI for the auth-code + PKCE flow. Must exactly match a redirect URI
-registered on the app. When developing the Portal on `http://localhost:5100`,
-register that URI in the entra-local admin portal (the seeded SPA app ships with
-`https://localhost:3000`), or rely on the `window.location.origin` default.
+registered on the app. In local dev this defaults to `window.location.origin`
+(`http://localhost:${PORTAL_PORT}`), which the `entra-local-init` service
+registers automatically — no manual step needed.
 
 ### VITE_AUTH_POST_LOGOUT_REDIRECT_URI
 **Default:** `window.location.origin`

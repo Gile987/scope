@@ -889,6 +889,16 @@ local dev exercises the same verification path as production. New env vars are d
     > (`VITE_AUTH_*`, see [ENV_VARIABLES.md](../../ENV_VARIABLES.md)) defaulting to
     > the `entra-local` emulator for local dev.
     >
+    > **One-command local dev.** Any `pnpm docker:dev:*` script that starts the
+    > Portal brings up the `entra-local` emulator (compose `auth` profile) over
+    > HTTPS with an mkcert-issued, locally-trusted `localhost` cert
+    > (`scripts/ensure-dev-certs.sh`), and auto-registers the per-worktree Portal
+    > redirect URI via a one-shot `entra-local-init` service. MSAL requires the
+    > authority to be served over HTTPS (it rejects non-HTTPS authorities with
+    > `authority_uri_insecure`), hence the mkcert TLS setup rather than plain HTTP.
+    > The only interactive step is a one-time `mkcert -install` password prompt.
+    > See [ENV_VARIABLES.md](../../ENV_VARIABLES.md) "Local dev setup (entra-local)".
+    >
     > **Deferred (needs subtask 6 + API-side authn):** because the API does not
     > verify tokens yet, enforcement is **client-side only** and identity shown in
     > the UI comes from **MSAL account token claims**, not `GET /api/v1/users/me`

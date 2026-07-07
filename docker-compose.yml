@@ -156,27 +156,78 @@ services:
   # users alice@/bob@entralocal.dev / Password1!). Dev-only, intentionally
   # insecure — never expose it beyond localhost. Pinned to the latest tag.
   #
-  # Opt-in via the `auth` profile, e.g. `pnpm docker:up:auth`. Serves HTTPS on
-  # 8443 with a self-signed cert the browser must trust; see the auth docs.
+  # entra-local — Microsoft Entra ID emulator for local auth development.
+  # Opt-in via the `auth` profile (bundled into every `docker:dev:*` script).
+  # Serves HTTPS using a locally-trusted mkcert certificate (provisioned by
+  # scripts/ensure-dev-certs.sh and mounted at /certs) so the browser trusts it
+  # with no manual cert step — MSAL requires an https authority. See the auth docs.
   entra-local:
     image: ghcr.io/cmaneu/entra-local:0.0.3
     profiles: [auth]
     ports:
       - "${ENTRA_LOCAL_PORT:-8443}:8443"
     environment:
-      # The container binds 0.0.0.0 for host port mapping; without this the
-      # issuer/endpoints in the OIDC discovery document come back as
-      # https://0.0.0.0:8443, which fails MSAL's authority/issuer match. Pin the
-      # public origin so discovery/JWKS/token URLs and the token `iss` all use
-      # the host the browser actually reaches.
-      PUBLIC_ORIGIN: "${ENTRA_LOCAL_PUBLIC_ORIGIN:-https://localhost:8443}"
+      # HTTPS with the mkcert-issued localhost cert. mkcert's CA is trusted on the
+      # host, so https://localhost:<port> is trusted by the browser.
+      TLS_ENABLED: "true"
+      TLS_CERT: /certs/entra-local.pem
+      TLS_KEY: /certs/entra-local-key.pem
+      # The container binds 0.0.0.0:8443 internally; the host maps it to
+      # ENTRA_LOCAL_PORT (offset per worktree). Pin PUBLIC_ORIGIN *and* ISSUER to
+      # the host-facing origin so the discovery/JWKS/token endpoints and the
+      # token `iss` all use the host+port the browser actually reaches — the
+      # internal 8443 would otherwise leak into the OIDC metadata and break
+      # MSAL's authority/issuer match when the host port is offset.
+      PUBLIC_ORIGIN: "${ENTRA_LOCAL_PUBLIC_ORIGIN:-https://localhost:${ENTRA_LOCAL_PORT:-8443}}"
+      ISSUER: "${ENTRA_LOCAL_ISSUER:-https://localhost:${ENTRA_LOCAL_PORT:-8443}/${AUTH_TENANT_ID:-11111111-1111-1111-1111-111111111111}/v2.0}"
     volumes:
       - entra_local_data:/app/data
+      - ./.certs:/certs:ro
     healthcheck:
       test: ["CMD", "node", "-e", "require('https').get({host:'localhost',port:8443,path:'/health',rejectUnauthorized:false},(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # entra-local-init — one-shot: registers the dev Portal origin as an SPA
+  # redirect URI on the seeded "Sample SPA" app so sign-in works with no manual
+  # portal step. Idempotent (tolerates an already-registered URI). Talks to the
+  # emulator over the compose network (https://entra-local:8443/admin/api); the
+  # cert is for `localhost`, so verification is disabled for this internal call.
+  entra-local-init:
+    image: ghcr.io/cmaneu/entra-local:0.0.3
+    profiles: [auth]
+    restart: "no"
+    entrypoint: ["node", "-e"]
+    command:
+      - |
+        const appId = 'cccccccc-0000-0000-0000-000000000001';
+        const uri = 'http://localhost:' + (process.env.PORTAL_PORT || '5100');
+        const base = 'https://entra-local:8443/admin/api/apps/' + appId + '/redirectUris';
+        const body = JSON.stringify({ uri, type: 'spa' });
+        const post = () => new Promise((res, rej) => {
+          const r = require('https').request(base, { method: 'POST', rejectUnauthorized: false, headers: { 'content-type': 'application/json' } }, (rsp) => {
+            let d = ''; rsp.on('data', c => d += c); rsp.on('end', () => res({ status: rsp.statusCode, body: d }));
+          });
+          r.on('error', rej); r.write(body); r.end();
+        });
+        (async () => {
+          for (let i = 0; i < 60; i++) {
+            try {
+              const { status, body } = await post();
+              if (status === 201) { console.log('registered redirect URI', uri); return; }
+              if (status === 409) { console.log('redirect URI already registered', uri); return; }
+              console.log('attempt', i, 'status', status, body);
+            } catch (e) { console.log('attempt', i, 'waiting for entra-local:', e.code || e.message); }
+            await new Promise(r => setTimeout(r, 2000));
+          }
+          console.error('failed to register redirect URI after retries'); process.exit(1);
+        })();
+    environment:
+      PORTAL_PORT: "${PORTAL_PORT:-5100}"
+    depends_on:
+      entra-local:
+        condition: service_healthy
 
   # ===========================================================================
   # Application services
