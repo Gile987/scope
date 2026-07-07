@@ -198,7 +198,8 @@ impl SessionManager {
         // appends its `_webSocketMessages` entry, then drops its in-flight
         // guard) before finalizing the HAR, so the captured frames are present
         // when the worker immediately reads the HAR after stop returns.
-        self.drain_in_flight(session_id, Duration::from_secs(5)).await;
+        self.drain_in_flight(session_id, Duration::from_secs(5))
+            .await;
 
         self.registry.on_session_stop(session_id).await;
 
