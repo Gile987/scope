@@ -504,3 +504,19 @@ The telemetry module is initialized via `initTelemetry()` from `packages/shared/
 
 - **Docker Compose:** Set in `.env` file or leave unset for local development
 - **Kubernetes:** Sourced from `appinsights-secrets` ExternalSecret (workers) or `appinsights-secrets` secretRef (API), which reads from Key Vault secret `appinsights-connection-string`
+
+The telemetry module uses the modern `@azure/monitor-opentelemetry` distribution (OpenTelemetry-based). Custom metrics are emitted through the OpenTelemetry Meter API. `initTelemetry()` sets `OTEL_SERVICE_NAME` to the service name so it appears as the resource `service.name`.
+
+### TELEMETRY_SAMPLING_RATIO
+**Default:** `1.0`
+**Type:** float (`0.0`–`1.0`)
+**Used by:** API, all workers
+
+Fraction of telemetry that is sampled and exported to Application Insights. `1.0` sends everything; `0.0` sends nothing. Passed to Azure Monitor as `samplingRatio`. Invalid or out-of-range values fall back to `1.0`.
+
+### TELEMETRY_LOG_LEVEL
+**Default:** `Warning`
+**Type:** string (`Verbose` | `Information` | `Warning` | `Error` | `Critical`)
+**Used by:** all workers
+
+Minimum severity level for forwarding subprocess/trace logs to Application Insights via `trackTrace()`. Only traces at or above this level are forwarded. Because subprocess logs are debug-level (`Verbose`), they are suppressed by default and only forwarded when set to `Verbose`.

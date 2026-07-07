@@ -10,7 +10,25 @@ dotenv.config();
 // Initialize telemetry before any other setup
 initTelemetry(process.env.WORKER_NAME || "coder-acp-copilot");
 
-const PROCESS_START_TIME = Date.now();
+/**
+ * Detect the first structured "AI turn" signal from a subprocess log line.
+ *
+ * Prefers an explicit "createTurn" marker or a JSON-parseable message carrying a
+ * `type` field, rather than a loose substring match on "turn".
+ */
+export function isFirstAiCallSignal(msg: string): boolean {
+  if (msg.includes("createTurn")) return true;
+  const trimmed = msg.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return typeof parsed === "object" && parsed !== null && typeof parsed.type === "string";
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
 
 /**
  * Build the environment variables for the copilot subprocess.
@@ -123,6 +141,19 @@ class CopilotProcessor implements WorkerProcessor {
     let firstAiCallTracked = false;
     let lastProtocolEventTime = runStartTime;
 
+    // Periodically emit subprocess idle gaps during active runs so long stalls are
+    // observable even before the run completes.
+    const idleMonitor = setInterval(() => {
+      const gapMs = Date.now() - lastProtocolEventTime;
+      if (gapMs > 60_000) {
+        trackMetric({
+          name: "worker.subprocess_idle_s",
+          value: gapMs / 1000,
+          properties: { runId, workerType },
+        });
+      }
+    }, 30_000);
+
     const skillConfigs = options?.skillConfigs ?? [];
     await log("info", "Starting Copilot ACP processor", {
       inputLength: message.length,
@@ -197,7 +228,7 @@ class CopilotProcessor implements WorkerProcessor {
         onLog: async (msg) => {
           lastProtocolEventTime = Date.now();
           // Track first AI call timing
-          if (!firstAiCallTracked && msg.toLowerCase().includes("turn")) {
+          if (!firstAiCallTracked && isFirstAiCallSignal(msg)) {
             firstAiCallTracked = true;
             const firstAiCallMs = Date.now() - runStartTime;
             trackMetric({
@@ -206,7 +237,8 @@ class CopilotProcessor implements WorkerProcessor {
               properties: { runId, workerType },
             });
           }
-          // Forward subprocess logs to App Insights
+          // Forward subprocess logs to App Insights. These are debug-level, so
+          // trackTrace only forwards them when TELEMETRY_LOG_LEVEL=Verbose.
           trackTrace({
             message: msg,
             severityLevel: "Verbose",
@@ -233,12 +265,12 @@ class CopilotProcessor implements WorkerProcessor {
         properties: { runId, workerType, stopReason: result.stopReason },
       });
 
-      // Track cold start (first run only — time from process start to first ACP message)
+      // Track cold start (first run only — container uptime up to first completed run)
       if (!CopilotProcessor.coldStartTracked) {
         CopilotProcessor.coldStartTracked = true;
         trackMetric({
           name: "worker.cold_start_ms",
-          value: runStartTime - PROCESS_START_TIME,
+          value: process.uptime() * 1000,
           properties: { workerType },
         });
       }
@@ -251,12 +283,14 @@ class CopilotProcessor implements WorkerProcessor {
         properties: { runId, workerType },
       });
 
+      clearInterval(idleMonitor);
       const response = result.response || `[${this.workerName}] No response from Copilot`;
       const { harFilePath, tokenUsage, aiCallCount } = devProxy
         ? await devProxy.stopAndCollectHar(log)
         : { harFilePath: null, tokenUsage: undefined, aiCallCount: undefined };
       return { response, ...(harFilePath && { harFilePath }), ...(tokenUsage && { tokenUsage }), ...(aiCallCount !== undefined && { aiCallCount }) };
     } catch (error) {
+      clearInterval(idleMonitor);
       if (devProxy) {
         const { harFilePath, aiCallCount } = await devProxy.stopAndCollectHar(log);
         if (harFilePath) {
