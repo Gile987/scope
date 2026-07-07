@@ -108,6 +108,22 @@ describe("extractToolCalls (Responses API / gpt-5.x)", () => {
       expect(extractToolCalls(har)).toHaveLength(0);
     });
 
+    // Regression: JSON.parse("null") returns null (no throw) and primitives
+    // parse to non-objects; the property access must not blow up, because an
+    // uncaught throw here aborts extraction for the entire HAR. postData.text
+    // is set to the RAW body directly (makeEntry would JSON.stringify it).
+    it.each(["null", "123", "true", '"str"'])(
+      "ignores a non-object request body (%s) without throwing",
+      (rawBody) => {
+        const entry = makeEntry({ url: RESP_URL });
+        entry.request.postData = { mimeType: "application/json", text: rawBody };
+        const har = makeHar([entry]);
+        expect(() => extractToolCalls(har)).not.toThrow();
+        expect(extractToolCalls(har)).toHaveLength(0);
+      },
+    );
+
+
     it("stringifies non-string output values", () => {
       const requestBody = {
         input: [

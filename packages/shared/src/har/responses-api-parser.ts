@@ -146,14 +146,19 @@ export function extractResponsesApiFromRequestBody(
   toolCalls: Map<string, ToolCall>,
   toolResponses: Map<string, string>,
 ): void {
-  let json: Record<string, unknown>;
+  let json: unknown;
   try {
     json = JSON.parse(body);
   } catch {
     return;
   }
+  // JSON.parse("null") returns null without throwing, and primitives like
+  // `123`/`true`/`"str"` parse to non-objects — guard before property access so
+  // a stray non-object request body can't throw and abort extraction for the
+  // whole HAR.
+  if (!json || typeof json !== "object") return;
 
-  const input = json.input;
+  const input = (json as Record<string, unknown>).input;
   if (!Array.isArray(input)) return;
 
   for (const raw of input) {
