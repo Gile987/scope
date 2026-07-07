@@ -8,6 +8,7 @@ import { colorLevel, dimTimestamp, errorText, successText, label, value, banner,
 import { GATE_METADATA, GATE_ORDER, type ConversationTurn, type GateId, type GateRunSummary, type RequestDocument } from "shared";
 import { formatData, isMachineReadable } from "./utils/formatters.js";
 import type { OutputFormat, DisplayField } from "./utils/types.js";
+import { apiFetch } from "./utils/api-client.js";
 
 function gateLabel(gate: GateId): string {
   return GATE_METADATA[gate]?.label ?? gate;
@@ -28,9 +29,6 @@ function gateStatusIcon(summary: GateRunSummary | undefined): string {
   return "○";
 }
 
-/** Strip trailing slashes from a URL */
-const normalizeUrl = (url: string): string => url.replace(/\/+$/, '');
-
 export interface RunGetOptions {
   id: string;
   url: string;
@@ -40,7 +38,7 @@ export interface RunGetOptions {
 export async function runGetAction(options: RunGetOptions): Promise<void> {
   const format = (options.output || 'table') as OutputFormat;
   try {
-  const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${options.id}`);
+  const response = await apiFetch(options.url, `/requests/${options.id}`);
 
   if (!response.ok) {
     const error = await response.json();

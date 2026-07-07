@@ -9,7 +9,8 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner, styleText } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { apiFetch } from "../utils/api-client.js";
 import { mapYamlCriterion } from "../utils/yaml-mappers.js";
 import { formatGateList, parseGateListOption, type GateId } from "../utils/gates.js";
 
@@ -38,7 +39,7 @@ criteria
       const params = new URLSearchParams();
       if (options.query) params.set("q", options.query);
       const qs = params.toString();
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria${qs ? `?${qs}` : ""}`);
+      const response = await apiFetch(options.url, `/criteria${qs ? `?${qs}` : ""}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -86,7 +87,7 @@ criteria
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/${options.id}`);
+      const response = await apiFetch(options.url, `/criteria/${options.id}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -155,7 +156,7 @@ criteria
       const gates = parseGateListOption(options.gates);
       if (gates !== undefined) body.gates = gates;
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria`, {
+      const response = await apiFetch(options.url, `/criteria`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -196,7 +197,7 @@ criteria
         process.exit(1);
       }
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/${options.id}`, {
+      const response = await apiFetch(options.url, `/criteria/${options.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -222,7 +223,7 @@ criteria
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/${options.id}`, {
+      const response = await apiFetch(options.url, `/criteria/${options.id}`, {
         method: "DELETE",
       });
 
@@ -252,7 +253,7 @@ criteria
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/graph`);
+      const response = await apiFetch(options.url, `/criteria/graph`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -339,7 +340,7 @@ criteria
         params.set("ancestors", "true");
       }
       const qs = params.toString();
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria${qs ? `?${qs}` : ""}`);
+      const response = await apiFetch(options.url, `/criteria${qs ? `?${qs}` : ""}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -490,7 +491,7 @@ criteria
 
       // Seed via API
       console.log();
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/seed`, {
+      const response = await apiFetch(options.url, `/criteria/seed`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ criteria: allCriteria }),

@@ -81,6 +81,21 @@ Key facts the design builds on:
   (`blobStorage.writeToolCalls` → `toolCallsUrl`). Each entry carries
   `{ name, arguments, response }`. This is **HAR-derived** today and is *not*
   surfaced to the judge.
+  - `extractToolCalls` (`packages/shared/src/har/har-parser.ts`) understands three
+    LLM wire formats: OpenAI **chat-completions** (`choices[].message.tool_calls`),
+    **Anthropic Messages** (`content[].type === "tool_use"`), and the OpenAI
+    **Responses API** (`/responses`, SSE) used by **gpt-5.x** via Copilot — whose
+    calls are `function_call` / `custom_tool_call` items keyed by `call_id`. The
+    Responses API is parsed from **both** the response `output_item.done` / `output[]`
+    items **and** the request `input[]` accumulated transcript (which also carries
+    `function_call_output` / `custom_tool_call_output` results), then deduped by
+    `call_id`; the request transcript is the authoritative complete source because a
+    HAR may retain only the tail of a long session. Adding a new agent that speaks a
+    different wire format requires a new extractor here, or the judge is silently
+    starved of tool-call evidence (see #1250).
+  - When a HAR is present but `extractToolCalls` returns `[]`, `multi-turn-loop.ts`
+    now emits a `warn` log so this class of failure (an unrecognized wire format) is
+    never silent.
 - **`ConversationTurn`** records per-iteration artifacts (snapshot, HAR, tool
   calls, tokens). Turns live under `run.turns` on the request document.
 
@@ -189,12 +204,40 @@ i.e. a parent must be compatible with at least every gate its child is compatibl
 
 - **Consequence:** ancestor resolution can never pull a criterion into a gate it is incompatible with — the situation is impossible by construction.
 - **Enforcement:** validated at criteria create/update (alongside the existing cycle check in `CriteriaStore`) and again at request submit. A violation is a clear validation error, e.g. `"builds_clean is compatible with build but its dependency uses_express is not (compatible with: select)."`
-- **Authoring (portal):** the criteria creation wizard never offers a dependency that would violate the invariant. **Gate compatibility is chosen in Step 1** (alongside behavior + ID), so the very first AI generation — which fires on the Step 1 → Step 2 transition — is already gate-aware. In the Review & Create step (Step 2) the gates are shown **read-only** and the **Parents** picker only lists criteria whose compatibility ⊇ the criterion's selected gates, while the **Children** picker only lists criteria whose compatibility ⊆ those gates. The two pickers also **cross-exclude**: a criterion already selected as a parent is removed from the Children picker's options and vice-versa, so the user can never select the same criterion as both a parent and a child (a contradictory 2-cycle). The same criterion may still be *displayed* as a suggestion in both lists — only *selection* in both is blocked. AI-suggested parents/children are filtered through the same predicates; to change gates after generation the user steps Back to Step 1 and continues again (re-generating). The reactive prune in `useCriteriaWizard` drops any now-incompatible parent/child as a backstop. This keeps the wizard from ever submitting a request the API would reject.
+- **Authoring (portal):** the criteria creation wizard never offers a dependency that would violate the invariant. **Gate compatibility is chosen in Step 1** (alongside behavior + ID), so the very first AI generation — which fires on the Step 1 → Step 2 transition — is already gate-aware. In the Review & Create step (Step 2) the gates are shown **read-only** and the **Parents** picker only lists criteria whose compatibility ⊇ the criterion's selected gates, while the **Children** picker only lists criteria whose compatibility ⊆ those gates. The two pickers also **cross-exclude**: a criterion already selected as a parent is removed from the Children picker's options and vice-versa, so the user can never select the same criterion as both a parent and a child (a contradictory 2-cycle). The same criterion may still be *displayed* as a suggestion in both lists — only *selection* in both is blocked. AI-suggested parents/children are filtered through the same predicates; to change gates after generation the user steps Back to Step 1 and continues again (re-generating). The reactive prune in `useCriteriaWizard` drops any now-incompatible parent/child as a backstop. This keeps the wizard from ever submitting a request the API would reject. When the selected gates leave **zero** compatible candidates in a direction (e.g. a `build` criterion against a `select`-only library), the picker renders an **explanatory note** (`hasCompatibleParentCandidates` / `hasCompatibleChildCandidates` from the hook) rather than an unexplained empty list — turning silent non-detection into an honest reason. Accepted **child** links are applied after creation as non-blocking updates; if any fails (e.g. it would introduce a cycle) the wizard surfaces a `toast.warning` naming the un-linked ids instead of swallowing the failure, so a detected-but-unpersisted child dependency is never silently lost.
 - **AI generation (server):** `generateCriteriaPrompt` (`apps/api/src/llm.ts`) is itself gate-aware so the model never even *proposes* an incompatible dependency. The wizard sends the criterion's selected gates with the generate-prompt request; the route projects each existing criterion's `gates` and the generator runs **three single-responsibility LLM calls in parallel** (`Promise.all`):
-  1. **author** → `{prompt, suggestedId}`, **gate-aware**: the criterion's selected gates are passed to the author call so the generated prompt is steered toward the right evidence source — the captured **tool output + exit status** for tool-output gates (`build`/`test`/`run`/`deploy`) or the **codebase files** for `select`. This stops the model from defaulting to file-inspection wording for behaviors (like "project builds") that are really judged from command output. The behavior-derived id chosen in Step 1 is **preserved**: the wizard ignores the author call's `suggestedId`, so the id never silently changes on the Step 1 → Step 2 transition.
+  1. **author** → `{prompt, suggestedId}`, **gate-aware**: the criterion's selected gates are passed to the author call so the generated prompt is steered toward the right *primary* evidence source — the captured **tool output + exit status** for tool-output gates (`build`/`test`/`run`/`deploy`) or the **codebase** for `select`. This stops the model from defaulting to file-inspection wording for behaviors (like "project builds") that are really judged from command output. The gate hint sets **emphasis only — never availability**: the author *system prompt* unconditionally tells the model the judge can read the agent's **entire captured tool-call history** (every command/tool it ran while doing the task, not just the gate commands), mirroring the judge's own gate-agnostic evidence guidance (`buildEvidenceGuidance` in `apps/judge/src/judge-strategies.ts`, which keys on availability, not gate). For a `select` criterion the hint therefore presents **both** sources with a **per-behavior decision rule** rather than forcing codebase wording: behaviors about how the code is written or structured are judged from the **codebase**, but behaviors about something the agent **did or ran** — a command it executed, a bootstrap/scaffold step, or a tool/skill/MCP invocation — make the captured **tool-call history the primary evidence even under the `select` gate**, because that action may not be visible in the resulting files alone. An earlier revision led with "judge it primarily from the codebase", which the model obeyed and dropped tool-history wording for exactly the select-gated *agent-action* criteria #1225 targets; the per-behavior rule fixes that while leaving genuinely structural `select` criteria codebase-oriented (scope #1225). The behavior-derived id chosen in Step 1 is **preserved**: the wizard ignores the author call's `suggestedId`, so the id never silently changes on the Step 1 → Step 2 transition.
+
+    > **Regression guard — prompt-orientation eval.** Because the orientation is
+    > LLM-produced, it is protected by an **eval** (not a unit test):
+    > `apps/api/src/llm.eval.test.ts`, run via `pnpm eval:criteria-prompts`. It calls
+    > the real `generateCriteriaPrompt` against GitHub Models for the five prod
+    > `rayfin_` criteria and asserts a **majority of N samples** steer each to the
+    > correct source (agent-action → tool-call history; structural → codebase;
+    > build-gated → command output). Each generated prompt is graded by a
+    > **second LLM call** — an LLM grader that returns a simple **pass/fail**:
+    > whether the prompt makes that case's expected source the *primary* evidence.
+    > It judges emphasis rather than mere keyword presence, so a prompt that lists
+    > both sources but leads with the wrong one **fails**. The reusable,
+    > **domain-agnostic** eval framework — the sample-N/majority harness and the
+    > 429 rate-limit retry — lives in the **`llm-eval` package**
+    > (`packages/llm-eval`). The evidence-source grader is specific to this eval,
+    > so it lives beside it in `apps/api/src/criteria-prompt-eval-grader.eval.ts`; this
+    > eval supplies the five cases, that grader, and a `ChatComplete` adapter
+    > around the api's inference client.
+    > Evals are a distinct category from unit/integration tests — non-deterministic,
+    > sample-based, and quota-costing — so they have their own `vitest.eval.config.ts`
+    > (`*.eval.test.ts`), are excluded from `pnpm test`, and self-skip when no LLM
+    > token is present. In CI the path-filtered `llm-evals` job runs every
+    > `*.eval.test.ts` when eval or prompt-gen code changes and is **required via CI
+    > Summary** (success-or-skipped).
+    > Add a case to `CRITERIA_PROMPT_EVAL_CASES` when a new behavior class needs a
+    > guard. Note: each sample makes **two** LLM calls (generate + grade), and the job
+    > needs a real GitHub PAT (the legacy Models endpoint the code uses does not accept
+    > the ephemeral Actions `GITHUB_TOKEN`).
   2. **suggest parents** → the parent pool, pre-filtered to `gatesSatisfyInvariant(candidate.gates, newGates)`.
   3. **suggest children** → the child pool, pre-filtered to `gatesSatisfyInvariant(newGates, candidate.gates)`.
-  The two suggestion calls share one symmetric `suggestDeps(direction, pool)` path; only the candidate pool and the relationship wording differ. Because the pools are pre-filtered, no gate/invariant wording is ever sent to the model. **Both suggestion prompts demand a true prerequisite edge** (`A → B` means "B cannot be meaningfully evaluated unless A passes first" — equivalently, B can never be true while A is false) and apply an **independence test**: if each criterion can be true or false irrespective of the other's outcome, they are independent and there is **no edge in either direction**. This makes the **sibling rejection** rigorous — `has_unit_tests` and `has_integration_tests` are each true/false regardless of the other, so neither is ever offered as a parent or child of the other. The model is told to prefer an empty array over a weak or speculative edge. Each returned list is post-filtered against its pool's IDs as a backstop. The author call failing throws (the prompt is indispensable); a suggestion call failing degrades that list to `[]` so it never blocks creation. When the request omits `gates` (e.g. older clients) both pools fall back to the full criteria list — fully backward compatible. Client-side pruning remains the final guarantee for any post-generation gate edits.
+  The two suggestion calls share one symmetric `suggestDeps(direction, pool)` path; only the candidate pool and the relationship wording differ. Because the pools are pre-filtered, no gate/invariant wording is ever sent to the model. **Both suggestion prompts demand a true prerequisite edge** (`A → B` means "B cannot be meaningfully evaluated unless A passes first" — equivalently, B can never be true while A is false) and apply an **independence test**: if each criterion can be true or false irrespective of the other's outcome, they are independent and there is **no edge in either direction**. This makes the **sibling rejection** rigorous — `has_unit_tests` and `has_integration_tests` are each true/false regardless of the other, so neither is ever offered as a parent or child of the other. Crucially, the prompts also treat **specialization as a genuine one-directional edge**: when the new criterion is a narrower form of a candidate (or vice-versa) such that the narrower one being true guarantees the broader one is also true, that is a real dependency — the broader criterion is the **parent** and the narrower one the **child**. So a new `has_unit_tests` correctly detects `has_tests` as a **parent** (no tests ⇒ no unit tests), and a new `has_tests` detects `has_unit_tests` as a **child** — kept distinct from the co-equal `has_unit_tests`/`has_integration_tests` siblings above. The model is told to prefer an empty array over a weak or speculative edge. Each returned list is post-filtered against its pool's IDs as a backstop. Because the parent and child calls are **independent**, the model can return the same id in both directions for a tightly-coupled pair (a contradictory 2-cycle); a **deterministic reconciliation** then drops any such id from the child set and keeps the parent edge — declaring a parent only affects the new criterion, whereas a child edge would mutate an existing one, so on directional ambiguity the safer parent edge wins. The author call failing throws (the prompt is indispensable); a suggestion call failing degrades that list to `[]` so it never blocks creation. When the request omits `gates` (e.g. older clients) both pools fall back to the full criteria list — fully backward compatible. Client-side pruning remains the final guarantee for any post-generation gate edits.
 - **Example:** if `builds_clean` (gates `[build]`) depends on `compiles`, then `compiles` must include `build` in its gates (or be unrestricted). A `select`-only `compiles` would be rejected.
 
 YAML example (`config/criteria/builds_clean.yaml`):
@@ -430,15 +473,16 @@ Because prompts are data, gate instructions are editable via the prompt
 CRUD/UI rather than baked into code; the platform may ship **default** prompts
 per non-Select gate type (seeded), which users can override or select among.
 
-### 4.6 Judge changes — tool outputs in context
+### 4.6 Judge changes — tool outputs & agent response in context
 
-The judge must evaluate gate criteria that depend on **what happened when the agent ran tools** (build/test/run output), not just the resulting files.
+The judge must evaluate gate criteria that depend on **what happened when the agent ran tools** (build/test/run output) and on **what the agent said** (its answer/explanation for the iteration), not just the resulting files.
 
 **Request contract** (`JudgeEvaluateRequest`) gains:
 
 ```ts
 gate: GateId;                 // which gate is being evaluated
 toolCallsUrl?: string;        // blob with this iteration's captured tool calls/outputs
+currentAgentResponse?: string; // the coding agent's assistant message for the iteration being judged (#1136)
 ```
 
 **New judge tool** — `read_tool_outputs` (added in `judge-strategies.ts`
@@ -453,12 +497,40 @@ alongside `createFileTools`):
 - Backed by the per-iteration tool-calls blob already produced by the loop
   (`writeToolCalls` / `toolCallsUrl`), downloaded next to the snapshot.
 
+**New judge tool** — `read_agent_response` (added in `judge-strategies.ts`
+alongside the tool-output tools, issue #1136):
+
+- Returns the coding agent's own response (its assistant message — answer,
+  explanation, or summary) for the iteration being judged. This is the
+  authoritative source for any criterion that grades **what the agent said**
+  (Q&A, "explain X", advisory / no-code-change deliverables), which the
+  workspace files and tool outputs may not contain at all.
+- Takes no parameters and returns the **full** text (bounded only by a high
+  `FULL_LIMIT = 100_000` safety cap, with `{ truncated, totalLength }` flags when
+  exceeded), avoiding the lossy 300–500 char truncation applied to
+  prior-iteration history.
+- **Sourcing.** The response is carried **inline** in the evaluate request
+  (`currentAgentResponse`) and read **in-memory** by the tool — there is no live
+  API/DB call. It cannot be read from the main API because the worker calls the
+  judge *before* the current turn (which carries `codingAgentResponse`) is
+  persisted (multi-turn-loop), so at judge time the response exists only in the
+  worker's memory and must be pushed into the request. This mirrors how
+  `read_tool_outputs` serves the pre-loaded in-memory `toolCalls` array.
+- Registered only when a non-empty response is present (mirrors the
+  `toolCalls.length > 0` gating for the tool-output tools), so file/tool-output
+  criteria behavior is unchanged when no response was captured.
+
 The judge agent's available tools therefore become workspace-scoped
 (`read_file`, `list_directory`, `search_files`, `file_exists`) **plus**
-`read_tool_outputs` / `get_tool_output`. When tool outputs are present, the
-system prompt injects a generic guidance block (`TOOL_OUTPUTS_GUIDANCE` in
-`judge-strategies.ts`, shared by both the bundled and independent strategies),
-which renders as two sections: **`## Your Tools`** and **`## How to Judge`**.
+`read_tool_outputs` / `get_tool_output` (when tool outputs are present) **plus**
+`read_agent_response` (when an agent response is present). When **either** tool
+outputs **or** an agent response are present, the system prompt injects a generic
+guidance block built by `buildEvidenceGuidance({ hasToolOutputs, hasAgentResponse })`
+in `judge-strategies.ts` (shared by both the bundled and independent strategies;
+the legacy `TOOL_OUTPUTS_GUIDANCE` constant is the
+`{ hasToolOutputs: true, hasAgentResponse: false }` case). It renders as two
+sections: **`## Your Tools`** and **`## How to Judge`**, listing only the
+evidence sources that actually exist for the iteration.
 
 The judge's opening framing is also gate-agnostic — it presents the judge as
 "evaluating the tool calls, logs and generated code produced by a coding agent"
@@ -476,9 +548,10 @@ The system prompt is organized into balanced, single-purpose sections:
   section.
 - **`## Your Tools`** — names the judge's own read-only tools once (`read_file`,
   `list_directory`, `search_files`, `file_exists`, plus `read_tool_outputs` /
-  `get_tool_output`) and states the hard limit: the judge cannot run any commands
-  or coding-agent tools. This keeps the judge's tools unambiguous from the
-  *coding agent's* tools/commands (whose output the judge only reads).
+  `get_tool_output` when tool outputs exist, plus `read_agent_response` when an
+  agent response exists) and states the hard limit: the judge cannot run any
+  commands or coding-agent tools. This keeps the judge's tools unambiguous from
+  the *coding agent's* tools/commands (whose output the judge only reads).
 - **`## How to Judge`** — the evidence philosophy (below).
 
 > **System / user prompt split.** The judge SDK session receives two distinct
@@ -486,14 +559,15 @@ The system prompt is organized into balanced, single-purpose sections:
 >
 > - The **system prompt** carries only the invariant *method/role*: the opening
 >   framing, `## Persona` (when set), `## Your Tools` + `## How to Judge` (when
->   tool outputs were captured), `## Instructions`, and `## Output Format`. It is
->   identical for every criterion and iteration in a run.
+>   tool outputs **or** an agent response are present), `## Instructions`, and
+>   `## Output Format`. It is identical for every criterion and iteration in a run.
 > - The **user prompt** carries the per-request *data*: the criterion (independent
 >   strategy: `Evaluate criterion "<id>": <prompt>`) or the `## Criteria` list
 >   (bundled strategy), followed by the `## Previous Iterations` context when this
 >   is not the first iteration.
 >
-> Both strategies build these via `buildSystemPrompt(persona, hasToolOutputs)` and
+> Both strategies build these via
+> `buildSystemPrompt(persona, hasToolOutputs, hasAgentResponse)` and
 > `buildUserPrompt(criteria, history)` in `judge-strategies.ts`. Keeping the
 > criterion in the user message (not the system prompt) gives a clean trust
 > boundary: the system prompt is the sole authority — including the override
@@ -519,6 +593,23 @@ The system prompt is organized into balanced, single-purpose sections:
 > together with the codebase. This prevents the failure mode where the judge
 > withheld a passing verdict for several iterations despite an exit-code-0 build
 > being present in the captured outputs.
+
+> **Agent-response evidence (issue #1136).** Previously the judge saw the
+> workspace snapshot and the captured tool outputs, but **not** the coding agent's
+> textual response for the *same* iteration — so any criterion grading what the
+> agent *said* (answering a question, explaining, advising, other no-code-change
+> deliverables) had no evidence, making Q&A / no-code runs ungradeable. The
+> response is now surfaced via `read_agent_response` and framed in `## How to
+> Judge` as a third, **equally authoritative** evidence source alongside the
+> codebase and tool outputs. When a criterion grades the response itself, the
+> judge reads it with `read_agent_response` and judges that text directly rather
+> than expecting changes in the codebase. The full response is delivered through
+> the tool (bounded by a high safety cap), sidestepping the lossy 300–500 char
+> truncation that only ever applied to prior-iteration *context*. When no response
+> was captured, neither the tool nor the guidance is added, so existing
+> file/tool-output criteria behavior is byte-for-byte unchanged. Like the other
+> judge tools, `read_agent_response` is `skipPermission: true` and `custom:*` so
+> the headless judge can never be denied it.
 
 > **Tool isolation (scope #1117).** The judge session is restricted to its own
 > custom tools only — `createSession` is called with `availableTools: ["custom:*"]`
@@ -577,6 +668,15 @@ flowchart LR
   explicitly as `run.gates: { gate, status, iterations }[]` for cheap querying.
 - No change to blob layout; tool-calls/snapshot blobs are already per
   `requestId/runs/runId/iteration-N/...`.
+- **Comparative submissions (profile variations).** When a submit fans out into
+  multiple profile variations (base + variations sharing one `submissionId`), the
+  request-level `gates` are the **shared evaluation harness**: the same resolved
+  `gates` array (with `promptText` materialized and the Select gate's `promptId`
+  stamped to the task prompt) is persisted onto **every** variation's request
+  document, so all variations are judged identically. Variations only vary agent
+  config (worker / model / mcpServers / skills / extensions); they never alter gate
+  selection. An invalid gate config fails the whole submit (400) before any request
+  is inserted.
 
 ### 4.8 Surfaces — Portal & CLI (parity required)
 
@@ -637,6 +737,13 @@ Per the CLI ↔ Portal parity rule, both must expose gate selection.
    *log* tool calls (`acp-client.ts`) — they are not persisted as structured
    outputs. Reliable per-iteration capture across **all** worker types is a
    prerequisite for Build/Test/Deploy gates and may need worker changes.
+   *Update (#1250):* `extractToolCalls` now also parses the OpenAI **Responses API**
+   (gpt-5.x via Copilot), which previously yielded **zero** tool calls and starved
+   the judge of evidence on those runs. Coverage is still **wire-format-specific** —
+   each new agent/API shape needs its own extractor, and the parser is the single
+   choke point where a missed format silently produces an empty tool-call history.
+   See also #1225 (make criteria-prompt generation *aware* of the judge's tool-call
+   access) — complementary: #1250 fixes runtime capture, #1225 fixes prompt wording.
 3. **Default gate prompts.** Non-Select gates are driven by typed prompt entities
    (§4.5); the platform should seed sensible defaults. Open: exact default text,
    and whether prompts can be parameterised by scenario (e.g. build command).

@@ -6,7 +6,8 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { apiFetch } from "../utils/api-client.js";
 
 export function registerAgentCommands(program: Command): void {
 // ─── Agent management ────────────────────────────────────────────────────────
@@ -29,7 +30,7 @@ agent
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/agents`);
+      const response = await apiFetch(options.url, `/agents`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -66,7 +67,7 @@ agent
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`);
+      const response = await apiFetch(options.url, `/agents/${encodeURIComponent(options.id)}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -117,7 +118,7 @@ agent
         console.error(errorText("Error: provide at least one field to update (--name, --description)"));
         process.exit(1);
       }
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`, {
+      const response = await apiFetch(options.url, `/agents/${encodeURIComponent(options.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -142,7 +143,7 @@ agent
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`, {
+      const response = await apiFetch(options.url, `/agents/${encodeURIComponent(options.id)}`, {
         method: "DELETE",
       });
       if (!response.ok) {
@@ -178,7 +179,7 @@ agentModel
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`);
+      const response = await apiFetch(options.url, `/agents/${encodeURIComponent(options.id)}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -214,7 +215,7 @@ agentModel
   .action(async (options) => {
     try {
       // Fetch current agent
-      const getResp = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`);
+      const getResp = await apiFetch(options.url, `/agents/${encodeURIComponent(options.id)}`);
       if (!getResp.ok) {
         const error = await getResp.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -227,7 +228,7 @@ agentModel
         return;
       }
       models.push(options.model);
-      const putResp = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`, {
+      const putResp = await apiFetch(options.url, `/agents/${encodeURIComponent(options.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ supportedModels: models }),
@@ -252,7 +253,7 @@ agentModel
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const getResp = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`);
+      const getResp = await apiFetch(options.url, `/agents/${encodeURIComponent(options.id)}`);
       if (!getResp.ok) {
         const error = await getResp.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -271,7 +272,7 @@ agentModel
       if (agentDoc.defaultModel === options.model) {
         body.defaultModel = null;
       }
-      const putResp = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`, {
+      const putResp = await apiFetch(options.url, `/agents/${encodeURIComponent(options.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -297,7 +298,7 @@ agentModel
   .action(async (options) => {
     try {
       // Verify the model is supported
-      const getResp = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`);
+      const getResp = await apiFetch(options.url, `/agents/${encodeURIComponent(options.id)}`);
       if (!getResp.ok) {
         const error = await getResp.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -309,7 +310,7 @@ agentModel
         console.error(errorText(`Error: model ${options.model} is not in the supported models for ${agentDoc._id}. Add it first with: agent model add -i ${agentDoc._id} --model ${options.model}`));
         process.exit(1);
       }
-      const putResp = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`, {
+      const putResp = await apiFetch(options.url, `/agents/${encodeURIComponent(options.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ defaultModel: options.model }),
@@ -349,7 +350,7 @@ agentVersion
     const format = (options.output || 'table') as OutputFormat;
     try {
       const params = options.status ? `?status=${encodeURIComponent(options.status)}` : '';
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}/versions${params}`);
+      const response = await apiFetch(options.url, `/agents/${encodeURIComponent(options.id)}/versions${params}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));

@@ -113,6 +113,9 @@ export async function fetchLatestVersion(timeoutMs = 5000): Promise<string | und
       headers.Authorization = `token ${token}`;
     }
 
+    // Intentional direct fetch: this targets the external GitHub Releases API
+    // with its own `token` auth and must NOT route through apiFetch(), which
+    // injects the Scope SCOPE_TOKEN bearer and would leak it to github.com.
     const res = await fetch(RELEASES_URL, {
       signal: controller.signal,
       headers,

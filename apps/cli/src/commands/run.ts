@@ -16,6 +16,7 @@ import { formatData, isMachineReadable, formatDate } from "../utils/formatters.j
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { runGetAction } from "../run-get-action.js";
 import { normalizeUrl, printFollowUpCommands, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { apiFetch, getApiBasePath } from "../utils/api-client.js";
 import { parseGatesOption } from "../utils/gates.js";
 
 /**
@@ -173,11 +174,11 @@ run
       if (isVariationSubmit && command.getOptionValueSource("worker") === "cli") {
         console.warn(label("Warning:"), "--worker is ignored in variation mode; worker is derived per-variation from each profile's workerType.");
       }
-      const submitUrl = isVariationSubmit
-        ? `${normalizeUrl(url)}/api/v1/requests`
-        : `${normalizeUrl(url)}/api/v1/requests?worker=${worker}`;
+      const submitPath = isVariationSubmit
+        ? `/requests`
+        : `/requests?worker=${worker}`;
 
-      const response = await fetch(submitUrl, {
+      const response = await apiFetch(url, submitPath, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -213,7 +214,7 @@ run
       // Stream logs
       console.log(`\n${banner('--- Streaming logs ---')}\n`);
 
-      const eventSource = new EventSource(`${normalizeUrl(url)}/api/v1/requests/${result.id}/logs`);
+      const eventSource = new EventSource(`${normalizeUrl(url)}${getApiBasePath()}/requests/${result.id}/logs`);
 
       eventSource.onmessage = (event) => {
         try {
@@ -303,7 +304,7 @@ run
     const format = (options.output || 'table') as OutputFormat;
     const { id } = options;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${id}`);
+      const response = await apiFetch(options.url, `/requests/${id}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -359,8 +360,8 @@ run
   .action(async (options) => {
     const { id } = options;
     const url = options.fromStart
-      ? `${normalizeUrl(options.url)}/api/v1/requests/${id}/logs?fromStart=true`
-      : `${normalizeUrl(options.url)}/api/v1/requests/${id}/logs`;
+      ? `${normalizeUrl(options.url)}${getApiBasePath()}/requests/${id}/logs?fromStart=true`
+      : `${normalizeUrl(options.url)}${getApiBasePath()}/requests/${id}/logs`;
 
     const eventSource = new EventSource(url);
 
@@ -437,7 +438,7 @@ run
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      let url = `${normalizeUrl(options.url)}/api/v1/requests`;
+      let path = `/requests`;
       const params = new URLSearchParams();
       const appendMulti = (key: string, vals?: string[] | string) => {
         if (vals == null) return;
@@ -499,9 +500,9 @@ run
         params.set("sortDir", options.sortDir);
       }
       const qs = params.toString();
-      if (qs) url += `?${qs}`;
+      if (qs) path += `?${qs}`;
 
-      const response = await fetch(url);
+      const response = await apiFetch(options.url, path);
 
       if (!response.ok) {
         const error = await response.json();
@@ -566,7 +567,7 @@ run
   .action(async (options) => {
     const { id, url } = options;
     try {
-      const response = await fetch(`${normalizeUrl(url)}/api/v1/requests/${id}`, { method: "DELETE" });
+      const response = await apiFetch(url, `/requests/${id}`, { method: "DELETE" });
 
       if (!response.ok) {
         const error = await response.json();
@@ -588,10 +589,9 @@ run
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     const { id: ids, url } = options;
-    const baseUrl = normalizeUrl(url);
     try {
       if (ids.length === 1) {
-        const response = await fetch(`${baseUrl}/api/v1/requests/${ids[0]}/cancel`, { method: "POST" });
+        const response = await apiFetch(url, `/requests/${ids[0]}/cancel`, { method: "POST" });
         if (!response.ok) {
           const error = await response.json();
           console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -600,7 +600,7 @@ run
         const result = await response.json() as { id: string; previousStatus: string; status: string; outcome: string };
         console.log(`${successText('Cancelled run')} ${value(result.id)} (was ${result.previousStatus})`);
       } else {
-        const response = await fetch(`${baseUrl}/api/v1/requests/bulk-cancel`, {
+        const response = await apiFetch(url, `/requests/bulk-cancel`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ids }),
@@ -644,7 +644,7 @@ run
     try {
       // Step 1: Fetch request document (lightweight — for metadata display)
       console.log(`${label('Fetching run')} ${value(id)}...`);
-      const response = await fetch(`${normalizeUrl(url)}/api/v1/requests/${id}`);
+      const response = await apiFetch(url, `/requests/${id}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error);
@@ -664,7 +664,7 @@ run
 
       // Step 2: Download the full archive from the server
       console.log(`${label('Downloading archive')}...`);
-      const archiveResp = await fetch(`${normalizeUrl(url)}/api/v1/requests/${id}/archive`);
+      const archiveResp = await apiFetch(url, `/requests/${id}/archive`);
       if (!archiveResp.ok || !archiveResp.body) {
         const error = await archiveResp.json().catch(() => ({ error: archiveResp.statusText }));
         console.error(errorText("Error downloading archive:"), error);
@@ -725,7 +725,7 @@ run
 
       if (options.submissionId) {
         console.log(`${label('Fetching runs for submission')} ${value(options.submissionId)}...`);
-        const listResp = await fetch(`${normalizeUrl(url)}/api/v1/requests?submissionId=${encodeURIComponent(options.submissionId)}&limit=1000`);
+        const listResp = await apiFetch(url, `/requests?submissionId=${encodeURIComponent(options.submissionId)}&limit=1000`);
         if (!listResp.ok) {
           const error = await listResp.json();
           console.error(errorText("Error fetching runs:"), error);
@@ -755,7 +755,7 @@ run
       console.log(`${label('Downloading batch archive for')} ${value(String(ids.length))} runs...`);
 
       // POST to batch archive endpoint
-      const archiveResp = await fetch(`${normalizeUrl(url)}/api/v1/requests/archive`, {
+      const archiveResp = await apiFetch(url, `/requests/archive`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids }),
@@ -859,7 +859,7 @@ run
 
       if (dryRun) {
         console.log(warnBanner("Dry run - no data will be uploaded"));
-        console.log(`Would upload to: ${normalizeUrl(url)}/api/v1/runs/upload`);
+        console.log(`Would upload to: ${normalizeUrl(url)}${getApiBasePath()}/runs/upload`);
         
         // Cleanup temp dir if created
         if (tempDir) {
@@ -876,7 +876,7 @@ run
       const blob = new Blob([archiveBuffer], { type: "application/gzip" });
       formData.append("archive", blob, basename(archivePath));
 
-      const response = await fetch(`${normalizeUrl(url)}/api/v1/runs/upload`, {
+      const response = await apiFetch(url, `/runs/upload`, {
         method: "POST",
         body: formData,
       });
@@ -941,7 +941,7 @@ run
 
       if (dryRun) {
         console.log(warnBanner("Dry run - no data will be uploaded"));
-        console.log(`Would upload to: ${normalizeUrl(url)}/api/v1/runs/upload-batch`);
+        console.log(`Would upload to: ${normalizeUrl(url)}${getApiBasePath()}/runs/upload-batch`);
         return;
       }
 
@@ -952,7 +952,7 @@ run
       const blob = new Blob([archiveBuffer], { type: "application/gzip" });
       formData.append("archive", blob, basename(resolvedPath));
 
-      const response = await fetch(`${normalizeUrl(url)}/api/v1/runs/upload-batch`, {
+      const response = await apiFetch(url, `/runs/upload-batch`, {
         method: "POST",
         body: formData,
       });
@@ -1002,7 +1002,7 @@ run
   .action(async (options) => {
     const { id, force } = options;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${id}/retry`, {
+      const response = await apiFetch(options.url, `/requests/${id}/retry`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: force ? JSON.stringify({ force: true }) : undefined,
@@ -1043,7 +1043,7 @@ run
     const format = (options.output || 'table') as OutputFormat;
     const { id } = options;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${id}/runs`);
+      const response = await apiFetch(options.url, `/requests/${id}/runs`);
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: response.statusText }));
         console.error(errorText(`Error: ${errorData.error || response.statusText}`));

@@ -7,15 +7,29 @@
  * Parses HAR (HTTP Archive) files produced by DevProxy and extracts
  * structured tool call data from Copilot API request/response bodies.
  *
- * The extraction logic mirrors SCOPE's packages/coder/utils/har.ts:
- * - Scans response bodies for assistant role messages containing tool_calls arrays
- * - Matches tool role messages by tool_call_id to attach responses
- * - Produces an array of ToolCall objects
+ * Three wire formats are supported:
+ * - OpenAI chat-completions (`/chat/completions`): assistant `tool_calls`
+ *   in responses, `role: "tool"` results in requests.
+ * - Anthropic Messages (`/v1/messages`): `content[].type === "tool_use"`
+ *   in responses, `tool_result` blocks in requests.
+ * - OpenAI Responses API (`/responses`, used by gpt-5.x via Copilot): tool
+ *   calls arrive as `function_call` / `custom_tool_call` items — both in
+ *   response `response.output_item.done` SSE events and in the accumulated
+ *   request `input[]` transcript — with results as
+ *   `function_call_output` / `custom_tool_call_output` items in `input[]`,
+ *   all keyed by `call_id`. (Extractors live in `responses-api-parser.ts`.)
+ *
+ * Calls and results are matched by id to produce an array of ToolCall objects.
  */
 
 import { readFile, writeFile } from "node:fs/promises";
 import type { HarFile, HarEntry, HarNameValue, ToolCall } from "./types.js";
 import type { TokenUsage } from "../types/types.js";
+import {
+  extractResponsesApiToolCallsFromBody,
+  extractResponsesApiFromRequestBody,
+} from "./responses-api-parser.js";
+import { parseBody, tryParseJson, type ParsedBody } from "./parsed-body.js";
 
 /**
  * Header names whose values must be redacted before HAR files are
@@ -90,26 +104,35 @@ export async function parseHarFile(filePath: string): Promise<HarFile> {
 /**
  * Extract tool calls from a parsed HAR file.
  *
- * Scans HTTP request/response bodies for tool calls in both:
- * - OpenAI-style chat completions (choices[].message.tool_calls)
+ * Scans HTTP request/response bodies for tool calls in:
+ * - OpenAI chat completions (choices[].message.tool_calls)
  * - Anthropic Messages API (content[].type === "tool_use")
+ * - OpenAI Responses API (function_call / custom_tool_call items, in both
+ *   response `output_item.done` events and the request `input[]` transcript)
  */
 export function extractToolCalls(har: HarFile): ToolCall[] {
   const toolCalls: Map<string, ToolCall> = new Map();
   const toolResponses: Map<string, string> = new Map();
 
   for (const entry of har.log.entries) {
-    // Process response bodies for assistant messages with tool_calls
+    // Parse each body once, then dispatch the pre-parsed result to every
+    // format parser (avoids re-running JSON.parse / the SSE split per parser).
     const responseBody = getResponseBody(entry);
     if (responseBody) {
-      extractToolCallsFromBody(responseBody, entry.startedDateTime, toolCalls);
-      extractAnthropicToolCallsFromBody(responseBody, entry.startedDateTime, toolCalls);
+      const parsed = parseBody(responseBody);
+      extractToolCallsFromBody(parsed, entry.startedDateTime, toolCalls);
+      extractAnthropicToolCallsFromBody(parsed, entry.startedDateTime, toolCalls);
+      extractResponsesApiToolCallsFromBody(parsed, entry.startedDateTime, toolCalls);
     }
 
-    // Process request bodies for tool role messages (responses to tool calls)
+    // Process request bodies for tool results (and, for the Responses API,
+    // the accumulated tool-call transcript in `input[]`). Request bodies are
+    // never SSE, so a single JSON parse suffices.
     const requestBody = getRequestBody(entry);
     if (requestBody) {
-      extractToolResponsesFromBody(requestBody, toolResponses);
+      const requestJson = tryParseJson(requestBody);
+      extractToolResponsesFromBody(requestJson, toolResponses);
+      extractResponsesApiFromRequestBody(requestJson, entry.startedDateTime, toolCalls, toolResponses);
     }
   }
 
@@ -155,29 +178,24 @@ function getRequestBody(entry: HarEntry): string | null {
 }
 
 /**
- * Extract tool_calls from response body.
+ * Extract tool_calls from a parsed response body.
  *
  * Handles both streaming (SSE) and non-streaming responses:
- * - Non-streaming: JSON with choices[].message.tool_calls
- * - Streaming: multiple `data: {...}` lines with choices[].delta.tool_calls
+ * - Non-streaming: choices[].message.tool_calls (from `parsed.json`)
+ * - Streaming: choices[].delta.tool_calls accumulated across `parsed.sseEvents`
  */
 function extractToolCallsFromBody(
-  body: string,
+  parsed: ParsedBody,
   timestamp: string,
   toolCalls: Map<string, ToolCall>,
 ): void {
-  // Try non-streaming format first
-  try {
-    const json = JSON.parse(body);
-    processChoices(json, timestamp, toolCalls);
-    return;
-  } catch {
-    // Not a single JSON object — try streaming
+  // Non-streaming format: choices[].message.tool_calls
+  if (parsed.json && typeof parsed.json === "object") {
+    processChoices(parsed.json as Record<string, unknown>, timestamp, toolCalls);
   }
 
-  // Handle SSE streaming format (data: {...}\n)
-  const lines = body.split("\n");
-  // Accumulate partial tool call data for streaming
+  // Streaming SSE format (empty for a single-JSON body). Accumulate partial
+  // tool call data across chunks.
   const partialCalls: Map<string, { name: string; arguments: string }> = new Map();
   // Map SSE index → tool call id so continuation chunks (which only
   // carry `index`, not `id`) can find the right partial entry.
@@ -185,12 +203,11 @@ function extractToolCallsFromBody(
   // Auto-incrementing counter for initial chunks that lack an explicit index.
   let nextAutoIndex = 0;
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("data: ") || trimmed === "data: [DONE]") continue;
-
+  for (const event of parsed.sseEvents) {
+    // Tolerate an unexpectedly-shaped event without aborting the whole HAR.
     try {
-      const json = JSON.parse(trimmed.slice(6));
+      if (!event || typeof event !== "object") continue;
+      const json = event as Record<string, unknown>;
       const choices = json.choices;
       if (!Array.isArray(choices)) continue;
 
@@ -299,43 +316,43 @@ function processChoices(
  *   content_block_delta (input_json_delta) for incremental input
  */
 function extractAnthropicToolCallsFromBody(
-  body: string,
+  parsed: ParsedBody,
   timestamp: string,
   toolCalls: Map<string, ToolCall>,
 ): void {
-  // Try non-streaming format first
-  try {
-    const json = JSON.parse(body);
-    if (Array.isArray(json.content)) {
-      for (const block of json.content) {
-        if (block.type === "tool_use" && block.id && !toolCalls.has(block.id)) {
-          toolCalls.set(block.id, {
-            id: block.id,
-            name: block.name || "unknown",
-            arguments: typeof block.input === "object" && block.input !== null
-              ? block.input
-              : {},
-            timestamp,
-          });
+  // Non-streaming format: content[].type === "tool_use"
+  if (parsed.json && typeof parsed.json === "object") {
+    try {
+      const json = parsed.json as Record<string, unknown>;
+      if (Array.isArray(json.content)) {
+        for (const block of json.content) {
+          if (block.type === "tool_use" && block.id && !toolCalls.has(block.id)) {
+            toolCalls.set(block.id, {
+              id: block.id,
+              name: block.name || "unknown",
+              arguments: typeof block.input === "object" && block.input !== null
+                ? block.input
+                : {},
+              timestamp,
+            });
+          }
         }
       }
-      return;
+    } catch {
+      // Tolerate malformed content blocks.
     }
-  } catch {
-    // Not a single JSON object — try streaming
   }
 
-  // Handle Anthropic SSE streaming format
+  // Anthropic SSE streaming format (empty for a single-JSON body).
   // Events: content_block_start (type: tool_use), content_block_delta (type: input_json_delta)
-  const lines = body.split("\n");
   const partialCalls: Map<number, { id: string; name: string; inputJson: string }> = new Map();
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("data: ")) continue;
-
+  for (const event of parsed.sseEvents) {
+    // Tolerate an unexpectedly-shaped event without aborting the whole HAR.
     try {
-      const json = JSON.parse(trimmed.slice(6));
+      // Mirror the original JSON.parse typing (the nested Anthropic event shape
+      // is dynamically checked below).
+      const json = event as any;
 
       if (json.type === "content_block_start" && json.content_block?.type === "tool_use") {
         const idx = json.index ?? partialCalls.size;
@@ -378,21 +395,24 @@ function extractAnthropicToolCallsFromBody(
 }
 
 /**
- * Extract tool role messages from request bodies.
+ * Extract tool role messages from a parsed request body.
  * These contain the responses to tool calls, matched by tool_call_id.
  *
  * Handles both OpenAI format (role: "tool", tool_call_id) and
  * Anthropic format (content[].type === "tool_result", tool_use_id).
+ *
+ * Takes the request body already parsed by the caller; non-object values are
+ * ignored. The body loop is wrapped so an unexpectedly-shaped message can't
+ * throw and abort extraction for the whole HAR.
  */
 function extractToolResponsesFromBody(
-  body: string,
+  json: unknown,
   toolResponses: Map<string, string>,
 ): void {
+  if (!json || typeof json !== "object") return;
   try {
-    const json = JSON.parse(body);
-
     // OpenAI format: messages[].role === "tool"
-    const messages = json.messages;
+    const messages = (json as Record<string, unknown>).messages;
     if (Array.isArray(messages)) {
       for (const msg of messages) {
         if (msg.role === "tool" && msg.tool_call_id && msg.content) {
@@ -416,7 +436,7 @@ function extractToolResponsesFromBody(
       }
     }
   } catch {
-    // Not a valid JSON body — skip
+    // Tolerate malformed messages.
   }
 }
 

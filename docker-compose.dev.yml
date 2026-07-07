@@ -24,6 +24,8 @@ services:
   # ===========================================================================
 
   api:
+    # dev target (tsx + in-container tsc --watch) needs headroom above prod 512m runtime limit
+    mem_limit: 1g
     build:
       target: dev
     develop:
@@ -62,6 +64,8 @@ services:
           path: ./pnpm-lock.yaml
 
   token-manager:
+    # dev target (tsx + in-container tsc --watch) needs headroom above prod 256m runtime limit
+    mem_limit: 1g
     build:
       target: dev
     develop:
@@ -78,6 +82,8 @@ services:
           path: ./pnpm-lock.yaml
 
   scheduler:
+    # dev target (tsx + in-container tsc --watch) needs headroom above prod 256m runtime limit
+    mem_limit: 1g
     build:
       target: dev
     develop:
@@ -98,6 +104,8 @@ services:
   # ===========================================================================
 
   portal:
+    # dev target (Vite dev server + esbuild dep-optimization) OOMs at 512m; needs headroom above prod 128m runtime limit
+    mem_limit: 1g
     build:
       target: dev
     environment:
