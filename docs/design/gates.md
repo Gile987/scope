@@ -210,8 +210,9 @@ i.e. a parent must be compatible with at least every gate its child is compatibl
     > Evals are a distinct category from unit/integration tests — non-deterministic,
     > sample-based, and quota-costing — so they have their own `vitest.eval.config.ts`
     > (`*.eval.test.ts`), are excluded from `pnpm test`, and self-skip when no LLM
-    > token is present. In CI a path-filtered `criteria-prompt-eval` job runs only when
-    > prompt-gen code changes and is **required via CI Summary** (success-or-skipped).
+    > token is present. In CI the path-filtered `llm-evals` job runs every
+    > `*.eval.test.ts` when eval or prompt-gen code changes and is **required via CI
+    > Summary** (success-or-skipped).
     > Add a case to `CRITERIA_PROMPT_EVAL_CASES` when a new behavior class needs a
     > guard. Note: each sample makes **two** LLM calls (generate + grade), and the job
     > needs a real GitHub PAT (the legacy Models endpoint the code uses does not accept
