@@ -15,6 +15,16 @@ import { defineConfig } from "vitest/config";
  * `pnpm eval:criteria-prompts` (just the criteria-prompt orientation eval).
  */
 export default defineConfig({
+  // Resolve workspace packages (e.g. `llm-eval`, `shared`) from their TS
+  // `source` export condition instead of built `dist/`. Eval CI does not build
+  // every package (and `dist/` is gitignored), so without this vitest would try
+  // `main: dist/index.js` and fail with "Failed to resolve entry for package".
+  // Mirrors the root `vitest.config.ts`.
+  ssr: {
+    resolve: {
+      conditions: ["source"],
+    },
+  },
   test: {
     include: [
       "packages/*/src/**/*.eval.test.ts",
