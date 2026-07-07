@@ -207,7 +207,7 @@ i.e. a parent must be compatible with at least every gate its child is compatibl
     > **domain-agnostic** eval framework — the sample-N/majority harness and the
     > 429 rate-limit retry — lives in the **`llm-eval` package**
     > (`packages/llm-eval`). The evidence-source grader is specific to this eval,
-    > so it lives beside it in `apps/api/src/criteria-prompt-eval-grader.ts`; this
+    > so it lives beside it in `apps/api/src/criteria-prompt-eval-grader.eval.ts`; this
     > eval supplies the five cases, that grader, and a `ChatComplete` adapter
     > around the api's inference client.
     > Evals are a distinct category from unit/integration tests — non-deterministic,

@@ -17,7 +17,7 @@
  * Each eval supplies its own domain data (cases), its own grader (the label set
  * + grader prompt), and a `ChatComplete` adapter, then asserts on the returned
  * grades. For example, the api criteria-prompt orientation eval keeps its
- * evidence-source grader in `apps/api/src/criteria-prompt-eval-grader.ts` and
+ * evidence-source grader in `apps/api/src/criteria-prompt-eval-grader.eval.ts` and
  * feeds it to `collectSampledGrades` from here.
  */
 export * from "./types.js";

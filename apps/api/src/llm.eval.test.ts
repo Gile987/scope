@@ -22,7 +22,7 @@
  * The reusable eval framework — the sampling/majority harness and the
  * rate-limit retry — lives in the generic `llm-eval` package. The
  * evidence-source grader is domain-specific to *this* eval, so it lives beside
- * it in `criteria-prompt-eval-grader.ts`. This file supplies the api-specific
+ * it in `criteria-prompt-eval-grader.eval.ts`. This file supplies the api-specific
  * pieces: the five production `rayfin_` cases and a `ChatComplete` adapter
  * around the api's inference client. It runs only under `vitest.eval.config.ts`
  * (`pnpm eval:criteria-prompts`) and self-skips when no LLM token is available
@@ -48,7 +48,7 @@ import {
 import {
   gradeCriteriaPrompt,
   type EvidenceSource,
-} from "./criteria-prompt-eval-grader.js";
+} from "./criteria-prompt-eval-grader.eval.js";
 import { generateCriteriaPrompt } from "./llm.js";
 import { acquireInferenceClient, isLlmAvailable } from "./llm-token.js";
 

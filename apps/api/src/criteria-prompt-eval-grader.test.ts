@@ -7,7 +7,7 @@ import {
   gradeCriteriaPrompt,
   parsePassFail,
   buildEvidenceGraderSystem,
-} from "./criteria-prompt-eval-grader.js";
+} from "./criteria-prompt-eval-grader.eval.js";
 
 describe("parsePassFail", () => {
   it("parses a clean JSON reply", () => {
