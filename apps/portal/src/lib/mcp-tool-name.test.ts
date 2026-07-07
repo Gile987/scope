@@ -17,6 +17,24 @@ describe("resolveMcpToolName", () => {
   });
 
   it("detects an MCP tool and splits server + tool name", () => {
+    expect(resolveMcpToolName("github-mcp-server__search_code", ["github-mcp-server"])).toEqual({
+      isMcp: true,
+      server: "github-mcp-server",
+      tool: "search_code",
+    });
+  });
+
+  it("resolves a name re-prefixed with the mcp-gateway server name", () => {
+    expect(
+      resolveMcpToolName("mcp-gateway__github-mcp-server__search_code", ["github-mcp-server"]),
+    ).toEqual({
+      isMcp: true,
+      server: "github-mcp-server",
+      tool: "search_code",
+    });
+  });
+
+  it("accepts the legacy single-hyphen separator", () => {
     expect(resolveMcpToolName("github-mcp-server-search_code", ["github-mcp-server"])).toEqual({
       isMcp: true,
       server: "github-mcp-server",
@@ -24,8 +42,18 @@ describe("resolveMcpToolName", () => {
     });
   });
 
+  it("handles slugs and tool names that themselves contain hyphens/underscores", () => {
+    expect(
+      resolveMcpToolName("filesystem__read_text_file", ["filesystem"]),
+    ).toEqual({
+      isMcp: true,
+      server: "filesystem",
+      tool: "read_text_file",
+    });
+  });
+
   it("prefers the longest matching server prefix", () => {
-    const result = resolveMcpToolName("github-mcp-server-search_code", [
+    const result = resolveMcpToolName("github-mcp-server__search_code", [
       "github",
       "github-mcp-server",
     ]);

@@ -255,16 +255,15 @@ export function RunDetail() {
   // falling back to the raw worker id when the agent can't be found.
   const workerLabel = agents.find((a) => a._id === run?.workerType)?.name ?? run?.workerType;
 
-  // Candidate MCP server name prefixes for this run. GitHub Copilot CLI exposes MCP tools
-  // as `<serverName>-<toolName>`, so we collect both the slug (_id) and display name of
-  // each server configured on the run to detect and label MCP tool calls.
+  // MCP server slugs (_id) configured on this run. Tools reach the model through the
+  // MCP gateway namespaced as `<serverSlug>__<toolName>` (see mcp-tool-name.ts), so the
+  // slug is the prefix we match on. The display name is never part of the tool-call name.
   const mcpServerNames = useMemo(() => {
     const configured = new Set(run?.mcpServers ?? []);
     const names = new Set<string>();
     for (const s of mcpServers) {
       if (configured.has(s._id)) {
         names.add(s._id);
-        if (s.name) names.add(s.name);
       }
     }
     return Array.from(names);
