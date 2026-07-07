@@ -17,7 +17,7 @@ use parking_lot::RwLock;
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::watch;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::iteration_store::IterationStore;
 use crate::plugin::{PluginRegistry, SessionId};
@@ -237,10 +237,12 @@ impl SessionManager {
                 return;
             }
             if start.elapsed() >= timeout {
-                debug!(
+                warn!(
                     session_id = %session_id,
                     in_flight = n,
-                    "drain_in_flight: timed out waiting for in-flight relays to flush"
+                    timeout_secs = timeout.as_secs(),
+                    "drain_in_flight: timed out waiting for in-flight relays to flush; \
+                     recorded WebSocket/streaming HAR entries may be missing or truncated"
                 );
                 return;
             }
