@@ -47,7 +47,6 @@ describe("collectSampledGrades", () => {
       grade,
       spacingMs: 0,
       gradeSpacingMs: 0,
-      retry: (fn) => fn(), // pass-through: no backoff in unit tests
     });
 
     expect(grades).toEqual(["graded:p0", "graded:p1", "graded:p2"]);
@@ -57,19 +56,23 @@ describe("collectSampledGrades", () => {
     expect(grade).toHaveBeenNthCalledWith(3, "p2");
   });
 
-  it("wraps every LLM call with the provided retry helper", async () => {
-    const retry = vi.fn(<T>(fn: () => Promise<T>) => fn());
-
-    await collectSampledGrades({
+  it("calls generate before grade for every sample and preserves order", async () => {
+    const order: string[] = [];
+    const grades = await collectSampledGrades<string>({
       samples: 2,
-      generate: async () => "p",
-      grade: async () => "g",
+      generate: async () => {
+        order.push("generate");
+        return "p";
+      },
+      grade: async () => {
+        order.push("grade");
+        return "g";
+      },
       spacingMs: 0,
       gradeSpacingMs: 0,
-      retry,
     });
 
-    // 2 samples * (generate + grade) = 4 wrapped calls.
-    expect(retry).toHaveBeenCalledTimes(4);
+    expect(grades).toEqual(["g", "g"]);
+    expect(order).toEqual(["generate", "grade", "generate", "grade"]);
   });
 });

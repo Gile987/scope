@@ -16,7 +16,7 @@
  * multi-way classification: the eval only needs to know whether each sample
  * passes, and a boolean keeps the sampling/majority math trivial.
  */
-import type { ChatComplete } from "llm-eval";
+import { withRateLimitRetry, type ChatComplete } from "llm-eval";
 
 /**
  * The evidence source a criterion's judge-prompt should make PRIMARY. This is the
@@ -43,6 +43,15 @@ export interface GradeOptions {
   temperature?: number;
   /** Defaults to 20 — the reply is a tiny JSON object. */
   maxTokens?: number;
+  /**
+   * Wraps the single grading LLM call so transient 429s are retried with
+   * exponential backoff. Defaults to {@link withRateLimitRetry}. Retry lives here,
+   * on the grader, because the grader is the thing that makes the LLM call — it
+   * owns its transient-failure handling rather than relying on the caller or the
+   * sampling harness (a deterministic grader would simply not set this). Pass
+   * `(fn) => fn()` to disable.
+   */
+  retry?: <T>(fn: () => Promise<T>) => Promise<T>;
 }
 
 /**
@@ -88,7 +97,8 @@ export function parsePassFail(content: string): boolean {
  * LLM grader: returns whether the instruction prompt makes `expected` the primary
  * evidence source (pass) or not (fail). Uses a second LLM call at temperature 0
  * so it reads emphasis/primacy rather than mere keyword presence. The LLM
- * transport is injected via `complete`.
+ * transport is injected via `complete`, and the call is wrapped in a rate-limit
+ * retry (its own responsibility, since it is the code making the LLM call).
  */
 export async function gradeCriteriaPrompt(
   complete: ChatComplete,
@@ -96,14 +106,17 @@ export async function gradeCriteriaPrompt(
   expected: EvidenceSource,
   options: GradeOptions = {},
 ): Promise<boolean> {
-  const content = await complete({
-    messages: [
-      { role: "system", content: buildEvidenceGraderSystem(expected) },
-      { role: "user", content: promptText },
-    ],
-    model: options.model,
-    temperature: options.temperature ?? 0,
-    maxTokens: options.maxTokens ?? 20,
-  });
+  const { retry = withRateLimitRetry } = options;
+  const content = await retry(() =>
+    complete({
+      messages: [
+        { role: "system", content: buildEvidenceGraderSystem(expected) },
+        { role: "user", content: promptText },
+      ],
+      model: options.model,
+      temperature: options.temperature ?? 0,
+      maxTokens: options.maxTokens ?? 20,
+    }),
+  );
   return parsePassFail(content);
 }

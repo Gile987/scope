@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { withRateLimitRetry } from "./rate-limit.js";
-
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Strict-majority threshold for N samples: more than half, i.e. floor(N/2)+1. */
@@ -17,24 +15,23 @@ export interface SampledGradesOptions<Label> {
   generate: () => Promise<string>;
   /** Grade the artifact into a label. */
   grade: (artifact: string) => Promise<Label>;
-  /** Delay between samples (default 6000ms) to respect the shared rate limit. */
+  /** Delay between samples (default 6000ms) to respect a shared rate limit. */
   spacingMs?: number;
   /** Delay between a sample's generate and grade call (default 1500ms). */
   gradeSpacingMs?: number;
-  /**
-   * Wrap each LLM call for retry. Defaults to {@link withRateLimitRetry}
-   * (429-only, exponential backoff). Pass `(fn) => fn()` to disable (e.g. tests).
-   */
-  retry?: <T>(fn: () => Promise<T>) => Promise<T>;
 }
 
 /**
- * Sample an LLM-graded eval `samples` times and return every grade in order.
- * Handles inter-call spacing and per-call rate-limit retry so callers only supply
- * `generate` + `grade` and assert on the returned labels (e.g. a majority).
+ * Sample an eval `samples` times and return every grade in order. This harness
+ * only orchestrates the loop and the inter-call spacing — it is deliberately
+ * retry-agnostic. Retrying transient failures (e.g. 429s) is the job of whatever
+ * actually makes an LLM call, so `generate` and `grade` own that themselves
+ * (wrap them in {@link withRateLimitRetry} when they hit a rate-limited service).
+ * This keeps a deterministic grader from being dragged through a backoff wrapper
+ * it never needs.
  *
  * Each sample is one `generate` call followed by one `grade` call, so the total
- * LLM call count is `2 * samples` — size the spacing and the caller's rate budget
+ * call count is `2 * samples` — size the spacing and the caller's rate budget
  * accordingly.
  */
 export async function collectSampledGrades<Label>(
@@ -46,15 +43,14 @@ export async function collectSampledGrades<Label>(
     grade,
     spacingMs = 6_000,
     gradeSpacingMs = 1_500,
-    retry = withRateLimitRetry,
   } = options;
 
   const grades: Label[] = [];
   for (let i = 0; i < samples; i++) {
     if (i > 0 && spacingMs > 0) await sleep(spacingMs);
-    const artifact = await retry(() => generate());
+    const artifact = await generate();
     if (gradeSpacingMs > 0) await sleep(gradeSpacingMs);
-    grades.push(await retry(() => grade(artifact)));
+    grades.push(await grade(artifact));
   }
   return grades;
 }

@@ -9,8 +9,10 @@
  *   - {@link ChatComplete}: an injected transport so the harness never depends on
  *     a specific inference SDK or credential path.
  *   - a {@link collectSampledGrades} sampling harness (generic over the grade
- *     `Label`) with rate-limit retry ({@link withRateLimitRetry}) and
- *     {@link majority} / {@link isMajority} voting helpers.
+ *     `Label`) plus {@link majority} / {@link isMajority} voting helpers.
+ *   - {@link withRateLimitRetry}: an opt-in 429 backoff wrapper the LLM-calling
+ *     functions (grader, generator) apply themselves — the sampler stays
+ *     retry-agnostic so a deterministic grader isn't forced through it.
  *
  * Each eval supplies its own domain data (cases), its own grader (the label set
  * + grader prompt), and a `ChatComplete` adapter, then asserts on the returned

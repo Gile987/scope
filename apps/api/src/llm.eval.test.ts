@@ -42,6 +42,7 @@ import type { GateId } from "shared";
 import {
   collectSampledGrades,
   majority,
+  withRateLimitRetry,
   type ChatComplete,
 } from "llm-eval";
 import {
@@ -160,15 +161,20 @@ describe.skipIf(!isLlmAvailable())(
           samples: SAMPLES,
           spacingMs: SPACING_MS,
           gradeSpacingMs: GRADE_SPACING_MS,
-          generate: async () => {
-            const { prompt } = await generateCriteriaPrompt(
-              behavior,
-              [],
-              gates,
-              MODEL,
-            );
-            return prompt;
-          },
+          generate: () =>
+            // generateCriteriaPrompt (the system under test) has no built-in
+            // retry, and the sampling harness is retry-agnostic, so wrap it here
+            // to survive the shared free-tier rate limit. The grader retries
+            // itself (see gradeCriteriaPrompt), so only generate is wrapped.
+            withRateLimitRetry(async () => {
+              const { prompt } = await generateCriteriaPrompt(
+                behavior,
+                [],
+                gates,
+                MODEL,
+              );
+              return prompt;
+            }),
           grade: (prompt) =>
             gradeCriteriaPrompt(complete, prompt, expected, {
               model: GRADER_MODEL,

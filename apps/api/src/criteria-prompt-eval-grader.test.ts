@@ -86,4 +86,16 @@ describe("gradeCriteriaPrompt", () => {
       await gradeCriteriaPrompt(complete, "prompt", "codebase"),
     ).toBe(false);
   });
+
+  it("routes its LLM call through its own retry wrapper", async () => {
+    const complete: ChatComplete = vi.fn().mockResolvedValue('{"pass":true}');
+    const retry = vi.fn(<T>(fn: () => Promise<T>) => fn());
+
+    await gradeCriteriaPrompt(complete, "prompt", "tool-history", { retry });
+
+    // Retry is the grader's responsibility: it wraps the single LLM call itself,
+    // so callers and the sampling harness don't have to.
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
 });
