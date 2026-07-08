@@ -13,9 +13,17 @@ import {
   DependencyGraph,
   GateId,
   ToolCall,
+  IterationToolCalls,
   TokenManagerClient,
   withRetry,
 } from "shared";
+import {
+  buildToolCallHistory,
+  callMatchesIteration,
+  stableStringify,
+  type FlatToolCall,
+  type ToolCallHistory,
+} from "./tool-call-history.js";
 
 export interface JudgeStrategyContext {
   workspacePath: string;
@@ -28,8 +36,10 @@ export interface JudgeStrategyContext {
   onProgress?: (result: CriterionResult) => void;
   /** Which gate is being evaluated. Defaults to select. */
   gate?: GateId;
-  /** This iteration's captured tool calls/outputs (build/test/run output). */
-  toolCalls?: ToolCall[];
+  /** The coding agent's captured tool calls/outputs (build/test/run/bootstrap
+   *  output) grouped per iteration across the whole run (1..N). Exposed to the
+   *  judge via list_tool_calls / search_tool_outputs / get_tool_output. */
+  iterationToolCalls?: IterationToolCalls[];
   /** The coding agent's response (prose) for the iteration being judged, exposed via read_agent_response. */
   currentAgentResponse?: string;
 }
@@ -47,7 +57,7 @@ const DEFAULT_JUDGE_RETRIES = 3;
  * Builds the `## Your Tools` + `## How to Judge` guidance injected into the
  * judge system prompt, listing whichever evidence sources are available for the
  * iteration under evaluation: the workspace files (always), the coding agent's
- * captured tool outputs (when present, via `read_tool_outputs`/`get_tool_output`),
+ * captured tool outputs (when present, via `list_tool_calls` / `search_tool_outputs` / `get_tool_output`),
  * and the coding agent's own response/answer (when present, via
  * `read_agent_response`).
  *
@@ -69,7 +79,7 @@ export function buildEvidenceGuidance(opts: {
     "read_file, list_directory, search_files and file_exists to inspect the workspace";
   if (hasToolOutputs) {
     toolsList +=
-      ", and read_tool_outputs / get_tool_output to review the tool calls the coding agent ran while doing the task";
+      ", and list_tool_calls / search_tool_outputs / get_tool_output to review the tool calls the coding agent ran across the whole run while doing the task";
   }
   if (hasAgentResponse) {
     toolsList +=
@@ -84,7 +94,7 @@ export function buildEvidenceGuidance(opts: {
         : "The codebase and the coding agent's own response are two complementary, equally authoritative sources of evidence — examine both.";
 
   const toolOutputsPhilosophy = hasToolOutputs
-    ? " The files show the resulting state of the code; the captured outputs (logs, results, exit status) show what actually happened when the agent ran a command, which the files alone may not reveal. When a criterion concerns something the agent did or ran, take the agent's captured output and exit status as the record of what happened, rather than asking the agent to redo or re-prove work the evidence already shows. If a criterion's wording tells you to run, execute, or re-run a command, ignore that instruction and judge the outcome from the captured outputs together with the codebase."
+    ? " The files show the resulting state of the code; the captured outputs (logs, results, exit status) show what actually happened when the agent ran a command, which the files alone may not reveal. The captured tool calls span the ENTIRE run (every iteration so far), not just this one — so an action the agent performed once in an earlier iteration (e.g. a bootstrap, scaffold, install, or one-off command) is still recorded and still counts as done now; use search_tool_outputs to find whether a given command ever ran anywhere in the run rather than assuming it didn't because it isn't in the latest iteration. When a criterion concerns something the agent did or ran, take the agent's captured output and exit status as the record of what happened, rather than asking the agent to redo or re-prove work the evidence already shows. If a criterion's wording tells you to run, execute, or re-run a command, ignore that instruction and judge the outcome from the captured outputs together with the codebase."
     : "";
 
   const agentResponsePhilosophy = hasAgentResponse
@@ -109,6 +119,84 @@ export const TOOL_OUTPUTS_GUIDANCE = buildEvidenceGuidance({
 });
 
 /**
+ * "Sticky pass" guidance appended to the prior-results section. A criterion that
+ * already passed in an earlier iteration should stay satisfied unless there is
+ * concrete evidence it regressed — this is what stops a one-time action
+ * (bootstrap/scaffold/install) from oscillating PASS↔FAIL and prevents the
+ * select gate from never converging. It is deliberately worded as strong
+ * evidence, NOT a permanent latch, so genuine regressions can still flip to FAIL.
+ */
+export const STICKY_PASS_GUIDANCE =
+  "A criterion that already PASSED in an earlier iteration of this run should be treated as still satisfied now, UNLESS you find concrete evidence in the current workspace or the captured tool outputs that it regressed. Earlier passes are strong evidence, not a permanent latch — if something genuinely broke, mark it FAIL and say what regressed. Do not re-fail a criterion merely because the action that satisfied it (e.g. a bootstrap, scaffold, install, or one-off command) happened in a previous iteration rather than the latest one; the captured tool history spans the whole run, so use search_tool_outputs to confirm whether that action ever ran.";
+
+/**
+ * Builds the "prior results" section of the user prompt from the per-iteration
+ * `criteriaResults` already carried in `conversationHistory`. Instead of dumping
+ * truncated prose, it renders a compact per-criterion PASS/FAIL timeline plus the
+ * most recent feedback, followed by {@link STICKY_PASS_GUIDANCE}. When no turn
+ * carries structured `criteriaResults` (older runs), it falls back to a short
+ * prose summary. `criterionIds`, when provided, restricts the timeline to those
+ * criteria (used by the independent strategy, which judges one criterion at a
+ * time); omit it to include every criterion seen (bundled strategy).
+ */
+export function buildPriorResultsSection(
+  conversationHistory: ConversationTurn[],
+  criterionIds?: string[]
+): string {
+  if (!conversationHistory || conversationHistory.length === 0) return "";
+
+  const turns = [...conversationHistory].sort(
+    (a, b) => (a.iteration ?? 0) - (b.iteration ?? 0)
+  );
+  const filter = criterionIds ? new Set(criterionIds) : null;
+
+  const timeline = new Map<
+    string,
+    { iteration: number; passed: boolean; feedback: string }[]
+  >();
+  for (const t of turns) {
+    const results = t.criteriaResults;
+    if (!Array.isArray(results)) continue;
+    for (const r of results) {
+      if (r.evaluated === false) continue;
+      if (filter && !filter.has(r.criterionId)) continue;
+      const arr = timeline.get(r.criterionId) ?? [];
+      arr.push({
+        iteration: t.iteration ?? 0,
+        passed: r.passed,
+        feedback: r.feedback ?? "",
+      });
+      timeline.set(r.criterionId, arr);
+    }
+  }
+
+  if (timeline.size > 0) {
+    const FEEDBACK_LIMIT = 300;
+    const lines = [...timeline.entries()].map(([cid, entries]) => {
+      const seq = entries
+        .map((e) => `it${e.iteration} ${e.passed ? "PASS" : "FAIL"}`)
+        .join(" → ");
+      const last = entries[entries.length - 1];
+      const fb = (last.feedback ?? "").replace(/\s+/g, " ").trim();
+      const fbLine = fb
+        ? `\n    last feedback (it${last.iteration}): "${fb.substring(0, FEEDBACK_LIMIT)}${fb.length > FEEDBACK_LIMIT ? "…" : ""}"`
+        : "";
+      return `- ${cid}: ${seq}${fbLine}`;
+    });
+    return `\n\n## Prior results from earlier iterations of this run\n${STICKY_PASS_GUIDANCE}\n\n${lines.join("\n")}`;
+  }
+
+  // Fallback for older runs without structured criteriaResults.
+  const prose = turns
+    .map((t) => {
+      const car = t.codingAgentResponse ?? "(no response captured)";
+      return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 400)}${car.length > 400 ? "…" : ""}\n- **Passed**: ${t.passed}`;
+    })
+    .join("\n\n");
+  return `\n\n## Previous Iterations (for context)\n${prose}`;
+}
+
+/**
  * Tool filter applied to every judge session.
  *
  * The Copilot SDK's `CopilotClient` defaults to `mode: "copilot-cli"`, which
@@ -118,7 +206,7 @@ export const TOOL_OUTPUTS_GUIDANCE = buildEvidenceGuidance({
  * `skipPermission`, and the judge runs headless (no TUI to answer prompts).
  *
  * The failure mode this guards against: instead of reading the coder's captured
- * output via `read_tool_outputs`/`get_tool_output`, the judge model decides to
+ * output via `list_tool_calls`/`search_tool_outputs`/`get_tool_output`, the judge model decides to
  * "verify" a build/test by running the command itself through the built-in
  * `bash` tool. Headless, that call is denied with "could not request permission
  * from user". The judge then mis-reports this as the coder's result ("execution
@@ -384,88 +472,264 @@ export abstract class JudgeStrategy {
   }
 
   /**
-   * Create tools that expose the tool calls/outputs captured during the gate
-   * iteration being judged (e.g. a build/test command's stdout/stderr/exit
-   * code). `read_tool_outputs` lists calls with truncated previews;
-   * `get_tool_output` returns the full output for a given index on demand.
+   * Create the tools that expose the coding agent's captured tool calls/outputs
+   * across the whole run (iterations 1..N), not just the iteration being judged.
+   * Assembled by {@link buildToolCallHistory} into one deduped, chronological,
+   * globally-indexed list so a one-time action recorded in an earlier iteration
+   * (e.g. a bootstrap/scaffold command) still counts as done when later
+   * iterations are judged. See scope #1255.
+   *
+   * Three tools, in a browse → find → read shape:
+   * - `list_tool_calls`   — browse calls across all iterations (deduped,
+   *                         filterable by iteration/query, paginated).
+   * - `search_tool_outputs` — find a pattern anywhere in the run (scans name +
+   *                         arguments + response); the token-cheap way to answer
+   *                         "was this command ever run?".
+   * - `get_tool_output`   — read one call's full output by its global index.
    */
-  protected createToolOutputTools(toolCalls: ToolCall[]) {
+  protected createToolOutputTools(iterationToolCalls: IterationToolCalls[]) {
     const PREVIEW_LIMIT = 2_000;
     const FULL_LIMIT = 100_000;
+    const SNIPPET_RADIUS = 150;
+    const DEFAULT_LIST_LIMIT = 50;
+    const MAX_LIST_LIMIT = parseInt(process.env.JUDGE_MAX_TOOL_CALLS || "300", 10);
+    const DEFAULT_SEARCH_MATCHES = 20;
+    const MAX_SEARCH_MATCHES = 100;
 
-    const readToolOutputs = defineTool("read_tool_outputs", {
+    const history: ToolCallHistory = buildToolCallHistory(iterationToolCalls);
+    const calls = history.calls;
+    const iterationsCovered = history.iterationsCovered;
+
+    const clamp = (n: number, lo: number, hi: number) =>
+      Math.max(lo, Math.min(hi, n));
+
+    const previewOf = (call: FlatToolCall) => {
+      const response = call.response ?? "";
+      const truncated = response.length > PREVIEW_LIMIT || call.responseTruncated;
+      return {
+        index: call.index,
+        iteration: call.iteration,
+        ...(call.iterations ? { iterations: call.iterations } : {}),
+        ...(call.occurrences ? { occurrences: call.occurrences } : {}),
+        name: call.name,
+        arguments: call.arguments,
+        responsePreview:
+          response.length > PREVIEW_LIMIT
+            ? response.substring(0, PREVIEW_LIMIT) + "\n…(truncated, use get_tool_output)"
+            : response,
+        responseTruncated: truncated,
+        responseLength: call.responseLength,
+      };
+    };
+
+    const listToolCalls = defineTool("list_tool_calls", {
       description:
-        "List the tool calls the coding agent made during this iteration (e.g. shell/bash commands and their output). Returns each call's index, name, arguments and a truncated response preview. Use get_tool_output(index) to fetch the full output of a specific call. Consult these to decide whether a command (build, test, run) actually succeeded.",
+        "List the tool calls the coding agent made across ALL iterations of this run (1..N), e.g. shell/bash commands and their output. The list is deduplicated (identical repeats are collapsed and annotated with `occurrences`/`iterations`) and each entry carries the `iteration` it ran in. Returns each call's global `index`, `name`, `arguments` and a truncated response preview. Optionally filter by `iteration` or a `query` substring over the command name/arguments, and paginate with `limit`/`offset`. Use get_tool_output(index) for a call's full output, or search_tool_outputs to find a specific command anywhere in the run. Consult these to decide whether a command (build, test, run, bootstrap, scaffold) actually succeeded at any point in the run.",
       // Read-only in-memory inspection of already-captured tool calls. Like the
-      // file tools above, this MUST run without a permission prompt: the judge is
+      // file tools, this MUST run without a permission prompt: the judge is
       // headless (no TUI), so the v3 runtime would otherwise deny every call with
       // "could not request permission from user" — which silently blocks the judge
-      // from ever seeing the coding agent's build/test output and forces it to
-      // demand on-disk proof files instead. See scope #1125.
+      // from ever seeing the coding agent's build/test output. See scope #1125, #1255.
       skipPermission: true,
       parameters: {
         type: "object",
-        properties: {},
+        properties: {
+          iteration: {
+            type: "number",
+            description: "Only include calls from this iteration number.",
+          },
+          query: {
+            type: "string",
+            description: "Only include calls whose name or arguments contain this substring (case-insensitive).",
+          },
+          limit: {
+            type: "number",
+            description: `Max calls to return (default ${DEFAULT_LIST_LIMIT}, max ${MAX_LIST_LIMIT}).`,
+          },
+          offset: {
+            type: "number",
+            description: "Number of matching calls to skip, for pagination (default 0).",
+          },
+        },
         required: [],
       },
-      handler: async () => {
-        if (toolCalls.length === 0) {
-          return { count: 0, calls: [], message: "No tool calls were captured for this iteration." };
-        }
-        const calls = toolCalls.map((tc, index) => {
-          const response = tc.response ?? "";
+      handler: async (args: { iteration?: number; query?: string; limit?: number; offset?: number }) => {
+        if (calls.length === 0) {
           return {
-            index,
-            name: tc.name,
-            arguments: tc.arguments,
-            responsePreview:
-              response.length > PREVIEW_LIMIT
-                ? response.substring(0, PREVIEW_LIMIT) + "\n…(truncated, use get_tool_output)"
-                : response,
-            responseTruncated: response.length > PREVIEW_LIMIT,
-            responseLength: response.length,
+            totalCalls: 0,
+            calls: [],
+            message: "No tool calls were captured for any iteration of this run.",
           };
+        }
+        const q = args.query?.toLowerCase();
+        const filtered = calls.filter((c) => {
+          if (args.iteration !== undefined && !callMatchesIteration(c, args.iteration)) {
+            return false;
+          }
+          if (q) {
+            const hay = `${c.name}\u0000${stableStringify(c.arguments)}`.toLowerCase();
+            if (!hay.includes(q)) return false;
+          }
+          return true;
         });
-        return { count: calls.length, calls };
+        const offset = Math.max(0, Math.floor(args.offset ?? 0));
+        const limit = clamp(Math.floor(args.limit ?? DEFAULT_LIST_LIMIT), 1, MAX_LIST_LIMIT);
+        const page = filtered.slice(offset, offset + limit);
+        return {
+          totalCalls: calls.length,
+          iterationsCovered,
+          filteredCalls: filtered.length,
+          returnedCalls: page.length,
+          offset,
+          limit,
+          truncated: offset + page.length < filtered.length,
+          calls: page.map(previewOf),
+        };
+      },
+    });
+
+    const searchToolOutputs = defineTool("search_tool_outputs", {
+      description:
+        "Search the coding agent's captured tool calls across ALL iterations of this run for a substring pattern, matching against each call's name, arguments AND response/output. This is the fastest, token-cheapest way to check whether a specific action ever happened in the run — e.g. whether a bootstrap/scaffold command was run, a package installed, a skill or MCP tool invoked, or a specific string appeared in any command's output — without paging through every call. Returns matching calls with their global `index`, `iteration`, and a short snippet around the match; use get_tool_output(index) for the full output.",
+      // Read-only; same headless permission rationale as list_tool_calls. See scope #1125, #1255.
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: {
+            type: "string",
+            description: "Substring to search for (case-insensitive), matched against name, arguments and response.",
+          },
+          iteration: {
+            type: "number",
+            description: "Restrict the search to this iteration number.",
+          },
+          maxMatches: {
+            type: "number",
+            description: `Max matches to return (default ${DEFAULT_SEARCH_MATCHES}, max ${MAX_SEARCH_MATCHES}).`,
+          },
+        },
+        required: ["pattern"],
+      },
+      handler: async (args: { pattern?: string; iteration?: number; maxMatches?: number }) => {
+        const pattern = (args.pattern ?? "").trim();
+        if (!pattern) {
+          return { error: "pattern is required and must be a non-empty string", matchCount: 0, matches: [] };
+        }
+        if (calls.length === 0) {
+          return {
+            matchCount: 0,
+            matches: [],
+            message: "No tool calls were captured for any iteration of this run.",
+          };
+        }
+        const needle = pattern.toLowerCase();
+        const maxMatches = clamp(Math.floor(args.maxMatches ?? DEFAULT_SEARCH_MATCHES), 1, MAX_SEARCH_MATCHES);
+
+        const snippetAround = (text: string, at: number): string => {
+          const start = Math.max(0, at - SNIPPET_RADIUS);
+          const end = Math.min(text.length, at + needle.length + SNIPPET_RADIUS);
+          return (start > 0 ? "…" : "") + text.substring(start, end) + (end < text.length ? "…" : "");
+        };
+
+        const matches: Array<{
+          index: number;
+          iteration: number;
+          iterations?: number[];
+          occurrences?: number;
+          name: string;
+          arguments: Record<string, unknown>;
+          matchedIn: string;
+          snippet: string;
+        }> = [];
+
+        for (const c of calls) {
+          if (args.iteration !== undefined && !callMatchesIteration(c, args.iteration)) {
+            continue;
+          }
+          const response = c.response ?? "";
+          const argsStr = stableStringify(c.arguments);
+          const fields: Array<[string, string]> = [
+            ["response", response],
+            ["name", c.name],
+            ["arguments", argsStr],
+          ];
+          let matchedIn: string | undefined;
+          let snippet: string | undefined;
+          for (const [field, text] of fields) {
+            const at = text.toLowerCase().indexOf(needle);
+            if (at !== -1) {
+              matchedIn = field;
+              snippet = snippetAround(text, at);
+              break;
+            }
+          }
+          if (matchedIn && snippet !== undefined) {
+            matches.push({
+              index: c.index,
+              iteration: c.iteration,
+              ...(c.iterations ? { iterations: c.iterations } : {}),
+              ...(c.occurrences ? { occurrences: c.occurrences } : {}),
+              name: c.name,
+              arguments: c.arguments,
+              matchedIn,
+              snippet,
+            });
+            if (matches.length >= maxMatches) break;
+          }
+        }
+
+        return {
+          pattern,
+          matchCount: matches.length,
+          truncated: matches.length >= maxMatches,
+          matches,
+        };
       },
     });
 
     const getToolOutput = defineTool("get_tool_output", {
       description:
-        "Return the full captured output (response) of a single tool call by its index, as listed by read_tool_outputs.",
-      // Read-only; same headless permission rationale as read_tool_outputs. See scope #1125.
+        "Return the full captured output (response) of a single tool call by its global `index`, as listed by list_tool_calls or search_tool_outputs. The result includes the `iteration` the call ran in.",
+      // Read-only; same headless permission rationale as list_tool_calls. See scope #1125, #1255.
       skipPermission: true,
       parameters: {
         type: "object",
         properties: {
           index: {
             type: "number",
-            description: "Zero-based index of the tool call from read_tool_outputs",
+            description: "Global index of the tool call from list_tool_calls / search_tool_outputs",
           },
         },
         required: ["index"],
       },
       handler: async (args: { index: number }) => {
-        const tc = toolCalls[args.index];
-        if (!tc) {
-          return { error: `No tool call at index ${args.index} (have ${toolCalls.length})` };
+        const call = calls[args.index];
+        if (!call) {
+          return { error: `No tool call at index ${args.index} (have ${calls.length})` };
         }
-        const response = tc.response ?? "";
-        if (response.length > FULL_LIMIT) {
+        const response = call.response ?? "";
+        const base = {
+          index: call.index,
+          iteration: call.iteration,
+          ...(call.iterations ? { iterations: call.iterations } : {}),
+          ...(call.occurrences ? { occurrences: call.occurrences } : {}),
+          name: call.name,
+          arguments: call.arguments,
+        };
+        if (response.length > FULL_LIMIT || call.responseTruncated) {
           return {
-            index: args.index,
-            name: tc.name,
-            arguments: tc.arguments,
+            ...base,
             response: response.substring(0, FULL_LIMIT),
             truncated: true,
-            totalLength: response.length,
+            totalLength: call.responseLength,
           };
         }
-        return { index: args.index, name: tc.name, arguments: tc.arguments, response };
+        return { ...base, response };
       },
     });
 
-    return [readToolOutputs, getToolOutput];
+    return [listToolCalls, searchToolOutputs, getToolOutput];
   }
 
   /**
@@ -524,12 +788,15 @@ export abstract class JudgeStrategy {
     workspacePath: string,
     systemPrompt: string,
     userPrompt: string,
-    toolCalls?: ToolCall[],
+    iterationToolCalls?: IterationToolCalls[],
     currentAgentResponse?: string
   ): Promise<string> {
+    const hasToolCalls = (iterationToolCalls ?? []).some(
+      (g) => g.toolCalls.length > 0
+    );
     const tools = [
       ...this.createFileTools(workspacePath),
-      ...(toolCalls && toolCalls.length > 0 ? this.createToolOutputTools(toolCalls) : []),
+      ...(hasToolCalls ? this.createToolOutputTools(iterationToolCalls!) : []),
       ...(currentAgentResponse && currentAgentResponse.length > 0
         ? this.createAgentResponseTool(currentAgentResponse)
         : []),
@@ -627,13 +894,17 @@ export class BundledStrategy extends JudgeStrategy {
       criteria,
       conversationHistory,
       personaInstructions,
-      toolCalls,
+      iterationToolCalls,
       currentAgentResponse,
     } = context;
 
+    const hasToolOutputs = (iterationToolCalls ?? []).some(
+      (g) => g.toolCalls.length > 0
+    );
+
     const systemPrompt = this.buildSystemPrompt(
       personaInstructions,
-      !!(toolCalls && toolCalls.length > 0),
+      hasToolOutputs,
       !!(currentAgentResponse && currentAgentResponse.length > 0)
     );
 
@@ -643,7 +914,7 @@ export class BundledStrategy extends JudgeStrategy {
       workspacePath,
       systemPrompt,
       userPrompt,
-      toolCalls,
+      iterationToolCalls,
       currentAgentResponse
     );
 
@@ -711,16 +982,10 @@ IMPORTANT: Return ONLY the JSON, no additional text before or after.`;
       .map((c) => `  - ${c.id}: ${c.prompt}`)
       .join("\n");
 
-    const historySection =
-      conversationHistory.length > 0
-        ? `\n\n## Previous Iterations\n${conversationHistory
-            .map((t) => {
-              const car = t.codingAgentResponse ?? "(no response captured)";
-              const fb = t.judgeFeedback;
-              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 500)}${car.length > 500 ? "..." : ""}\n- **Your previous feedback**: ${fb.substring(0, 500)}${fb.length > 500 ? "..." : ""}\n- **Passed**: ${t.passed}`;
-            })
-            .join("\n\n")}`
-        : "";
+    const historySection = buildPriorResultsSection(
+      conversationHistory,
+      criteria.map((c) => c.id)
+    );
 
     return `Evaluate the workspace against ALL criteria below. Use the file tools to inspect the code, then provide your verdict in JSON format.
 
@@ -837,7 +1102,7 @@ export class IndependentStrategy extends JudgeStrategy {
       personaInstructions,
       onProgress,
       gate,
-      toolCalls,
+      iterationToolCalls,
       currentAgentResponse,
     } = context;
 
@@ -904,7 +1169,7 @@ export class IndependentStrategy extends JudgeStrategy {
             personaInstructions,
             evalIndex++,
             gate,
-            toolCalls,
+            iterationToolCalls,
             currentAgentResponse
           )
         );
@@ -946,12 +1211,16 @@ export class IndependentStrategy extends JudgeStrategy {
     personaInstructions: string | undefined,
     index: number,
     gate?: GateId,
-    toolCalls?: ToolCall[],
+    iterationToolCalls?: IterationToolCalls[],
     currentAgentResponse?: string
   ): Promise<CriterionResult> {
+    const hasToolOutputs = (iterationToolCalls ?? []).some(
+      (g) => g.toolCalls.length > 0
+    );
+
     const systemPrompt = this.buildSystemPrompt(
       personaInstructions,
-      !!(toolCalls && toolCalls.length > 0),
+      hasToolOutputs,
       !!(currentAgentResponse && currentAgentResponse.length > 0)
     );
 
@@ -962,7 +1231,7 @@ export class IndependentStrategy extends JudgeStrategy {
         workspacePath,
         systemPrompt,
         userPrompt,
-        toolCalls,
+        iterationToolCalls,
         currentAgentResponse
       );
 
@@ -1043,15 +1312,9 @@ No package.json file was found in the workspace root.`;
     criterion: CriteriaConfig,
     conversationHistory: ConversationTurn[]
   ): string {
-    const historySection =
-      conversationHistory.length > 0
-        ? `\n\n## Previous Iterations (for context)\n${conversationHistory
-            .map((t) => {
-              const car = t.codingAgentResponse ?? "(no response captured)";
-              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 300)}${car.length > 300 ? "..." : ""}\n- **Passed**: ${t.passed}`;
-            })
-            .join("\n\n")}`
-        : "";
+    const historySection = buildPriorResultsSection(conversationHistory, [
+      criterion.id,
+    ]);
 
     return `Evaluate criterion "${criterion.id}": ${criterion.prompt}${historySection}`;
   }

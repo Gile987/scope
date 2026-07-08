@@ -52,7 +52,7 @@ app.post(
     const startTime = Date.now();
 
     try {
-      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, currentAgentResponse } = req.body;
+      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, iteration, currentAgentResponse } = req.body;
 
       // Validate required fields
       if (!snapshotUrl || typeof snapshotUrl !== "string") {
@@ -94,22 +94,56 @@ app.post(
 
         console.log(`[judge] Snapshot extracted to ${workDir}`);
 
-        // Download this iteration's captured tool calls/outputs (build/test/run
-        // output), if provided. Failures are non-fatal — the judge can still
-        // evaluate the workspace files.
-        let toolCalls: import("shared").ToolCall[] = [];
-        if (toolCallsUrl && typeof toolCallsUrl === "string") {
-          try {
-            toolCalls = await blobStorage.getToolCalls(toolCallsUrl);
-            console.log(
-              `[judge] Loaded ${toolCalls.length} tool call(s) for gate '${gate ?? "select"}'`,
-            );
-          } catch (err) {
-            console.warn(
-              `[judge] Failed to load tool calls from ${toolCallsUrl}: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
+        // Assemble the coding agent's captured tool calls across the WHOLE run,
+        // not just the current iteration. Each prior turn in conversationHistory
+        // carries its own toolCallsUrl; the current iteration's log arrives as the
+        // top-level toolCallsUrl. We fetch them all in parallel and label each by
+        // its iteration number so a one-time action performed in an earlier
+        // iteration (bootstrap, scaffold, install, one-off command) stays visible
+        // to the judge in every later iteration. Missing/legacy logs (404 → [])
+        // are skipped, never fatal — the judge can still evaluate the workspace.
+        const currentIteration =
+          typeof iteration === "number" && iteration > 0
+            ? iteration
+            : (Array.isArray(conversationHistory) ? conversationHistory.length : 0) + 1;
+
+        // Map iteration → toolCallsUrl (current overrides any history collision).
+        const urlByIteration = new Map<number, string>();
+        if (Array.isArray(conversationHistory)) {
+          conversationHistory.forEach((turn: { iteration?: number; toolCallsUrl?: string }, idx: number) => {
+            if (turn?.toolCallsUrl && typeof turn.toolCallsUrl === "string") {
+              const iterNum =
+                typeof turn.iteration === "number" && turn.iteration > 0 ? turn.iteration : idx + 1;
+              urlByIteration.set(iterNum, turn.toolCallsUrl);
+            }
+          });
         }
+        if (toolCallsUrl && typeof toolCallsUrl === "string") {
+          urlByIteration.set(currentIteration, toolCallsUrl);
+        }
+
+        const iterationToolCalls: import("shared").IterationToolCalls[] = (
+          await Promise.all(
+            [...urlByIteration.entries()]
+              .sort(([a], [b]) => a - b)
+              .map(async ([iterNum, url]) => {
+                try {
+                  const toolCalls = await blobStorage.getToolCalls(url);
+                  return { iteration: iterNum, toolCalls };
+                } catch (err) {
+                  console.warn(
+                    `[judge] Failed to load tool calls for iteration ${iterNum} from ${url}: ${err instanceof Error ? err.message : String(err)}`,
+                  );
+                  return { iteration: iterNum, toolCalls: [] };
+                }
+              }),
+          )
+        ).filter((g) => g.toolCalls.length > 0);
+
+        const totalToolCalls = iterationToolCalls.reduce((n, g) => n + g.toolCalls.length, 0);
+        console.log(
+          `[judge] Loaded ${totalToolCalls} tool call(s) across ${iterationToolCalls.length} iteration(s) for gate '${gate ?? "select"}'`,
+        );
 
         // Build onProgress callback that publishes criterion results via Redis
         const onProgress = (requestId && logPublisher)
@@ -133,7 +167,7 @@ app.post(
           personaInstructions,
           onProgress,
           gate,
-          toolCalls,
+          iterationToolCalls,
           currentAgentResponse,
         });
 

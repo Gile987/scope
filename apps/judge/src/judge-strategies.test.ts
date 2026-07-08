@@ -9,7 +9,9 @@ import {
   IndependentStrategy,
   BundledStrategy,
   TOOL_OUTPUTS_GUIDANCE,
+  STICKY_PASS_GUIDANCE,
   buildEvidenceGuidance,
+  buildPriorResultsSection,
   isWithinWorkspace,
   JUDGE_AVAILABLE_TOOLS,
   JUDGE_EXCLUDED_TOOLS,
@@ -24,8 +26,8 @@ class TestableStrategy extends IndependentStrategy {
   publicCreateFileTools(workspacePath: string) {
     return this.createFileTools(workspacePath);
   }
-  publicCreateToolOutputTools(toolCalls: any[]) {
-    return this.createToolOutputTools(toolCalls);
+  publicCreateToolOutputTools(iterationToolCalls: any[]) {
+    return this.createToolOutputTools(iterationToolCalls);
   }
   publicCreateAgentResponseTool(response: string) {
     return this.createAgentResponseTool(response);
@@ -90,34 +92,119 @@ describe("judge file tools", () => {
   });
 });
 
-describe("judge tool-output tools (issue #1125)", () => {
+describe("judge tool-output tools (issues #1125, #1255)", () => {
   const strategy = new TestableStrategy("test-model");
-  const toolCalls = [
+  // Two iterations: a one-time bootstrap in iteration 1, a build in iteration 2.
+  const iterationToolCalls = [
     {
-      id: "1",
-      name: "bash",
-      arguments: { command: "npm run build" },
-      response: "build ok",
-      timestamp: "",
+      iteration: 1,
+      toolCalls: [
+        {
+          id: "1",
+          name: "bash",
+          arguments: { command: "npx create-app my-app" },
+          response: "scaffolded project into my-app/",
+          timestamp: "",
+        },
+      ],
+    },
+    {
+      iteration: 2,
+      toolCalls: [
+        {
+          id: "2",
+          name: "bash",
+          arguments: { command: "npm run build" },
+          response: "build ok",
+          timestamp: "",
+        },
+      ],
     },
   ];
-  const tools = strategy.publicCreateToolOutputTools(toolCalls);
 
-  it("exposes read_tool_outputs and get_tool_output", () => {
+  async function call(name: string, args: Record<string, unknown>): Promise<any> {
+    const tools = strategy.publicCreateToolOutputTools(iterationToolCalls);
+    const tool = tools.find((t) => t.name === name);
+    if (!tool?.handler) throw new Error(`tool ${name} has no handler`);
+    return (tool.handler as (a: unknown, b: unknown) => unknown)(args, stubInvocation);
+  }
+
+  const tools = strategy.publicCreateToolOutputTools(iterationToolCalls);
+
+  it("exposes list_tool_calls, search_tool_outputs and get_tool_output", () => {
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["get_tool_output", "read_tool_outputs"]);
+    expect(names).toEqual(["get_tool_output", "list_tool_calls", "search_tool_outputs"]);
   });
 
   // Regression guard for scope #1125: headless, any tool without skipPermission
   // is denied at execution time ("could not request permission from user"). When
-  // this affected read_tool_outputs/get_tool_output, the judge could never see
-  // the coding agent's captured build/test output and wrongly demanded on-disk
-  // proof files, forcing the build gate to loop for many iterations.
+  // this affected the tool-output tools, the judge could never see the coding
+  // agent's captured build/test output and wrongly demanded on-disk proof files.
   it("marks every tool-output tool to skip the permission prompt", () => {
     expect(tools.length).toBeGreaterThan(0);
     for (const tool of tools) {
       expect(tool.skipPermission, `${tool.name} must skip the permission prompt`).toBe(true);
     }
+  });
+
+  // The core of #1255: list_tool_calls spans EVERY iteration of the run, not just
+  // the one being judged, and labels each call with its iteration.
+  it("list_tool_calls returns calls from all iterations, each labeled by iteration", async () => {
+    const res = await call("list_tool_calls", {});
+    expect(res.totalCalls).toBe(2);
+    expect(res.iterationsCovered).toEqual([1, 2]);
+    const byIter = new Map(res.calls.map((c: any) => [c.iteration, c.name]));
+    expect(byIter.get(1)).toBe("bash");
+    expect(byIter.get(2)).toBe("bash");
+  });
+
+  it("list_tool_calls can filter to a single iteration", async () => {
+    const res = await call("list_tool_calls", { iteration: 1 });
+    expect(res.filteredCalls).toBe(1);
+    expect(res.calls[0].iteration).toBe(1);
+    expect(res.calls[0].arguments.command).toContain("create-app");
+  });
+
+  it("list_tool_calls can filter by a query substring over name/arguments", async () => {
+    const res = await call("list_tool_calls", { query: "create-app" });
+    expect(res.filteredCalls).toBe(1);
+    expect(res.calls[0].index).toBe(0);
+  });
+
+  // The key tool for one-time-action criteria: a single search answers "was this
+  // command ever run in the run?" — even if it ran in an earlier iteration.
+  it("search_tool_outputs finds a one-time action from an earlier iteration", async () => {
+    const res = await call("search_tool_outputs", { pattern: "create-app" });
+    expect(res.matchCount).toBe(1);
+    expect(res.matches[0].iteration).toBe(1);
+    expect(res.matches[0].matchedIn).toBe("arguments");
+  });
+
+  it("search_tool_outputs matches against captured response text", async () => {
+    const res = await call("search_tool_outputs", { pattern: "scaffolded" });
+    expect(res.matchCount).toBe(1);
+    expect(res.matches[0].matchedIn).toBe("response");
+    expect(res.matches[0].iteration).toBe(1);
+  });
+
+  it("get_tool_output returns a call's full output with its iteration by global index", async () => {
+    const res = await call("get_tool_output", { index: 1 });
+    expect(res.iteration).toBe(2);
+    expect(res.name).toBe("bash");
+    expect(res.response).toBe("build ok");
+  });
+
+  it("get_tool_output reports a clear error for an out-of-range index", async () => {
+    const res = await call("get_tool_output", { index: 99 });
+    expect(res.error).toContain("No tool call at index 99");
+  });
+
+  it("reports empty history gracefully when no iterations captured tool calls", async () => {
+    const emptyStrategy = new TestableStrategy("test-model");
+    const [list] = emptyStrategy.publicCreateToolOutputTools([]);
+    const res: any = await (list.handler as any)({}, stubInvocation);
+    expect(res.totalCalls).toBe(0);
+    expect(res.calls).toEqual([]);
   });
 });
 
@@ -189,13 +276,15 @@ describe("judge evidence guidance — agent response (issue #1136)", () => {
     expect(g).toContain("## How to Judge");
     expect(g.toLowerCase()).toContain("equally authoritative");
     // It must NOT advertise tool-output tools that aren't available here.
-    expect(g).not.toContain("read_tool_outputs");
+    expect(g).not.toContain("list_tool_calls");
+    expect(g).not.toContain("search_tool_outputs");
     expect(g).not.toContain("get_tool_output");
   });
 
   it("lists all three sources when both tool outputs and a response are present", () => {
     const g = buildEvidenceGuidance({ hasToolOutputs: true, hasAgentResponse: true });
-    expect(g).toContain("read_tool_outputs");
+    expect(g).toContain("list_tool_calls");
+    expect(g).toContain("search_tool_outputs");
     expect(g).toContain("get_tool_output");
     expect(g).toContain("read_agent_response");
     expect(g.toLowerCase()).toContain("equally authoritative");
@@ -408,9 +497,18 @@ describe("judge tool-outputs guidance (issue #1125)", () => {
   it("names the judge's own read-only tools and disambiguates them from the agent's", () => {
     expect(TOOL_OUTPUTS_GUIDANCE).toContain("## Your Tools");
     expect(TOOL_OUTPUTS_GUIDANCE).toContain("read_file");
-    expect(TOOL_OUTPUTS_GUIDANCE).toContain("read_tool_outputs");
+    expect(TOOL_OUTPUTS_GUIDANCE).toContain("list_tool_calls");
+    expect(TOOL_OUTPUTS_GUIDANCE).toContain("search_tool_outputs");
     expect(TOOL_OUTPUTS_GUIDANCE).toContain("get_tool_output");
     expect(TOOL_OUTPUTS_GUIDANCE.toLowerCase()).toContain("codebase");
+  });
+
+  // #1255: the guidance must tell the judge the captured history spans the WHOLE
+  // run and point one-time-action criteria at search_tool_outputs.
+  it("frames the captured tool history as spanning the whole run", () => {
+    const g = TOOL_OUTPUTS_GUIDANCE.toLowerCase();
+    expect(g).toContain("entire run");
+    expect(g).toContain("search_tool_outputs");
   });
 
   it("frames the codebase and captured outputs as equally authoritative and to be examined together", () => {
@@ -527,5 +625,130 @@ describe("judge system/user prompt split (criteria + history are user data)", ()
       expect(withHistory).toContain("## Previous Iterations (for context)");
       expect(withHistory).toContain("### Iteration 1");
     });
+  });
+});
+
+describe("list_tool_calls page cap via JUDGE_MAX_TOOL_CALLS (issue #1255)", () => {
+  // The cap bounds the browse PAGE size only. The canonical deduped list stays
+  // whole, so get_tool_output / search_tool_outputs can still reach a one-time
+  // action beyond the cap. Here we prove the page is capped but search still finds
+  // a call past it.
+  const strat = new TestableStrategy("test-model");
+  const many = Array.from({ length: 10 }, (_, i) => ({
+    id: String(i),
+    name: "bash",
+    arguments: { command: `cmd-${i}` },
+    response: `out-${i}`,
+  }));
+
+  it("clamps the returned page to the configured max while keeping the full list searchable", async () => {
+    const prev = process.env.JUDGE_MAX_TOOL_CALLS;
+    process.env.JUDGE_MAX_TOOL_CALLS = "3";
+    try {
+      const tools = strat.publicCreateToolOutputTools([{ iteration: 1, toolCalls: many }]);
+      const list = tools.find((t) => t.name === "list_tool_calls")!;
+      const search = tools.find((t) => t.name === "search_tool_outputs")!;
+
+      const listed: any = await (list.handler as any)({}, stubInvocation);
+      expect(listed.totalCalls).toBe(10);
+      expect(listed.returnedCalls).toBe(3);
+      expect(listed.truncated).toBe(true);
+
+      // A command beyond the page cap is still discoverable via search.
+      const found: any = await (search.handler as any)({ pattern: "cmd-9" }, stubInvocation);
+      expect(found.matchCount).toBe(1);
+      expect(found.matches[0].name).toBe("bash");
+    } finally {
+      if (prev === undefined) delete process.env.JUDGE_MAX_TOOL_CALLS;
+      else process.env.JUDGE_MAX_TOOL_CALLS = prev;
+    }
+  });
+});
+
+describe("buildPriorResultsSection — structured per-criterion timeline + sticky pass (issue #1255)", () => {
+  it("returns empty string when there is no history", () => {
+    expect(buildPriorResultsSection([])).toBe("");
+  });
+
+  it("renders a PASS/FAIL timeline per criterion from criteriaResults", () => {
+    const section = buildPriorResultsSection([
+      {
+        iteration: 1,
+        passed: false,
+        criteriaResults: [
+          { criterionId: "scaffolds_app", passed: true, feedback: "created via create-app", evaluated: true },
+          { criterionId: "has_tests", passed: false, feedback: "no tests yet", evaluated: true },
+        ],
+      },
+      {
+        iteration: 2,
+        passed: false,
+        criteriaResults: [
+          { criterionId: "scaffolds_app", passed: false, feedback: "no scaffold command this iteration", evaluated: true },
+          { criterionId: "has_tests", passed: true, feedback: "added tests", evaluated: true },
+        ],
+      },
+    ] as any);
+    expect(section).toContain("## Prior results from earlier iterations of this run");
+    // scaffolds_app oscillated it1 PASS → it2 FAIL — exactly the #1255 trap.
+    expect(section).toContain("scaffolds_app: it1 PASS → it2 FAIL");
+    expect(section).toContain("has_tests: it1 FAIL → it2 PASS");
+    // Includes the most recent feedback for context.
+    expect(section).toContain("last feedback (it2)");
+  });
+
+  it("includes sticky-pass guidance so a prior PASS isn't re-failed without regression evidence", () => {
+    const section = buildPriorResultsSection([
+      { iteration: 1, passed: true, criteriaResults: [{ criterionId: "c", passed: true, feedback: "ok", evaluated: true }] },
+    ] as any);
+    expect(section).toContain(STICKY_PASS_GUIDANCE);
+  });
+
+  it("frames sticky pass as strong evidence, NOT a permanent latch (regressions can still fail)", () => {
+    const g = STICKY_PASS_GUIDANCE.toLowerCase();
+    expect(g).toContain("not a permanent latch");
+    expect(g).toMatch(/regress/);
+  });
+
+  it("filters the timeline to the given criterion ids (independent strategy path)", () => {
+    const section = buildPriorResultsSection(
+      [
+        {
+          iteration: 1,
+          passed: false,
+          criteriaResults: [
+            { criterionId: "a", passed: true, feedback: "", evaluated: true },
+            { criterionId: "b", passed: false, feedback: "", evaluated: true },
+          ],
+        },
+      ] as any,
+      ["a"]
+    );
+    expect(section).toContain("a: it1 PASS");
+    expect(section).not.toContain("b: it1");
+  });
+
+  it("skips criteria that were not evaluated (e.g. descendants of a failed ancestor)", () => {
+    const section = buildPriorResultsSection([
+      {
+        iteration: 1,
+        passed: false,
+        criteriaResults: [
+          { criterionId: "gate", passed: false, feedback: "no", evaluated: true },
+          { criterionId: "child", passed: false, feedback: "skipped", evaluated: false },
+        ],
+      },
+    ] as any);
+    expect(section).toContain("gate: it1 FAIL");
+    expect(section).not.toContain("child");
+  });
+
+  it("falls back to prose for older runs without structured criteriaResults", () => {
+    const section = buildPriorResultsSection([
+      { iteration: 1, passed: false, codingAgentResponse: "tried to build" },
+    ] as any);
+    expect(section).toContain("## Previous Iterations (for context)");
+    expect(section).toContain("### Iteration 1");
+    expect(section).not.toContain("## Prior results from earlier iterations");
   });
 });
