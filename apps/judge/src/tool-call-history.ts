@@ -160,3 +160,74 @@ export function toIterationGroup(
 ): IterationToolCalls {
   return { iteration, toolCalls };
 }
+
+/**
+ * The subset of a conversation turn the judge server needs to locate that
+ * iteration's captured tool calls. Kept structural (not the full
+ * `ConversationTurn`) so the untyped request-body turns can be passed directly
+ * without over-coupling to the transport shape.
+ */
+export interface ToolCallUrlTurn {
+  /** 1-based iteration this turn was captured in (falls back to position). */
+  iteration?: number;
+  /** Blob URL of the iteration's captured tool calls, when present. */
+  toolCallsUrl?: string;
+}
+
+/**
+ * Resolves the 1-based iteration number currently being judged. Prefers an
+ * explicit positive `iteration`; otherwise falls back to
+ * `conversationHistory.length + 1` (the current turn follows all prior turns).
+ * Accepts `unknown` because both values arrive untyped from the request body.
+ * See scope #1255.
+ */
+export function resolveCurrentIteration(
+  iteration: unknown,
+  conversationHistory: unknown,
+): number {
+  if (typeof iteration === "number" && iteration > 0) return iteration;
+  const priorTurns = Array.isArray(conversationHistory)
+    ? conversationHistory.length
+    : 0;
+  return priorTurns + 1;
+}
+
+/**
+ * Maps each iteration to the blob URL of its captured tool calls, in ascending
+ * iteration order, ready for the judge to fetch. Prior iterations come from
+ * `conversationHistory[].toolCallsUrl`; `currentToolCallsUrl` is applied last so
+ * it OVERRIDES any collision on `currentIteration`. A turn missing a usable
+ * string `toolCallsUrl` is skipped; a turn's iteration number falls back to its
+ * 1-based position when absent or non-positive. Pure and deterministic (no IO)
+ * so the judge's cumulative assembly is unit-testable independent of blob
+ * storage. See scope #1255.
+ */
+export function mapIterationToolCallUrls(
+  conversationHistory: unknown,
+  currentToolCallsUrl: unknown,
+  currentIteration: number,
+): { iteration: number; url: string }[] {
+  const urlByIteration = new Map<number, string>();
+
+  if (Array.isArray(conversationHistory)) {
+    (conversationHistory as ToolCallUrlTurn[]).forEach((turn, idx) => {
+      const url = turn?.toolCallsUrl;
+      if (typeof url === "string" && url) {
+        const iterNum =
+          typeof turn.iteration === "number" && turn.iteration > 0
+            ? turn.iteration
+            : idx + 1;
+        urlByIteration.set(iterNum, url);
+      }
+    });
+  }
+
+  // Current iteration applied last → overrides any history collision.
+  if (typeof currentToolCallsUrl === "string" && currentToolCallsUrl) {
+    urlByIteration.set(currentIteration, currentToolCallsUrl);
+  }
+
+  return [...urlByIteration.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([iteration, url]) => ({ iteration, url }));
+}

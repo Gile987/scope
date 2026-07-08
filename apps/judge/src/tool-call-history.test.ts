@@ -7,6 +7,8 @@ import {
   stableStringify,
   callMatchesIteration,
   toIterationGroup,
+  resolveCurrentIteration,
+  mapIterationToolCallUrls,
 } from "./tool-call-history.js";
 
 // Assembly/dedup/cap for the cumulative, run-wide tool-call history that the
@@ -103,5 +105,106 @@ describe("tool-call history assembly (issue #1255)", () => {
       iteration: 3,
       toolCalls: [{ id: "1", name: "bash", arguments: {}, response: "x" }],
     });
+  });
+});
+
+// The iteration → tool-calls-URL assembly the judge server runs before fetching
+// blobs. Extracted from the /api/v1/evaluate handler so the current-overrides-
+// history, iteration-number-fallback and ordering rules are testable without IO.
+// See scope #1255.
+describe("resolveCurrentIteration (issue #1255)", () => {
+  it("prefers an explicit positive iteration", () => {
+    expect(resolveCurrentIteration(4, [{}, {}])).toBe(4);
+  });
+
+  it("falls back to conversationHistory.length + 1 when iteration is absent", () => {
+    expect(resolveCurrentIteration(undefined, [{}, {}, {}])).toBe(4);
+  });
+
+  it("falls back for non-positive or non-numeric iterations", () => {
+    expect(resolveCurrentIteration(0, [{}])).toBe(2);
+    expect(resolveCurrentIteration(-1, [{}])).toBe(2);
+    expect(resolveCurrentIteration("2", [{}])).toBe(2);
+  });
+
+  it("returns 1 when there is no prior history", () => {
+    expect(resolveCurrentIteration(undefined, undefined)).toBe(1);
+    expect(resolveCurrentIteration(undefined, [])).toBe(1);
+  });
+});
+
+describe("mapIterationToolCallUrls (issue #1255)", () => {
+  it("maps each prior turn by its own iteration number", () => {
+    const history = [
+      { iteration: 1, toolCallsUrl: "u1" },
+      { iteration: 2, toolCallsUrl: "u2" },
+    ];
+    expect(mapIterationToolCallUrls(history, undefined, 3)).toEqual([
+      { iteration: 1, url: "u1" },
+      { iteration: 2, url: "u2" },
+    ]);
+  });
+
+  it("appends the current iteration's URL", () => {
+    const history = [{ iteration: 1, toolCallsUrl: "u1" }];
+    expect(mapIterationToolCallUrls(history, "current", 2)).toEqual([
+      { iteration: 1, url: "u1" },
+      { iteration: 2, url: "current" },
+    ]);
+  });
+
+  it("lets the current iteration override a history collision on the same iteration", () => {
+    const history = [
+      { iteration: 1, toolCallsUrl: "u1" },
+      { iteration: 2, toolCallsUrl: "stale" },
+    ];
+    expect(mapIterationToolCallUrls(history, "fresh", 2)).toEqual([
+      { iteration: 1, url: "u1" },
+      { iteration: 2, url: "fresh" },
+    ]);
+  });
+
+  it("falls back to 1-based position when a turn has no iteration number", () => {
+    const history = [
+      { toolCallsUrl: "a" },
+      { toolCallsUrl: "b" },
+      { iteration: 0, toolCallsUrl: "c" },
+    ];
+    expect(mapIterationToolCallUrls(history, undefined, 4)).toEqual([
+      { iteration: 1, url: "a" },
+      { iteration: 2, url: "b" },
+      { iteration: 3, url: "c" },
+    ]);
+  });
+
+  it("skips turns without a usable toolCallsUrl", () => {
+    const history = [
+      { iteration: 1, toolCallsUrl: "u1" },
+      { iteration: 2 },
+      { iteration: 3, toolCallsUrl: "" },
+      { iteration: 4, toolCallsUrl: 42 as unknown as string },
+    ];
+    expect(mapIterationToolCallUrls(history, undefined, 5)).toEqual([
+      { iteration: 1, url: "u1" },
+    ]);
+  });
+
+  it("returns entries sorted ascending by iteration regardless of input order", () => {
+    const history = [
+      { iteration: 3, toolCallsUrl: "u3" },
+      { iteration: 1, toolCallsUrl: "u1" },
+    ];
+    expect(mapIterationToolCallUrls(history, "u2", 2)).toEqual([
+      { iteration: 1, url: "u1" },
+      { iteration: 2, url: "u2" },
+      { iteration: 3, url: "u3" },
+    ]);
+  });
+
+  it("handles a non-array history and a missing current URL", () => {
+    expect(mapIterationToolCallUrls(undefined, undefined, 1)).toEqual([]);
+    expect(mapIterationToolCallUrls(undefined, "only", 1)).toEqual([
+      { iteration: 1, url: "only" },
+    ]);
   });
 });

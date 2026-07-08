@@ -5,6 +5,7 @@ import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
 import { evaluateWorkspace } from "./judge-agent.js";
 import { verifyCopilotProtocol } from "./protocol-check.js";
+import { resolveCurrentIteration, mapIterationToolCallUrls } from "./tool-call-history.js";
 import { BlobStorage, RedisLogPublisher } from "shared";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -102,41 +103,28 @@ app.post(
         // iteration (bootstrap, scaffold, install, one-off command) stays visible
         // to the judge in every later iteration. Missing/legacy logs (404 → [])
         // are skipped, never fatal — the judge can still evaluate the workspace.
-        const currentIteration =
-          typeof iteration === "number" && iteration > 0
-            ? iteration
-            : (Array.isArray(conversationHistory) ? conversationHistory.length : 0) + 1;
+        const currentIteration = resolveCurrentIteration(iteration, conversationHistory);
 
-        // Map iteration → toolCallsUrl (current overrides any history collision).
-        const urlByIteration = new Map<number, string>();
-        if (Array.isArray(conversationHistory)) {
-          conversationHistory.forEach((turn: { iteration?: number; toolCallsUrl?: string }, idx: number) => {
-            if (turn?.toolCallsUrl && typeof turn.toolCallsUrl === "string") {
-              const iterNum =
-                typeof turn.iteration === "number" && turn.iteration > 0 ? turn.iteration : idx + 1;
-              urlByIteration.set(iterNum, turn.toolCallsUrl);
-            }
-          });
-        }
-        if (toolCallsUrl && typeof toolCallsUrl === "string") {
-          urlByIteration.set(currentIteration, toolCallsUrl);
-        }
-
+        // Fetch every iteration's tool-calls log in parallel, in ascending
+        // iteration order. Missing/legacy logs (404 → []) are skipped, never
+        // fatal — the judge can still evaluate the workspace.
         const iterationToolCalls: import("shared").IterationToolCalls[] = (
           await Promise.all(
-            [...urlByIteration.entries()]
-              .sort(([a], [b]) => a - b)
-              .map(async ([iterNum, url]) => {
-                try {
-                  const toolCalls = await blobStorage.getToolCalls(url);
-                  return { iteration: iterNum, toolCalls };
-                } catch (err) {
-                  console.warn(
-                    `[judge] Failed to load tool calls for iteration ${iterNum} from ${url}: ${err instanceof Error ? err.message : String(err)}`,
-                  );
-                  return { iteration: iterNum, toolCalls: [] };
-                }
-              }),
+            mapIterationToolCallUrls(
+              conversationHistory,
+              toolCallsUrl,
+              currentIteration,
+            ).map(async ({ iteration: iterNum, url }) => {
+              try {
+                const toolCalls = await blobStorage.getToolCalls(url);
+                return { iteration: iterNum, toolCalls };
+              } catch (err) {
+                console.warn(
+                  `[judge] Failed to load tool calls for iteration ${iterNum} from ${url}: ${err instanceof Error ? err.message : String(err)}`,
+                );
+                return { iteration: iterNum, toolCalls: [] };
+              }
+            }),
           )
         ).filter((g) => g.toolCalls.length > 0);
 
