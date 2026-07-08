@@ -6,9 +6,10 @@ The **CriteriaProvider** abstraction unifies how the judge (and other consumers)
 
 > **Evidence available to criteria at evaluation time.** This doc covers how
 > criteria are *loaded*. When the judge *evaluates* a resolved criterion it can
-> gather evidence from three sources for the iteration under evaluation: the
-> workspace snapshot (always), the coding agent's captured tool outputs (via
-> `read_tool_outputs` / `get_tool_output`, when present), and the coding agent's
+> gather evidence from three sources: the
+> workspace snapshot (always), the coding agent's captured tool outputs across the
+> **whole run** (via `list_tool_calls` / `search_tool_outputs` / `get_tool_output`,
+> when present — see issue #1255), and the coding agent's
 > own response — its answer/explanation — via `read_agent_response` (issue #1136,
 > when present). This makes criteria that grade what the agent *said* (Q&A /
 > no-code-change deliverables) gradeable. See [gates §4.6](../design/gates.md) for

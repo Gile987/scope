@@ -485,17 +485,36 @@ toolCallsUrl?: string;        // blob with this iteration's captured tool calls/
 currentAgentResponse?: string; // the coding agent's assistant message for the iteration being judged (#1136)
 ```
 
-**New judge tool** — `read_tool_outputs` (added in `judge-strategies.ts`
-alongside `createFileTools`):
+**Judge tool-call tools** — `list_tool_calls`, `search_tool_outputs`, and
+`get_tool_output` (added in `judge-strategies.ts` alongside `createFileTools`,
+built by `createToolOutputTools`):
 
-- Lists the tool calls captured during the current gate iteration:
-  `{ name, arguments, response }` (e.g. a `shell`/`bash` call with the build
-  command and its stdout/stderr/exit code).
-- Supports fetching the full output for a given call (outputs may be large, so
-  the list view truncates and a `get_tool_output(index)` style accessor returns
-  the full text on demand).
-- Backed by the per-iteration tool-calls blob already produced by the loop
-  (`writeToolCalls` / `toolCallsUrl`), downloaded next to the snapshot.
+- `list_tool_calls` browses the captured tool calls
+  (`{ name, arguments, response }`, e.g. a `shell`/`bash` call with the build
+  command and its stdout/stderr/exit code) across **the whole run**, deduped and
+  paginated, filterable by `iteration` or a `query` substring. Previews are
+  truncated (large outputs are read on demand).
+- `search_tool_outputs` finds a pattern anywhere in the run — across name,
+  arguments, and response — and returns matches with surrounding snippets and the
+  owning iteration. This is the key tool for **one-time-action** criteria (e.g. a
+  scaffold/bootstrap command that only ran once): a single call answers "did this
+  command ever run in the run?" without paging through hundreds of entries.
+- `get_tool_output(index)` returns the full output for a single call by its
+  global index; the result includes the call's `iteration`.
+
+**Cumulative assembly (issue #1255).** The tools are no longer scoped to the
+current iteration. The judge assembles the tool calls from **every** iteration in
+the run: `judge/index.ts` collects the `toolCallsUrl` from the current request
+*and* from each prior turn in `conversationHistory`, downloads them all in
+parallel (missing/legacy 404 logs are skipped, not fatal), and labels each call
+with its `iteration`. The merged list is deduped — byte-identical calls (same
+name + arguments + response) collapse into one entry carrying `occurrences` /
+`iterations` metadata, while a *changed* build/test output is always kept as a
+separate entry so a regression is never hidden — and the browse page is capped by
+`JUDGE_MAX_TOOL_CALLS` (default 300; `search_tool_outputs` / `get_tool_output`
+still reach the full history). This fixes the failure mode where a one-time action
+was visible only in the iteration that ran it and its criterion oscillated
+pass↔fail across later iterations.
 
 **New judge tool** — `read_agent_response` (added in `judge-strategies.ts`
 alongside the tool-output tools, issue #1136):
@@ -514,16 +533,16 @@ alongside the tool-output tools, issue #1136):
   API/DB call. It cannot be read from the main API because the worker calls the
   judge *before* the current turn (which carries `codingAgentResponse`) is
   persisted (multi-turn-loop), so at judge time the response exists only in the
-  worker's memory and must be pushed into the request. This mirrors how
-  `read_tool_outputs` serves the pre-loaded in-memory `toolCalls` array.
+  worker's memory and must be pushed into the request. This mirrors how the
+  tool-output tools serve the pre-loaded in-memory `iterationToolCalls` array.
 - Registered only when a non-empty response is present (mirrors the
   `toolCalls.length > 0` gating for the tool-output tools), so file/tool-output
   criteria behavior is unchanged when no response was captured.
 
 The judge agent's available tools therefore become workspace-scoped
 (`read_file`, `list_directory`, `search_files`, `file_exists`) **plus**
-`read_tool_outputs` / `get_tool_output` (when tool outputs are present) **plus**
-`read_agent_response` (when an agent response is present). When **either** tool
+`list_tool_calls` / `search_tool_outputs` / `get_tool_output` (when tool outputs
+are present) **plus** `read_agent_response` (when an agent response is present). When **either** tool
 outputs **or** an agent response are present, the system prompt injects a generic
 guidance block built by `buildEvidenceGuidance({ hasToolOutputs, hasAgentResponse })`
 in `judge-strategies.ts` (shared by both the bundled and independent strategies;
@@ -547,8 +566,9 @@ The system prompt is organized into balanced, single-purpose sections:
   the criteria, so it stays invariant and does not back-couple to the tooling
   section.
 - **`## Your Tools`** — names the judge's own read-only tools once (`read_file`,
-  `list_directory`, `search_files`, `file_exists`, plus `read_tool_outputs` /
-  `get_tool_output` when tool outputs exist, plus `read_agent_response` when an
+  `list_directory`, `search_files`, `file_exists`, plus `list_tool_calls` /
+  `search_tool_outputs` / `get_tool_output` when tool outputs exist, plus
+  `read_agent_response` when an
   agent response exists) and states the hard limit: the judge cannot run any
   commands or coding-agent tools. This keeps the judge's tools unambiguous from
   the *coding agent's* tools/commands (whose output the judge only reads).
@@ -611,6 +631,19 @@ The system prompt is organized into balanced, single-purpose sections:
 > judge tools, `read_agent_response` is `skipPermission: true` and `custom:*` so
 > the headless judge can never be denied it.
 
+> **Prior per-criterion results + sticky pass (issue #1255).** The judge no longer
+> sees earlier iterations only as truncated prose. `buildUserPrompt` (both
+> strategies) renders a structured `## Previous Iterations` view built from each
+> turn's `criteriaResults`: for every criterion, a compact PASS/FAIL timeline
+> (`criterionId: it1 PASS → it2 FAIL`) plus the last feedback. This pairs with the
+> cumulative tool history: when a one-time action's evidence lives in an earlier
+> iteration, the judge can both *see that it passed before* (timeline) and *confirm
+> the action in the run* (`search_tool_outputs`). Guidance adds **sticky pass**:
+> a criterion that passed in an earlier iteration is treated as satisfied **unless
+> there is concrete evidence of regression now** — strong evidence, not a permanent
+> latch, so a genuine regression can still flip it to FAIL. Runs without structured
+> `criteriaResults` (older data) fall back to the previous prose rendering.
+
 > **Tool isolation (scope #1117).** The judge session is restricted to its own
 > custom tools only — `createSession` is called with `availableTools: ["custom:*"]`
 > and `excludedTools: ["builtin:*", "mcp:*"]` (see `JUDGE_AVAILABLE_TOOLS` /
@@ -622,7 +655,8 @@ The system prompt is organized into balanced, single-purpose sections:
 > permission from user" and the judge mis-reports that as the coder's result
 > (a bogus, non-deterministic "permission denied" failure even when the coder's
 > command actually succeeded). Locking the session to `custom:*` removes that
-> escape hatch and forces the judge to evaluate from `read_tool_outputs`.
+> escape hatch and forces the judge to evaluate from the captured tool outputs
+> (`list_tool_calls` / `search_tool_outputs` / `get_tool_output`).
 
 > **All judge tools must be `skipPermission` (scope #1125).** The same headless
 > permission rule that applies to the built-ins above applies to the judge's *own*
@@ -630,25 +664,33 @@ The system prompt is organized into balanced, single-purpose sections:
 > `skipPermission: true` is denied non-interactively with "Permission denied and
 > could not request permission from user". The file-inspection tools
 > (`read_file`, `list_directory`, `search_files`, `file_exists`) set this flag,
-> but `read_tool_outputs` / `get_tool_output` originally did not — so every judge
+> but the tool-output tools originally did not — so every judge
 > attempt to read the coder's captured build/test output was silently denied. The
 > judge then fell back to demanding on-disk proof (a `dist/` directory, a
 > `build-output.log`, a README), which forced the coding agent to *fabricate*
 > build-evidence files and made the build/test gates loop for many iterations.
-> Both tool-output tools are now `skipPermission: true`, so the judge can read the
+> All tool-output tools are now `skipPermission: true`, so the judge can read the
 > captured command output (and trust an exit-code-0 build) on the first iteration.
 > A regression test in `judge-strategies.test.ts` asserts every tool returned by
 > `createToolOutputTools` skips the permission prompt.
 
 ```mermaid
 flowchart LR
-    subgraph Iteration
-      Agent[Agent runs build cmd] --> TC[Tool calls + outputs captured]
-      Agent --> WS[Workspace files]
+    subgraph Run
+      subgraph It1[Iteration 1]
+        A1[Agent runs cmds] --> TC1[Tool calls captured]
+      end
+      subgraph ItN[Iteration N]
+        AN[Agent runs cmds] --> TCN[Tool calls captured]
+        AN --> WS[Workspace files]
+      end
     end
-    TC --> Blob[(tool-calls blob)]
+    TC1 --> B1[(tool-calls blob 1)]
+    TCN --> BN[(tool-calls blob N)]
     WS --> Snapshot[(workspace snapshot)]
-    Blob --> JT[Judge tool: read_tool_outputs]
+    B1 --> Assemble[judge/index.ts: assemble + dedup + label by iteration]
+    BN --> Assemble
+    Assemble --> JT[Judge tools: list_tool_calls / search_tool_outputs / get_tool_output]
     Snapshot --> JF[Judge tools: read_file/list_directory]
     JT --> Eval[Judge evaluates gate criteria]
     JF --> Eval
@@ -721,7 +763,7 @@ Per the CLI ↔ Portal parity rule, both must expose gate selection.
 | Existing requests (no `gates`) | Normalised to a single Select gate from `scenario.criteria` + `maxIterations` + `taskPromptId`. Identical behaviour. |
 | Existing criteria (no `gates`) | Backfilled to `["select"]` by migration 018 (§4.2.1) — which matches absent, empty (`[]`), and null — so they stay selectable only for the Select gate. The portal always writes an explicit, non-empty list, so the empty=all fallback is never produced by normal flows. |
 | Existing prompts (no `type`) | Backfilled to `type: "select"` (field-only, no id rewrite — §4.7). `select` prompts keep text-only hashing; only build/test/run/deploy namespace `type` into the id. |
-| Judge requests without `gate`/`toolCallsUrl` | Treated as Select gate; `read_tool_outputs` returns empty. |
+| Judge requests without `gate`/`toolCallsUrl` | Treated as Select gate; with no tool-call logs to assemble, `list_tool_calls` / `search_tool_outputs` return empty. |
 | YAML scenarios/criteria | New fields are optional; old files load unchanged. |
 
 ## 6. Open questions & risks
