@@ -19,6 +19,21 @@ export interface ToolCall {
 }
 
 /**
+ * A single iteration's captured tool calls, labeled with the iteration number
+ * it belongs to. The judge assembles an ordered list of these (iterations
+ * 1..N) so a criterion can be evaluated against the tool-call history of the
+ * *whole run*, not just the iteration currently being judged. This is what lets
+ * one-time actions (bootstrap/scaffold commands recorded in an earlier
+ * iteration) keep counting as done in later iterations. See scope #1255.
+ */
+export interface IterationToolCalls {
+  /** 1-based iteration number this batch of tool calls was captured in. */
+  iteration: number;
+  /** The tool calls captured during that iteration. */
+  toolCalls: ToolCall[];
+}
+
+/**
  * Minimal HAR 1.2 types — just enough for parsing DevProxy output.
  * For full HAR types, use @types/har-format.
  */

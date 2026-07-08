@@ -450,6 +450,7 @@ export async function runMultiTurnLoop(
         conversationHistory: turns,
         personaInstructions,
         requestId,
+        iteration,
         ...(gate && { gate }),
         ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
         ...(codingResponse && { currentAgentResponse: codingResponse }),

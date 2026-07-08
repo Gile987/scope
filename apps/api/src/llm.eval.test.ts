@@ -8,7 +8,8 @@
  * each behavior:
  *   - agent-action behaviors (something the agent RAN or DID: a command, a
  *     bootstrap/scaffold, a tool/skill/MCP invocation) -> the captured tool-call
- *     history, which the judge can read via read_tool_outputs / get_tool_output.
+ *     history (cumulative across the whole run), which the judge can read via
+ *     list_tool_calls / search_tool_outputs / get_tool_output.
  *   - structural behaviors (how the code is written) -> the codebase.
  *
  * This is an **eval**, not a unit test. Two layers of LLM are involved:
