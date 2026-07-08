@@ -44,6 +44,7 @@ export function TaskPromptPreviewPanel() {
     );
   }
 
+  const extracted = (taskPrompt.features?.length ?? 0) > 0;
   const detected = taskPrompt.features?.filter((f) => f.detected).length ?? 0;
 
   return (
@@ -85,7 +86,9 @@ export function TaskPromptPreviewPanel() {
             <CardTitle className="text-sm">Features</CardTitle>
           </CardHeader>
           <CardContent>
-            {detected > 0 ? (
+            {!extracted ? (
+              <p className="text-xs text-muted-foreground">Not extracted.</p>
+            ) : (
               <>
                 <div className="mb-2 flex items-center gap-2">
                   <Badge variant="secondary" className="text-xs">
@@ -97,22 +100,24 @@ export function TaskPromptPreviewPanel() {
                     </span>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {taskPrompt.features
-                    ?.filter((f) => f.detected)
-                    .map((f) => (
-                      <Badge
-                        key={f.featureId}
-                        variant="default"
-                        className="font-mono text-xs"
-                      >
-                        {f.featureId}
-                      </Badge>
-                    ))}
-                </div>
+                {detected > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {taskPrompt.features
+                      ?.filter((f) => f.detected)
+                      .map((f) => (
+                        <Badge
+                          key={f.featureId}
+                          variant="default"
+                          className="font-mono text-xs"
+                        >
+                          {f.featureId}
+                        </Badge>
+                      ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No features detected.</p>
+                )}
               </>
-            ) : (
-              <p className="text-xs text-muted-foreground">No detected features.</p>
             )}
           </CardContent>
         </Card>

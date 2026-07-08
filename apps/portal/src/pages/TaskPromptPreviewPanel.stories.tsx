@@ -75,10 +75,10 @@ export const WithDetectedFeatures: Story = {
 };
 
 /**
- * A prompt with no detected features shows the "No detected features." message
- * instead of an empty count badge.
+ * A prompt that has never been extracted (no `features` array) shows
+ * "Not extracted." — distinct from an extraction that detected nothing.
  */
-export const NoFeatures: Story = {
+export const NotExtracted: Story = {
   parameters: {
     msw: {
       handlers: [
@@ -87,6 +87,36 @@ export const NoFeatures: Story = {
     },
   },
   play: async ({ canvas }) => {
-    await expect(await canvas.findByText("No detected features.")).toBeVisible();
+    await expect(await canvas.findByText("Not extracted.")).toBeVisible();
+  },
+};
+
+/**
+ * A prompt that was extracted but matched no features shows "No features
+ * detected." plus a "0 detected" count and the extraction timestamp — this is
+ * deliberately distinct from the never-extracted state above.
+ */
+export const ExtractedNoneDetected: Story = {
+  parameters: {
+    msw: {
+      handlers: [
+        http.get("/api/v1/task-prompts/:id", () =>
+          HttpResponse.json({
+            ...baseTaskPrompt,
+            features: [
+              notDetected("asks_for_frontend"),
+              skipped("asks_for_iac"),
+            ],
+            featuresExtractedAt: "2024-06-01T12:00:00.000Z",
+          }),
+        ),
+      ],
+    },
+  },
+  play: async ({ canvas }) => {
+    await expect(await canvas.findByText("No features detected.")).toBeVisible();
+    await expect(canvas.getByText("0 detected")).toBeVisible();
+    expect(canvas.queryByText("asks_for_frontend")).toBeNull();
+    expect(canvas.queryByText("asks_for_iac")).toBeNull();
   },
 };
