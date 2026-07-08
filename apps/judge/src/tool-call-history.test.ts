@@ -53,6 +53,34 @@ describe("tool-call history assembly (issue #1255)", () => {
     expect(callMatchesIteration(history.calls[0], 3)).toBe(false);
   });
 
+  it("does not set `iterations` for a call repeated within the SAME iteration", () => {
+    // A byte-identical repeat inside one iteration bumps `occurrences` but must
+    // leave `iterations` unset — that field means ">1 distinct iteration".
+    const identical = { id: "x", name: "bash", arguments: { command: "ls" }, response: "a\nb" };
+    const history = buildToolCallHistory([
+      { iteration: 1, toolCalls: [identical, identical] },
+    ]);
+    expect(history.calls).toHaveLength(1);
+    expect(history.calls[0].occurrences).toBe(2);
+    expect(history.calls[0].iterations).toBeUndefined();
+    expect(history.iterationsCovered).toEqual([1]);
+  });
+
+  it("counts a recurrence-only iteration in iterationsCovered", () => {
+    // Iteration 2's only call is byte-identical to iteration 1's, so it collapses
+    // into that entry and is never a first-seen `iteration`. It must still be
+    // represented in iterationsCovered (via the entry's `iterations`).
+    const identical = { id: "x", name: "bash", arguments: { command: "npm test" }, response: "1 passing" };
+    const history = buildToolCallHistory([
+      { iteration: 1, toolCalls: [identical] },
+      { iteration: 2, toolCalls: [identical] },
+    ]);
+    expect(history.calls).toHaveLength(1);
+    expect(history.calls[0].iteration).toBe(1);
+    expect(history.calls[0].iterations).toEqual([1, 2]);
+    expect(history.iterationsCovered).toEqual([1, 2]);
+  });
+
   it("keeps calls with the same command but a CHANGED response as separate entries", () => {
     // A changed build/test output can signal a regression and must never be hidden.
     const history = buildToolCallHistory([

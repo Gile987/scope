@@ -663,6 +663,24 @@ describe("list_tool_calls page cap via JUDGE_MAX_TOOL_CALLS (issue #1255)", () =
       else process.env.JUDGE_MAX_TOOL_CALLS = prev;
     }
   });
+
+  it("falls back to the default page cap when JUDGE_MAX_TOOL_CALLS is non-numeric", async () => {
+    // A non-numeric override must not make the cap NaN (which would collapse the
+    // clamp and return an empty page); it should fall back to the default so the
+    // captured calls are still listed.
+    const prev = process.env.JUDGE_MAX_TOOL_CALLS;
+    process.env.JUDGE_MAX_TOOL_CALLS = "not-a-number";
+    try {
+      const tools = strat.publicCreateToolOutputTools([{ iteration: 1, toolCalls: many }]);
+      const list = tools.find((t) => t.name === "list_tool_calls")!;
+      const listed: any = await (list.handler as any)({}, stubInvocation);
+      expect(listed.totalCalls).toBe(10);
+      expect(listed.returnedCalls).toBe(10);
+    } finally {
+      if (prev === undefined) delete process.env.JUDGE_MAX_TOOL_CALLS;
+      else process.env.JUDGE_MAX_TOOL_CALLS = prev;
+    }
+  });
 });
 
 describe("buildPriorResultsSection — structured per-criterion timeline + sticky pass (issue #1255)", () => {

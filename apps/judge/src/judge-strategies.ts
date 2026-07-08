@@ -492,7 +492,10 @@ export abstract class JudgeStrategy {
     const FULL_LIMIT = 100_000;
     const SNIPPET_RADIUS = 150;
     const DEFAULT_LIST_LIMIT = 50;
-    const MAX_LIST_LIMIT = parseInt(process.env.JUDGE_MAX_TOOL_CALLS || "300", 10);
+    const parsedMaxList = parseInt(process.env.JUDGE_MAX_TOOL_CALLS || "300", 10);
+    // A non-numeric override would make MAX_LIST_LIMIT NaN, collapsing the clamp
+    // below and returning an empty page; fall back to the default instead.
+    const MAX_LIST_LIMIT = Number.isNaN(parsedMaxList) ? 300 : parsedMaxList;
     const DEFAULT_SEARCH_MATCHES = 20;
     const MAX_SEARCH_MATCHES = 100;
 

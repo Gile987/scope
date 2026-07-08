@@ -114,7 +114,10 @@ export function buildToolCallHistory(
           iters.push(group.iteration);
           iters.sort((a, b) => a - b);
         }
-        existing.iterations = iters;
+        // `iterations` is meaningful only when the call spans MORE THAN ONE
+        // distinct iteration; a same-iteration repeat leaves it unset (see doc
+        // on FlatToolCall.iterations).
+        if (iters.length > 1) existing.iterations = iters;
         existing.occurrences = (existing.occurrences ?? 1) + 1;
         continue;
       }
@@ -134,9 +137,14 @@ export function buildToolCallHistory(
     }
   }
 
-  const iterationsCovered = [...new Set(list.map((c) => c.iteration))].sort(
-    (a, b) => a - b,
-  );
+  // Union each entry's first-seen iteration with its recurrence iterations, so
+  // an iteration whose calls were ALL byte-identical to earlier ones (recorded
+  // only in `iterations`, never as a first-seen `iteration`) is still counted.
+  const coveredSet = new Set<number>();
+  for (const c of list) {
+    for (const it of c.iterations ?? [c.iteration]) coveredSet.add(it);
+  }
+  const iterationsCovered = [...coveredSet].sort((a, b) => a - b);
 
   return { calls: list, iterationsCovered, rawCount };
 }
