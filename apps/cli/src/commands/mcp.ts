@@ -6,7 +6,8 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { apiFetch } from "../utils/api-client.js";
 import { parseEnvPairs, parseHeaderPairs } from "../utils/parsers.js";
 
 export function registerMcpCommands(program: Command): void {
@@ -39,7 +40,7 @@ mcpServer
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/mcp/servers`);
+      const response = await apiFetch(options.url, `/mcp/servers`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -77,7 +78,7 @@ mcpServer
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/mcp/servers/${encodeURIComponent(options.id)}`);
+      const response = await apiFetch(options.url, `/mcp/servers/${encodeURIComponent(options.id)}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -175,7 +176,7 @@ mcpServer
       }
       if (options.description) body.description = options.description;
 
-      const response = await fetch(`${normalizeUrl(options.apiUrl)}/api/v1/mcp/servers`, {
+      const response = await apiFetch(options.apiUrl, `/mcp/servers`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -221,7 +222,7 @@ mcpServer
         console.error(errorText("Error: provide at least one field to update"));
         process.exit(1);
       }
-      const response = await fetch(`${normalizeUrl(options.apiUrl)}/api/v1/mcp/servers/${encodeURIComponent(options.id)}`, {
+      const response = await apiFetch(options.apiUrl, `/mcp/servers/${encodeURIComponent(options.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -246,7 +247,7 @@ mcpServer
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/mcp/servers/${encodeURIComponent(options.id)}`, {
+      const response = await apiFetch(options.url, `/mcp/servers/${encodeURIComponent(options.id)}`, {
         method: "DELETE",
       });
       if (!response.ok) {

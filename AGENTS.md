@@ -28,6 +28,7 @@ packages/
   github-auth/                  # GitHub OAuth/device-code auth utilities
   model-scanning/               # Shared model scanning logic
   version-checking/             # Version comparison utilities
+  llm-eval/                     # LLM-graded eval harness (grader, sampling, rate-limit retry)
 config/                         # Benchmark definitions (YAML)
 deploy/                         # Kubernetes manifests (Kustomize + FluxCD)
 ```

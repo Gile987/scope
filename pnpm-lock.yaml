@@ -17,6 +17,7 @@ overrides:
   brace-expansion@5: ^5.0.6
   path-to-regexp@0.1: ^0.1.13
   undici@5: ^6.24.0
+  undici@7: ^7.28.0
   qs: ^6.15.2
   ws: ^8.20.1
   handlebars: ^4.7.9
@@ -145,6 +146,9 @@ importers:
       '@types/uuid':
         specifier: ^10.0.0
         version: 10.0.0
+      llm-eval:
+        specifier: workspace:*
+        version: link:../../packages/llm-eval
       supertest:
         specifier: ^7.2.2
         version: 7.2.2
@@ -170,6 +174,9 @@ importers:
         specifier: ^16.6.1
         version: 16.6.1
       eventsource:
+        specifier: ^2.0.2
+        version: 2.0.2
+      ky:
         specifier: ^2.0.2
         version: 2.0.2
       semver:
@@ -363,6 +370,9 @@ importers:
       jsqr:
         specifier: ^1.4.0
         version: 1.4.0
+      ky:
+        specifier: ^2.0.2
+        version: 2.0.2
       lucide-react:
         specifier: ^0.469.0
         version: 0.469.0(react@19.2.4)
@@ -796,6 +806,19 @@ importers:
       playwright:
         specifier: ^1.40.0
         version: 1.58.2
+    devDependencies:
+      '@types/node':
+        specifier: ^22.7.0
+        version: 22.19.10
+      typescript:
+        specifier: ^5.6.2
+        version: 5.9.3
+
+  packages/llm-eval:
+    dependencies:
+      shared:
+        specifier: workspace:*
+        version: link:../shared
     devDependencies:
       '@types/node':
         specifier: ^22.7.0
@@ -4837,6 +4860,10 @@ packages:
     resolution: {integrity: sha512-dcS1ul+9tmeD95T+x28/ehLgd9mENa3LsvDTtzm3vyBEO7RPptvAD+t44WVXaUjTBRcrpFeFlC8WCruUR456hw==}
     engines: {node: '>=0.10.0'}
 
+  ky@2.0.2:
+    resolution: {integrity: sha512-/GmXpo9F9W+f8n4Ivr2iH+7h7wL7jLbLKWkMlpflcCRb6kGjBfTlASEXaZ9qUgNTn4VgS0P2pwxxzQ4EM6Ulgg==}
+    engines: {node: '>=22'}
+
   lazystream@1.0.1:
     resolution: {integrity: sha512-b94GiNHQNy6JNTrt5w6zNyffMrNkXZb3KTkCZJb2V1xaEGCk093vkZ2jk3tpaeP33/OiXC+WvK9AxUebnf5nbw==}
     engines: {node: '>= 0.6.3'}
@@ -6308,12 +6335,8 @@ packages:
     resolution: {integrity: sha512-YmfV3YnEDzXRC5lZ2jWtWWHKGUm1zIt8AhesR1tens+HTNv+YZlN/dp6G727LOvMJ8xjP9Be7Y2Sdr96LDm+pg==}
     engines: {node: '>=18.17'}
 
-  undici@7.24.6:
-    resolution: {integrity: sha512-Xi4agocCbRzt0yYMZGMA6ApD7gvtUFaxm4ZmeacWI4cZxaF6C+8I8QfofC20NAePiB/IcvZmzkJ7XPa471AEtA==}
-    engines: {node: '>=20.18.1'}
-
-  undici@7.27.2:
-    resolution: {integrity: sha512-uZsKNuzQxDMUY6M3pIMvy5tvlGmtq8XJ2oLAkfRKGNu+1VQAIvLy2xIVG5ATZl5wDXl/tddByAWCizRbOme+TA==}
+  undici@7.28.0:
+    resolution: {integrity: sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==}
     engines: {node: '>=20.18.1'}
 
   unicorn-magic@0.1.0:
@@ -9507,7 +9530,7 @@ snapshots:
       parse5: 7.3.0
       parse5-htmlparser2-tree-adapter: 7.1.0
       parse5-parser-stream: 7.1.2
-      undici: 7.24.6
+      undici: 7.28.0
       whatwg-mimetype: 4.0.0
 
   chokidar@3.6.0:
@@ -10706,6 +10729,8 @@ snapshots:
     optional: true
 
   kind-of@6.0.3: {}
+
+  ky@2.0.2: {}
 
   lazystream@1.0.1:
     dependencies:
@@ -12469,7 +12494,7 @@ snapshots:
       ssh-remote-port-forward: 1.0.4
       tar-fs: 3.1.2
       tmp: 0.2.7
-      undici: 7.27.2
+      undici: 7.28.0
     transitivePeerDependencies:
       - bare-abort-controller
       - bare-buffer
@@ -12608,9 +12633,7 @@ snapshots:
 
   undici@6.27.0: {}
 
-  undici@7.24.6: {}
-
-  undici@7.27.2: {}
+  undici@7.28.0: {}
 
   unicorn-magic@0.1.0: {}
 
