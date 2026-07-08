@@ -93,6 +93,17 @@ Key facts the design builds on:
     HAR may retain only the tail of a long session. Adding a new agent that speaks a
     different wire format requires a new extractor here, or the judge is silently
     starved of tool-call evidence (see #1250).
+  - The Responses API is read across **two transports**: HTTP bodies
+    (`request.postData.text` / `response.content.text`, as produced by DevProxy) **and**
+    WebSocket frames (`entry._webSocketMessages`, gateway-captured) — the Copilot CLI
+    carries `/responses` over a WebSocket when `copilot_cli_websocket_responses` is
+    enabled. The WebSocket path (`extractResponsesApiFromWebSocketMessages` in
+    `responses-api-parser.ts`) only unwraps the `send`/`receive` frames and feeds them to
+    the **same** semantic extractors, so no format logic is duplicated; it is a no-op for
+    HTTP-only HARs. Before this, gpt-5.x runs whose payloads lived entirely in WebSocket
+    frames got an **empty** tool-call history (see #1253). See
+    [`docs/architecture/gateway-websocket.md`](../architecture/gateway-websocket.md) for
+    the frame format.
   - When a HAR is present but `extractToolCalls` returns `[]`, `multi-turn-loop.ts`
     now emits a `warn` log so this class of failure (an unrecognized wire format) is
     never silent.
@@ -742,6 +753,11 @@ Per the CLI ↔ Portal parity rule, both must expose gate selection.
    the judge of evidence on those runs. Coverage is still **wire-format-specific** —
    each new agent/API shape needs its own extractor, and the parser is the single
    choke point where a missed format silently produces an empty tool-call history.
+   *Update (#1253):* the Responses API extractor is now also **transport-aware** — it
+   reads tool calls from WebSocket `_webSocketMessages` frames (gateway-captured), not
+   just HTTP bodies, so gpt-5.x runs that carry `/responses` over a WebSocket no longer
+   get an empty history. The same wire-format caveat applies: a missing **transport**
+   unwrapper is just as silent as a missing wire-format extractor.
    See also #1225 (make criteria-prompt generation *aware* of the judge's tool-call
    access) — complementary: #1250 fixes runtime capture, #1225 fixes prompt wording.
 3. **Default gate prompts.** Non-Select gates are driven by typed prompt entities
