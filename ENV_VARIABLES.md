@@ -212,6 +212,12 @@ Maximum number of retry attempts when the judge client encounters a timeout or t
 
 At startup the judge service runs a self-check that spawns the bundled Copilot CLI and asserts its ACP protocol version matches the installed `@github/copilot-sdk`. On a mismatch (e.g. the `@github/copilot` override in `package.json` drifted ahead of the SDK) the judge logs a clear fatal message and exits instead of serving opaque per-evaluation HTTP 500s. Set to `true` to bypass the check (not recommended).
 
+### JUDGE_MAX_TOOL_CALLS
+**Default:** `300`
+**Type:** integer
+
+Caps how many tool calls the judge's `list_tool_calls` tool returns in a single browse page. The judge assembles the coding agent's tool calls **cumulatively across every iteration of the run** (issue #1255), deduplicating byte-identical calls, so this bound keeps a long run's history from overflowing the judge's context. It applies **only** to the `list_tool_calls` browse page — `search_tool_outputs` (pattern search) and `get_tool_output` (fetch one call by global index) always reach the full deduped history, so a one-time action from an early iteration stays discoverable regardless of this cap.
+
 ## Feedback Configuration
 
 ### FEEDBACK_MAX_CRITERIA
@@ -481,7 +487,37 @@ Enables kubedock-specific container cleanup (purge on setup, remove on teardown)
 - **Docker Compose:** Do NOT set (direct socket — no cleanup needed)
 - **Used by:** `coder-acp-copilot`, `coder-acp-claude-code` (via `KubedockClient.isEnabled()`)
 
-## DevProxy Configuration (HAR Capture)
+## Proxy & HAR Capture Configuration (Gateway / DevProxy)
+
+Workers capture agent↔provider traffic as HAR via one of two interchangeable backends,
+selected by `PROXY_BACKEND`. Both converge on the same `extractHarMetadata()` pipeline, so
+HAR output is identical regardless of backend.
+
+### PROXY_BACKEND
+**Default:** `devproxy` (worker adapter default; deployment manifests set `gateway`)
+**Type:** enum (`gateway` | `devproxy`)
+
+Selects the proxy backend returned by `createProxyClient()` (`packages/shared/src/devproxy/index.ts`):
+
+- `gateway` — the shared Rust [AI Gateway](docs/architecture/ai-gateway.md). Records both
+  HTTP and **WebSocket** frames — required for Copilot CLI ≥ 1.0.65, whose `/responses`
+  traffic is carried over a WebSocket that DevProxy's HTTP-only HAR generator cannot see.
+  HAR is downloaded via the gateway session API, so no shared `har-output` volume is
+  needed. Used by the VS Code Electron worker and both Copilot ACP workers (Linux + Windows).
+- `devproxy` — the legacy per-worker [Microsoft DevProxy](https://github.com/dotnet/dev-proxy)
+  sidecar. Records HTTP only; HAR is read from a shared filesystem volume. Still used by the
+  ACP Claude Code worker.
+
+### GATEWAY_TOKEN_PLUGIN_ENABLED
+**Default:** `true` (effective only when `TOKEN_MANAGER_URL` is also set)
+**Type:** boolean (`true` | `false`)
+
+Only relevant when `PROXY_BACKEND=gateway`. When `true` (and `TOKEN_MANAGER_URL` is set) the
+worker asks the gateway to enable the `copilot_token` plugin, which mints and refreshes
+Copilot session tokens for that session. Set to `false` for workers whose agent manages its
+own token lifecycle: both Copilot ACP workers set `false` because the Copilot CLI handles
+token minting/refresh itself (enabling the plugin caused upstream 502s — #1058). The VS Code
+Electron worker leaves it enabled.
 
 ### DEV_PROXY_ENABLED
 **Default:** `false`
@@ -496,20 +532,14 @@ Enables DevProxy integration for capturing HTTP traffic as HAR files. When `true
 **Default:** `http://localhost:18000`
 **Type:** URL string
 
-URL of the gateway/DevProxy REST API. Used to start/stop recording, check status, and download the CA certificate.
+URL of the gateway/DevProxy REST API. Used to start/stop recording, check status, and download the CA certificate. Points at the gateway control API when `PROXY_BACKEND=gateway`, or the DevProxy management port when `PROXY_BACKEND=devproxy`.
 
-- **Docker Compose (gateway):** `http://gateway:18000` (shared service)
-- **Docker Compose (devproxy-copilot):** `http://devproxy-copilot:18897` (separate legacy service)
-- **Kubernetes:** `http://gateway-service:18000` (shared service)
+- **Docker Compose (gateway):** `http://gateway:18000` (shared service — Copilot + VS Code Electron)
+- **Docker Compose (devproxy, Claude Code):** `http://devproxy-claude-code:18897` (per-worker sidecar)
+- **Kubernetes (gateway):** `http://gateway-service.scoped.svc.cluster.local:18000` (shared service)
 
 ### DEV_PROXY_HAR_DIR
 **Default:** `/har-output`
 **Type:** path
 
-Directory where DevProxy writes HAR files. Shared between the DevProxy process and the worker via a volume mount.
-
-### DEVPROXY_COPILOT_API_PORT
-**Default:** `18800`
-**Type:** integer (Docker Compose only)
-
-Host port mapping for the Copilot DevProxy REST API in Docker Compose.
+**`PROXY_BACKEND=devproxy` only.** Directory where DevProxy writes HAR files, shared between the DevProxy process and the worker via a volume mount. Unused by the gateway backend, which downloads HAR over HTTP instead of via a shared volume.

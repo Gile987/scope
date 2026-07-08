@@ -354,6 +354,80 @@ describe("logging sink", () => {
     const body = await res.json();
     expect(body).toEqual({ value: 42 });
   });
+
+  it("captures a redacted preview for JSON responses", async () => {
+    const entries: ApiLogEntry[] = [];
+    setApiLogSink({ record: (e) => entries.push(e) });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okJson({ token: "should-be-hidden", value: 42 })));
+
+    await apiFetch("http://localhost:3100", "/api/v1/criteria");
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].responseBody).toContain("42");
+    expect(entries[0].responseBody).not.toContain("should-be-hidden");
+  });
+
+  it("skips capturing binary response bodies", async () => {
+    const entries: ApiLogEntry[] = [];
+    setApiLogSink({ record: (e) => entries.push(e) });
+    const archive = new Response(new Uint8Array([1, 2, 3, 4]), {
+      status: 200,
+      headers: { "content-type": "application/gzip" },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(archive));
+
+    const res = await apiFetch("http://localhost:3100", "/api/v1/requests/abc/archive");
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].responseBody).toBe("[application/gzip body, not captured]");
+    // The caller can still read the untouched body.
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3, 4]));
+  });
+
+  it("skips capturing streaming (text/event-stream) response bodies", async () => {
+    const entries: ApiLogEntry[] = [];
+    setApiLogSink({ record: (e) => entries.push(e) });
+    const stream = new Response("data: hello\n\n", {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(stream));
+
+    await apiFetch("http://localhost:3100", "/api/v1/logs/stream");
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].responseBody).toBe("[text/event-stream body, not captured]");
+  });
+
+  it("skips capturing responses that declare an oversized Content-Length", async () => {
+    const entries: ApiLogEntry[] = [];
+    setApiLogSink({ record: (e) => entries.push(e) });
+    const big = new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json", "content-length": String(64 * 1024 + 1) },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(big));
+
+    await apiFetch("http://localhost:3100", "/api/v1/criteria");
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].responseBody).toBe(`[${64 * 1024 + 1} bytes, not captured]`);
+  });
+
+  it("caps large text response previews", async () => {
+    const entries: ApiLogEntry[] = [];
+    setApiLogSink({ record: (e) => entries.push(e) });
+    const long = "a".repeat(5000);
+    const res = new Response(long, { status: 200, headers: { "content-type": "text/plain" } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(res));
+
+    await apiFetch("http://localhost:3100", "/api/v1/criteria");
+
+    expect(entries).toHaveLength(1);
+    const preview = entries[0].responseBody ?? "";
+    expect(preview.endsWith("…")).toBe(true);
+    expect(preview.length).toBeLessThan(long.length);
+  });
 });
 
 describe("readApiError", () => {

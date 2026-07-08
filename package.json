@@ -42,6 +42,8 @@
     "test:coverage": "vitest run --coverage",
     "test:integration": "dotenv -e .env -- vitest run --config vitest.integration.config.ts",
     "test:integration:queue": "pnpm --filter shared build && vitest run --config vitest.integration.config.ts packages/shared/src/queue/redelivery.integration.test.ts apps/scheduler/src/stuck-run-reaper.integration.test.ts",
+    "test:eval": "pnpm --filter shared build && dotenv -e .env -- vitest run --config vitest.eval.config.ts",
+    "eval:criteria-prompts": "pnpm test:eval apps/api/src/llm.eval.test.ts",
     "test:watch": "vitest",
     "build:gateway": "cd apps/gateway && cargo build --release",
     "test:gateway": "cd apps/gateway && cargo test",

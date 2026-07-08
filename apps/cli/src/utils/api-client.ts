@@ -191,6 +191,114 @@ export function redactString(input: string): string {
   return out;
 }
 
+/**
+ * Largest response body we're willing to read for a log preview, in bytes.
+ *
+ * If the response declares a `Content-Length` larger than this, we skip capture
+ * up front and record a marker instead. Otherwise we read up to this many bytes
+ * from a clone and then cancel the clone's stream to bound memory/time.
+ */
+const MAX_RESPONSE_CAPTURE_BYTES = 64 * 1024;
+
+/**
+ * Whether a response `Content-Type` names a text-ish payload worth capturing
+ * for a log preview. Binary payloads (archives, images, octet-stream) and
+ * streaming media (`text/event-stream`) are excluded. A missing/blank type is
+ * treated as non-capturable — we don't guess at binary data.
+ */
+function isCapturableContentType(contentType: string | null | undefined): boolean {
+  if (!contentType) return false;
+  const type = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (!type) return false;
+  // Streaming media: reading to completion may never resolve.
+  if (type === "text/event-stream") return false;
+  if (type.startsWith("text/")) return true;
+  if (type === "application/json" || type.endsWith("+json")) return true;
+  if (type === "application/xml" || type.endsWith("+xml")) return true;
+  if (type === "application/x-www-form-urlencoded") return true;
+  return false;
+}
+
+/** The bare content type (no parameters), for use in a skipped-body marker. */
+function contentTypeLabel(contentType: string | null | undefined): string {
+  const type = contentType?.split(";", 1)[0]?.trim();
+  return type ? type : "unknown";
+}
+
+/**
+ * Read at most `maxBytes` from a fresh clone of `response`, decode as UTF-8, and
+ * return the text. The clone's stream is cancelled once the cap is reached so we
+ * never buffer (or wait for) the whole body — this bounds memory use and avoids
+ * hanging on long-lived streams. Returns `undefined` when the body is empty or
+ * unreadable. Never consumes the caller's body.
+ */
+async function readCappedResponseText(response: Response, maxBytes: number): Promise<string | undefined> {
+  const clone = response.clone();
+  const body = clone.body;
+  if (!body) {
+    // No stream to bound (e.g. empty body): text() resolves immediately.
+    const text = await clone.text();
+    return text || undefined;
+  }
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value && value.byteLength > 0) {
+        // Clamp the final chunk so we never buffer more than the cap.
+        const remaining = maxBytes - total;
+        const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+        chunks.push(chunk);
+        total += chunk.byteLength;
+      }
+    }
+  } finally {
+    // Stop the tee'd stream; ignore errors from an already-closed reader.
+    await reader.cancel().catch(() => {});
+  }
+  if (total === 0) return undefined;
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder("utf-8", { fatal: false }).decode(merged) || undefined;
+}
+
+/**
+ * Build a size-capped, redacted preview of a response body for the log sink,
+ * without consuming the caller's body. Bodies that are binary, streaming, or
+ * declare an oversized `Content-Length` are skipped with an explanatory marker
+ * rather than buffered.
+ */
+async function captureResponseBody(response: Response): Promise<string | undefined> {
+  const contentType = response.headers.get("content-type");
+  if (!isCapturableContentType(contentType)) {
+    return `[${contentTypeLabel(contentType)} body, not captured]`;
+  }
+
+  const contentLengthRaw = response.headers.get("content-length");
+  if (contentLengthRaw != null) {
+    const contentLength = Number(contentLengthRaw);
+    if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_CAPTURE_BYTES) {
+      return `[${contentLength} bytes, not captured]`;
+    }
+  }
+
+  try {
+    const text = await readCappedResponseText(response, MAX_RESPONSE_CAPTURE_BYTES);
+    if (!text) return undefined;
+    const capped = text.length > MAX_BODY_LOG_CHARS ? `${text.slice(0, MAX_BODY_LOG_CHARS)}…` : text;
+    return redactString(capped);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Cap + redact a body value for logging. Returns `undefined` for un-loggable bodies. */
 function previewBody(body: BodyInit | null | undefined): string | undefined {
   if (body == null) return undefined;
@@ -385,10 +493,10 @@ async function dispatch(url: string, init: RequestInit, originalBody: BodyInit |
   try {
     const response = await send(url, init);
     // Capture a redacted preview without consuming the caller's body stream.
+    // Gated on content type/length so binary and streaming bodies aren't buffered.
     let responseBody: string | undefined;
     try {
-      const text = await response.clone().text();
-      responseBody = text ? redactString(text.length > MAX_BODY_LOG_CHARS ? `${text.slice(0, MAX_BODY_LOG_CHARS)}…` : text) : undefined;
+      responseBody = await captureResponseBody(response);
     } catch {
       responseBody = undefined;
     }
