@@ -7,8 +7,7 @@
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "lint": "eslint src/",
-    "smoke:cumulative": "tsx scripts/smoke-cumulative-tool-calls.ts"
+    "lint": "eslint src/"
   },
   "dependencies": {
     "shared": "workspace:*",
