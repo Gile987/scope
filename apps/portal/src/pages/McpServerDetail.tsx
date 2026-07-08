@@ -21,9 +21,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Trash2, Loader2, Save, Plus } from "lucide-react";
 import { formatDate } from "@/lib/utils";
-import { unmaskSecretValue } from "@/lib/mcp-secrets";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
+import { SecretInput } from "@/components/ui/secret-input";
 
 export function McpServerDetail() {
   const { slug } = useParams<{ slug: string }>();
@@ -57,11 +57,11 @@ export function McpServerDetail() {
       setUrl(server.url ?? "");
       setCommand(server.command ?? "");
       setArgs(server.args ? server.args.join(" ") : "");
-      setEnvPairs(server.env ? Object.entries(server.env).map(([k, v]) => ({ name: k, value: unmaskSecretValue(v) })) : []);
+      setEnvPairs(server.env ? Object.entries(server.env).map(([k]) => ({ name: k, value: "" })) : []);
       setSessionMode(server.sessionMode ?? "stateless");
       setVersion(server.version ?? "");
       setDescription(server.description ?? "");
-      setHeaders(server.headers ? server.headers.map(h => ({ name: h.name, value: unmaskSecretValue(h.value) })) : []);
+      setHeaders(server.headers ? server.headers.map(h => ({ name: h.name, value: "" })) : []);
     }
   }, [server]);
 
@@ -152,11 +152,11 @@ export function McpServerDetail() {
       setUrl(server.url ?? "");
       setCommand(server.command ?? "");
       setArgs(server.args ? server.args.join(" ") : "");
-      setEnvPairs(server.env ? Object.entries(server.env).map(([k, v]) => ({ name: k, value: unmaskSecretValue(v) })) : []);
+      setEnvPairs(server.env ? Object.entries(server.env).map(([k]) => ({ name: k, value: "" })) : []);
       setSessionMode(server.sessionMode ?? "stateless");
       setVersion(server.version ?? "");
       setDescription(server.description ?? "");
-      setHeaders(server.headers ? server.headers.map(h => ({ name: h.name, value: unmaskSecretValue(h.value) })) : []);
+      setHeaders(server.headers ? server.headers.map(h => ({ name: h.name, value: "" })) : []);
     }
   };
 
@@ -442,13 +442,13 @@ export function McpServerDetail() {
                       placeholder="Header name"
                       value={header.name}
                       onChange={(e) => updateHeader(idx, "name", e.target.value)}
-                      className="font-mono text-sm"
+                      className="font-mono text-sm w-1/3 shrink-0"
                     />
-                    <Input
-                      placeholder="Header value"
-                      type="password"
+                    <SecretInput
+                      placeholder="Enter new value"
                       value={header.value}
                       onChange={(e) => updateHeader(idx, "value", e.target.value)}
+                      containerClassName="flex-1"
                       className="font-mono text-sm"
                     />
                     <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-destructive" onClick={() => removeHeader(idx)}>
@@ -464,9 +464,7 @@ export function McpServerDetail() {
                 {server.headers.map((h, idx) => (
                   <div key={idx} className="flex items-center gap-2 text-sm">
                     <Badge variant="secondary" className="font-mono text-xs">{h.name}</Badge>
-                    <span className="text-muted-foreground font-mono text-xs">
-                      {h.name.toLowerCase() === "authorization" ? "••••••••" : h.value}
-                    </span>
+                    <span className="text-muted-foreground font-mono text-xs">••••••••</span>
                   </div>
                 ))}
               </div>
@@ -504,13 +502,13 @@ export function McpServerDetail() {
                       placeholder="KEY"
                       value={pair.name}
                       onChange={(e) => updateEnvPair(idx, "name", e.target.value)}
-                      className="font-mono text-sm"
+                      className="font-mono text-sm w-1/3 shrink-0"
                     />
-                    <Input
-                      placeholder={pair.value === "" && server?.env?.[pair.name] === "<secret>" ? "" : "value"}
-                      type="password"
+                    <SecretInput
+                      placeholder={pair.value === "" && server?.env?.[pair.name] === "<secret>" ? "(unchanged — enter new value to update)" : "value"}
                       value={pair.value}
                       onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
+                      containerClassName="flex-1"
                       className="font-mono text-sm"
                     />
                     <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-destructive" onClick={() => removeEnvPair(idx)}>
@@ -523,10 +521,10 @@ export function McpServerDetail() {
           ) : (
             (server.env && Object.keys(server.env).length > 0) ? (
               <div className="space-y-2">
-                {Object.entries(server.env).map(([k, v]) => (
+                {Object.entries(server.env).map(([k]) => (
                   <div key={k} className="flex items-center gap-2 text-sm">
                     <Badge variant="secondary" className="font-mono text-xs">{k}</Badge>
-                    <span className="text-muted-foreground font-mono text-xs">{v === "<secret>" ? "••••••••" : v}</span>
+                    <span className="text-muted-foreground font-mono text-xs">••••••••</span>
                   </div>
                 ))}
               </div>

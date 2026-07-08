@@ -4,8 +4,34 @@
 import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 import { ScenarioSchema, PersonaSchema } from "./scenario.js";
+import { GateIdSchema } from "./criteria.js";
 
 extendZodWithOpenApi(z);
+
+export const GateConfigSchema = z
+  .object({
+    gate: GateIdSchema,
+    // Resolved prompt entity id. Optional on input: callers may instead supply
+    // `promptText` (free text), which the submit handler materializes into a
+    // typed prompt and resolves to this id. Persisted gate configs always carry
+    // the resolved `promptId`.
+    promptId: z.string().optional(),
+    // Input-only convenience: free-text gate prompt. When present at submit it is
+    // content-addressed via `findOrCreate(text, gate)` and supersedes any
+    // `promptId`. Never persisted (stripped once resolved).
+    promptText: z.string().optional(),
+    criteria: z.array(z.string()),
+    maxIterations: z.number().int().min(1).max(50).optional(),
+  })
+  .openapi("GateConfig");
+
+export const GateRunSummarySchema = z
+  .object({
+    gate: GateIdSchema,
+    status: z.enum(["passed", "failed", "skipped"]),
+    iterations: z.number().int().min(0),
+  })
+  .openapi("GateRunSummary");
 
 export const TokenUsageSchema = z
   .object({
@@ -37,6 +63,7 @@ export const CriterionResultSchema = z
 export const ConversationTurnSchema = z
   .object({
     iteration: z.number(),
+    gate: GateIdSchema.optional(),
     codingAgentResponse: z.string().optional(),
     judgeFeedback: z.string(),
     snapshotUrl: z.string(),
@@ -97,10 +124,20 @@ export const CreateRequestInputSchema = z
     persona: PersonaSchema.optional(),
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
+    codebaseRevisionId: z.string().optional(),
     extensions: z.array(z.string()).optional(),
     profileId: z.string().optional(),
     profileVariations: z.array(z.string()).optional(),
     priority: z.number().int().optional(),
+    // Raw AGENTS.md body to deliver to the worker workspace. When present, the
+    // API findOrCreates an `agents.md`-typed prompt and stores its id on the
+    // request (see `agentsMdPromptId`).
+    agentsMd: z.string().optional(),
+    // Lineage edges (parent AGENTS.md prompt ids) when this candidate was
+    // derived from earlier ones: [] / omitted = root, [p] = mutation,
+    // [i, j] = merge of two parents.
+    agentsMdParentIds: z.array(z.string()).optional(),
+    gates: z.array(GateConfigSchema).optional(),
   })
   .openapi("CreateRequestInput");
 
@@ -118,14 +155,19 @@ export const RequestResponseSchema = z
     persona: PersonaSchema.optional(),
     deletedAt: z.coerce.date().optional(),
     taskPromptId: z.string().optional(),
+    agentsMdPromptId: z.string().optional(),
+    agentsMdParentIds: z.array(z.string()).optional(),
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
+    codebaseRevisionId: z.string().optional(),
     extensions: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
     profileId: z.string().optional(),
     profileVersionId: z.string().optional(),
     submissionId: z.string().optional(),
     priority: z.number().int().default(0),
+    gates: z.array(GateConfigSchema).optional(),
+    gateSummaries: z.array(GateRunSummarySchema).optional(),
     // Per-attempt state lives in the run sub-document.
     run: z
       .lazy(() => RunStateSchema)
@@ -160,6 +202,8 @@ export const RunStateSchema = z
     updatedAt: z.coerce.date().optional(),
     startedAt: z.coerce.date().optional(),               // When worker picked up this attempt
     finishedAt: z.coerce.date().optional(),              // When this attempt reached "done"
+    durationMs: z.number().optional(),                   // Denormalized finishedAt − startedAt (ms); enables server-side sort by duration
+
     turns: z.array(ConversationTurnSchema).optional(),
     workerVersion: z.string().optional(),
     os: z.object({
@@ -193,21 +237,44 @@ export const RunHistoryDocumentSchema = RunStateSchema.extend({
   requestId: z.string(),
 }).openapi("RunHistoryDocument");
 
+/**
+ * A categorical filter param that accepts a single value or repeated/comma-
+ * separated values (e.g. `?status=done&status=processing` or `?status=done,processing`).
+ * The literal sentinel `__empty__` selects rows missing that field. Values are
+ * validated/narrowed in the list handler (apps/api/src/routes/requests/index.ts).
+ */
+const MultiValueParam = z.union([z.string(), z.array(z.string())]).optional();
+
+/** Sentinel selecting rows missing a categorical field (the "(Unknown)" bucket). */
+export const EMPTY_FILTER_VALUE = "__empty__";
+
 export const ListRequestsQuerySchema = z
   .object({
-    worker: z.string().optional(),
+    worker: MultiValueParam,
     taskPromptId: z.string().optional(),
     criteria: z.string().optional(),
     submissionId: z.string().optional(),
-    profileId: z.string().optional(),
-    status: RequestStatusSchema.optional(),
-    outcome: RequestOutcomeSchema.optional(),
+    profileId: MultiValueParam,
+    status: MultiValueParam,
+    outcome: MultiValueParam,
+    model: MultiValueParam,
+    os: MultiValueParam,
+    priority: MultiValueParam,
+    agentVersion: MultiValueParam,
+    // Free-text, case-insensitive search across run id, scenario task, model, worker.
+    search: z.string().optional(),
     groupBy: z.enum(["task", "submissionId", "profile"]).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
     after: z.string().optional(),
     before: z.string().optional(),
     last: z.enum(["true", "false"]).optional(),
-    sortBy: z.enum(["createdAt", "priority"]).optional(),
+    // Sort allowlist → indexable stored fields. `createdAt` is a legacy alias
+    // for `created`. The unset default is `created` desc (existing cursors keep working).
+    sortBy: z.enum(["created", "updated", "priority", "worker", "status", "id", "duration", "createdAt"]).optional(),
+    sortDir: z.enum(["asc", "desc"]).optional(),
+    // Created-at date/time range (ISO-8601). Adopted from PR #908.
+    createdAfter: z.coerce.date().optional(),
+    createdBefore: z.coerce.date().optional(),
     // Iteration-count filters. `turns` matches the actual number of turns
     // executed (size of run.turns); `maxIterations` matches the configured
     // upper bound. Each pairs with an operator (default "eq").
@@ -217,6 +284,37 @@ export const ListRequestsQuerySchema = z
     maxIterationsOp: z.enum(["eq", "gte", "lte"]).optional(),
   })
   .openapi("ListRequestsQuery");
+
+/** One value bucket in a categorical facet (value + full-dataset count). */
+export const RunFacetBucketSchema = z
+  .object({
+    value: z.string(),
+    count: z.number(),
+  })
+  .openapi("RunFacetBucket");
+
+/**
+ * Server-computed facets for the Runs list filter rail. Each categorical
+ * dimension lists every selectable value with an accurate full-dataset count
+ * (honoring the active base filter but independent of categorical selections,
+ * so all values stay visible). The `__empty__` bucket counts rows missing the
+ * field.
+ */
+export const RunFacetsResponseSchema = z
+  .object({
+    total: z.number(),
+    facets: z.object({
+      workerType: z.array(RunFacetBucketSchema),
+      status: z.array(RunFacetBucketSchema),
+      outcome: z.array(RunFacetBucketSchema),
+      model: z.array(RunFacetBucketSchema),
+      os: z.array(RunFacetBucketSchema),
+      priority: z.array(RunFacetBucketSchema),
+      agentVersion: z.array(RunFacetBucketSchema),
+      profileId: z.array(RunFacetBucketSchema),
+    }),
+  })
+  .openapi("RunFacetsResponse");
 
 export const AggregateStatsSchema = z
   .object({
@@ -235,6 +333,7 @@ export const GroupUniformValuesSchema = z
     platform: z.string().optional(),
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
+    codebaseRevisionId: z.string().optional(),
     extensions: z.array(z.string()).optional(),
     status: RequestStatusSchema.optional(),
     submissionId: z.string().optional(),

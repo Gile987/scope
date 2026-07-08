@@ -57,7 +57,7 @@ export class FeedbackGenerator {
   private tokenClient: TokenManagerClient;
 
   constructor(model?: string) {
-    this.model = model || process.env.FEEDBACK_MODEL || "gpt-4.1";
+    this.model = model || process.env.FEEDBACK_MODEL || "gpt-5.4-mini";
     this.tokenClient = new TokenManagerClient();
   }
 
@@ -179,7 +179,7 @@ export class FeedbackGenerator {
     failureContext: string
   ): Promise<string> {
     const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
-    const client = new CopilotClient({ githubToken });
+    const client = new CopilotClient({ gitHubToken: githubToken });
     let fullResponse = "";
 
     try {

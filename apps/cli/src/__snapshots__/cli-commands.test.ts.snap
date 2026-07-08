@@ -77,11 +77,59 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       },
     },
   },
+  "codebase": {
+    "subcommands": {
+      "create": {
+        "options": [
+          "--archive",
+          "--default-branch",
+          "--description",
+          "--name",
+          "--output",
+          "--source",
+          "--source-type",
+          "--url",
+        ],
+      },
+      "delete": {
+        "options": [
+          "--url",
+        ],
+      },
+      "list": {
+        "options": [
+          "--output",
+          "--url",
+        ],
+      },
+      "resolve": {
+        "options": [
+          "--output",
+          "--ref",
+          "--url",
+        ],
+      },
+      "revisions": {
+        "options": [
+          "--limit",
+          "--output",
+          "--url",
+        ],
+      },
+      "upload": {
+        "options": [
+          "--output",
+          "--url",
+        ],
+      },
+    },
+  },
   "criteria": {
     "subcommands": {
       "create": {
         "options": [
           "--depends-on",
+          "--gates",
           "--id",
           "--prompt",
           "--url",
@@ -90,6 +138,13 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "delete": {
         "options": [
           "--id",
+          "--url",
+        ],
+      },
+      "export": {
+        "options": [
+          "--ids",
+          "--output-file",
           "--url",
         ],
       },
@@ -122,6 +177,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "update": {
         "options": [
           "--depends-on",
+          "--gates",
           "--id",
           "--prompt",
           "--url",
@@ -366,6 +422,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         "options": [
           "--id",
           "--prompt",
+          "--type",
           "--url",
         ],
       },
@@ -402,6 +459,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         "options": [
           "--output",
           "--query",
+          "--type",
           "--url",
         ],
       },
@@ -562,10 +620,24 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       },
       "list": {
         "options": [
+          "--agent-version",
+          "--created-after",
+          "--created-before",
+          "--criteria",
           "--include-deleted",
           "--max-iterations",
+          "--model",
+          "--os",
+          "--outcome",
           "--output",
+          "--priority",
+          "--profile",
+          "--search",
+          "--sort-by",
+          "--sort-dir",
+          "--status",
           "--submission-id",
+          "--task",
           "--turns",
           "--url",
           "--worker",
@@ -595,9 +667,12 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "submit": {
         "options": [
           "--agent-version",
+          "--agents-md",
           "--base-profile",
+          "--codebase",
           "--criteria",
           "--extensions",
+          "--gates",
           "--max-iterations",
           "--mcp-servers",
           "--message",
@@ -690,6 +765,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         "options": [
           "--file",
           "--text",
+          "--type",
           "--url",
         ],
       },
@@ -721,6 +797,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--offset",
           "--output",
           "--search",
+          "--type",
           "--url",
         ],
       },

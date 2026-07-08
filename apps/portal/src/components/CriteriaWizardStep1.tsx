@@ -4,6 +4,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { GateCompatibilityPicker } from "@/components/GateCompatibilityPicker";
 import type { CriteriaWizardState } from "@/hooks/useCriteriaWizard";
 
 interface CriteriaWizardStep1Props {
@@ -22,6 +23,9 @@ export function CriteriaWizardStep1({ wizard, idPrefix = "" }: CriteriaWizardSte
     idValid,
     idExists,
     criteriaLoading,
+    gates,
+    setGates,
+    lockedGates,
   } = wizard;
 
   return (
@@ -82,6 +86,16 @@ export function CriteriaWizardStep1({ wizard, idPrefix = "" }: CriteriaWizardSte
           {id && !wizard.idManuallyEdited
             ? "Auto-generated from behavior — edit to customize"
             : "This ID will be attached to evaluations when the judge evaluates them as positive"}
+        </p>
+      </div>
+
+      {/* Gate compatibility */}
+      <div className="space-y-2">
+        <Label className="text-sm font-semibold">Gate compatibility</Label>
+        <GateCompatibilityPicker value={gates} onChange={setGates} lockedGates={lockedGates} />
+        <p className="text-xs text-muted-foreground">
+          Select the gates this criterion applies to. Parents must be compatible with every
+          selected gate. This drives the gate-aware parent/child suggestions on the next step.
         </p>
       </div>
     </div>

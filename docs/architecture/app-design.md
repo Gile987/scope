@@ -23,9 +23,9 @@ flowchart LR
 |---------|---------------|
 | `api` | REST API (Express), SSE log streaming, run management, criteria CRUD |
 | `cli` | Command-line interface for submitting tasks, streaming logs, managing runs |
-| `portal` | Vue.js web UI for run management, insights, criteria graph editing |
+| `portal` | React web UI for run management, insights, criteria graph editing |
 | `judge` | Evaluation engine — executes criteria against agent output |
-| `shared` | Types, database models, queue/blob/redis clients, config loaders |
+| `shared` | Types, database models, queue/blob/redis clients, config loaders, codebase/skill stores and clients |
 | `workers/*` | Coding agent adapters — each implements the same interface for a different agent |
 
 ## Data Model
@@ -39,15 +39,56 @@ erDiagram
     RUN }o--|| SCENARIO : uses
     RUN }o--|| PERSONA : uses
     RUN }o--|| WORKER_TYPE : targets
+    RUN }o--|| CODEBASE_REVISION : seeds
     ITERATION ||--o{ CRITERION_RESULT : evaluated_by
     CRITERION ||--o{ CRITERION_RESULT : produces
     CRITERION }o--o{ CRITERION : depends_on
+    CODEBASE ||--o{ CODEBASE_REVISION : has
 ```
 
 - **Run** — A single benchmark execution: one scenario + one persona + one worker
 - **Iteration** — A coding agent turn within a run (agent may iterate multiple times)
 - **Criterion** — An evaluation check (e.g., "has a working Express server"). Criteria form a DAG (directed acyclic graph) with dependencies.
 - **CriterionResult** — Pass/fail result of evaluating a criterion against a specific iteration
+- **Codebase** — Mutable first-class project entity in `codebases`, with a unique slug, source type (`git` or `archive`), optional GitHub source/default branch, revision counter, latest revision pointer, and soft-delete metadata.
+- **CodebaseRevision** — Immutable snapshot in `codebase-revisions`. Every Git resolution or archive upload creates a fresh UUID revision with the next per-codebase `revisionNumber` and canonical `{slug}@r{N}` ref.
+
+### Typed prompts, AGENTS.md, and size-based storage
+
+Task prompts live in a single `task-prompts` collection that is now **typed** and
+shared by two prompt kinds:
+
+- `TaskPromptDocument.type?: 'task' | 'agents.md'` — absent ⇒ `'task'` (backward
+  compatible; existing docs are untouched).
+- **`_id` is the content hash.** `computeTaskPromptId(text, type?)` hashes the
+  trimmed text for `task` (or absent) — identical to the legacy hash, so every
+  existing task prompt keeps its `_id` — and namespaces non-task types as
+  `hash(type + '\n' + text)` so an AGENTS.md prompt never collides with a task
+  prompt of the same text. `findOrCreate` deduplicates on this hash.
+- **Body storage is decided by size, not type.** A prompt body at/under
+  `PROMPT_INLINE_MAX_BYTES` (default 16 KB, UTF-8) is stored inline as `text`;
+  larger bodies are uploaded to blob (`prompts/{promptId}.txt`) and the doc carries
+  `contentBlobUrl` with no inline `text`. Exactly one of `text` / `contentBlobUrl`
+  is set. `resolvePromptText(doc)` returns the inline body or downloads the blob, so
+  callers (feature extraction, the worker text endpoint) get plain text regardless
+  of location.
+- **Prompt features are typed the same way.** `PromptFeatureDocument.type?:
+  'task' | 'agents.md'` (absent ⇒ `'task'`); feature extraction selects only
+  features of the prompt's type.
+
+### AGENTS.md delivery
+
+To support submitting an AGENTS.md prompt with a run, the request carries:
+
+- `RequestDocument.agentsMdPromptId?: string` — set when the create-request body
+  includes `agentsMd` (raw text); the API `findOrCreate`s an `agents.md`-typed
+  prompt and stores its id. Before the run starts, the shared queue-processor
+  resolves the text (downloading from blob if needed) and writes
+  `<workspace>/AGENTS.md` once (constant for the whole run). It **fails the run**
+  if the prompt id is set but cannot be resolved — never silently runs the baseline.
+- `RequestDocument.agentsMdParentIds?: string[]` — best-effort lineage edges
+  (`[]`/absent = root, `[p]` = mutation, `[i, j]` = merge) for callers that know
+  parentage at submit time.
 
 ## Judge Pipeline
 
@@ -73,6 +114,38 @@ flowchart TD
     I --> J
 ```
 
+## Gates — multi-phase evaluation pipeline
+
+Runs execute through a hard-coded, ordered sequence of **gates**: `Select → Build
+→ Test → Run → Deploy`. Each gate runs the per-iteration coding + judge loop
+against the **same** workspace, with its own prompt, its own subset of criteria,
+and its own iteration budget. Gates run **stop-on-failure**: when a gate exhausts
+its budget without passing, downstream gates are recorded as `skipped`.
+
+- A request carries an optional `gates: GateConfig[]` (`{ gate, promptId, criteria,
+  maxIterations? }`). When absent, the request is normalised to a single **Select**
+  gate built from the legacy `scenario.criteria` + `maxIterations` + `taskPromptId`
+  — so existing requests behave identically.
+- Criteria declare a `gates: GateId[]` compatibility list (empty = all gates); the
+  list is **downward-closed** along the DAG (a parent is compatible with at least
+  every gate its children are).
+- Prompts are **typed** (`type: PromptType`, one literal per gate); a gate's prompt
+  must have `type === gate`. The Select gate's prompt is the request's task prompt.
+- Whenever the coding agent captured tool calls in an iteration — **any gate,
+  including Select** — the judge can inspect the captured tool-call history from the
+  **whole run** (cumulative across iterations; issue #1255) via the
+  `list_tool_calls` / `search_tool_outputs` / `get_tool_output` tools, not just the
+  workspace files (availability is gate-agnostic; see `buildEvidenceGuidance`). The
+  judge can also read the coding agent's own response for the iteration under
+  evaluation via the `read_agent_response` tool (issue #1136), so criteria that
+  grade what the agent *said* (Q&A / no-code-change deliverables) are gradeable.
+- Per-gate outcomes are persisted on the request as `gateSummaries:
+  GateRunSummary[]`; each `ConversationTurn` is tagged with its `gate`.
+
+The orchestration lives in `runGatedLoop` (`packages/shared/src/judge/gated-loop.ts`),
+which wraps the per-gate `runMultiTurnLoop`. See the full
+[gates design doc](../design/gates.md).
+
 ## Queue Pattern
 
 Each worker type has a dedicated Azure Storage Queue. The API resolves the target queue via **version-aware routing**: when a run is submitted, the API looks up the selected (or latest active) agent version and uses its registered `queueName` to route the message.
@@ -85,11 +158,13 @@ Currently all versions of an agent share a single queue (e.g., `queue-coder-acp-
 
 ### Run submission flow
 
-1. User submits via Portal or CLI with: **task**, **criteria** (required), **worker**, **model** (required), and optionally **agentVersion**
+1. User submits via Portal or CLI with: **task**, **criteria** (required), **worker**, **model** (required), and optionally **agentVersion**, a **codebase** selection, and/or a per-gate **`gates`** configuration (see [Gates](#gates--multi-phase-evaluation-pipeline))
 2. API resolves `agentVersion`: explicit selection → validate active; omitted → latest active by `createdAt`
 3. API resolves `model`: explicit → validate against `supportedModels`; omitted → `defaultModel`
 4. API looks up `AgentVersion.queueName` and routes message to that queue
 5. `agentVersion` and `model` are persisted on the `RequestDocument`
+
+When a codebase is selected, the API resolves the submitted spec (`codebaseRevisionId`, `{slug}@r{N}`, or bare `{slug}`) before enqueueing. Bare archive slugs resolve to the latest existing revision; bare Git slugs resolve the default branch at submit time and create a new immutable revision. The resolved revision UUID is stored as `RequestDocument.codebaseRevisionId`, and workers seed the workspace from that revision after setup and before skills extraction.
 
 Profile fan-out mode is also supported for comparative runs:
 
@@ -98,9 +173,184 @@ Profile fan-out mode is also supported for comparative runs:
 3. Each expanded request resolves configuration from its variation profile; unpinned specs resolve to `latestVersion`
 4. Expanded requests persist `profileId` and `profileVersionId` on each `RequestDocument` for indexing and traceability
 
+## Runs List Query API
+
+`GET /api/v1/requests` powers the Portal **Runs** list and `scope run list`. All
+filtering, sorting, and grouping are evaluated **server-side** so they compose with
+cursor pagination over the whole dataset (not just the loaded page). The CLI exposes the
+same filters and sort controls as the Portal — see CLI↔Portal parity below.
+
+### Filtering
+
+Every categorical dimension accepts **multi-value** input, supplied either as repeated
+query keys (`?status=done&status=processing`) or comma-separated (`?status=done,processing`).
+A single value compiles to an equality clause; multiple values compile to `$in`.
+
+| Query param | Stored field |
+|-------------|--------------|
+| `worker` | `workerType` |
+| `status` | `run.status` |
+| `outcome` | `run.outcome` |
+| `model` | `model` |
+| `os` | `run.os.platform` |
+| `priority` | `priority` (coerced to number) |
+| `agentVersion` | `agentVersion` |
+| `profileId` | `profileId` |
+| `taskPromptId` | `taskPromptId` |
+| `submissionId` | `submissionId` (prefix match) |
+| `criteria` | `scenario.criteria` |
+| `turns` / `maxIterations` | `run.turns` size / `maxIterations` |
+
+Additional cross-cutting filters:
+
+- **`(Unknown)` sentinel** — the literal value `__empty__` (exported as `EMPTY_FILTER_VALUE`)
+  matches rows where the field is missing or null (`{ $or: [{ field: { $exists: false } }, { field: null }] }`),
+  and OR-composes with explicit values selected in the same dimension.
+- **Free-text `search`** — case-insensitive regex `$or` across run id, `taskPromptId`,
+  `scenario.task`, `model`, and `workerType`. Cosmos DB has no `$text` index, so regex is
+  used (the term is regex-escaped).
+- **Date range** — `createdAfter` / `createdBefore` (ISO-8601 datetimes, `z.coerce.date()`)
+  apply a `createdAt` `$gte`/`$lte` window. An invalid datetime or an inverted range
+  (`createdAfter > createdBefore`) returns **400**.
+
+Internally the handler collects clauses into a flat single-field map plus an `$and` array
+(for `$or`/repeated-field groups), so the multi-value, sentinel, search, criteria, and
+cursor-seek groups compose under one `$and` without clobbering each other.
+
+### Sorting
+
+`sortBy` selects an allowlisted, indexable stored field and `sortDir` (`asc`/`desc`, default
+`desc`) the direction:
+
+| `sortBy` | Stored field |
+|----------|--------------|
+| `created` (default) | `createdAt` |
+| `updated` | `updatedAt` |
+| `priority` | `priority` |
+| `worker` | `workerType` |
+| `status` | `run.status` |
+| `id` | `_id` |
+| `duration` | `run.durationMs` |
+
+The cursor seek is generalized to `{ <sortField>, _id }`: the cursor encodes the active
+sort field's value plus the `_id` tiebreaker, and the seek `$or`, `sort` object, and
+`hasMore` probes are all built from `(sortField, dir)`. Rows whose sort field is unset
+(e.g. `run.durationMs` on unfinished runs) sort null-last. **The no-`sortBy` default stays
+byte-for-byte `createdAt desc`, so in-flight cursors keep working.**
+
+`run.durationMs` is a **denormalized** field (`run.finishedAt − run.startedAt`, ms): duration
+is computed, so it can't be sorted/indexed directly. It is stamped on write at every run
+completion site (the queue processors' terminal writes via `durationSetFields`, plus
+`cancel.ts` and the stuck-run reaper) and **backfilled** for existing finished runs by
+migration 022. Unfinished runs leave it unset.
+
+### Facets
+
+`GET /api/v1/requests/facets` drives the filter rail: it returns, per categorical dimension,
+every distinct value with a **full-dataset count**, plus a `total`. Counts are **absolute over
+all non-deleted runs** — they intentionally ignore every active filter (search, date range,
+numeric, and categorical selections), so all values stay visible/selectable even when not on the
+current page and the numbers don't shift as the user narrows the query. Because the response is
+input-independent, it is served from a process-wide in-memory cache (short TTL, in-flight
+de-duplicated) so the underlying scan runs at most once per window per API replica. `total` is
+derived for free by summing any one dimension's bucket counts (every run lands in exactly one
+bucket, `(Unknown)` included), avoiding a separate count query. Because Cosmos DB has limited
+`$facet` support — and serves no index-only `GROUP BY`, so each `$group` scans the matched set —
+the endpoint runs one `$group` aggregation **per dimension in parallel** (`Promise.all`) rather
+than a single `$facet`.
+
+### Grouping
+
+When `groupBy` is set (e.g. `task`, `profile`, `submissionId`), the endpoint returns
+`RunGroup[]` (via `buildGroupingPipeline`) using the **same** `filter` object, so all filters
+compose with grouping. The Portal consumes this through `api.listRunGroups` (flat list gated
+on `groupBy === "none"`, groups gated otherwise) and **lazily fetches each expanded group's
+member runs** by passing the group key as an extra filter alongside all active filters. Group
+member runs reuse the flat `sortBy`/`sortDir`; group order stays deterministic by group key.
+
+Member runs are **cursor-paged** rather than capped: the list API limits `limit` to 100, so
+an expanded group fetches one 100-run page at a time and the group footer surfaces
+`Showing X of N` (N = the group's full-dataset `aggregates.count`) with a **Load more**
+button that walks `cursors.next` for one more page. Collapsing a group or changing the
+filter/sort/grouping resets a group's loaded depth back to the first page.
+
+### Total count
+
+`estimatedTotal` is **filter-aware**: when a flat-list filter is active it uses
+`countDocuments(filter)` for an accurate total; with no active filter it falls back to the
+O(1) `estimatedDocumentCount()`. Grouped mode keeps `estimatedDocumentCount()` to preserve
+group-pagination semantics.
+
+### Indexes (Cosmos-friendly)
+
+Per the [Cosmos DB skill](../../.agents/skills/cosmosdb-mongodb/SKILL.md), filters use
+**single-field** indexes (Cosmos intersects them) and each `ORDER BY` field gets a **2-field**
+compound `{ <field>: 1, _id: 1 }`:
+
+| Migration | Indexes |
+|-----------|---------|
+| `021-add-runs-filter-indexes` | single-field on `model`, `run.os.platform`, `priority`, `agentVersion` (other dimensions already indexed) |
+| `022-add-runs-sort-indexes` | 2-field compound `{ <field>, _id }` for `updatedAt`, `priority`, `workerType`, `run.status`, `run.durationMs` (`{ createdAt, _id }` exists from migration 010); also backfills `run.durationMs` |
+
+Both are registered in `required-migrations.ts`; their `down()` is log-only (non-destructive).
+Because Cosmos silently drops unsupported compound indexes, `getIndexes()` is verified after
+applying them.
+
+### CLI↔Portal parity
+
+`scope run list` exposes every Portal filter and the sort controls, forwarding them to the
+same API params: `--worker` (multi), `--status`, `--outcome`, `--task`, `--profile`,
+`--criteria`, `--model`, `--os`, `--priority`, `--agent-version`, `--search`,
+`--created-after`, `--created-before`, `--sort-by`, `--sort-dir`. (The CLI list stays flat;
+grouping is a Portal view.)
+
 ## Real-Time Log Streaming
 
 Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API subscribes and relays them as Server-Sent Events (SSE) to CLI and Portal clients.
+
+## Portal Shell
+
+The Portal desktop shell uses a persistent left navigation sidebar. It defaults to the compact icon rail, and users can expand it to show navigation labels; the choice is stored in `localStorage` under `scope:layout:sidebar-expanded`. Mobile navigation remains a sheet-based menu with labels always visible.
+
+### Hover-preview + navigate badges
+
+Criteria and task prompts appear across many surfaces (Run Detail, Runs list and its
+right-hand preview panel, Statistics, Criteria list/graph, Task Prompt list,
+report-template triggers). Wherever one is shown, two
+reusable badge components provide a consistent **hover-to-preview + click-to-navigate** affordance:
+
+| Component | Entity | Links to | Hover preview |
+|-----------|--------|----------|---------------|
+| `components/CriteriaBadge.tsx` | Criterion | `/criteria/:id` | Criterion prompt snippet |
+| `components/TaskPromptBadge.tsx` | Task prompt (any type) | `/task-prompts/:id` | Type label, text snippet, list of detected features, created date, **Open details** button |
+
+Both follow the same rules:
+
+- **Self-contained tooltip.** Each wraps its trigger in a Radix `Tooltip` (a local
+  `TooltipProvider`, mirroring `StatusBadge`) and a React Router `Link`. The link calls
+  `e.stopPropagation()` so a badge inside a clickable table row navigates to the detail page
+  without also firing the row's `onRowClick`.
+- **No request fan-out.** Callers that already have the object/text pass it via props
+  (`prompt`) and **no** request fires. Otherwise the entity is fetched lazily via React Query
+  **only when the tooltip opens** (gated on an internal `open` state), so dense lists never
+  issue one request per row on mount. Blob-backed task prompts (no inline `text`) additionally
+  lazy-load their body via `getTaskPromptContent` on open.
+- **`TaskPromptBadge` is type-agnostic.** Gate prompts (`select`/`build`/`test`/`run`/`deploy`),
+  `agents.md`, and legacy untyped prompts all render the same hover + the same
+  `/task-prompts/:id` navigation; only the human label differs (via `promptTypeLabel`). It also
+  renders content plainly (no link/tooltip) when no `taskPromptId` is available.
+- **Detected-features list + explicit navigate button.** `TaskPromptBadge`'s preview lists only
+  the prompt's **detected** features by id (it never shows undetected features or an `x/y` count)
+  and ends with an obvious button-styled **Open details** `Link` (not plain text). Because the
+  popup is interactive (hoverable feature badges + a clickable button), its `TooltipContent` is
+  wrapped in a Radix `Tooltip.Portal` with `collisionPadding` so it can't be clipped by an
+  overflow container (e.g. a table cell) — the same portaling `ShortId` uses.
+
+A sibling affordance, `components/ShortId.tsx`, applies the same hoverable-tooltip pattern to
+**identifiers**: the Runs list renders run and submission IDs truncated to 8 chars
+(`formatId`), and on hover the tooltip reveals the full ID plus a copy-to-clipboard button. The
+trigger stays an inline `<span>` (not a link) so the row click still navigates to the run; the
+copy button calls `e.stopPropagation()` so copying never triggers row navigation.
 
 ## Criteria System
 
@@ -109,8 +359,39 @@ Criteria are reusable evaluation rules stored in the database and optionally def
 - **DAG dependencies** — criterion A can depend on criterion B (B must pass before A is evaluated)
 - **AI-generated prompts** — natural language behavior descriptions can be converted to evaluation prompts via LLM
 - **Traits** — reusable labels for filtering and composition (e.g., `has_azure`, `has_node`)
+- **Gate compatibility** — a `gates: GateId[]` list controls which [gates](#gates--multi-phase-evaluation-pipeline) a criterion may be selected for (empty = all); the list is downward-closed along the DAG
 
 See [`ENV_VARIABLES.md`](../../scope-mt-app/ENV_VARIABLES.md) for related configuration options.
+
+## Statistics Analysis
+
+The Statistics page (`apps/portal/src/pages/Statistics.tsx`) is backed by `GET /api/v1/analysis` (`computeAnalysis` in `apps/api/src/analysis.ts`), which aggregates pass rates, iteration distribution, and duration stats across runs. It supports two independent, composable filters via query params:
+
+| Param | Filter | Semantics |
+|-------|--------|-----------|
+| `criteria` | Success criteria (comma-separated `criterionId`s) | A run counts as a pass only if **all** selected criteria pass; runs lacking a selected criterion are excluded |
+| `features` | Task prompt features (comma-separated `featureId`s) | Keep a run iff its task prompt was **detected** to have **every** selected feature (AND) |
+
+The response exposes the option lists and current selection for each filter so the Portal can render filter bars: `availableCriteria` / `selectedCriteria` and `availableFeatures` / `selectedFeatures`. Both `available*` lists are computed over the full valid-run set **before** filtering, so the bars stay populated even when a filter combination matches zero runs (the Portal then shows a "no runs match" empty state instead of the "no data yet" state).
+
+**Detected-based feature semantics (intentional divergence).** A task prompt's `features[]` stores a `{featureId, detected}` row for *every* evaluated feature, so presence is near-universal and meaningless as a filter. `availableFeatures` is therefore the sorted union of featureIds with `detected === true` across valid runs, and the feature filter matches on `detected === true`. This is deliberately stricter than the MDP route (`GET /api/v1/criteria/mdp`), whose feature filter is presence-based. Runs join to task prompts by effective id (`taskPromptId || computeTaskPromptId(scenario.task)`) so legacy runs without a stored `taskPromptId` still resolve their features.
+
+Feature data is produced by the `extract-features` endpoint (`POST /api/v1/task-prompts/:id/extract-features`), which evaluates a task prompt against the configured prompt-feature definitions (`config/prompt-features/*.yaml`, seedable via `POST /api/v1/prompt-features/seed`). The feature filter bar only appears once at least one referenced task prompt has a detected feature.
+
+**Bounded run set (memory).** `computeAnalysis` runs in Node over a materialized array, so the endpoint caps how many runs it loads to keep memory bounded as history grows. It fetches the most-recent `ANALYSIS_MAX_RUNS` (default 5000) done runs sorted by `createdAt` desc — served by the existing `createdAt` index (migration 010), so no extra index is needed — using a **slim projection** that includes only the fields the analysis reads (`run.status`, `run.outcome`, and per-turn `iteration` / `passed` / `durationMs` / `criteriaResults`). The heavy per-turn payloads (`codingAgentResponse`, `judgeFeedback`, legacy inline `toolCalls`, HAR/video URLs) are excluded — a single run document can otherwise approach Cosmos's 2 MB limit. To detect "more exist", it fetches `limit + 1` and trims via `capRunsToLimit`; when trimmed, the response sets `truncated: true` and `runLimit`, and the Portal shows a "most recent N runs" banner so capped metrics are never presented as all-time. Tune the cap with the `ANALYSIS_MAX_RUNS` env var (see [ENV_VARIABLES.md](../../ENV_VARIABLES.md)). The long-term scaling path is DB-side aggregation, but that is gated on Cosmos's partial aggregation-pipeline support.
+
+## Codebase System
+
+Codebases are reusable source snapshots that can be attached to run submissions. The shared package owns the core types (`CodebaseDocument`, `CodebaseRevisionDocument`, `CodebaseConfig`), stores, resolver, API client, and worker seeder. The API exposes CRUD, Git resolution, archive upload, and archive-download proxy endpoints; workers use `CodebaseClient` to fetch a normalized root-level tar.gz and extract it into the run workspace.
+
+Two MongoDB collections back the feature:
+
+| Collection | Purpose |
+|------------|---------|
+| `codebases` | Mutable codebase metadata, slug uniqueness, source type/source, `revisionCounter`, `latestRevisionId`, and soft deletion |
+| `codebase-revisions` | Immutable revisions addressed by UUID or `{slug}@r{N}`, with Git/archive provenance and the normalized archive URL |
+
+See [Codebases Architecture](codebases.md) for revision addressing, blob storage naming, REST endpoints, and worker seeding details.
 
 ## OpenAPI Documentation
 

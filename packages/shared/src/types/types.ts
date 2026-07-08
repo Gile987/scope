@@ -9,6 +9,118 @@ import type { ToolCall } from '../har/types.js';
 // Re-export ToolCall so consumers can import from types
 export type { ToolCall } from '../har/types.js';
 
+// --- Gates (multi-phase evaluation pipeline) ---
+// See docs/design/gates.md. Gates are hard-coded and run strictly in order.
+
+/** The ordered, hard-coded set of evaluation gates. */
+export const GATES = ["select", "build", "test", "run", "deploy"] as const;
+
+/** A single gate identifier. */
+export type GateId = (typeof GATES)[number];
+
+/** Ordered execution sequence — array index defines run order. */
+export const GATE_ORDER: readonly GateId[] = GATES;
+
+/** Static, human-facing metadata for a gate. */
+export interface GateMetadata {
+  id: GateId;
+  label: string;
+  description: string;
+}
+
+/** Hard-coded metadata for every gate, keyed by id. */
+export const GATE_METADATA: Record<GateId, GateMetadata> = {
+  select: {
+    id: "select",
+    label: "Requirements",
+    description: "Agent implements the task (current behaviour).",
+  },
+  build: {
+    id: "build",
+    label: "Build",
+    description: "Project builds / compiles successfully.",
+  },
+  test: {
+    id: "test",
+    label: "Test",
+    description: "Tests pass.",
+  },
+  run: {
+    id: "run",
+    label: "Run",
+    description: "App runs / serves correctly.",
+  },
+  deploy: {
+    id: "deploy",
+    label: "Deploy",
+    description: "Deploys to the target environment.",
+  },
+};
+
+/** True when `value` is a valid gate id. */
+export function isGateId(value: unknown): value is GateId {
+  return typeof value === "string" && (GATES as readonly string[]).includes(value);
+}
+
+/** Non-gate prompt kinds — prompt types that are not pipeline gates. */
+export const NON_GATE_PROMPT_TYPES = ["agents.md"] as const;
+
+/** Every prompt-type discriminator: the gates plus non-gate kinds. */
+export const PROMPT_TYPES = [...GATES, ...NON_GATE_PROMPT_TYPES] as const;
+
+/**
+ * A prompt's type discriminator. Either a gate id — the prompt that drives that
+ * gate, where `select` is the request's task prompt — or a non-gate kind such
+ * as `agents.md` (an AGENTS.md instruction file delivered into the agent
+ * workspace). Absent on a document ⇒ legacy `'select'`.
+ */
+export type PromptType = (typeof PROMPT_TYPES)[number];
+
+/** True when `value` is a valid prompt type (a gate id or a non-gate kind). */
+export function isPromptType(value: unknown): value is PromptType {
+  return typeof value === "string" && (PROMPT_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * Per-gate configuration on a request. Describes which prompt drives the gate,
+ * which criteria are evaluated for it, and the gate's iteration budget.
+ */
+export interface GateConfig {
+  /** Which gate this configures. */
+  gate: GateId;
+  /**
+   * Prompt entity id (`prompt.type` must === `gate`). For the Select gate this
+   * is the request's task prompt (`taskPromptId`).
+   *
+   * Optional on **input**: callers may instead supply `promptText` (free text),
+   * which the submit handler content-addresses into a typed prompt and resolves
+   * to this id. Persisted gate configs always carry the resolved `promptId`.
+   */
+  promptId?: string;
+  /**
+   * Input-only convenience: a free-text gate prompt. When present at submit it
+   * is materialized via `taskPromptStore.findOrCreate(text, gate)` and
+   * supersedes any `promptId`. It is stripped from the persisted config once
+   * resolved, so it never appears on a stored/running gate.
+   */
+  promptText?: string;
+  /**
+   * Criterion ids evaluated for THIS gate. Must contain ≥1 id unless
+   * `maxIterations === 1` (a pass-through gate that auto-passes with no judge).
+   */
+  criteria: string[];
+  /** Per-gate iteration budget. Falls back to the request-level default. */
+  maxIterations?: number;
+}
+
+/** Per-gate execution outcome recorded on a run for cheap querying. */
+export interface GateRunSummary {
+  gate: GateId;
+  status: "passed" | "failed" | "skipped";
+  /** Number of iterations actually executed for this gate. */
+  iterations: number;
+}
+
 /** LLM token usage counters for a single interaction */
 export interface TokenUsage {
   promptTokens: number;
@@ -19,6 +131,9 @@ export interface TokenUsage {
 // Multi-turn conversation turn (one coding + judge iteration)
 export interface ConversationTurn {
   iteration: number;
+  /** Which gate this turn belongs to. Absent on legacy turns (treated as
+   *  "select"). Lets the UI/history group turns per gate. */
+  gate?: GateId;
   /** The coding agent's final assistant message for this iteration.
    *  Optional: workers may omit it when no response text could be extracted
    *  from the agent (e.g. the chat result envelope contained no recognizable
@@ -165,8 +280,22 @@ export interface RequestDocument {
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
   taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → TaskPromptDocument._id)
   promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
+  /**
+  * FK → TaskPromptDocument._id of an AGENTS.md-typed prompt to deliver into
+  * the agent's workspace for this run. When set, the worker writes the
+  * resolved content to `<workspace>/AGENTS.md` before the run starts.
+  */
+  agentsMdPromptId?: string;
+  /**
+  * Lineage edges for the AGENTS.md candidate: the parent AGENTS.md prompt ids
+  * this candidate was derived from. Empty/absent = root (seed); one entry =
+  * reflective mutation; two entries = merge. Recorded on the request so the
+  * full lineage DAG can be reconstructed by querying related requests.
+  */
+  agentsMdParentIds?: string[];
   mcpServers?: string[];          // MCP server slugs selected for this run
   skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
+  codebaseRevisionId?: string;    // FK → CodebaseRevisionDocument._id — seeds the workspace before the agent starts
   extensions?: string[];           // VS Code extension IDs selected for this run (e.g. "ms-python.python")
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
@@ -174,6 +303,18 @@ export interface RequestDocument {
   submissionId?: string;           // FK → SubmissionDocument._id
   /** Scheduling priority. Higher = processed first. Default: 0. */
   priority: number;
+  /**
+   * Per-gate configuration for the multi-phase evaluation pipeline. When
+   * absent, the request is normalised to a single Select gate from
+   * `scenario.criteria` + `maxIterations` + `taskPromptId` (see
+   * docs/design/gates.md §4.3). Gates run in `GATE_ORDER`.
+   */
+  gates?: GateConfig[];
+  /**
+   * Per-gate execution summary, populated as the run progresses. Derived
+   * from `run.turns` but stored explicitly for cheap querying.
+   */
+  gateSummaries?: GateRunSummary[];
   /**
    * Per-attempt mutable state. Migration 014 nests per-attempt fields
    * under this object; new submissions populate it on insert.
@@ -230,6 +371,9 @@ export interface RunState {
   outcome?: "succeeded" | "failed" | "finished";
   result?: string;
   error?: string;
+  /** Machine-readable error classification (e.g. "model_unavailable", "model_discovery_failed", "auth_failed").
+   *  Set alongside `error` when the failure has a well-known cause. */
+  errorCode?: string;
   /** Full blob URL pointing to this attempt's JSONL log blob in the `logs`
    *  container, e.g. `https://<account>.blob.core.windows.net/logs/{requestId}/runs/{runId}/run.jsonl`.
    *  Set at submit time so the SSE replay endpoint can read it directly from
@@ -452,6 +596,10 @@ export interface CriteriaConfig {
   id: string;
   prompt: string;
   dependsOn?: string[];  // Optional parent criteria IDs
+  /** Gates this criterion is compatible with. Empty/undefined = all gates
+   *  (applies only to NEW criteria; legacy rows are backfilled to ["select"]
+   *  by migration 018). See docs/design/gates.md §4.2. */
+  gates?: GateId[];
 }
 
 // Per-criterion result from judge evaluation
@@ -612,8 +760,23 @@ export interface InsightDocument {
 
 /** Task prompt document stored in MongoDB. Immutable — text cannot be changed after creation. */
 export interface TaskPromptDocument {
-  _id: string;                          // UUIDv5 of text.trim() (content-addressed)
-  text: string;                         // Full task prompt text
+  _id: string;                          // UUIDv5 (content-addressed; see computePromptId)
+  /**
+   * Inline prompt body. Present when the body is small enough to store in
+   * Mongo (≤ PROMPT_INLINE_MAX_BYTES). Mutually exclusive with
+   * `contentBlobUrl` — exactly one is set. Optional so large bodies can live
+   * in blob storage instead.
+   */
+  text?: string;
+  /**
+   * Blob reference to the prompt body when it exceeds the inline size
+   * threshold. Mutually exclusive with `text`. The body is fetched via
+   * `resolvePromptText` server-side.
+   */
+  contentBlobUrl?: string;
+  /** Which gate this prompt drives, or a non-gate kind (e.g. `agents.md`).
+   *  Absent ⇒ legacy `'select'` (the request's task prompt). */
+  type?: PromptType;
   features?: PromptFeatureResult[];     // Detected prompt features
   featuresExtractedAt?: Date;           // When features were last extracted
   createdAt: Date;
@@ -628,6 +791,12 @@ export interface TaskPromptDocument {
 export interface PromptFeatureConfig {
   id: string;
   prompt: string;
+  /**
+   * Which prompt type this feature applies to. Absent ⇒ `'select'` (backward
+   * compatible). Feature extraction only considers features whose `type`
+   * matches the prompt being extracted.
+   */
+  type?: PromptType;
 }
 
 /** Prompt feature document stored in MongoDB (extends PromptFeatureConfig with DB metadata) */

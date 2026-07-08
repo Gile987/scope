@@ -17,11 +17,19 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Save, Trash2, Loader2, Sparkles, Check, X, Plus } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Loader2, Sparkles, Check, X, Plus, Download } from "lucide-react";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
+import { GateCompatibilityPicker } from "@/components/GateCompatibilityPicker";
 import { formatDate } from "@/lib/utils";
+import {
+  formatGateList,
+  gatesSatisfyInvariant,
+  type GateId,
+} from "@/lib/gates";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
+import { criteriaToExportYaml, downloadAsFile } from "@/lib/criteria-export";
+import { toast } from "sonner";
 
 export function CriterionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -40,6 +48,7 @@ export function CriterionDetail() {
   const [editing, setEditing] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [editDependsOn, setEditDependsOn] = useState<string[]>([]);
+  const [editGates, setEditGates] = useState<GateId[] | undefined>(undefined);
 
   // AI Suggest state
   const [aiSuggestOpen, setAiSuggestOpen] = useState(false);
@@ -49,8 +58,13 @@ export function CriterionDetail() {
   const [suggestedChildren, setSuggestedChildren] = useState<string[]>([]);
   const [acceptedChildren, setAcceptedChildren] = useState<string[]>([]);
 
+  const { data: allCriteria = [] } = useQuery({
+    queryKey: ["criteria"],
+    queryFn: () => api.listCriteria(),
+  });
+
   const updateMutation = useMutation({
-    mutationFn: (body: { prompt?: string; dependsOn?: string[] }) =>
+    mutationFn: (body: { prompt?: string; dependsOn?: string[]; gates?: GateId[] }) =>
       api.updateCriterion(id!, body),
     onSuccess: async () => {
       // Update accepted children to depend on this criterion
@@ -110,6 +124,7 @@ export function CriterionDetail() {
     if (!criterion) return;
     setPrompt(criterion.prompt);
     setEditDependsOn(criterion.dependsOn ?? []);
+    setEditGates(criterion.gates && criterion.gates.length > 0 ? criterion.gates : ["select"]);
     setAiSuggestOpen(false);
     setBehaviorInput("");
     setSuggestedPrompt(null);
@@ -120,9 +135,14 @@ export function CriterionDetail() {
   };
 
   const handleSave = () => {
+    if (!editGates || editGates.length === 0) return;
     updateMutation.mutate({
       prompt: prompt.trim(),
-      dependsOn: editDependsOn.length > 0 ? editDependsOn : undefined,
+      // Always send the array (even empty) so removing the last dependency
+      // persists. The backend treats `undefined` as "no change", so collapsing
+      // [] to undefined here silently dropped deletions.
+      dependsOn: editDependsOn,
+      gates: editGates,
     });
   };
 
@@ -139,6 +159,23 @@ export function CriterionDetail() {
   const handleDismissPrompt = () => {
     setSuggestedPrompt(null);
   };
+
+  const invariantErrors = editing
+    ? [
+        ...editDependsOn.flatMap((depId) => {
+          const parent = allCriteria.find((c) => c.id === depId);
+          return parent && !gatesSatisfyInvariant(parent.gates, editGates)
+            ? [`Parent '${depId}' must include ${formatGateList(editGates)}.`]
+            : [];
+        }),
+        ...(criterion?.dependents.flatMap((childId) => {
+          const child = allCriteria.find((c) => c.id === childId);
+          return child && !gatesSatisfyInvariant(editGates, child.gates)
+            ? [`Dependent '${childId}' requires ${formatGateList(child.gates)} compatibility.`]
+            : [];
+        }) ?? []),
+      ]
+    : [];
 
   if (isLoading) {
     return (
@@ -185,6 +222,21 @@ export function CriterionDetail() {
                   New Criterion
                   <KbdBadge />
                 </Link>
+              </Button>
+              <Button
+                variant="outline"
+                className="gap-1.5"
+                onClick={async () => {
+                  try {
+                    const subset = await api.listCriteria(undefined, { ids: [criterion.id], ancestors: true });
+                    const yaml = criteriaToExportYaml(subset);
+                    downloadAsFile(yaml, `${criterion.id}.yaml`);
+                  } catch (err) {
+                    toast.error(`Failed to export: ${err instanceof Error ? err.message : String(err)}`);
+                  }
+                }}
+              >
+                <Download className="h-4 w-4" /> Export YAML
               </Button>
               <Button variant="outline" onClick={startEditing}>
                 Edit
@@ -399,12 +451,43 @@ export function CriterionDetail() {
         </CardContent>
       </Card>
 
+      {/* Gate compatibility */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Gate compatibility</CardTitle>
+          <CardDescription>
+            Where this criterion can be selected.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {editing ? (
+            <>
+              <GateCompatibilityPicker value={editGates} onChange={setEditGates} />
+              {invariantErrors.length > 0 && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                  <p className="font-medium">Compatibility invariant issues</p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {invariantErrors.map((message) => (
+                      <li key={message}>{message}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          ) : (
+            <Badge variant="secondary">{formatGateList(criterion.gates)}</Badge>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Dependencies */}
       <Card>
         <CardHeader>
           <CardTitle>Dependencies</CardTitle>
           <CardDescription>
-            Criteria that must pass before this one is evaluated
+            Criteria that must pass before this one is evaluated. List only direct parents —
+            the judge automatically evaluates all transitive ancestors in topological order,
+            so you don't need to repeat a parent's own dependencies here.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -465,7 +548,7 @@ export function CriterionDetail() {
               <Button variant="outline" onClick={() => setEditing(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleSave} disabled={updateMutation.isPending} className="gap-1.5">
+              <Button onClick={handleSave} disabled={updateMutation.isPending || invariantErrors.length > 0} className="gap-1.5">
                 {updateMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (

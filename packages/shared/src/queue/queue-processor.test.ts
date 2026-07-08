@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import os from "node:os";
 import { CodingAgentQueueProcessor } from "./queue-processor.js";
 import type { QueueProcessorConfig, WorkerProcessor, WorkerResult } from "../types/types.js";
@@ -82,6 +82,63 @@ describe("CodingAgentQueueProcessor.getVersionFields", () => {
   });
 });
 
+// ─── AGENTS.md workspace delivery ────────────────────────────────────────────
+describe("CodingAgentQueueProcessor.writeAgentsMd", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("no-ops when the request has no agentsMdPromptId", async () => {
+    const qp = new CodingAgentQueueProcessor(testConfig, stubProcessor);
+    const log = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await (qp as any).writeAgentsMd({ _id: "r1" }, "/tmp/does-not-matter", log);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("throws when agentsMdPromptId is set but apiBaseUrl is missing", async () => {
+    // testConfig has no apiBaseUrl.
+    const qp = new CodingAgentQueueProcessor(testConfig, stubProcessor);
+    const log = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      (qp as any).writeAgentsMd({ _id: "r1", agentsMdPromptId: "agents-1" }, "/tmp", log),
+    ).rejects.toThrow(/apiBaseUrl/);
+  });
+
+  it("writes the resolved AGENTS.md body into the workspace root", async () => {
+    const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const workspace = await mkdtemp(join(tmpdir(), "agents-md-test-"));
+
+    try {
+      const qp = new CodingAgentQueueProcessor(
+        { ...testConfig, apiBaseUrl: "https://api.example.com" },
+        stubProcessor,
+      );
+      const log = vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({ id: "agents-1", text: "# AGENTS\nBe terse." }),
+        }),
+      );
+
+      await (qp as any).writeAgentsMd({ _id: "r1", agentsMdPromptId: "agents-1" }, workspace, log);
+
+      const written = await readFile(join(workspace, "AGENTS.md"), "utf-8");
+      expect(written).toBe("# AGENTS\nBe terse.");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+});
+
 // ─── Redelivery fail-fast (handleRequest pre-checks) ─────────────────────────
 describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
   function makeHarness(runStatus: string, runOverrides: Record<string, unknown> = {}) {
@@ -98,10 +155,12 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     const collection = { findOneAndUpdate } as any;
 
     const safeDeleteMessage = vi.fn().mockResolvedValue(undefined);
+    const safeDeferMessage = vi.fn().mockResolvedValue(undefined);
     const log = vi.fn().mockResolvedValue(undefined);
 
+    const stop = vi.fn().mockReturnValue("frozen-pop-1");
     const heartbeat: VisibilityHeartbeat = {
-      stop: () => "pop-1",
+      stop,
       get popReceipt() { return "pop-1"; },
     };
     const message = { messageId: "msg-1", popReceipt: "pop-1", messageText: "" } as any;
@@ -111,12 +170,13 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     const qp = new CodingAgentQueueProcessor(testConfig, stubProcessor);
     (qp as any).collection = collection;
     (qp as any).safeDeleteMessage = safeDeleteMessage;
+    (qp as any).safeDeferMessage = safeDeferMessage;
     (qp as any).heartbeatStore = heartbeatStore;
     // Guard: if the redelivery branch ever falls through, processMultiTurn
     // would be invoked. Stub it so any accidental call is observable.
     (qp as any).processMultiTurn = vi.fn().mockResolvedValue(undefined);
 
-    return { qp, requestDoc, message, heartbeat, log, findOneAndUpdate, safeDeleteMessage, heartbeatStore, runId, requestId };
+    return { qp, requestDoc, message, heartbeat, stop, log, findOneAndUpdate, safeDeleteMessage, safeDeferMessage, heartbeatStore, runId, requestId };
   }
 
   it("marks run failed when no heartbeat AND startedAt is older than the staleness threshold", async () => {
@@ -154,10 +214,12 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
   });
 
-  it("DROPS duplicate (does not fail run) when no heartbeat but startedAt is recent", async () => {
+  it("RE-DEFERS duplicate (does not fail or delete) when no heartbeat but startedAt is recent", async () => {
     // No Redis heartbeat yet AND run was just picked up — this is a
     // transient race (queue redelivered before the first beat fired, or a
-    // brief Redis blip). Must NOT fail healthy runs.
+    // brief Redis blip). Must NOT fail healthy runs, and must NOT delete the
+    // message (that would destroy the only recovery trigger if the worker
+    // later dies hard). Re-defer instead.
     const h = makeHarness("processing", {
       startedAt: new Date(Date.now() - 5_000),
       worker: { instanceId: "worker-X" },
@@ -166,11 +228,15 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     await (h.qp as any).handleRequest(h.requestDoc, h.message, h.heartbeat, h.log, { runId: h.runId });
 
     expect(h.findOneAndUpdate).not.toHaveBeenCalled();
-    expect(h.safeDeleteMessage).toHaveBeenCalledWith("msg-1", "pop-1");
+    // Heartbeat is stopped first to freeze the pop receipt, then the message
+    // is re-deferred with that frozen receipt — never deleted.
+    expect(h.stop).toHaveBeenCalled();
+    expect(h.safeDeferMessage).toHaveBeenCalledWith("msg-1", "frozen-pop-1", 120);
+    expect(h.safeDeleteMessage).not.toHaveBeenCalled();
     expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
     expect(h.log).toHaveBeenCalledWith(
       "warn",
-      expect.stringMatching(/Duplicate queue message dropped/),
+      expect.stringMatching(/Duplicate queue message re-deferred/),
       expect.objectContaining({ runId: h.runId }),
     );
   });
@@ -198,7 +264,7 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
   });
 
-  it("drops duplicate message WITHOUT touching run state when heartbeat is fresh", async () => {
+  it("re-defers duplicate message WITHOUT touching run state when heartbeat is fresh", async () => {
     const h = makeHarness("processing", {
       startedAt: new Date(Date.now() - 60_000),
       worker: { instanceId: "worker-B", podName: "pod-B" },
@@ -210,15 +276,37 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
 
     // Critical: no DB write — the original worker keeps its run state.
     expect(h.findOneAndUpdate).not.toHaveBeenCalled();
-    expect(h.safeDeleteMessage).toHaveBeenCalledWith("msg-1", "pop-1");
+    // And the message is re-deferred (kept alive), not deleted.
+    expect(h.stop).toHaveBeenCalled();
+    expect(h.safeDeferMessage).toHaveBeenCalledWith("msg-1", "frozen-pop-1", 120);
+    expect(h.safeDeleteMessage).not.toHaveBeenCalled();
     expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
     expect(h.log).toHaveBeenCalledWith(
       "warn",
-      expect.stringMatching(/Duplicate queue message dropped.*worker-B/),
+      expect.stringMatching(/Duplicate queue message re-deferred.*worker-B/),
       expect.objectContaining({ runId: h.runId }),
     );
     const finalCalls = h.log.mock.calls.filter((c: any[]) => c[2]?.final);
     expect(finalCalls).toHaveLength(0);
+  });
+
+  it("respects SCOPE_RUN_REDELIVER_DEFER_MS override for the re-defer interval", async () => {
+    const prev = process.env.SCOPE_RUN_REDELIVER_DEFER_MS;
+    process.env.SCOPE_RUN_REDELIVER_DEFER_MS = "30000"; // 30 s
+    try {
+      const h = makeHarness("processing", {
+        startedAt: new Date(Date.now() - 60_000),
+        worker: { instanceId: "worker-B" },
+      });
+      await h.heartbeatStore.set(h.runId, new Date(Date.now() - 5_000));
+
+      await (h.qp as any).handleRequest(h.requestDoc, h.message, h.heartbeat, h.log, { runId: h.runId });
+
+      expect(h.safeDeferMessage).toHaveBeenCalledWith("msg-1", "frozen-pop-1", 30);
+    } finally {
+      if (prev === undefined) delete process.env.SCOPE_RUN_REDELIVER_DEFER_MS;
+      else process.env.SCOPE_RUN_REDELIVER_DEFER_MS = prev;
+    }
   });
 
   it("respects SCOPE_RUN_HEARTBEAT_STALE_MS override", async () => {

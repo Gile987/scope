@@ -144,6 +144,74 @@ jobs:
           name: ctrf-test-results-node-${{ matrix.node-version }}
           path: ctrf/
 
+  # ---------------------------------------------------------------------------
+  # LLM evals. Runs every *.eval.test.ts against a real LLM; each eval asserts on
+  # a majority of N samples (non-deterministic, quota-costing). The criteria-prompt
+  # orientation eval (origin: #1225) lives here today; adding more *.eval.test.ts
+  # files makes them run in this same job. Path-filtered to eval files + prompt-gen
+  # source and required via CI Summary (success-or-skipped). Self-skips when no LLM
+  # token is present.
+  # ---------------------------------------------------------------------------
+  llm-evals:
+    name: LLM Evals
+    needs: [detect-changes]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.evals == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      models: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # pnpm/action-setup@v4 is not allowed on EMU
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.29.1 --activate
+          pnpm --version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared packages
+        run: pnpm --filter shared build
+
+      - name: Run LLM evals
+        run: npx vitest run --config vitest.eval.config.ts --silent=false
+        env:
+          # A real GitHub PAT is required here: the generator calls the legacy
+          # GitHub Models endpoint (models.inference.ai.azure.com), which the
+          # ephemeral Actions GITHUB_TOKEN is NOT valid against (that only works
+          # with the newer models.github.ai/inference endpoint). COPILOT_GITHUB_TOKEN
+          # is an existing PAT secret. If it lacks model access, add a dedicated
+          # GITHUB_MODELS_API_KEY secret (a PAT with models scope) and read it here.
+          GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          CRITERIA_EVAL_SAMPLES: "3"
+
+      - name: Generate GitHub test summary from CTRF
+        if: always()
+        run: |
+          pnpm exec github-actions-ctrf "ctrf/*-eval-ctrf-report.json" --title "LLM Eval Results" || true
+
+      - name: Upload CTRF eval results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ctrf-eval-results
+          path: ctrf/
+          if-no-files-found: ignore
+
   integration-test:
     name: Integration Tests (${{ matrix.worker.name }})
     needs: [detect-changes]
@@ -167,7 +235,7 @@ jobs:
                 --build-arg VSCODE_VERSION=$VSCODE_VERSION \
                 --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
                 --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
                 --load \
                 .
               docker buildx build \
@@ -175,7 +243,7 @@ jobs:
                 --build-arg VSCODE_VERSION=$VSCODE_VERSION \
                 --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
                 --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
                 --load \
                 .
           - name: copilot-acp
@@ -190,7 +258,7 @@ jobs:
                 --target dev \
                 --build-arg COPILOT_CLI_VERSION=$COPILOT_CLI_VERSION \
                 --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
                 --load \
                 .
           - name: vscode-electron
@@ -200,7 +268,7 @@ jobs:
                 --build-arg VSCODE_VERSION=$VSCODE_VERSION \
                 --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
                 --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
                 --load \
                 .
           - name: claude-code-acp
@@ -216,11 +284,19 @@ jobs:
                 --build-arg CLAUDE_CODE_ACP_VERSION=$CLAUDE_CODE_ACP_VERSION \
                 --build-arg CLAUDE_AGENT_SDK_VERSION=$CLAUDE_AGENT_SDK_VERSION \
                 --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=min \
                 --load \
                 .
 
     steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/share/boost /usr/local/graalvm /usr/local/share/chromium \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h /
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -318,6 +394,73 @@ jobs:
         with:
           name: test-videos-${{ matrix.worker.name }}
           path: test-videos/
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Queue recovery integration tests (stuck-run fix). Self-provision their own
+  # MongoDB/Redis/Azurite via testcontainers — no docker-compose infra needed.
+  # ---------------------------------------------------------------------------
+  integration-test-queue:
+    name: Integration Tests (queue recovery)
+    needs: [detect-changes]
+    if: >-
+      github.repository == 'growth-ecosystems/scope-core' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        needs.detect-changes.outputs.shared == 'true' ||
+        needs.detect-changes.outputs.scheduler == 'true'
+      )
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # pnpm/action-setup@v4 is not allowed on EMU
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.29.1 --activate
+          pnpm --version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The scheduler reaper test imports CodingAgentQueueProcessor from the
+      # built `shared` dist (the integration config resolves bare imports to
+      # dist, not source), so shared must be built first.
+      - name: Build shared packages
+        run: pnpm --filter shared build
+
+      # mongo:7.0 and redis are pulled from Docker Hub; authenticate to avoid
+      # anonymous pull-rate limits. (Azurite comes from mcr.microsoft.com.)
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Run queue recovery integration tests
+        run: pnpm vitest run --config vitest.integration.config.ts --silent=false packages/shared/src/queue/redelivery.integration.test.ts apps/scheduler/src/stuck-run-reaper.integration.test.ts
+
+      - name: Generate GitHub test summary from CTRF
+        if: always()
+        run: |
+          pnpm exec github-actions-ctrf "ctrf/*-integration-ctrf-report.json" --title "Integration Test Results (queue recovery)" || true
+
+      - name: Upload CTRF integration test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ctrf-integration-test-results-queue-recovery
+          path: ctrf/
           if-no-files-found: ignore
 
   lint:
@@ -524,6 +667,7 @@ jobs:
       coder-acp-copilot-windows: ${{ steps.changes.outputs.coder-acp-copilot-windows }}
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
       typescript: ${{ steps.changes.outputs.typescript }}
+      evals: ${{ steps.changes.outputs.evals }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'push' || github.event_name == 'pull_request'
@@ -579,6 +723,12 @@ jobs:
               - 'tsconfig.base.json'
               - 'vitest.config.ts'
               - 'vitest.integration.config.ts'
+            evals:
+              - '**/*.eval.test.ts'
+              - 'apps/api/src/llm.ts'
+              - 'apps/api/src/llm-token.ts'
+              - 'vitest.eval.config.ts'
+              - 'packages/llm-eval/**'
 
   # ---------------------------------------------------------------------------
   # Build container images — gated on CI passing
@@ -593,6 +743,7 @@ jobs:
       (needs.build.result == 'success' || needs.build.result == 'skipped') &&
       (needs.gateway.result == 'success' || needs.gateway.result == 'skipped') &&
       (needs.integration-test.result == 'success' || needs.integration-test.result == 'skipped') &&
+      (needs.integration-test-queue.result == 'success' || needs.integration-test-queue.result == 'skipped') &&
       (
         (github.event_name == 'workflow_dispatch' && github.event.inputs.images != '') ||
         ((github.event_name == 'push' || github.event_name == 'pull_request') && (
@@ -613,7 +764,7 @@ jobs:
           needs.detect-changes.outputs.model-scanning == 'true'
         ))
       )
-    needs: [test, integration-test, build, gateway, detect-changes]
+    needs: [test, integration-test, integration-test-queue, build, gateway, detect-changes]
     runs-on: ubuntu-latest
     environment: integration
     strategy:
@@ -933,7 +1084,7 @@ jobs:
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [test, integration-test, lint, build, cli-bundle-test, gateway]
+    needs: [test, integration-test, integration-test-queue, lint, build, cli-bundle-test, gateway, llm-evals]
     if: always()
 
     steps:
@@ -941,9 +1092,11 @@ jobs:
         run: |
           if [ "${{ needs.test.result }}" = "success" ] && \
              [ "${{ needs.integration-test.result }}" = "success" -o "${{ needs.integration-test.result }}" = "skipped" ] && \
+             [ "${{ needs.integration-test-queue.result }}" = "success" -o "${{ needs.integration-test-queue.result }}" = "skipped" ] && \
              [ "${{ needs.lint.result }}" = "success" ] && \
              [ "${{ needs.build.result }}" = "success" ] && \
              [ "${{ needs.cli-bundle-test.result }}" = "success" -o "${{ needs.cli-bundle-test.result }}" = "skipped" ] && \
+             [ "${{ needs.llm-evals.result }}" = "success" -o "${{ needs.llm-evals.result }}" = "skipped" ] && \
              [ "${{ needs.gateway.result }}" = "success" -o "${{ needs.gateway.result }}" = "skipped" ]; then
             echo "✅ All checks passed!"
             exit 0
@@ -951,9 +1104,11 @@ jobs:
             echo "❌ Some checks failed:"
             echo "  Unit Tests: ${{ needs.test.result }}"
             echo "  Integration Tests: ${{ needs.integration-test.result }}"
+            echo "  Integration Tests (queue recovery): ${{ needs.integration-test-queue.result }}"
             echo "  Lint: ${{ needs.lint.result }}"
             echo "  Build: ${{ needs.build.result }}"
             echo "  CLI Bundle Tests: ${{ needs.cli-bundle-test.result }}"
+            echo "  LLM Evals: ${{ needs.llm-evals.result }}"
             echo "  Gateway: ${{ needs.gateway.result }}"
             exit 1
           fi

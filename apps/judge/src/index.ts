@@ -4,6 +4,8 @@
 import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
 import { evaluateWorkspace } from "./judge-agent.js";
+import { verifyCopilotProtocol } from "./protocol-check.js";
+import { resolveCurrentIteration, mapIterationToolCallUrls } from "./tool-call-history.js";
 import { BlobStorage, RedisLogPublisher } from "shared";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -55,7 +57,7 @@ app.post(
     const startTime = Date.now();
 
     try {
-      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId } = req.body;
+      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, iteration, currentAgentResponse } = req.body;
 
       // Validate required fields
       if (!snapshotUrl || typeof snapshotUrl !== "string") {
@@ -80,6 +82,11 @@ app.post(
         return;
       }
 
+      if (currentAgentResponse !== undefined && typeof currentAgentResponse !== "string") {
+        res.status(400).json({ error: "currentAgentResponse must be a string" });
+        return;
+      }
+
       console.log(
         `[judge] Evaluating snapshot: ${snapshotUrl} (${criteria.length} criteria, ${conversationHistory?.length || 0} prior turns)`
       );
@@ -91,6 +98,44 @@ app.post(
         await blobStorage.downloadAndExtractSnapshot(snapshotUrl, workDir);
 
         console.log(`[judge] Snapshot extracted to ${workDir}`);
+
+        // Assemble the coding agent's captured tool calls across the WHOLE run,
+        // not just the current iteration. Each prior turn in conversationHistory
+        // carries its own toolCallsUrl; the current iteration's log arrives as the
+        // top-level toolCallsUrl. We fetch them all in parallel and label each by
+        // its iteration number so a one-time action performed in an earlier
+        // iteration (bootstrap, scaffold, install, one-off command) stays visible
+        // to the judge in every later iteration. Missing/legacy logs (404 → [])
+        // are skipped, never fatal — the judge can still evaluate the workspace.
+        const currentIteration = resolveCurrentIteration(iteration, conversationHistory);
+
+        // Fetch every iteration's tool-calls log in parallel, in ascending
+        // iteration order. Missing/legacy logs (404 → []) are skipped, never
+        // fatal — the judge can still evaluate the workspace.
+        const iterationToolCalls: import("shared").IterationToolCalls[] = (
+          await Promise.all(
+            mapIterationToolCallUrls(
+              conversationHistory,
+              toolCallsUrl,
+              currentIteration,
+            ).map(async ({ iteration: iterNum, url }) => {
+              try {
+                const toolCalls = await blobStorage.getToolCalls(url);
+                return { iteration: iterNum, toolCalls };
+              } catch (err) {
+                console.warn(
+                  `[judge] Failed to load tool calls for iteration ${iterNum} from ${url}: ${err instanceof Error ? err.message : String(err)}`,
+                );
+                return { iteration: iterNum, toolCalls: [] };
+              }
+            }),
+          )
+        ).filter((g) => g.toolCalls.length > 0);
+
+        const totalToolCalls = iterationToolCalls.reduce((n, g) => n + g.toolCalls.length, 0);
+        console.log(
+          `[judge] Loaded ${totalToolCalls} tool call(s) across ${iterationToolCalls.length} iteration(s) for gate '${gate ?? "select"}'`,
+        );
 
         // Build onProgress callback that publishes criterion results via Redis
         const onProgress = (requestId && logPublisher)
@@ -113,6 +158,9 @@ app.post(
           conversationHistory: conversationHistory || [],
           personaInstructions,
           onProgress,
+          gate,
+          iterationToolCalls,
+          currentAgentResponse,
         });
 
         const elapsed = Date.now() - startTime;
@@ -139,6 +187,24 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 async function main(): Promise<void> {
+  // Fail fast on Copilot SDK<->CLI protocol drift instead of surfacing it as an
+  // opaque per-evaluation HTTP 500. Set JUDGE_SKIP_PROTOCOL_CHECK=true to bypass.
+  if (process.env.JUDGE_SKIP_PROTOCOL_CHECK !== "true") {
+    try {
+      await verifyCopilotProtocol();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(
+        "[judge] FATAL: Copilot SDK<->CLI protocol self-check failed — refusing to start.\n" +
+          "[judge] The installed @github/copilot-sdk and the bundled @github/copilot CLI disagree on the ACP protocol version.\n" +
+          "[judge] Fix: align @github/copilot-sdk with the @github/copilot override in package.json, then rebuild the judge image.\n" +
+          "[judge] (Set JUDGE_SKIP_PROTOCOL_CHECK=true to bypass — not recommended.)\n" +
+          `[judge] Detail: ${msg}`
+      );
+      process.exit(1);
+    }
+  }
+
   app.listen(port, () => {
     console.log(`[judge] Judge service listening on port ${port}`);
   });

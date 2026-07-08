@@ -136,7 +136,38 @@ Model name / deployment name used by both backends. For Foundry, this must
 match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
 `gpt-4o`, `gpt-4.1-mini`. Put in `.env.local` (see note above).
 
+## Prompt Storage Configuration
+
+### PROMPT_INLINE_MAX_BYTES
+**Default:** `16384` (16 KB)
+**Type:** integer (UTF-8 byte length)
+**Used by:** API (`apps/api`)
+
+Threshold deciding where a task/AGENTS.md prompt body is stored. A body whose
+UTF-8 byte length is at/under this value is stored **inline** in Mongo (`text`);
+a larger body is uploaded to blob storage (`prompts/{promptId}.txt`) and the doc
+references it via `contentBlobUrl` with no inline `text`. The decision is purely
+size-based — independent of the prompt's `type`. Small task prompts stay inline
+(today's behavior); large AGENTS.md bodies go to blob automatically.
+
 ## Judge Strategy Configuration
+
+### JUDGE_MODEL
+**Default:** `gpt-5.4-mini`
+**Type:** string
+
+Model used by the judge to evaluate agent output against criteria. Defaults to
+`gpt-5.4-mini` (set in code, docker-compose, and the K8s manifest). Override via
+`JUDGE_MODEL` (e.g. in `.env`) to use a different model.
+
+### FEEDBACK_MODEL
+**Default:** `gpt-5.4-mini`
+**Type:** string
+
+Model used by the feedback generator that produces actionable feedback for the
+coding agent between iterations. Defaults to `gpt-5.4-mini` (set in code,
+docker-compose, and the K8s manifest). Override via `FEEDBACK_MODEL` (e.g. in
+`.env`) to use a different model.
 
 ### JUDGE_STRATEGY
 **Default:** `bundled`
@@ -175,6 +206,18 @@ Timeout for the HTTP request from workers to the judge service (`/api/v1/evaluat
 
 Maximum number of retry attempts when the judge client encounters a timeout or transient network error. Uses exponential backoff (5s base, 30s max). Set to `0` to disable retries.
 
+### JUDGE_SKIP_PROTOCOL_CHECK
+**Default:** `false`
+**Type:** boolean (`true` to enable)
+
+At startup the judge service runs a self-check that spawns the bundled Copilot CLI and asserts its ACP protocol version matches the installed `@github/copilot-sdk`. On a mismatch (e.g. the `@github/copilot` override in `package.json` drifted ahead of the SDK) the judge logs a clear fatal message and exits instead of serving opaque per-evaluation HTTP 500s. Set to `true` to bypass the check (not recommended).
+
+### JUDGE_MAX_TOOL_CALLS
+**Default:** `300`
+**Type:** integer
+
+Caps how many tool calls the judge's `list_tool_calls` tool returns in a single browse page. The judge assembles the coding agent's tool calls **cumulatively across every iteration of the run** (issue #1255), deduplicating byte-identical calls, so this bound keeps a long run's history from overflowing the judge's context. It applies **only** to the `list_tool_calls` browse page — `search_tool_outputs` (pattern search) and `get_tool_output` (fetch one call by global index) always reach the full deduped history, so a one-time action from an early iteration stays discoverable regardless of this cap.
+
 ## Feedback Configuration
 
 ### FEEDBACK_MAX_CRITERIA
@@ -195,6 +238,29 @@ When enabled, prevents feedback from hinting about descendant criteria (requirem
 
 Path to the directory containing criteria definition YAML files for v2 scenarios.
 
+## Codebase Configuration
+
+### CODEBASE_MAX_EXTRACTED_BYTES
+**Default:** `268435456` (256 MiB)
+**Type:** integer (bytes)
+
+Maximum total *uncompressed* bytes written while extracting a codebase archive (Git tarball or uploaded zip/tar). Guards against decompression bombs — the edge ingress cap limits compressed bytes only. Extraction is aborted with HTTP `413` once exceeded.
+
+### CODEBASE_MAX_EXTRACTED_ENTRIES
+**Default:** `50000`
+**Type:** integer
+
+Maximum number of entries (files + directories) extracted from a codebase archive. Aborts extraction with HTTP `413` once exceeded.
+
+## Analysis Configuration
+
+### ANALYSIS_MAX_RUNS
+**Default:** `5000`
+**Type:** integer
+**Scope:** API (`apps/api`)
+
+Maximum number of completed runs loaded into memory for a single Statistics / `GET /api/v1/analysis` pass. The endpoint fetches the most-recent `ANALYSIS_MAX_RUNS` done runs (sorted by `createdAt`, served by the existing `createdAt` index) with a slim projection, so server memory stays bounded as run history grows. When the cap is reached the response includes `truncated: true` and `runLimit`, and the portal shows a "most recent N runs" banner rather than dropping data silently or breaking the page. Raise it for richer all-time stats at the cost of memory; lower it on memory-constrained deployments.
+
 ## Portal Feature Flags
 
 ### VITE_SHOW_PASS_AT_K
@@ -202,6 +268,15 @@ Path to the directory containing criteria definition YAML files for v2 scenarios
 **Type:** `"true"` | (any other value or unset)
 
 When set to `"true"`, displays the Pass@k metrics table on the Insights page. By default, this table is hidden. This is a Vite env var and must be prefixed with `VITE_` to be exposed to the frontend.
+
+## Portal Runtime Configuration
+
+### SCOPE_DOCS_BASE_URL
+**Default:** `https://urban-disco-1qzzq7z.pages.github.io`
+**Type:** URL string
+**Scope:** Portal container (runtime)
+
+Base URL for the public Scope docs site that in-app help tooltips link to. Unlike `VITE_*` flags (which Vite inlines into the bundle at build time), this is read at **container start**: the portal's entrypoint regenerates `/config.js` from this variable and the frontend reads it via `window.__SCOPE_CONFIG__.docsBaseUrl`. This means a single built image can be promoted across environments and still point at the correct docs deployment without a rebuild — set or override it via the Kubernetes Deployment env (`deploy/base/portal.yaml` or an overlay patch). In local Vite development the static `apps/portal/public/config.js` provides the default.
 
 ## Setting Variables
 
@@ -254,10 +329,10 @@ FEEDBACK_DESCENDANT_GUARD=false
 Azure Storage Queue name for report generation jobs. The API enqueues messages here when a report is requested; the report-generator worker polls this queue.
 
 ### REPORT_MODEL
-**Default:** `gpt-4.1`
+**Default:** `gpt-5.4-mini`
 **Type:** string
 
-The LLM model used by the report-generator worker (via the Copilot SDK) to generate run analysis reports. Examples: `gpt-4.1`, `gpt-4o`, `claude-sonnet-4`.
+The LLM model used by the report-generator worker (via the Copilot SDK) to generate run analysis reports. Examples: `gpt-5.4-mini`, `gpt-4.1`, `gpt-4o`, `claude-sonnet-4`.
 
 ### SCOPE_MT_API_URL
 **Default:** `http://localhost:3001` (local), `http://api:80` (Docker)
@@ -297,7 +372,39 @@ How often the post-processor dispatcher polls for completed runs needing post-pr
 
 Azure Storage Queue name used by both the scheduler (to enqueue post-processing work) and the post-processor worker (to dequeue). Must match between the two services.
 
+### SCOPE_REAPER_ENABLED
+**Default:** `false`
+**Type:** boolean (`true` to enable)
+
+Kill-switch for the scheduler's stuck-run reaper. **Disabled by default** — set to `true` (and ensure `REDIS_HOST` is set) to run a periodic backstop sweep that fails `processing` runs whose worker died without writing a terminal state and whose queue message no longer triggers recovery. When disabled, the queue redelivery path still operates. Redis is **non-fatal**: even when enabled, if `REDIS_HOST` is absent or the heartbeat store can't be constructed, the reaper self-disables and the dispatch loop keeps running.
+
+### SCOPE_REAPER_POLL_INTERVAL_MS
+**Default:** `60000`
+**Type:** integer (milliseconds)
+
+How often the stuck-run reaper sweeps MongoDB for stale `processing` runs. A run must look stale in **two consecutive** sweeps before it is reaped, so the effective time-to-reap after the staleness threshold is roughly one extra poll interval. Invalid/non-positive values fall back to the default.
+
+### SCOPE_REAPER_MAX_PER_SWEEP
+**Default:** `30`
+**Type:** integer
+
+Circuit-breaker bound on how many runs a single reaper sweep may fail. If a sweep would reap more than this, it **skips and logs loudly** instead — a high count implies a systemic slowdown (e.g. CosmosDB 429 storm lagging heartbeats fleet-wide) rather than that many independent worker deaths. Invalid/non-positive values fall back to the default.
+
+The reaper reuses `SCOPE_RUN_HEARTBEAT_STALE_MS` (Worker Configuration, below) as its staleness threshold. The scheduler must therefore have Redis credentials (`redis-secrets`) to read per-run heartbeats; see [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#stuck-run-reaper-scheduler-backstop).
+
 ## Worker Configuration
+
+### ACP_SESSION_TIMEOUT_MS
+**Default:** `3600000` (60 minutes)
+**Type:** integer (milliseconds)
+
+Maximum time the `coder-acp-copilot` worker waits for a Copilot CLI ACP session to complete before terminating it. If the agent takes longer than this to produce a response, the session is killed and the iteration fails with a timeout error. Increase for complex tasks that require extended processing. Set to `0` to disable the timeout entirely (not recommended in production).
+
+### CLAUDE_CODE_DISABLE_POLICY_SKILLS
+**Default:** `1` (set in the `coder-acp-claude-code` Dockerfile)
+**Type:** boolean-ish (`1` to disable, unset/`0` to allow)
+
+Disables Claude Code "policy skills" — auto-loaded, Anthropic-managed Agent Skills — for the `coder-acp-claude-code` worker. As of `claude-agent-acp` 0.52.0 / `claude-agent-sdk` 0.3.191 the bundled agent auto-invokes a `claude-api` policy skill on ordinary coding prompts; its injected payload overflows the context window available to Claude **subscription** OAuth tokens, so the turn fails with `Internal error: Prompt is too long`. Earlier agent versions never loaded it. The worker's Dockerfile bakes this variable at the container level so every descendant process (the worker, `claude-agent-acp`, and the bundled `claude` binary it spawns) inherits it — setting it only on the immediate child process is not sufficient. Disabling these skills restores the prior behavior and keeps benchmark runs reproducible. Override by setting it to `0` in the deployment environment if policy skills are explicitly wanted.
 
 ### SCOPE_RUN_HEARTBEAT_STALE_MS
 **Default:** `120000` (2 × `HEARTBEAT_VISIBILITY_SECONDS`)
@@ -305,11 +412,17 @@ Azure Storage Queue name used by both the scheduler (to enqueue post-processing 
 
 Threshold used by the queue-processor redelivery handler to decide whether an in-flight `processing` run is still alive. When a worker dequeues a duplicate message for a run already in `processing`, it reads the per-run liveness heartbeat from Redis (`run-heartbeat:<runId>`) and compares `Date.now() - lastBeat`:
 
-- **≤ threshold** → original worker is alive; drop the duplicate, leave the run untouched.
+- **≤ threshold** → original worker is alive; **re-defer** the duplicate (push its visibility out by `SCOPE_RUN_REDELIVER_DEFER_MS`), leave the run untouched. The message is **not** deleted — it is the recovery token if the original worker later dies hard.
 - **> threshold** → worker presumed dead; mark the run failed atomically.
-- **missing key** → fall back to `run.startedAt`. If picked up ≤ threshold ago, drop (transient race / Redis blip); otherwise mark failed.
+- **missing key** → fall back to `run.startedAt`. If picked up ≤ threshold ago, re-defer (transient race / Redis blip); otherwise mark failed.
 
-Lower values fail crashed runs faster but increase the risk of false positives if the heartbeat is briefly delayed (network, throttling, GC). The default gives the per-run heartbeat (every 15s) a generous 8× margin. See [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#liveness-heartbeat--redelivery).
+Lower values fail crashed runs faster but increase the risk of false positives if the heartbeat is briefly delayed (network, throttling, GC). The default gives the per-run heartbeat (every 15s) a generous 8× margin. This value is also the staleness threshold used by the scheduler's stuck-run reaper — keep the scheduler and workers on the same value so both recovery paths agree on "worker dead". See [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#liveness-heartbeat--redelivery).
+
+### SCOPE_RUN_REDELIVER_DEFER_MS
+**Default:** value of `SCOPE_RUN_HEARTBEAT_STALE_MS` (`120000`)
+**Type:** integer (milliseconds)
+
+How far the queue-processor pushes out a duplicate message's visibility when the original worker is still alive (fresh heartbeat). The duplicate is re-deferred rather than deleted so the message survives as the at-least-once recovery token; each time it resurfaces, a fresh heartbeat re-defers it (cheap) and a stale heartbeat marks the run failed. Defaulting to the staleness threshold makes the re-check cadence match the staleness window.
 
 ### SCOPE_RUN_HEARTBEAT_REDIS_TTL_MS
 **Default:** `300000` (5 × `HEARTBEAT_VISIBILITY_SECONDS`)
@@ -352,7 +465,37 @@ How often the Token Manager's scheduler validates all active tokens against thei
 
 Host port mapping for the token-manager service in Docker Compose.
 
-## DevProxy Configuration (HAR Capture)
+## Proxy & HAR Capture Configuration (Gateway / DevProxy)
+
+Workers capture agent↔provider traffic as HAR via one of two interchangeable backends,
+selected by `PROXY_BACKEND`. Both converge on the same `extractHarMetadata()` pipeline, so
+HAR output is identical regardless of backend.
+
+### PROXY_BACKEND
+**Default:** `devproxy` (worker adapter default; deployment manifests set `gateway`)
+**Type:** enum (`gateway` | `devproxy`)
+
+Selects the proxy backend returned by `createProxyClient()` (`packages/shared/src/devproxy/index.ts`):
+
+- `gateway` — the shared Rust [AI Gateway](docs/architecture/ai-gateway.md). Records both
+  HTTP and **WebSocket** frames — required for Copilot CLI ≥ 1.0.65, whose `/responses`
+  traffic is carried over a WebSocket that DevProxy's HTTP-only HAR generator cannot see.
+  HAR is downloaded via the gateway session API, so no shared `har-output` volume is
+  needed. Used by the VS Code Electron worker and both Copilot ACP workers (Linux + Windows).
+- `devproxy` — the legacy per-worker [Microsoft DevProxy](https://github.com/dotnet/dev-proxy)
+  sidecar. Records HTTP only; HAR is read from a shared filesystem volume. Still used by the
+  ACP Claude Code worker.
+
+### GATEWAY_TOKEN_PLUGIN_ENABLED
+**Default:** `true` (effective only when `TOKEN_MANAGER_URL` is also set)
+**Type:** boolean (`true` | `false`)
+
+Only relevant when `PROXY_BACKEND=gateway`. When `true` (and `TOKEN_MANAGER_URL` is set) the
+worker asks the gateway to enable the `copilot_token` plugin, which mints and refreshes
+Copilot session tokens for that session. Set to `false` for workers whose agent manages its
+own token lifecycle: both Copilot ACP workers set `false` because the Copilot CLI handles
+token minting/refresh itself (enabling the plugin caused upstream 502s — #1058). The VS Code
+Electron worker leaves it enabled.
 
 ### DEV_PROXY_ENABLED
 **Default:** `false`
@@ -367,20 +510,14 @@ Enables DevProxy integration for capturing HTTP traffic as HAR files. When `true
 **Default:** `http://localhost:18000`
 **Type:** URL string
 
-URL of the gateway/DevProxy REST API. Used to start/stop recording, check status, and download the CA certificate.
+URL of the gateway/DevProxy REST API. Used to start/stop recording, check status, and download the CA certificate. Points at the gateway control API when `PROXY_BACKEND=gateway`, or the DevProxy management port when `PROXY_BACKEND=devproxy`.
 
-- **Docker Compose (gateway):** `http://gateway:18000` (shared service)
-- **Docker Compose (devproxy-copilot):** `http://devproxy-copilot:18897` (separate legacy service)
-- **Kubernetes:** `http://gateway-service:18000` (shared service)
+- **Docker Compose (gateway):** `http://gateway:18000` (shared service — Copilot + VS Code Electron)
+- **Docker Compose (devproxy, Claude Code):** `http://devproxy-claude-code:18897` (per-worker sidecar)
+- **Kubernetes (gateway):** `http://gateway-service.scoped.svc.cluster.local:18000` (shared service)
 
 ### DEV_PROXY_HAR_DIR
 **Default:** `/har-output`
 **Type:** path
 
-Directory where DevProxy writes HAR files. Shared between the DevProxy process and the worker via a volume mount.
-
-### DEVPROXY_COPILOT_API_PORT
-**Default:** `18800`
-**Type:** integer (Docker Compose only)
-
-Host port mapping for the Copilot DevProxy REST API in Docker Compose.
+**`PROXY_BACKEND=devproxy` only.** Directory where DevProxy writes HAR files, shared between the DevProxy process and the worker via a volume mount. Unused by the gateway backend, which downloads HAR over HTTP instead of via a shared volume.

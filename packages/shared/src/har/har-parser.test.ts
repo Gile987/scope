@@ -2,8 +2,9 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseHarFile, extractToolCalls, sanitizeHar, extractThinkingContent, extractTokenUsage, extractAiCallCount } from "./har-parser.js";
+import { parseHarFile, extractToolCalls, sanitizeHar, extractThinkingContent, extractTokenUsage, extractAiCallCount, extractTokenUsageFromTelemetry, countAiCallsFromTelemetry } from "./har-parser.js";
 import type { HarFile, ToolCall } from "./types.js";
+import { makeHar, makeEntry } from "./test-helpers.js";
 
 // Mock fs/promises for parseHarFile tests
 vi.mock("node:fs/promises", () => ({
@@ -13,73 +14,6 @@ vi.mock("node:fs/promises", () => ({
 
 import { readFile } from "node:fs/promises";
 const mockReadFile = vi.mocked(readFile);
-
-/**
- * Helper to build a minimal HAR file structure.
- */
-function makeHar(entries: HarFile["log"]["entries"]): HarFile {
-  return {
-    log: {
-      version: "1.2",
-      creator: { name: "DevProxy", version: "0.26.0" },
-      entries,
-    },
-  };
-}
-
-/**
- * Helper to build a HAR entry with a JSON request/response body.
- */
-function makeEntry(opts: {
-  url?: string;
-  requestBody?: unknown;
-  responseBody?: unknown;
-  responseEncoding?: string;
-  timestamp?: string;
-}): HarFile["log"]["entries"][0] {
-  const responseText = opts.responseBody
-    ? typeof opts.responseBody === "string"
-      ? opts.responseBody
-      : JSON.stringify(opts.responseBody)
-    : undefined;
-
-  return {
-    startedDateTime: opts.timestamp || "2025-01-15T10:00:00.000Z",
-    time: 100,
-    request: {
-      method: "POST",
-      url: opts.url || "https://api.githubcopilot.com/chat/completions",
-      httpVersion: "HTTP/1.1",
-      headers: [],
-      queryString: [],
-      headersSize: -1,
-      bodySize: -1,
-      ...(opts.requestBody
-        ? {
-            postData: {
-              mimeType: "application/json",
-              text: JSON.stringify(opts.requestBody),
-            },
-          }
-        : {}),
-    },
-    response: {
-      status: 200,
-      statusText: "OK",
-      httpVersion: "HTTP/1.1",
-      headers: [],
-      content: {
-        size: responseText?.length || 0,
-        mimeType: "application/json",
-        text: responseText,
-        encoding: opts.responseEncoding,
-      },
-      headersSize: -1,
-      bodySize: -1,
-      redirectURL: "",
-    },
-  };
-}
 
 describe("parseHarFile", () => {
   it("reads and parses a HAR file from disk", async () => {
@@ -981,6 +915,53 @@ describe("extractTokenUsage", () => {
     });
   });
 
+  it("includes Anthropic prompt-cache tokens in the prompt count", () => {
+    // Anthropic's `input_tokens` is only the non-cached remainder; the bulk of
+    // the prompt is reported in cache_creation_input_tokens / cache_read_input_tokens.
+    const har = makeHar([
+      makeEntry({
+        responseBody: {
+          content: [{ type: "text", text: "hello" }],
+          usage: {
+            input_tokens: 9,
+            cache_creation_input_tokens: 22153,
+            cache_read_input_tokens: 100,
+            output_tokens: 249,
+          },
+        },
+      }),
+    ]);
+    const usage = extractTokenUsage(har);
+    // prompt = 9 + 22153 + 100
+    expect(usage).toEqual({
+      promptTokens: 22262,
+      completionTokens: 249,
+      totalTokens: 22511,
+    });
+  });
+
+  it("counts Anthropic SSE usage once and includes cache tokens (message_delta)", () => {
+    // Anthropic streams usage twice: message_start carries it under
+    // `message.usage` (ignored — not at the top level), message_delta carries
+    // the final usage at the top-level `usage`. Only the latter is counted, so
+    // cache tokens are added exactly once.
+    const sseBody = [
+      "event: message_start",
+      'data: {"type":"message_start","message":{"usage":{"input_tokens":9,"cache_creation_input_tokens":22153,"cache_read_input_tokens":0,"output_tokens":8}}}',
+      "event: message_delta",
+      'data: {"type":"message_delta","usage":{"input_tokens":9,"cache_creation_input_tokens":22153,"cache_read_input_tokens":0,"output_tokens":249}}',
+      "data: [DONE]",
+    ].join("\n");
+    const har = makeHar([makeEntry({ responseBody: sseBody })]);
+    const usage = extractTokenUsage(har);
+    // prompt = 9 + 22153 + 0 (counted once, from message_delta)
+    expect(usage).toEqual({
+      promptTokens: 22162,
+      completionTokens: 249,
+      totalTokens: 22411,
+    });
+  });
+
   it("extracts token usage from SSE streaming response (final chunk)", () => {
     const sseBody = [
       'data: {"choices":[{"delta":{"content":"hi"}}]}',
@@ -1085,5 +1066,231 @@ describe("extractAiCallCount", () => {
   it("returns 0 for empty HAR", () => {
     const har = makeHar([]);
     expect(extractAiCallCount(har)).toBe(0);
+  });
+
+  it("counts POST /responses as AI calls", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.enterprise.githubcopilot.com/responses" }),
+      makeEntry({ url: "https://api.enterprise.githubcopilot.com/responses" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(2);
+  });
+
+  it("counts GET /responses 101 WebSocket upgrades as AI calls", () => {
+    const wsEntry = makeEntry({ url: "https://api.enterprise.githubcopilot.com/responses" });
+    wsEntry.request.method = "GET";
+    wsEntry.response.status = 101;
+    wsEntry.response.statusText = "Switching Protocols";
+    const har = makeHar([wsEntry]);
+    expect(extractAiCallCount(har)).toBe(1);
+  });
+
+  it("counts mixed /responses (POST + WebSocket) and /chat/completions", () => {
+    const wsEntry = makeEntry({ url: "https://api.enterprise.githubcopilot.com/responses" });
+    wsEntry.request.method = "GET";
+    wsEntry.response.status = 101;
+    wsEntry.response.statusText = "Switching Protocols";
+    const har = makeHar([
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+      makeEntry({ url: "https://api.enterprise.githubcopilot.com/responses" }),
+      wsEntry,
+    ]);
+    expect(extractAiCallCount(har)).toBe(3);
+  });
+
+  it("falls back to telemetry count when no direct AI calls found", () => {
+    const telemetryPayload = JSON.stringify({
+      data: { baseData: { properties: { payload: JSON.stringify({ kind: "assistant_usage", metrics: { input_tokens: 100, output_tokens: 50 } }) } } }
+    });
+    const har = makeHar([
+      makeEntry({
+        url: "https://copilot-telemetry.githubusercontent.com/telemetry",
+        requestBody: undefined,
+      }),
+    ]);
+    // Set the telemetry POST body on the request
+    har.log.entries[0].request.postData = {
+      mimeType: "application/x-ndjson",
+      text: telemetryPayload + "\n" + telemetryPayload + "\n" + telemetryPayload,
+    };
+    expect(extractAiCallCount(har)).toBe(3);
+  });
+});
+
+describe("extractTokenUsage — Responses API", () => {
+  it("extracts token usage from POST /responses SSE with response.usage nesting", () => {
+    const sseBody = [
+      'data: {"type":"response.output_item.added","output_index":0}',
+      'data: {"type":"response.completed","response":{"usage":{"input_tokens":500,"output_tokens":100,"total_tokens":600}}}',
+      "data: [DONE]",
+    ].join("\n");
+
+    const har = makeHar([
+      makeEntry({
+        url: "https://api.enterprise.githubcopilot.com/responses",
+        responseBody: sseBody,
+      }),
+    ]);
+    const usage = extractTokenUsage(har);
+    expect(usage).toEqual({
+      promptTokens: 500,
+      completionTokens: 100,
+      totalTokens: 600,
+    });
+  });
+
+  it("sums token usage across multiple /responses entries", () => {
+    const makeSse = (input: number, output: number, total: number) => [
+      `data: {"type":"response.completed","response":{"usage":{"input_tokens":${input},"output_tokens":${output},"total_tokens":${total}}}}`,
+      "data: [DONE]",
+    ].join("\n");
+
+    const har = makeHar([
+      makeEntry({
+        url: "https://api.enterprise.githubcopilot.com/responses",
+        responseBody: makeSse(1000, 200, 1200),
+      }),
+      makeEntry({
+        url: "https://api.enterprise.githubcopilot.com/responses",
+        responseBody: makeSse(3000, 500, 3500),
+      }),
+    ]);
+    const usage = extractTokenUsage(har);
+    expect(usage).toEqual({
+      promptTokens: 4000,
+      completionTokens: 700,
+      totalTokens: 4700,
+    });
+  });
+
+  it("falls back to telemetry extraction for WebSocket-only HAR", () => {
+    // WebSocket entry has no response body
+    const wsEntry = makeEntry({ url: "https://api.enterprise.githubcopilot.com/responses" });
+    wsEntry.request.method = "GET";
+    wsEntry.response.status = 101;
+    wsEntry.response.statusText = "Switching Protocols";
+    wsEntry.response.content.text = undefined;
+
+    // Telemetry entry has assistant_usage in the request body
+    const telemetryLine1 = JSON.stringify({
+      data: { baseData: { properties: { payload: JSON.stringify({ kind: "assistant_usage", metrics: { input_tokens: 5000, output_tokens: 1000 } }) } } }
+    });
+    const telemetryLine2 = JSON.stringify({
+      data: { baseData: { properties: { payload: JSON.stringify({ kind: "assistant_usage", metrics: { input_tokens: 3000, output_tokens: 800 } }) } } }
+    });
+    const telemetryEntry = makeEntry({ url: "https://copilot-telemetry.githubusercontent.com/telemetry" });
+    telemetryEntry.request.postData = {
+      mimeType: "application/x-ndjson",
+      text: telemetryLine1 + "\n" + telemetryLine2,
+    };
+
+    const har = makeHar([wsEntry, telemetryEntry]);
+    const usage = extractTokenUsage(har);
+    expect(usage).toEqual({
+      promptTokens: 8000,
+      completionTokens: 1800,
+      totalTokens: 9800,
+    });
+  });
+
+  it("prefers response body usage over telemetry when both exist", () => {
+    // POST /responses with usage in body
+    const sseBody = [
+      'data: {"type":"response.completed","response":{"usage":{"input_tokens":500,"output_tokens":100,"total_tokens":600}}}',
+      "data: [DONE]",
+    ].join("\n");
+    const responsesEntry = makeEntry({
+      url: "https://api.enterprise.githubcopilot.com/responses",
+      responseBody: sseBody,
+    });
+
+    // Telemetry entry (should be ignored since we got data from response)
+    const telemetryLine = JSON.stringify({
+      data: { baseData: { properties: { payload: JSON.stringify({ kind: "assistant_usage", metrics: { input_tokens: 9999, output_tokens: 9999 } }) } } }
+    });
+    const telemetryEntry = makeEntry({ url: "https://copilot-telemetry.githubusercontent.com/telemetry" });
+    telemetryEntry.request.postData = {
+      mimeType: "application/x-ndjson",
+      text: telemetryLine,
+    };
+
+    const har = makeHar([responsesEntry, telemetryEntry]);
+    const usage = extractTokenUsage(har);
+    expect(usage).toEqual({
+      promptTokens: 500,
+      completionTokens: 100,
+      totalTokens: 600,
+    });
+  });
+});
+
+describe("extractTokenUsageFromTelemetry", () => {
+  it("extracts token usage from assistant_usage telemetry events", () => {
+    const makeLine = (input: number, output: number) => JSON.stringify({
+      data: { baseData: { properties: { payload: JSON.stringify({ kind: "assistant_usage", metrics: { input_tokens: input, output_tokens: output } }) } } }
+    });
+    const telemetryEntry = makeEntry({ url: "https://copilot-telemetry.githubusercontent.com/telemetry" });
+    telemetryEntry.request.postData = {
+      mimeType: "application/x-ndjson",
+      text: [makeLine(1000, 200), makeLine(2000, 300)].join("\n"),
+    };
+
+    const har = makeHar([telemetryEntry]);
+    const usage = extractTokenUsageFromTelemetry(har);
+    expect(usage).toEqual({
+      promptTokens: 3000,
+      completionTokens: 500,
+      totalTokens: 3500,
+    });
+  });
+
+  it("returns undefined when no telemetry entries exist", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+    ]);
+    expect(extractTokenUsageFromTelemetry(har)).toBeUndefined();
+  });
+
+  it("ignores non-assistant_usage telemetry events", () => {
+    const otherLine = JSON.stringify({
+      data: { baseData: { properties: { payload: JSON.stringify({ kind: "copilot_event", data: {} }) } } }
+    });
+    const usageLine = JSON.stringify({
+      data: { baseData: { properties: { payload: JSON.stringify({ kind: "assistant_usage", metrics: { input_tokens: 500, output_tokens: 100 } }) } } }
+    });
+    const telemetryEntry = makeEntry({ url: "https://copilot-telemetry.githubusercontent.com/telemetry" });
+    telemetryEntry.request.postData = {
+      mimeType: "application/x-ndjson",
+      text: [otherLine, usageLine, otherLine].join("\n"),
+    };
+
+    const har = makeHar([telemetryEntry]);
+    const usage = extractTokenUsageFromTelemetry(har);
+    expect(usage).toEqual({
+      promptTokens: 500,
+      completionTokens: 100,
+      totalTokens: 600,
+    });
+  });
+});
+
+describe("countAiCallsFromTelemetry", () => {
+  it("counts assistant_usage events in telemetry", () => {
+    const makeLine = (kind: string) => JSON.stringify({
+      data: { baseData: { properties: { payload: JSON.stringify({ kind, metrics: { input_tokens: 100, output_tokens: 50 } }) } } }
+    });
+    const telemetryEntry = makeEntry({ url: "https://copilot-telemetry.githubusercontent.com/telemetry" });
+    telemetryEntry.request.postData = {
+      mimeType: "application/x-ndjson",
+      text: [makeLine("assistant_usage"), makeLine("other_event"), makeLine("assistant_usage")].join("\n"),
+    };
+
+    const har = makeHar([telemetryEntry]);
+    expect(countAiCallsFromTelemetry(har)).toBe(2);
+  });
+
+  it("returns 0 when no telemetry entries exist", () => {
+    const har = makeHar([]);
+    expect(countAiCallsFromTelemetry(har)).toBe(0);
   });
 });

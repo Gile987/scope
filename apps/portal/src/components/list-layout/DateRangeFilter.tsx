@@ -105,7 +105,7 @@ export function DateRangeFilter({ from, to, onChange }: DateRangeFilterProps) {
               type="button"
               variant={active ? "secondary" : "ghost"}
               size="sm"
-              className={cn("h-7 justify-start text-xs", !active && "text-muted-foreground")}
+              className={cn("h-7 min-w-0 justify-start truncate px-2 text-xs", !active && "text-muted-foreground")}
               onClick={() => {
                 const [f, t] = p.range();
                 onChange(f, t);
@@ -118,7 +118,7 @@ export function DateRangeFilter({ from, to, onChange }: DateRangeFilterProps) {
       </div>
 
       <div className="grid grid-cols-2 gap-1.5">
-        <div className="space-y-0.5">
+        <div className="min-w-0 space-y-0.5">
           <label
             className="block text-[10px] uppercase tracking-wide text-muted-foreground"
             htmlFor="date-range-from"
@@ -131,10 +131,10 @@ export function DateRangeFilter({ from, to, onChange }: DateRangeFilterProps) {
             value={from ?? ""}
             max={to ?? undefined}
             onChange={(e) => onChange(e.target.value || null, to)}
-            className="h-7 px-2 text-xs"
+            className="h-7 w-full min-w-0 px-2 text-xs"
           />
         </div>
-        <div className="space-y-0.5">
+        <div className="min-w-0 space-y-0.5">
           <label
             className="block text-[10px] uppercase tracking-wide text-muted-foreground"
             htmlFor="date-range-to"
@@ -147,7 +147,7 @@ export function DateRangeFilter({ from, to, onChange }: DateRangeFilterProps) {
             value={to ?? ""}
             min={from ?? undefined}
             onChange={(e) => onChange(from, e.target.value || null)}
-            className="h-7 px-2 text-xs"
+            className="h-7 w-full min-w-0 px-2 text-xs"
           />
         </div>
       </div>

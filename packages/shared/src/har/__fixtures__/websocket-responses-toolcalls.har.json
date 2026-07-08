@@ -1,0 +1,129 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": {
+      "name": "gateway",
+      "version": "0.1.0"
+    },
+    "entries": [
+      {
+        "startedDateTime": "2026-06-16T20:00:00.000Z",
+        "time": 4200,
+        "_resourceType": "websocket",
+        "request": {
+          "method": "GET",
+          "url": "wss://api.enterprise.githubcopilot.com/responses",
+          "httpVersion": "HTTP/1.1",
+          "headers": [
+            {
+              "name": "editor-plugin-version",
+              "value": "copilot/1.0.55"
+            },
+            {
+              "name": "authorization",
+              "value": "[REDACTED]"
+            }
+          ],
+          "queryString": [],
+          "cookies": [],
+          "headersSize": -1,
+          "bodySize": 0
+        },
+        "response": {
+          "status": 101,
+          "statusText": "Switching Protocols",
+          "httpVersion": "HTTP/1.1",
+          "headers": [],
+          "cookies": [],
+          "content": {
+            "size": 0,
+            "mimeType": "x-unknown"
+          },
+          "redirectURL": "",
+          "headersSize": -1,
+          "bodySize": 0
+        },
+        "cache": {},
+        "timings": {
+          "send": 0,
+          "wait": 0,
+          "receive": 0
+        },
+        "_webSocketMessages": [
+          {
+            "type": "send",
+            "opcode": 1,
+            "time": 1781035200.0,
+            "data": "{\"type\": \"response.create\", \"model\": \"gpt-5.5\", \"input\": [{\"role\": \"user\", \"content\": [{\"type\": \"input_text\", \"text\": \"Build the project, apply the fix, view the result, then finish.\"}]}]}"
+          },
+          {
+            "type": "receive",
+            "opcode": 1,
+            "time": 1781035200.1,
+            "data": "{\"type\": \"response.output_item.added\", \"output_index\": 0, \"item\": {\"type\": \"message\"}}"
+          },
+          {
+            "type": "receive",
+            "opcode": 1,
+            "time": 1781035200.2,
+            "data": "{\"type\": \"response.output_text.delta\", \"output_index\": 0, \"delta\": \"I'll start by running the build.\"}"
+          },
+          {
+            "type": "receive",
+            "opcode": 1,
+            "time": 1781035200.3,
+            "data": "{\"type\": \"response.output_item.done\", \"output_index\": 1, \"item\": {\"type\": \"function_call\", \"name\": \"bash\", \"call_id\": \"call_build\", \"id\": \"fc_opaque_1\", \"arguments\": \"{\\\"command\\\": \\\"npm run build\\\", \\\"description\\\": \\\"Build the project\\\"}\", \"status\": \"completed\"}}"
+          },
+          {
+            "type": "receive",
+            "opcode": 1,
+            "time": 1781035200.4,
+            "data": "{\"type\": \"response.completed\", \"response\": {\"model\": \"gpt-5.5\", \"usage\": {\"input_tokens\": 120, \"output_tokens\": 40, \"total_tokens\": 160}}}"
+          },
+          {
+            "type": "send",
+            "opcode": 1,
+            "time": 1781035200.5,
+            "data": "{\"type\": \"response.create\", \"model\": \"gpt-5.5\", \"input\": [{\"role\": \"user\", \"content\": [{\"type\": \"input_text\", \"text\": \"Build the project, apply the fix, view the result, then finish.\"}]}, {\"type\": \"function_call\", \"name\": \"bash\", \"call_id\": \"call_build\", \"arguments\": \"{\\\"command\\\": \\\"npm run build\\\", \\\"description\\\": \\\"Build the project\\\"}\"}, {\"type\": \"function_call_output\", \"call_id\": \"call_build\", \"output\": \"Build succeeded in 3.1s\"}]}"
+          },
+          {
+            "type": "receive",
+            "opcode": 1,
+            "time": 1781035200.6,
+            "data": "{\"type\": \"response.output_item.done\", \"output_index\": 0, \"item\": {\"type\": \"custom_tool_call\", \"name\": \"apply_patch\", \"call_id\": \"call_patch\", \"id\": \"ctc_opaque_2\", \"input\": \"*** Begin Patch\\n*** Update File: src/index.ts\\n@@\\n-const x = 1;\\n+const x = 2;\\n*** End Patch\", \"status\": \"completed\"}}"
+          },
+          {
+            "type": "send",
+            "opcode": 1,
+            "time": 1781035200.7,
+            "data": "{\"type\": \"response.create\", \"model\": \"gpt-5.5\", \"input\": [{\"type\": \"custom_tool_call\", \"name\": \"apply_patch\", \"call_id\": \"call_patch\", \"input\": \"*** Begin Patch\\n*** Update File: src/index.ts\\n@@\\n-const x = 1;\\n+const x = 2;\\n*** End Patch\"}, {\"type\": \"custom_tool_call_output\", \"call_id\": \"call_patch\", \"output\": \"Applied patch to src/index.ts\"}]}"
+          },
+          {
+            "type": "receive",
+            "opcode": 1,
+            "time": 1781035200.8,
+            "data": "{\"type\": \"response.output_item.done\", \"output_index\": 0, \"item\": {\"type\": \"function_call\", \"name\": \"view\", \"call_id\": \"call_view\", \"id\": \"fc_opaque_3\", \"arguments\": \"{\\\"path\\\": \\\"src/index.ts\\\"}\", \"status\": \"completed\"}}"
+          },
+          {
+            "type": "send",
+            "opcode": 1,
+            "time": 1781035200.9,
+            "data": "{\"type\": \"response.create\", \"model\": \"gpt-5.5\", \"input\": [{\"type\": \"function_call\", \"name\": \"view\", \"call_id\": \"call_view\", \"arguments\": \"{\\\"path\\\": \\\"src/index.ts\\\"}\"}, {\"type\": \"function_call_output\", \"call_id\": \"call_view\", \"output\": \"const x = 2;\"}]}"
+          },
+          {
+            "type": "receive",
+            "opcode": 1,
+            "time": 1781035201.0,
+            "data": "{\"type\": \"response.output_item.done\", \"output_index\": 0, \"item\": {\"type\": \"function_call\", \"name\": \"task_complete\", \"call_id\": \"call_done\", \"id\": \"fc_opaque_4\", \"arguments\": \"{\\\"summary\\\": \\\"Built, patched, and verified the change.\\\"}\", \"status\": \"completed\"}}"
+          },
+          {
+            "type": "receive",
+            "opcode": 1,
+            "time": 1781035201.1,
+            "data": "{\"type\": \"response.completed\", \"response\": {\"model\": \"gpt-5.5\", \"usage\": {\"input_tokens\": 400, \"output_tokens\": 60, \"total_tokens\": 460}}}"
+          }
+        ]
+      }
+    ]
+  }
+}

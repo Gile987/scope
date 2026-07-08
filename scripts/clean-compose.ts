@@ -40,6 +40,26 @@ export interface ClassifiedProject {
   decision: ComposeDecision;
 }
 
+/** Raised when the Docker daemon can't be reached (Docker/Colima not running). */
+export class DockerUnavailableError extends Error {
+  constructor(message = "Docker daemon is not reachable") {
+    super(message);
+    this.name = "DockerUnavailableError";
+  }
+}
+
+/**
+ * Whether a captured error message/stderr indicates the Docker daemon is not
+ * reachable (Docker Desktop / Colima not started), as opposed to a genuine
+ * `docker compose` failure. Matching on the daemon-connectivity wording keeps
+ * the cleanup script from dumping a raw stack trace for a routine condition.
+ */
+export function isDockerDaemonUnavailable(message: string): boolean {
+  return /cannot connect to the docker daemon|is the docker daemon running|error during connect|the docker daemon is not running/i.test(
+    message,
+  );
+}
+
 export function parseComposeLs(json: string): ComposeProject[] {
   const trimmed = json.trim();
   if (!trimmed) return [];
@@ -142,10 +162,19 @@ function listWorktrees(): Worktree[] {
 }
 
 function listComposeProjects(): ComposeProject[] {
-  const out = execSync("docker compose ls --all --format json", {
-    encoding: "utf-8",
-  });
-  return parseComposeLs(out);
+  try {
+    const out = execSync("docker compose ls --all --format json", {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    return parseComposeLs(out);
+  } catch (err: any) {
+    const detail = `${err?.stderr?.toString() ?? ""}\n${err?.message ?? ""}`;
+    if (isDockerDaemonUnavailable(detail)) {
+      throw new DockerUnavailableError();
+    }
+    throw err;
+  }
 }
 
 function getPrStatus(repo: string, branch: string): PrInfo | null {
@@ -344,6 +373,12 @@ async function main() {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
+    if (err instanceof DockerUnavailableError) {
+      console.log(
+        "Docker daemon is not reachable — is Docker/Colima running? Nothing to clean up.",
+      );
+      process.exit(0);
+    }
     console.error(err);
     process.exit(1);
   });

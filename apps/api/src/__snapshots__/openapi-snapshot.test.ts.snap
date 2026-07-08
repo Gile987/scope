@@ -313,6 +313,163 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
         "type": "object",
       },
+      "CodebaseResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "creator": {
+            "type": "string",
+          },
+          "defaultBranch": {
+            "type": "string",
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "description": {
+            "type": "string",
+          },
+          "latestRevisionId": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "revisionCounter": {
+            "type": "number",
+          },
+          "slug": {
+            "type": "string",
+          },
+          "source": {
+            "type": "string",
+          },
+          "sourceType": {
+            "enum": [
+              "git",
+              "archive",
+            ],
+            "type": "string",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "_id",
+          "slug",
+          "name",
+          "sourceType",
+          "revisionCounter",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "CodebaseRevisionResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "archiveUrl": {
+            "type": "string",
+          },
+          "codebaseId": {
+            "type": "string",
+          },
+          "commitTimestamp": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "contentSha256": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "creator": {
+            "type": "string",
+          },
+          "deduplicated": {
+            "type": "boolean",
+          },
+          "fileCount": {
+            "type": "number",
+          },
+          "originalFilename": {
+            "type": "string",
+          },
+          "ref": {
+            "type": "string",
+          },
+          "requestedRef": {
+            "type": "string",
+          },
+          "resolvedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "resolvedCommitSha": {
+            "type": "string",
+          },
+          "revisionNumber": {
+            "type": "number",
+          },
+          "sizeBytes": {
+            "type": "number",
+          },
+          "slug": {
+            "type": "string",
+          },
+          "source": {
+            "type": "string",
+          },
+          "sourceType": {
+            "enum": [
+              "git",
+              "archive",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "_id",
+          "codebaseId",
+          "slug",
+          "revisionNumber",
+          "ref",
+          "sourceType",
+          "archiveUrl",
+          "resolvedAt",
+          "createdAt",
+        ],
+        "type": "object",
+      },
       "ConversationTurn": {
         "properties": {
           "aiCallCount": {
@@ -335,6 +492,16 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "durationMs": {
             "type": "number",
+          },
+          "gate": {
+            "enum": [
+              "select",
+              "build",
+              "test",
+              "run",
+              "deploy",
+            ],
+            "type": "string",
           },
           "harUrl": {
             "type": "string",
@@ -465,6 +632,19 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "properties": {
           "dependsOn": {
             "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "gates": {
+            "items": {
+              "enum": [
+                "select",
+                "build",
+                "test",
+                "run",
+                "deploy",
+              ],
               "type": "string",
             },
             "type": "array",
@@ -606,6 +786,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "prompt": {
             "type": "string",
           },
+          "type": {
+            "$ref": "#/components/schemas/PromptType",
+          },
         },
         "required": [
           "id",
@@ -664,9 +847,27 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       },
       "CreateRequestInput": {
         "properties": {
+          "agentsMd": {
+            "type": "string",
+          },
+          "agentsMdParentIds": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "codebaseRevisionId": {
+            "type": "string",
+          },
           "extensions": {
             "items": {
               "type": "string",
+            },
+            "type": "array",
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/GateConfig",
             },
             "type": "array",
           },
@@ -755,6 +956,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "text": {
             "type": "string",
           },
+          "type": {
+            "$ref": "#/components/schemas/PromptType",
+          },
         },
         "required": [
           "text",
@@ -805,6 +1009,19 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "gates": {
+            "items": {
+              "enum": [
+                "select",
+                "build",
+                "test",
+                "run",
+                "deploy",
+              ],
+              "type": "string",
+            },
+            "type": "array",
+          },
           "id": {
             "type": "string",
           },
@@ -836,6 +1053,19 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "dependsOn": {
             "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "gates": {
+            "items": {
+              "enum": [
+                "select",
+                "build",
+                "test",
+                "run",
+                "deploy",
+              ],
               "type": "string",
             },
             "type": "array",
@@ -1032,6 +1262,74 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
         "type": "object",
       },
+      "GateConfig": {
+        "properties": {
+          "criteria": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "gate": {
+            "enum": [
+              "select",
+              "build",
+              "test",
+              "run",
+              "deploy",
+            ],
+            "type": "string",
+          },
+          "maxIterations": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer",
+          },
+          "promptId": {
+            "type": "string",
+          },
+          "promptText": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "gate",
+          "criteria",
+        ],
+        "type": "object",
+      },
+      "GateRunSummary": {
+        "properties": {
+          "gate": {
+            "enum": [
+              "select",
+              "build",
+              "test",
+              "run",
+              "deploy",
+            ],
+            "type": "string",
+          },
+          "iterations": {
+            "minimum": 0,
+            "type": "integer",
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "skipped",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "gate",
+          "status",
+          "iterations",
+        ],
+        "type": "object",
+      },
       "GroupAggregates": {
         "properties": {
           "completionTokens": {
@@ -1076,6 +1374,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       "GroupUniformValues": {
         "properties": {
           "agentVersion": {
+            "type": "string",
+          },
+          "codebaseRevisionId": {
             "type": "string",
           },
           "extensions": {
@@ -1716,6 +2017,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "prompt": {
             "type": "string",
           },
+          "type": {
+            "$ref": "#/components/schemas/PromptType",
+          },
           "updatedAt": {
             "format": "date-time",
             "type": [
@@ -1749,6 +2053,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "evaluated",
         ],
         "type": "object",
+      },
+      "PromptType": {
+        "enum": [
+          "select",
+          "build",
+          "test",
+          "run",
+          "deploy",
+          "agents.md",
+        ],
+        "type": "string",
       },
       "RegisterAgentVersionInput": {
         "properties": {
@@ -2087,6 +2402,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "agentVersion": {
             "type": "string",
           },
+          "agentsMdParentIds": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "agentsMdPromptId": {
+            "type": "string",
+          },
+          "codebaseRevisionId": {
+            "type": "string",
+          },
           "createdAt": {
             "format": "date-time",
             "type": [
@@ -2104,6 +2431,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "extensions": {
             "items": {
               "type": "string",
+            },
+            "type": "array",
+          },
+          "gateSummaries": {
+            "items": {
+              "$ref": "#/components/schemas/GateRunSummary",
+            },
+            "type": "array",
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/GateConfig",
             },
             "type": "array",
           },
@@ -2175,6 +2514,107 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
         "type": "object",
       },
+      "ResolveCodebaseRevisionInput": {
+        "properties": {
+          "creator": {
+            "type": "string",
+          },
+          "requestedRef": {
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
+      "RunFacetBucket": {
+        "properties": {
+          "count": {
+            "type": "number",
+          },
+          "value": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "value",
+          "count",
+        ],
+        "type": "object",
+      },
+      "RunFacetsResponse": {
+        "properties": {
+          "facets": {
+            "properties": {
+              "agentVersion": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "model": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "os": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "outcome": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "priority": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "profileId": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "status": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "workerType": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+            },
+            "required": [
+              "workerType",
+              "status",
+              "outcome",
+              "model",
+              "os",
+              "priority",
+              "agentVersion",
+              "profileId",
+            ],
+            "type": "object",
+          },
+          "total": {
+            "type": "number",
+          },
+        },
+        "required": [
+          "total",
+          "facets",
+        ],
+        "type": "object",
+      },
       "RunGroup": {
         "properties": {
           "aggregates": {
@@ -2216,6 +2656,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "attemptNumber": {
             "minimum": 1,
             "type": "integer",
+          },
+          "durationMs": {
+            "type": "number",
           },
           "error": {
             "type": "string",
@@ -2622,6 +3065,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "_id": {
             "type": "string",
           },
+          "contentBlobUrl": {
+            "type": "string",
+          },
           "createdAt": {
             "format": "date-time",
             "type": [
@@ -2652,10 +3098,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "text": {
             "type": "string",
           },
+          "type": {
+            "$ref": "#/components/schemas/PromptType",
+          },
         },
         "required": [
           "_id",
-          "text",
           "createdAt",
         ],
         "type": "object",
@@ -2719,10 +3167,38 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "type": "object",
       },
+      "UpdateCodebaseInput": {
+        "properties": {
+          "defaultBranch": {
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
       "UpdateCriteriaInput": {
         "properties": {
           "dependsOn": {
             "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "gates": {
+            "items": {
+              "enum": [
+                "select",
+                "build",
+                "test",
+                "run",
+                "deploy",
+              ],
               "type": "string",
             },
             "type": "array",
@@ -3464,6 +3940,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           {
             "in": "query",
+            "name": "features",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
             "name": "submissionId",
             "required": false,
             "schema": {
@@ -3500,6 +3984,243 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/codebase-revisions/{id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodebaseRevisionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Revision not found",
+          },
+        },
+        "summary": "Get codebase revision by id",
+        "tags": [
+          "Codebase Revisions",
+        ],
+      },
+    },
+    "/api/v1/codebase-revisions/{id}/archive": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Binary tar.gz archive",
+          },
+          "404": {
+            "description": "Revision or archive not found",
+          },
+          "500": {
+            "description": "Blob storage error",
+          },
+        },
+        "summary": "Download codebase revision archive",
+        "tags": [
+          "Codebase Revisions",
+        ],
+      },
+    },
+    "/api/v1/codebases": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CodebaseResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List all codebases",
+        "tags": [
+          "Codebases",
+        ],
+      },
+      "post": {
+        "responses": {
+          "201": {
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid input or missing archive",
+          },
+        },
+        "summary": "Create a codebase (archive codebases require the archive file)",
+        "tags": [
+          "Codebases",
+        ],
+      },
+    },
+    "/api/v1/codebases/{id}": {
+      "delete": {
+        "responses": {
+          "204": {
+            "description": "Success",
+          },
+          "404": {
+            "description": "Codebase not found",
+          },
+        },
+        "summary": "Delete a codebase",
+        "tags": [
+          "Codebases",
+        ],
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodebaseResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Codebase not found",
+          },
+        },
+        "summary": "Get a codebase",
+        "tags": [
+          "Codebases",
+        ],
+      },
+      "patch": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCodebaseInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodebaseResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Codebase not found",
+          },
+        },
+        "summary": "Update a codebase",
+        "tags": [
+          "Codebases",
+        ],
+      },
+    },
+    "/api/v1/codebases/{id}/revisions": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CodebaseRevisionResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Codebase not found",
+          },
+        },
+        "summary": "List codebase revisions",
+        "tags": [
+          "Codebases",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveCodebaseRevisionInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodebaseRevisionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Not a git codebase",
+          },
+          "404": {
+            "description": "Codebase not found",
+          },
+          "502": {
+            "description": "GitHub resolution failed",
+          },
+        },
+        "summary": "Resolve a new git codebase revision",
+        "tags": [
+          "Codebases",
+        ],
+      },
+    },
+    "/api/v1/codebases/{id}/upload": {
+      "post": {
+        "responses": {
+          "201": {
+            "description": "Success",
+          },
+          "400": {
+            "description": "Missing archive or not an archive codebase",
+          },
+          "404": {
+            "description": "Codebase not found",
+          },
+        },
+        "summary": "Upload a codebase archive as a new revision",
+        "tags": [
+          "Codebases",
+        ],
+      },
+    },
     "/api/v1/criteria": {
       "get": {
         "parameters": [
@@ -3508,6 +4229,30 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "q",
             "required": false,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Comma-separated criterion IDs to include",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "description": "Comma-separated criterion IDs to include",
+              "type": "string",
+            },
+          },
+          {
+            "description": "When true and ids is set, also include dependency ancestors",
+            "in": "query",
+            "name": "ancestors",
+            "required": false,
+            "schema": {
+              "description": "When true and ids is set, also include dependency ancestors",
+              "enum": [
+                "true",
+                "false",
+              ],
               "type": "string",
             },
           },
@@ -3576,6 +4321,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   "currentId": {
                     "type": "string",
                   },
+                  "gates": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
                 },
                 "required": [
                   "behavior",
@@ -3594,9 +4345,27 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "prompt": {
                       "type": "string",
                     },
+                    "suggestedChildren": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "suggestedId": {
+                      "type": "string",
+                    },
+                    "suggestedParents": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
                   },
                   "required": [
                     "prompt",
+                    "suggestedId",
+                    "suggestedParents",
+                    "suggestedChildren",
                   ],
                   "type": "object",
                 },
@@ -3748,6 +4517,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               },
             },
             "description": "Success",
+          },
+          "400": {
+            "description": "Seed batch would introduce a dependency cycle",
           },
         },
         "summary": "Seed criteria in bulk",
@@ -5022,6 +5794,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "disappeared",
+              ],
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -5516,6 +6300,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "enum": [
+                "select",
+                "agents.md",
+              ],
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -5582,6 +6378,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "type": "string",
                   },
                   "text": {
+                    "type": "string",
+                  },
+                  "type": {
+                    "enum": [
+                      "select",
+                      "agents.md",
+                    ],
                     "type": "string",
                   },
                 },
@@ -6553,7 +7356,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "worker",
             "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
             },
           },
           {
@@ -6585,7 +7398,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "profileId",
             "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
             },
           },
           {
@@ -6593,14 +7416,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "status",
             "required": false,
             "schema": {
-              "enum": [
-                "pending",
-                "queued",
-                "processing",
-                "paused",
-                "done",
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
               ],
-              "type": "string",
             },
           },
           {
@@ -6608,11 +7434,96 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "outcome",
             "required": false,
             "schema": {
-              "enum": [
-                "succeeded",
-                "failed",
-                "finished",
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
               ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "os",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "priority",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "agentVersion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
               "type": "string",
             },
           },
@@ -6673,10 +7584,52 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "required": false,
             "schema": {
               "enum": [
-                "createdAt",
+                "created",
+                "updated",
                 "priority",
+                "worker",
+                "status",
+                "id",
+                "duration",
+                "createdAt",
               ],
               "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "sortDir",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "createdAfter",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "createdBefore",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null",
+              ],
             },
           },
           {
@@ -6767,6 +7720,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "default": undefined,
                     "properties": {
                       "agentVersion": {
+                        "type": "string",
+                      },
+                      "codebase": {
                         "type": "string",
                       },
                       "count": {
@@ -7261,6 +8217,27 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Bulk retry requests (start new attempts)",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/facets": {
+      "get": {
+        "description": "Returns every distinct value and its full-dataset count per categorical filter dimension for the Runs list rail. Counts are absolute over all non-deleted runs: they intentionally ignore the active search, date range, iteration, and categorical selections so every selectable value stays visible with a stable count. Computed with parallel $group aggregations (Cosmos has no $facet) and cached process-wide for a short TTL.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunFacetsResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List run filter facets",
         "tags": [
           "Requests",
         ],
@@ -8541,6 +9518,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PromptType",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -8731,6 +9716,51 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Get task prompt",
+        "tags": [
+          "Task Prompts",
+        ],
+      },
+    },
+    "/api/v1/task-prompts/{id}/content": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                    },
+                    "text": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "text",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Task prompt not found",
+          },
+        },
+        "summary": "Get resolved task prompt content",
         "tags": [
           "Task Prompts",
         ],

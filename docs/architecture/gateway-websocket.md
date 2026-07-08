@@ -105,6 +105,29 @@ Each WebSocket connection produces a single HAR entry:
 
 This matches Chrome DevTools behavior.
 
+### Downstream consumers (judge tool-call extraction)
+
+The judge's HAR parser reads these frames when reconstructing an agent's tool-call
+history. `extractToolCalls` (`packages/shared/src/har/har-parser.ts`) calls
+`extractResponsesApiFromWebSocketMessages` (`responses-api-parser.ts`) for every entry that
+carries `_webSocketMessages`:
+
+- **`send`** frames are the client's `response.create` messages; their top-level `input[]`
+  transcript (accumulated `function_call` / `custom_tool_call` calls plus their
+  `function_call_output` / `custom_tool_call_output` results) is fed to the same
+  request-body extractor used for HTTP.
+- **`receive`** frames are the server's streamed events (e.g. `response.output_item.done`);
+  they are the same objects as SSE `data:` payloads and are fed to the same response-body
+  extractor.
+- Binary frames (`opcode 2`) and any malformed / non-JSON payloads are skipped.
+
+Because this reuses the existing Responses-API semantic parsers and is gated purely on the
+**presence** of `_webSocketMessages`, it is a no-op for HTTP-only (DevProxy) HARs. Before
+this transport unwrapping was added (#1253), gpt-5.x runs whose `/responses` traffic lived
+entirely in WebSocket frames produced an **empty** tool-call history even though the
+payloads were present in the HAR. See
+[`docs/design/gates.md`](../design/gates.md) for how tool-call evidence feeds the gates.
+
 ## Plugin API Mapping
 
 The gateway's plugin system receives WebSocket connections as `HttpExchange`:

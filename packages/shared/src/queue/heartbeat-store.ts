@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const Redis = require("ioredis");
 
 import type { RedisConfig } from "../logging/log-publisher.js";
+import { clusterSafeMget } from "./cluster-safe-mget.js";
 
 /**
  * Per-run liveness heartbeat storage.
@@ -27,6 +28,17 @@ export interface HeartbeatStore {
   mget(runIds: string[]): Promise<Map<string, Date>>;
   delete(runId: string): Promise<void>;
   close(): Promise<void>;
+
+  /**
+   * Liveness probe for the backend. Returns `true` when the store is reachable.
+   *
+   * Used by the stuck-run reaper to distinguish "Redis is down" (skip the
+   * sweep — `mget` would return an empty map and a missing heartbeat would be
+   * misread as a dead worker) from "Redis is healthy but the key is absent"
+   * (a genuinely dead worker). Implementations must never throw — return
+   * `false` on any error.
+   */
+  ping(): Promise<boolean>;
 
   // --- Cancellation signal ---
 
@@ -151,9 +163,10 @@ export class RedisHeartbeatStore implements HeartbeatStore {
     const out = new Map<string, Date>();
     if (runIds.length === 0) return out;
     try {
-      const vals: (string | null)[] = await this.redis.mget(runIds.map(keyFor));
-      vals.forEach((v, i) => {
-        if (!v) return;
+      // Cluster-safe batch read (see {@link clusterSafeMget}, issue #1064).
+      const values = await clusterSafeMget(this.redis, runIds.map(keyFor));
+      values.forEach((v, i) => {
+        if (typeof v !== "string") return;
         const ms = Date.parse(v);
         if (Number.isFinite(ms)) out.set(runIds[i], new Date(ms));
       });
@@ -168,6 +181,16 @@ export class RedisHeartbeatStore implements HeartbeatStore {
       await this.redis.del(keyFor(runId));
     } catch (err) {
       console.warn(`[heartbeat-store] delete ${runId} failed:`, (err as Error).message);
+    }
+  }
+
+  async ping(): Promise<boolean> {
+    try {
+      const res = await this.redis.ping();
+      return res === "PONG";
+    } catch (err) {
+      console.warn(`[heartbeat-store] ping failed:`, (err as Error).message);
+      return false;
     }
   }
 
@@ -274,6 +297,10 @@ export class InMemoryHeartbeatStore implements HeartbeatStore {
 
   async delete(runId: string): Promise<void> {
     this.map.delete(runId);
+  }
+
+  async ping(): Promise<boolean> {
+    return true;
   }
 
   async close(): Promise<void> {

@@ -13,3 +13,13 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** Runtime configuration injected via /config.js before the app boots. */
+interface ScopeRuntimeConfig {
+  /** Base URL for the public docs site (no trailing slash required). */
+  docsBaseUrl?: string;
+}
+
+interface Window {
+  __SCOPE_CONFIG__?: ScopeRuntimeConfig;
+}

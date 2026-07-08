@@ -8,8 +8,8 @@ import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
-import { TaskPromptStore, SkillRevisionStore, SkillResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore } from "shared";
-import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, ProfileDocument, ProfileVersionDocument, HeartbeatStore } from "shared";
+import { TaskPromptStore, SkillRevisionStore, SkillResolver, CodebaseStore, CodebaseRevisionStore, CodebaseResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore } from "shared";
+import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, ProfileDocument, ProfileVersionDocument, HeartbeatStore } from "shared";
 import { acquireGitHubPublicApiToken } from "./github-api-token.js";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
@@ -33,6 +33,7 @@ import { registerAgentsRoutes } from "./routes/agents.js";
 import { registerModelsRoutes } from "./routes/models.js";
 import { registerMcpServersRoutes } from "./routes/mcp-servers.js";
 import { registerSkillsRoutes } from "./routes/skills.js";
+import { registerCodebasesRoutes } from "./routes/codebases.js";
 import { registerExtensionsRoutes } from "./routes/extensions.js";
 import { registerInsightsRoutes } from "./routes/insights.js";
 import { registerSecretsRoutes } from "./routes/secrets.js";
@@ -103,6 +104,11 @@ let skillRevisionStore: SkillRevisionStore;
 let profileCollection: Collection<ProfileDocument>;
 let profileVersionCollection: Collection<ProfileVersionDocument>;
 let skillResolver: SkillResolver;
+let codebaseCollection: Collection<CodebaseDocument>;
+let codebaseRevisionCollection: Collection<CodebaseRevisionDocument>;
+let codebaseStore: CodebaseStore;
+let codebaseRevisionStore: CodebaseRevisionStore;
+let codebaseResolver: CodebaseResolver;
 let blobStorage: BlobStorage;
 let heartbeatStore: HeartbeatStore;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
@@ -124,7 +130,10 @@ async function initializeClients(): Promise<void> {
   mcpServerCollection = db.collection<McpServerDocument>("mcp-servers");
   insightsCollection = db.collection<InsightDocument>("insights");
   taskPromptCollection = db.collection<TaskPromptDocument>("task-prompts");
-  taskPromptStore = new TaskPromptStore(taskPromptCollection);
+  // Blob storage is also (re)assigned below for logs/snapshots; construct an
+  // instance here so the task-prompt store can offload over-threshold bodies.
+  blobStorage = new BlobStorage({ storageAccountName, storageConnectionString });
+  taskPromptStore = new TaskPromptStore(taskPromptCollection, blobStorage);
   featureFlagCollection = db.collection<FeatureFlagDocument>("feature-flags");
   reportTemplateCollection = db.collection<ReportTemplateDocument>("report-templates");
   skillCollection = db.collection<SkillDocument>("skills");
@@ -137,22 +146,35 @@ async function initializeClients(): Promise<void> {
   profileCollection = db.collection<ProfileDocument>("profiles");
   profileVersionCollection = db.collection<ProfileVersionDocument>("profile-versions");
 
+  codebaseCollection = db.collection<CodebaseDocument>("codebases");
+  codebaseRevisionCollection = db.collection<CodebaseRevisionDocument>("codebase-revisions");
+  codebaseStore = new CodebaseStore(codebaseCollection);
+  codebaseRevisionStore = new CodebaseRevisionStore(codebaseRevisionCollection, codebaseStore);
+  codebaseResolver = new CodebaseResolver({
+    tokenProvider: acquireGitHubPublicApiToken,
+  });
+
   // Note: Collection indexes are managed by db-migrations (see 002-create-indexes.ts).
   // Run `pnpm migrate:up` to apply pending migrations.
 
   // Seed default feature flags (upsert — won't overwrite existing enabled state)
-  const defaultFlags: Array<{ key: string; label: string }> = [
+  const defaultFlags: Array<{ key: string; label: string; enabled?: boolean }> = [
     { key: "mcp", label: "MCP Servers" },
     { key: "models", label: "Models" },
     { key: "agents", label: "Agents" },
     { key: "tokens", label: "Tokens" },
     { key: "extensions", label: "VS Code Extensions" },
     { key: "statistics-graph", label: "Statistics Graph" },
+    // Gate pipeline: Run and Deploy are not ready for users yet — hidden in the
+    // portal by default. Backend/CLI stay permissive; flip these on in Admin
+    // when ready. See apps/portal/src/lib/gates.ts (GATE_FEATURE_FLAGS).
+    { key: "gates-run", label: "Run Gate", enabled: false },
+    { key: "gates-deploy", label: "Deploy Gate", enabled: false },
   ];
   for (const flag of defaultFlags) {
     await featureFlagCollection.updateOne(
       { key: flag.key },
-      { $setOnInsert: { key: flag.key, label: flag.label, enabled: true, updatedAt: new Date() } },
+      { $setOnInsert: { key: flag.key, label: flag.label, enabled: flag.enabled ?? true, updatedAt: new Date() } },
       { upsert: true }
     );
   }
@@ -201,7 +223,9 @@ async function initializeClients(): Promise<void> {
 
   console.log(`Initialized Queue clients for workers: ${Array.from(queueClients.keys()).join(", ")}, report`);
 
-  // Initialize blob storage (used for log persistence and snapshots)
+  // Initialize blob storage (used for log persistence and snapshots).
+  // Already constructed above for the task-prompt store; reassign to keep the
+  // original initialization order/comment intact.
   blobStorage = new BlobStorage({ storageAccountName, storageConnectionString });
 
   // Initialize Redis-backed heartbeat store. Workers write per-run
@@ -245,6 +269,11 @@ const routeCtx: RouteContext = {
   get taskPromptStore() { return taskPromptStore; },
   get skillRevisionStore() { return skillRevisionStore; },
   get skillResolver() { return skillResolver; },
+  get codebaseCollection() { return codebaseCollection; },
+  get codebaseRevisionCollection() { return codebaseRevisionCollection; },
+  get codebaseStore() { return codebaseStore; },
+  get codebaseRevisionStore() { return codebaseRevisionStore; },
+  get codebaseResolver() { return codebaseResolver; },
   get queueClients() { return queueClients; },
   get reportQueueClient() { return reportQueueClient; },
   get blobStorage() { return blobStorage; },
@@ -278,6 +307,7 @@ registerAgentsRoutes(routeCtx);
 registerModelsRoutes(routeCtx);
 registerMcpServersRoutes(routeCtx);
 registerSkillsRoutes(routeCtx);
+registerCodebasesRoutes(routeCtx);
 registerExtensionsRoutes(routeCtx);
 registerInsightsRoutes(routeCtx);
 registerFeatureFlagRoutes(routeCtx);
@@ -334,6 +364,11 @@ export interface TestDependencies {
   skillRevisionCollection?: Collection<SkillRevisionDocument>;
   skillRevisionStore?: SkillRevisionStore;
   skillResolver?: SkillResolver;
+  codebaseCollection?: Collection<CodebaseDocument>;
+  codebaseRevisionCollection?: Collection<CodebaseRevisionDocument>;
+  codebaseStore?: CodebaseStore;
+  codebaseRevisionStore?: CodebaseRevisionStore;
+  codebaseResolver?: CodebaseResolver;
   queueClients?: Map<WorkerType, QueueClient>;
   reportQueueClient?: QueueClient;
   blobStorage?: BlobStorage;
@@ -362,6 +397,11 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.skillRevisionCollection) skillRevisionCollection = deps.skillRevisionCollection;
   if (deps.skillRevisionStore) skillRevisionStore = deps.skillRevisionStore;
   if (deps.skillResolver) skillResolver = deps.skillResolver;
+  if (deps.codebaseCollection) codebaseCollection = deps.codebaseCollection;
+  if (deps.codebaseRevisionCollection) codebaseRevisionCollection = deps.codebaseRevisionCollection;
+  if (deps.codebaseStore) codebaseStore = deps.codebaseStore;
+  if (deps.codebaseRevisionStore) codebaseRevisionStore = deps.codebaseRevisionStore;
+  if (deps.codebaseResolver) codebaseResolver = deps.codebaseResolver;
   if (deps.queueClients) queueClients.clear(), deps.queueClients.forEach((v, k) => queueClients.set(k, v));
   if (deps.reportQueueClient) reportQueueClient = deps.reportQueueClient;
   if (deps.blobStorage) blobStorage = deps.blobStorage;

@@ -4,3 +4,5 @@ prompt: |
   or typescript dependency in package.json.
 depends_on:
   - has_node
+gates:
+  - select

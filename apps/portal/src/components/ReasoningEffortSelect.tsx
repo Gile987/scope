@@ -19,8 +19,8 @@ import type { ModelCapabilities } from "@/types";
 
 export function useModelCapabilities(agentId: string | undefined) {
   const { data: agentModels = [] } = useQuery({
-    queryKey: ["models", agentId],
-    queryFn: () => api.listModels({ agentId: agentId! }),
+    queryKey: ["models", agentId, "active"],
+    queryFn: () => api.listModels({ agentId: agentId!, status: "active" }),
     enabled: !!agentId,
   });
 
@@ -30,7 +30,10 @@ export function useModelCapabilities(agentId: string | undefined) {
       .map((m) => [m.modelId, m.capabilities])
   );
 
-  return { agentModels, capabilitiesMap };
+  // Sorted list of active model IDs derived from the models collection (source of truth)
+  const activeModelIds = agentModels.map((m) => m.modelId).sort();
+
+  return { agentModels, capabilitiesMap, activeModelIds };
 }
 
 // --- Hook: useReasoningEffort ---
@@ -107,7 +110,7 @@ export function ModelSelectItems({
               {m}
               {m === defaultModel ? " (default)" : ""}
               {efforts && efforts.map((e) => (
-                <Badge key={e} variant="outline" className="text-xs font-medium bg-gray-200">
+                <Badge key={e} variant="secondary" className="text-xs font-medium">
                   {e}
                 </Badge>
               ))}

@@ -3,6 +3,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { WorkerResult } from "../types/types.js";
+// Resolves to the mocked class defined in vi.mock("./judge-client.js") below.
+import { JudgeInfrastructureError } from "./judge-client.js";
+
 // Mock BlobStorage
 const mockUploadFile = vi.fn();
 vi.mock("../storage/blob-storage.js", () => ({
@@ -26,6 +29,15 @@ vi.mock("./judge-client.js", () => ({
   JudgeClient: vi.fn().mockImplementation(() => ({
     evaluate: vi.fn().mockResolvedValue({ passed: true, feedback: "All good" }),
   })),
+  JudgeInfrastructureError: class JudgeInfrastructureError extends Error {
+    readonly isInfrastructure = true as const;
+    readonly isVersionMismatch: boolean;
+    constructor(message: string, opts: { isVersionMismatch?: boolean } = {}) {
+      super(message);
+      this.name = "JudgeInfrastructureError";
+      this.isVersionMismatch = opts.isVersionMismatch ?? false;
+    }
+  },
 }));
 
 // Import after mocks
@@ -310,7 +322,7 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     expect((config.blobStorage as any).writeToolCalls).not.toHaveBeenCalled();
   });
 
-  it("does not record toolCallsUrl when extraction returns empty array", async () => {
+  it("does not record toolCallsUrl but warns when extraction returns empty array", async () => {
     mockSanitizeHarFile.mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
     mockExtractToolCalls.mockReturnValue([]);
 
@@ -326,6 +338,14 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     expect(result.turns[0].toolCallsUrl).toBeUndefined();
     expect(result.turns[0].toolCallCount).toBeUndefined();
     expect((config.blobStorage as any).writeToolCalls).not.toHaveBeenCalled();
+    // Gate 4: a captured HAR that yields zero tool calls must NOT be silent —
+    // it is almost always an unsupported wire format starving the judge of
+    // tool-call evidence, so the loop must emit a loud warning.
+    expect(mockLog).toHaveBeenCalledWith(
+      "warn",
+      expect.stringContaining("0 tool calls extracted"),
+      expect.anything()
+    );
   });
 
   it("logs warning but continues when tool call extraction fails", async () => {
@@ -398,6 +418,70 @@ describe("runMultiTurnLoop — hadError", () => {
     expect(result.passed).toBe(false);
     expect(result.hadError).toBe(false);
     expect(result.finalResult).toContain("Max iterations");
+  });
+  it("judge protocol-version mismatch → hadError with a distinct infrastructure label and metadata", async () => {
+    const config = makeConfig({
+      maxIterations: 1,
+      judgeClient: {
+        evaluate: vi.fn().mockRejectedValue(
+          new JudgeInfrastructureError("Judge infra: protocol mismatch", { isVersionMismatch: true })
+        ),
+      } as any,
+    });
+    (config.processor as any).processMessage.mockResolvedValue({ response: "did work" } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.passed).toBe(false);
+    expect(result.hadError).toBe(true);
+    expect(result.finalResult).toContain("Judge infrastructure error (evaluation could not run");
+    expect(result.turns[0].judgeFeedback).toContain("Judge infrastructure error (evaluation could not run");
+
+    const infraLog = (config.log as any).mock.calls.find(
+      (c: any[]) => typeof c[1] === "string" && c[1].includes("Judge infrastructure error")
+    );
+    expect(infraLog).toBeTruthy();
+    expect(infraLog[2]).toMatchObject({ judgeInfrastructureError: true, protocolVersionMismatch: true });
+  });
+
+  it("generic judge infrastructure error (non-version) sets the infra flag without protocolVersionMismatch", async () => {
+    const config = makeConfig({
+      maxIterations: 1,
+      judgeClient: {
+        evaluate: vi.fn().mockRejectedValue(new JudgeInfrastructureError("Judge infra: HTTP 503")),
+      } as any,
+    });
+    (config.processor as any).processMessage.mockResolvedValue({ response: "did work" } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.hadError).toBe(true);
+    expect(result.finalResult).toContain("Judge infrastructure error (evaluation could not run");
+    const infraLog = (config.log as any).mock.calls.find(
+      (c: any[]) => typeof c[1] === "string" && c[1].includes("Judge infrastructure error")
+    );
+    expect(infraLog).toBeTruthy();
+    expect(infraLog[2].judgeInfrastructureError).toBe(true);
+    expect(infraLog[2].protocolVersionMismatch).toBeUndefined();
+  });
+
+  it("a non-infrastructure judge error keeps the plain 'Judge evaluation failed' label", async () => {
+    const config = makeConfig({
+      maxIterations: 1,
+      judgeClient: { evaluate: vi.fn().mockRejectedValue(new Error("transient boom")) } as any,
+    });
+    (config.processor as any).processMessage.mockResolvedValue({ response: "did work" } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.hadError).toBe(true);
+    expect(result.finalResult).toContain("Judge evaluation failed");
+    expect(result.finalResult).not.toContain("infrastructure error");
+    const failLog = (config.log as any).mock.calls.find(
+      (c: any[]) => typeof c[1] === "string" && c[1].includes("Judge evaluation failed")
+    );
+    expect(failLog).toBeTruthy();
+    expect(failLog[2].judgeInfrastructureError).toBeUndefined();
   });
 });
 
@@ -571,6 +655,79 @@ describe("runMultiTurnLoop — optional criteria (issue #605)", () => {
 
     expect(result.passed).toBe(true);
     expect(judgeEvaluate).toHaveBeenCalledTimes(1);
+  });
+
+  // Issue #1136: the judge must receive the coding agent's response for the
+  // iteration under evaluation (inline `currentAgentResponse`) so criteria can
+  // grade what the agent said. The current turn isn't persisted until after the
+  // judge returns, so inline transport is the only way the judge can see it.
+  it("forwards the coding agent's response to the judge as currentAgentResponse", async () => {
+    const judgeEvaluate = vi.fn().mockResolvedValue({ passed: true, feedback: "OK" });
+    const config = makeConfig({
+      criteria: ["has_button"],
+      maxIterations: 1,
+      processor: {
+        workerName: "test-worker",
+        processMessage: vi
+          .fn()
+          .mockResolvedValue({ response: "The factorial of 5 is 120." } satisfies WorkerResult),
+      },
+      judgeClient: { evaluate: judgeEvaluate },
+    });
+
+    await runMultiTurnLoop(config as any);
+
+    expect(judgeEvaluate).toHaveBeenCalledTimes(1);
+    expect(judgeEvaluate).toHaveBeenCalledWith(
+      expect.objectContaining({ currentAgentResponse: "The factorial of 5 is 120." }),
+    );
+  });
+
+  // Issue #1255: the judge assembles the whole run's tool calls and labels the
+  // current iteration by number, so the loop must forward the iteration index on
+  // every evaluate call.
+  it("forwards the current iteration number to the judge", async () => {
+    const judgeEvaluate = vi
+      .fn()
+      .mockResolvedValueOnce({ passed: false, feedback: "keep going" })
+      .mockResolvedValueOnce({ passed: true, feedback: "OK" });
+    const config = makeConfig({
+      criteria: ["has_button"],
+      maxIterations: 2,
+      processor: {
+        workerName: "test-worker",
+        processMessage: vi.fn().mockResolvedValue({ response: "did work" } satisfies WorkerResult),
+      },
+      judgeClient: { evaluate: judgeEvaluate },
+    });
+
+    await runMultiTurnLoop(config as any);
+
+    expect(judgeEvaluate).toHaveBeenCalledTimes(2);
+    expect(judgeEvaluate.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ iteration: 1 }),
+    );
+    expect(judgeEvaluate.mock.calls[1][0]).toEqual(
+      expect.objectContaining({ iteration: 2 }),
+    );
+  });
+
+  it("omits currentAgentResponse when the worker produced no response text", async () => {
+    const judgeEvaluate = vi.fn().mockResolvedValue({ passed: true, feedback: "OK" });
+    const config = makeConfig({
+      criteria: ["has_button"],
+      maxIterations: 1,
+      processor: {
+        workerName: "test-worker",
+        processMessage: vi.fn().mockResolvedValue({ response: "" } satisfies WorkerResult),
+      },
+      judgeClient: { evaluate: judgeEvaluate },
+    });
+
+    await runMultiTurnLoop(config as any);
+
+    expect(judgeEvaluate).toHaveBeenCalledTimes(1);
+    expect(judgeEvaluate.mock.calls[0][0]).not.toHaveProperty("currentAgentResponse");
   });
 
   it("throws when criteria is empty and maxIterations > 1", async () => {

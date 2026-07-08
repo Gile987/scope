@@ -28,6 +28,7 @@ packages/
   github-auth/                  # GitHub OAuth/device-code auth utilities
   model-scanning/               # Shared model scanning logic
   version-checking/             # Version comparison utilities
+  llm-eval/                     # LLM-graded eval harness (grader, sampling, rate-limit retry)
 config/                         # Benchmark definitions (YAML)
 deploy/                         # Kubernetes manifests (Kustomize + FluxCD)
 ```
@@ -206,6 +207,7 @@ pnpm test:integration             # Integration tests (requires .env + Docker)
 | [docs/architecture/token-manager.md](docs/architecture/token-manager.md) | Token storage, validation, round-robin distribution |
 | [docs/architecture/criteria-provider.md](docs/architecture/criteria-provider.md) | CriteriaProvider abstraction, filesystem vs REST backends |
 | [docs/architecture/skills.md](docs/architecture/skills.md) | Agent Skills spec, registration, resolution, delivery |
+| [docs/architecture/codebases.md](docs/architecture/codebases.md) | Codebase entity, immutable revisions, source types, worker seeding |
 | [docs/architecture/db-migrations.md](docs/architecture/db-migrations.md) | MongoDB migration framework |
 | [docs/architecture/deployment.md](docs/architecture/deployment.md) | Single-branch deployment, int→prod promotion |
 | [docs/architecture/cli-distribution.md](docs/architecture/cli-distribution.md) | CLI bundling, publishing, installation, update check |
