@@ -16,7 +16,8 @@ use std::time::{Duration, Instant};
 use parking_lot::RwLock;
 use serde::Serialize;
 use serde_json::Value;
-use tracing::{debug, info};
+use tokio::sync::watch;
+use tracing::{debug, info, warn};
 
 use crate::iteration_store::IterationStore;
 use crate::plugin::{PluginRegistry, SessionId};
@@ -34,6 +35,11 @@ pub struct Session {
     /// The reaper skips sessions with `in_flight > 0` so a long-running
     /// streaming response cannot be deleted out from under the request.
     pub in_flight: u32,
+    /// Cancellation signal for long-lived in-flight relays (notably persistent
+    /// WebSocket connections, e.g. Codex's Responses-over-WebSocket). Set to
+    /// `true` on explicit stop so the relay loop breaks and flushes its
+    /// accumulated `_webSocketMessages` HAR entry before the session finalizes.
+    pub cancel_tx: watch::Sender<bool>,
 }
 
 /// Summary returned by list / get endpoints.
@@ -144,6 +150,7 @@ impl SessionManager {
                     started_at: chrono::Utc::now(),
                     last_activity: Instant::now(),
                     in_flight: 0,
+                    cancel_tx: watch::channel(false).0,
                 },
             );
         }
@@ -179,7 +186,21 @@ impl SessionManager {
                 return Err(SessionError::NotActive);
             }
             session.active = false;
+            // Signal long-lived relays (persistent WebSocket connections) to
+            // break and flush their HAR entry. Workers stop the session as soon
+            // as a turn completes, while an agent like Codex keeps its
+            // Responses-over-WebSocket connection open — without this the
+            // buffered frames would never be recorded.
+            let _ = session.cancel_tx.send(true);
         }
+
+        // Wait for in-flight relays to flush (e.g. a cancelled WebSocket relay
+        // appends its `_webSocketMessages` entry, then drops its in-flight
+        // guard) before finalizing the HAR, so the captured frames are present
+        // when the worker immediately reads the HAR after stop returns.
+        self.drain_in_flight(session_id, Duration::from_secs(5))
+            .await;
+
         self.registry.on_session_stop(session_id).await;
 
         // Delete from Redis on explicit stop.
@@ -188,6 +209,45 @@ impl SessionManager {
         }
 
         Ok(())
+    }
+
+    /// Subscribe to a session's cancellation signal. Returns `None` if the
+    /// session no longer exists. Used by long-lived relays (WebSocket) to break
+    /// their loop when the session is explicitly stopped.
+    pub fn subscribe_cancel(&self, session_id: &SessionId) -> Option<watch::Receiver<bool>> {
+        self.sessions_lock
+            .read()
+            .get(session_id)
+            .map(|s| s.cancel_tx.subscribe())
+    }
+
+    /// Poll until a session has no in-flight requests or the timeout elapses.
+    /// Used on stop to give cancelled WebSocket relays a chance to flush their
+    /// HAR entry before the session is finalized.
+    async fn drain_in_flight(&self, session_id: &SessionId, timeout: Duration) {
+        let start = Instant::now();
+        loop {
+            let n = self
+                .sessions_lock
+                .read()
+                .get(session_id)
+                .map(|s| s.in_flight)
+                .unwrap_or(0);
+            if n == 0 {
+                return;
+            }
+            if start.elapsed() >= timeout {
+                warn!(
+                    session_id = %session_id,
+                    in_flight = n,
+                    timeout_secs = timeout.as_secs(),
+                    "drain_in_flight: timed out waiting for in-flight relays to flush; \
+                     recorded WebSocket/streaming HAR entries may be missing or truncated"
+                );
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
     }
 
     /// Delete a session entirely — clears plugin data and removes from the map.
@@ -555,6 +615,28 @@ mod tests {
             .await
             .unwrap();
         assert!(!second);
+    }
+
+    #[tokio::test]
+    async fn stop_session_signals_cancel() {
+        // A long-lived relay (e.g. a Codex Responses-over-WebSocket connection)
+        // subscribes to the cancel signal; stopping the session must flip it to
+        // true so the relay breaks and flushes its HAR entry.
+        let mgr = make_manager(100);
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+
+        let mut cancel_rx = mgr
+            .subscribe_cancel(&"s1".into())
+            .expect("session exists, receiver must be available");
+        assert!(!*cancel_rx.borrow_and_update());
+
+        mgr.stop_session(&"s1".into()).await.unwrap();
+
+        // The receiver should now observe the cancellation.
+        assert!(cancel_rx.has_changed().unwrap_or(true));
+        assert!(*cancel_rx.borrow());
     }
 
     #[tokio::test]

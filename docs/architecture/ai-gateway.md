@@ -478,7 +478,12 @@ The gateway runs as a standalone Deployment (not a sidecar) in the `scoped` name
 - **Service** with `sessionAffinity: ClientIP` (10 min timeout) — performance optimization: keeps a worker's connections pinned to one replica for in-memory cache hits (not required for correctness — sessions are resolved via Proxy-Authorization, not IP)
 - **Resources**: 100m CPU / 128Mi memory (requests), 500m CPU / 512Mi memory (limits) per pod
 
-Workers that use the gateway (currently VS Code Electron) have their DevProxy sidecar **removed entirely**. The worker pod drops from 3 containers to 1, and proxy URLs point to the gateway Service:
+Workers that use the gateway have their DevProxy sidecar (and its `fix-permissions`
+init container) **removed entirely**, and proxy URLs point to the gateway Service.
+Workers currently on the gateway: **VS Code Electron**, **Linux `coder-acp-copilot`**,
+and **Windows `coder-acp-copilot-windows`**. Removing the proxy sidecar drops the
+DevProxy container plus its init container; the Linux Copilot pod goes from 3 containers
+to 2 (it keeps its MCPJungle `mcp-gateway` sidecar, which is unrelated to the proxy):
 
 ```yaml
 env:
@@ -516,4 +521,15 @@ flowchart TD
     F --> G["Remove DevProxy sidecars + init containers"]
 ```
 
-**Current status (Phase 1.b):** VS Code Electron worker uses the gateway with Copilot token minting enabled (via `TOKEN_MANAGER_URL`). Other workers (ACP Copilot, ACP Claude Code) still use DevProxy sidecars. Both paths converge on the same `extractHarMetadata()` pipeline, so HAR output is identical regardless of backend.
+**Current status (Phase 3):** The gateway is the default backend. On it: the **VS Code
+Electron** worker (with Copilot token minting enabled via `TOKEN_MANAGER_URL`) and both
+**Copilot ACP** workers — **Windows** (#1058) and **Linux** (#723). The Copilot ACP
+workers run with the token plugin **disabled** (`GATEWAY_TOKEN_PLUGIN_ENABLED=false`)
+because the Copilot CLI manages its own token lifecycle. Only **ACP Claude Code** still
+uses a DevProxy sidecar. All paths converge on the same `extractHarMetadata()` pipeline,
+so HAR output is identical regardless of backend.
+
+Migrating the Linux Copilot worker is what makes gpt-5.x tool calls visible to the
+judge: DevProxy's HAR generator records HTTP only, but Copilot CLI ≥ 1.0.65 carries its
+`/responses` traffic over a **WebSocket**, which the gateway records into
+`_webSocketMessages` (see [`gateway-websocket.md`](./gateway-websocket.md)).

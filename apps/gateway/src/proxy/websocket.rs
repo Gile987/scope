@@ -17,6 +17,7 @@ use std::time::SystemTime;
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::watch;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::WebSocketStream;
 use tracing::debug;
@@ -88,17 +89,38 @@ fn message_to_record(msg: &Message, direction: &str) -> Option<WsMessage> {
     }
 }
 
+/// Resolve once the session's cancellation signal becomes `true`. If the
+/// sender has been dropped (e.g. a placeholder receiver for a session that no
+/// longer exists), this parks forever so the relay's select branch never wins.
+async fn wait_for_cancel(rx: &mut watch::Receiver<bool>) {
+    loop {
+        if *rx.borrow_and_update() {
+            return;
+        }
+        if rx.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
 /// Perform full bidirectional WebSocket relay between client and upstream,
 /// recording all messages flowing in both directions.
 ///
 /// This is the core relay function called after both sides have completed
 /// the WebSocket handshake.
+///
+/// The relay also watches `cancel_rx`: when the session is explicitly stopped
+/// the loop breaks and returns the messages captured so far. This is essential
+/// for agents (e.g. Codex) that keep a single WebSocket open for the whole
+/// turn — the worker stops the session before the socket closes, so without
+/// cancellation the `_webSocketMessages` would never be flushed to the HAR.
 pub async fn relay_websocket_bidirectional<C, U>(
     client_ws: WebSocketStream<C>,
     upstream_ws: WebSocketStream<U>,
     domain: &str,
     session_id: &SessionId,
     state: &Arc<ProxyState>,
+    mut cancel_rx: watch::Receiver<bool>,
 ) -> Vec<WsMessage>
 where
     C: AsyncRead + AsyncWrite + Unpin,
@@ -114,6 +136,13 @@ where
 
     loop {
         tokio::select! {
+            // Session stopped — close both sides and flush what we have.
+            _ = wait_for_cancel(&mut cancel_rx) => {
+                debug!("WebSocket relay for {} cancelled by session stop", domain);
+                let _ = upstream_sink.send(Message::Close(None)).await;
+                let _ = client_sink.send(Message::Close(None)).await;
+                break;
+            }
             // Client → Upstream
             client_msg = client_stream.next() => {
                 match client_msg {
