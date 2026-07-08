@@ -8,6 +8,10 @@
  * from the judge service, then verifies that JudgeClient retries correctly
  * and honors the server's suggested backoff duration.
  *
+ * Uses short server-suggested backoff durations (1-3s) so tests exercise
+ * the real retry path without waiting minutes. The differential test verifies
+ * that longer hints produce longer waits.
+ *
  * Run with: npx vitest run packages/shared/src/judge/judge-rate-limit.integration.test.ts
  */
 import { describe, it, expect, afterAll } from "vitest";
@@ -79,14 +83,17 @@ describe("JudgeClient — rate-limit retry integration", () => {
   });
 
   it("retries on rate-limit 500 and succeeds after backoff", async () => {
-    // Rate limit for first 2 calls, succeed on 3rd
-    mock = createMockJudgeServer({ rateLimitForCalls: 2 });
+    // Rate limit for first 2 calls (1s backoff each), succeed on 3rd
+    mock = createMockJudgeServer({
+      rateLimitForCalls: 2,
+      rateLimitMessage: "Sorry, you've hit a rate limit. Please try again in 1 seconds.",
+    });
     await mock.start();
 
     const client = new JudgeClient(`http://127.0.0.1:${mock.port}`, {
       timeoutMs: 10_000,
       maxRetries: 1,
-      rateLimitRetries: 4, // enough to survive 2 rate-limit responses
+      rateLimitRetries: 4,
     });
 
     const result = await client.evaluate({
@@ -98,17 +105,20 @@ describe("JudgeClient — rate-limit retry integration", () => {
     expect(result.passed).toBe(true);
     expect(result.feedback).toBe("All criteria passed");
     expect(mock.callCount()).toBe(3); // 2 rate-limited + 1 success
-  }, 120_000);
+  }, 10_000);
 
   it("reports rate-limit failure after all retries exhausted", async () => {
-    // Always rate-limit (never succeeds)
-    mock = createMockJudgeServer({ rateLimitForCalls: 100 });
+    // Always rate-limit (1s backoff, never succeeds)
+    mock = createMockJudgeServer({
+      rateLimitForCalls: 100,
+      rateLimitMessage: "Sorry, you've hit a rate limit. Please try again in 1 seconds.",
+    });
     await mock.start();
 
     const client = new JudgeClient(`http://127.0.0.1:${mock.port}`, {
       timeoutMs: 10_000,
       maxRetries: 1,
-      rateLimitRetries: 2, // only 2 retries
+      rateLimitRetries: 2,
     });
 
     await expect(
@@ -119,15 +129,15 @@ describe("JudgeClient — rate-limit retry integration", () => {
       })
     ).rejects.toThrow(/rate limit/i);
 
-    // Should have attempted initial call + 2 retries = 3 calls
+    // initial + 2 retries = 3 calls
     expect(mock.callCount()).toBe(3);
-  }, 120_000);
+  }, 10_000);
 
   it("honors server-suggested backoff: longer hint produces longer wait", async () => {
-    // Test with a short hint (2 seconds)
+    // Short hint: 1 second
     const shortMock = createMockJudgeServer({
       rateLimitForCalls: 1,
-      rateLimitMessage: "Sorry, you've hit a rate limit. Please try again in 2 seconds.",
+      rateLimitMessage: "Sorry, you've hit a rate limit. Please try again in 1 seconds.",
     });
     await shortMock.start();
 
@@ -146,15 +156,15 @@ describe("JudgeClient — rate-limit retry integration", () => {
     const shortElapsed = Date.now() - shortStart;
     await shortMock.stop();
 
-    // Test with a longer hint (8 seconds)
+    // Long hint: 3 seconds
     const longMock = createMockJudgeServer({
       rateLimitForCalls: 1,
-      rateLimitMessage: "Sorry, you've hit a rate limit. Please try again in 8 seconds.",
+      rateLimitMessage: "Sorry, you've hit a rate limit. Please try again in 3 seconds.",
     });
     await longMock.start();
 
     const longClient = new JudgeClient(`http://127.0.0.1:${longMock.port}`, {
-      timeoutMs: 30_000,
+      timeoutMs: 10_000,
       maxRetries: 1,
       rateLimitRetries: 3,
     });
@@ -168,16 +178,17 @@ describe("JudgeClient — rate-limit retry integration", () => {
     const longElapsed = Date.now() - longStart;
     await longMock.stop();
 
-    // The "8 seconds" hint should produce a measurably longer wait than "2 seconds"
+    // Both make exactly 2 calls (1 rate-limited + 1 success)
     expect(shortMock.callCount()).toBe(2);
     expect(longMock.callCount()).toBe(2);
-    expect(shortElapsed).toBeGreaterThanOrEqual(1_500); // at least ~2s wait
-    expect(longElapsed).toBeGreaterThanOrEqual(7_000);  // at least ~8s wait
-    expect(longElapsed).toBeGreaterThan(shortElapsed + 3_000); // differential: long is meaningfully longer
-  }, 30_000);
+    // Verify timing: short ~1s, long ~3s, differential >1.5s
+    expect(shortElapsed).toBeGreaterThanOrEqual(900);
+    expect(longElapsed).toBeGreaterThanOrEqual(2_800);
+    expect(longElapsed).toBeGreaterThan(shortElapsed + 1_500);
+  }, 10_000);
 
   it("succeeds immediately when no rate limit", async () => {
-    mock = createMockJudgeServer({ rateLimitForCalls: 0 }); // Never rate-limit
+    mock = createMockJudgeServer({ rateLimitForCalls: 0 });
     await mock.start();
 
     const client = new JudgeClient(`http://127.0.0.1:${mock.port}`, {
@@ -193,8 +204,8 @@ describe("JudgeClient — rate-limit retry integration", () => {
     });
 
     expect(result.passed).toBe(true);
-    expect(mock.callCount()).toBe(1); // single call, no retries
-  }, 10_000);
+    expect(mock.callCount()).toBe(1);
+  }, 5_000);
 
   it("health check works against mock server", async () => {
     mock = createMockJudgeServer({ rateLimitForCalls: 0 });
@@ -208,12 +219,15 @@ describe("JudgeClient — rate-limit retry integration", () => {
 
 describe("JudgeClient — concurrency behavior", () => {
   it("handles multiple concurrent evaluate calls with intermittent rate limits", async () => {
-    // Simulate a batch scenario: first 3 calls get rate-limited, rest succeed
-    const mock = createMockJudgeServer({ rateLimitForCalls: 3 });
+    // First 3 calls get rate-limited (1s backoff), rest succeed
+    const mock = createMockJudgeServer({
+      rateLimitForCalls: 3,
+      rateLimitMessage: "Sorry, you've hit a rate limit. Please try again in 1 seconds.",
+    });
     await mock.start();
 
     const client = new JudgeClient(`http://127.0.0.1:${mock.port}`, {
-      timeoutMs: 30_000,
+      timeoutMs: 10_000,
       maxRetries: 1,
       rateLimitRetries: 5,
     });
@@ -224,18 +238,16 @@ describe("JudgeClient — concurrency behavior", () => {
       conversationHistory: [] as any[],
     };
 
-    // Fire 3 concurrent evaluate calls
     const results = await Promise.all([
       client.evaluate(request),
       client.evaluate(request),
       client.evaluate(request),
     ]);
 
-    // All should eventually succeed
     for (const result of results) {
       expect(result.passed).toBe(true);
     }
 
     await mock.stop();
-  }, 120_000);
+  }, 10_000);
 });

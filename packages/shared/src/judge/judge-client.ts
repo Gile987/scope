@@ -202,19 +202,24 @@ export class JudgeClient {
   async evaluate(request: JudgeEvaluateRequest): Promise<JudgeEvaluateResponse> {
     const url = `${this.baseUrl}/api/v1/evaluate`;
     const criteriaCount = request.criteria.length;
-    const effectiveRetries = Math.max(this.maxRetries, this.rateLimitRetries);
 
     console.log(
       `[JudgeClient] Evaluating ${criteriaCount} criteria (timeout: ${this.timeoutMs}ms, retries: ${this.maxRetries}, rateLimitRetries: ${this.rateLimitRetries})`
     );
 
     let lastError: unknown;
-    for (let attempt = 0; attempt <= effectiveRetries; attempt++) {
+    let transientAttempts = 0;
+    let rateLimitAttempts = 0;
+
+    // Loop until we succeed or exhaust both budgets
+    const maxLoopIterations = this.maxRetries + this.rateLimitRetries + 1;
+    for (let i = 0; i < maxLoopIterations; i++) {
       try {
         return await this.doEvaluate(url, request);
       } catch (error) {
         lastError = error;
-        if (attempt >= effectiveRetries || !isRetryableJudgeError(error)) {
+
+        if (!isRetryableJudgeError(error)) {
           throw error;
         }
 
@@ -222,16 +227,24 @@ export class JudgeClient {
         let delayMs: number;
 
         if (isRateLimitError(error)) {
+          rateLimitAttempts++;
+          if (rateLimitAttempts > this.rateLimitRetries) {
+            throw error;
+          }
           // Honor the server's suggested backoff duration
           delayMs = parseRateLimitBackoff(error);
           console.warn(
-            `[JudgeClient] Rate limit hit on attempt ${attempt + 1}/${effectiveRetries} (waiting ${Math.round(delayMs / 1000)}s before retry): ${msg.substring(0, 200)}`
+            `[JudgeClient] Rate limit hit (attempt ${rateLimitAttempts}/${this.rateLimitRetries}, waiting ${Math.round(delayMs / 1000)}s before retry): ${msg.substring(0, 200)}`
           );
         } else {
+          transientAttempts++;
+          if (transientAttempts > this.maxRetries) {
+            throw error;
+          }
           // Exponential backoff with jitter for transient errors
-          delayMs = Math.min(5_000 * Math.pow(2, attempt), 5 * 60 * 1000) + Math.random() * 1_000;
+          delayMs = Math.min(5_000 * Math.pow(2, transientAttempts - 1), 5 * 60 * 1000) + Math.random() * 1_000;
           console.warn(
-            `[JudgeClient] Evaluate attempt ${attempt + 1}/${effectiveRetries} failed (retrying in ${Math.round(delayMs / 1000)}s): ${msg.substring(0, 200)}`
+            `[JudgeClient] Evaluate attempt ${transientAttempts}/${this.maxRetries} failed (retrying in ${Math.round(delayMs / 1000)}s): ${msg.substring(0, 200)}`
           );
         }
 
