@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces, initTelemetry, trackMetric, trackTrace, trackEvent } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { initTelemetry, trackMetric, trackTrace, trackEvent } from "telemetry";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 

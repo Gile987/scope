@@ -112,6 +112,9 @@ importers:
       tar-stream:
         specifier: ^3.1.7
         version: 3.1.7
+      telemetry:
+        specifier: workspace:*
+        version: link:../../packages/telemetry
       uuid:
         specifier: ^10.0.0
         version: 10.0.0
@@ -657,6 +660,9 @@ importers:
       shared:
         specifier: workspace:*
         version: link:../../../packages/shared
+      telemetry:
+        specifier: workspace:*
+        version: link:../../../packages/telemetry
     devDependencies:
       '@types/dockerode':
         specifier: ^4.0.1
@@ -688,6 +694,9 @@ importers:
       shared:
         specifier: workspace:*
         version: link:../../../packages/shared
+      telemetry:
+        specifier: workspace:*
+        version: link:../../../packages/telemetry
     devDependencies:
       tsx:
         specifier: ^4.20.3
@@ -851,18 +860,12 @@ importers:
       '@azure/identity':
         specifier: ^4.5.0
         version: 4.13.0
-      '@azure/monitor-opentelemetry':
-        specifier: ^1.7.0
-        version: 1.18.2
       '@azure/storage-blob':
         specifier: ^12.26.0
         version: 12.30.0
       '@azure/storage-queue':
         specifier: ^12.24.0
         version: 12.29.0
-      '@opentelemetry/api':
-        specifier: ^1.9.0
-        version: 1.9.1
       cockatiel:
         specifier: ^3.2.1
         version: 3.2.1
@@ -915,6 +918,22 @@ importers:
       yazl:
         specifier: ^3.3.1
         version: 3.3.1
+
+  packages/telemetry:
+    dependencies:
+      '@azure/monitor-opentelemetry':
+        specifier: ^1.7.0
+        version: 1.18.2
+      '@opentelemetry/api':
+        specifier: ^1.9.0
+        version: 1.9.1
+    devDependencies:
+      '@types/node':
+        specifier: ^22.7.0
+        version: 22.19.10
+      typescript:
+        specifier: ^5.6.2
+        version: 5.9.3
 
   packages/version-checking:
     devDependencies:

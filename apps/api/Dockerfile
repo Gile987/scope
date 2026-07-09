@@ -7,6 +7,7 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
 COPY packages/db-migrations/package.json ./packages/db-migrations/
 COPY apps/api/package.json ./apps/api/
 
@@ -14,7 +15,9 @@ RUN pnpm install --frozen-lockfile
 
 COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
-RUN pnpm --filter shared build
+COPY packages/telemetry/tsconfig.json ./packages/telemetry/
+COPY packages/telemetry/src ./packages/telemetry/src/
+RUN pnpm --filter shared build && pnpm --filter telemetry build
 
 COPY packages/db-migrations/tsconfig.json ./packages/db-migrations/
 COPY packages/db-migrations/src ./packages/db-migrations/src/
@@ -44,12 +47,14 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
 COPY packages/db-migrations/package.json ./packages/db-migrations/
 COPY apps/api/package.json ./apps/api/
 
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
+COPY --from=builder /app/packages/telemetry/dist ./packages/telemetry/dist/
 COPY --from=builder /app/packages/db-migrations/dist ./packages/db-migrations/dist/
 COPY --from=builder /app/apps/api/dist ./apps/api/dist/
 

@@ -1,0 +1,28 @@
+{
+  "name": "telemetry",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "@azure/monitor-opentelemetry": "^1.7.0",
+    "@opentelemetry/api": "^1.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.2"
+  }
+}

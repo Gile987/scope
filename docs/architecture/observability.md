@@ -12,7 +12,7 @@ graph TB
         W2[coder-acp-copilot-windows]
     end
 
-    subgraph "Telemetry Module<br/>(packages/shared/src/telemetry)"
+    subgraph "Telemetry Package<br/>(packages/telemetry)"
         INIT[initTelemetry]
         METER["OTel Meter API<br/>(Histogram / Counter)"]
         TRACE["trackTrace<br/>(gated by TELEMETRY_LOG_LEVEL)"]
@@ -93,12 +93,12 @@ graph TB
 
 ## Telemetry Module
 
-Located at `packages/shared/src/telemetry/`. All services import from `shared`.
+Located at `packages/telemetry/`. All services import from `"telemetry"`.
 
 ### Initialization
 
 ```typescript
-import { initTelemetry } from "shared";
+import { initTelemetry } from "telemetry";
 
 // Must be called BEFORE any other imports that make HTTP calls
 // (Express, MongoDB, etc.) so OTel auto-instrumentation hooks are applied.
@@ -127,7 +127,7 @@ When `APPLICATIONINSIGHTS_CONNECTION_STRING` is unset, `initTelemetry()` returns
 ### Shutdown
 
 ```typescript
-import { shutdownTelemetry } from "shared";
+import { shutdownTelemetry } from "telemetry";
 
 process.on("SIGTERM", async () => {
   await shutdownTelemetry(); // flushes pending telemetry
