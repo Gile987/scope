@@ -31,11 +31,11 @@ export no_proxy="$NO_PROXY"
 
 # Parse flags
 NO_CACHE=""
-BUILD_TARGETS=()
+BUILD_TARGETS=""
 for arg in "$@"; do
   case "$arg" in
     --no-cache) NO_CACHE="--no-cache" ;;
-    *) BUILD_TARGETS+=("$arg") ;;
+    *) BUILD_TARGETS="${BUILD_TARGETS:+$BUILD_TARGETS }$arg" ;;
   esac
 done
 
@@ -43,7 +43,7 @@ done
 ALL_SERVICES="api judge portal token-manager scheduler gateway coder-acp-copilot coder-acp-claude-code"
 
 # Validate requested targets
-for svc in "${BUILD_TARGETS[@]}"; do
+for svc in $BUILD_TARGETS; do
   valid=false
   for known in $ALL_SERVICES; do
     if [ "$svc" = "$known" ]; then valid=true; break; fi
@@ -72,20 +72,20 @@ if docker buildx bake --help &>/dev/null; then
     BAKE_ARGS+=(--no-cache)
   fi
 
-  if [ ${#BUILD_TARGETS[@]} -eq 0 ]; then
+  if [ -z "$BUILD_TARGETS" ]; then
     echo "    Services: ALL (parallel)"
     REGISTRY="$REGISTRY" docker buildx bake "${BAKE_ARGS[@]}"
-    PUSH_LIST=($ALL_SERVICES)
+    PUSH_LIST="$ALL_SERVICES"
   else
-    echo "    Services: ${BUILD_TARGETS[*]} (parallel)"
-    REGISTRY="$REGISTRY" docker buildx bake "${BAKE_ARGS[@]}" "${BUILD_TARGETS[@]}"
-    PUSH_LIST=("${BUILD_TARGETS[@]}")
+    echo "    Services: $BUILD_TARGETS (parallel)"
+    REGISTRY="$REGISTRY" docker buildx bake "${BAKE_ARGS[@]}" $BUILD_TARGETS
+    PUSH_LIST="$BUILD_TARGETS"
   fi
 
   # Push images to local registry
   echo ""
   echo ">>> Pushing images to $REGISTRY..."
-  for svc in "${PUSH_LIST[@]}"; do
+  for svc in $PUSH_LIST; do
     docker push "${REGISTRY}/scoped/${svc}:latest" --quiet &
   done
   wait
@@ -149,16 +149,16 @@ build_and_push() {
   docker push "$image" --quiet
 }
 
-if [ ${#BUILD_TARGETS[@]} -eq 0 ]; then
-  BUILD_LIST=($ALL_SERVICES)
+if [ -z "$BUILD_TARGETS" ]; then
+  BUILD_LIST="$ALL_SERVICES"
 else
-  BUILD_LIST=("${BUILD_TARGETS[@]}")
+  BUILD_LIST="$BUILD_TARGETS"
 fi
 
-echo "    Services: ${BUILD_LIST[*]} (sequential)"
+echo "    Services: $BUILD_LIST (sequential)"
 echo ""
 
-for svc in "${BUILD_LIST[@]}"; do
+for svc in $BUILD_LIST; do
   build_and_push "$svc"
 done
 
