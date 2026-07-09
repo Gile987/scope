@@ -19,6 +19,21 @@ export interface ToolCall {
 }
 
 /**
+ * A single iteration's captured tool calls, labeled with the iteration number
+ * it belongs to. The judge assembles an ordered list of these (iterations
+ * 1..N) so a criterion can be evaluated against the tool-call history of the
+ * *whole run*, not just the iteration currently being judged. This is what lets
+ * one-time actions (bootstrap/scaffold commands recorded in an earlier
+ * iteration) keep counting as done in later iterations. See scope #1255.
+ */
+export interface IterationToolCalls {
+  /** 1-based iteration number this batch of tool calls was captured in. */
+  iteration: number;
+  /** The tool calls captured during that iteration. */
+  toolCalls: ToolCall[];
+}
+
+/**
  * Minimal HAR 1.2 types — just enough for parsing DevProxy output.
  * For full HAR types, use @types/har-format.
  */
@@ -38,6 +53,36 @@ export interface HarEntry {
   request: HarRequest;
   response: HarResponse;
   time: number;
+  /**
+   * Chrome DevTools resource type. Set to `"websocket"` by the gateway for a
+   * WebSocket connection entry (the `/responses` transport used by gpt-5.x).
+   */
+  _resourceType?: string;
+  /**
+   * WebSocket frames captured for a WebSocket connection entry (gateway
+   * convention). Present only when the entry carries a WebSocket connection;
+   * absent for the HTTP entries produced by DevProxy.
+   */
+  _webSocketMessages?: HarWebSocketMessage[];
+}
+
+/**
+ * A single captured WebSocket frame (Chrome DevTools / gateway HAR convention).
+ *
+ * For the OpenAI Responses API over WebSocket, `send` frames carry the client's
+ * `response.create` messages (with the accumulated `input[]` transcript) and
+ * `receive` frames carry the server's streamed response events (the same objects
+ * as SSE `data:` payloads).
+ */
+export interface HarWebSocketMessage {
+  /** Frame direction: `"send"` (client→server) or `"receive"` (server→client). */
+  type: "send" | "receive";
+  /** Fractional seconds since the Unix epoch when the frame was observed. */
+  time: number;
+  /** WebSocket opcode: 1 = text (JSON payload), 2 = binary. */
+  opcode: number;
+  /** Frame payload. For text frames (opcode 1) this is the JSON string. */
+  data: string;
 }
 
 export interface HarRequest {

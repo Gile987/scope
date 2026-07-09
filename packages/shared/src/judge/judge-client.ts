@@ -18,6 +18,14 @@ export interface JudgeEvaluateRequest {
   /** Blob URL of this iteration's captured tool calls/outputs (build/test/run output). */
   toolCallsUrl?: string;
   /**
+   * 1-based number of the iteration currently being judged. Lets the judge
+   * label the current iteration's tool calls when assembling the cumulative
+   * run-wide tool-call history (prior iterations come from
+   * `conversationHistory[].toolCallsUrl`). Optional for backward compatibility;
+   * defaults to `conversationHistory.length + 1` when omitted. See scope #1255.
+   */
+  iteration?: number;
+  /**
    * The coding agent's assistant message (prose) for the iteration being
    * judged. Carried inline so the judge can expose it to criteria via the
    * read-only `read_agent_response` tool. Required for grading no-code / Q&A
