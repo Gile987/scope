@@ -78,16 +78,19 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
 COPY apps/workers/coder-acp-claude-code/package.json ./apps/workers/coder-acp-claude-code/
 
 RUN pnpm install --frozen-lockfile
 
 COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
+COPY packages/telemetry/tsconfig.json ./packages/telemetry/
+COPY packages/telemetry/src ./packages/telemetry/src/
 COPY apps/workers/coder-acp-claude-code/tsconfig.json ./apps/workers/coder-acp-claude-code/
 COPY apps/workers/coder-acp-claude-code/src ./apps/workers/coder-acp-claude-code/src/
 
-RUN pnpm --filter shared build && pnpm --filter coder-acp-claude-code build
+RUN pnpm --filter shared build && pnpm --filter telemetry build && pnpm --filter coder-acp-claude-code build
 
 # Pre-convert agent.yaml to JSON so the registration job doesn't need the yaml package at runtime
 COPY apps/workers/coder-acp-claude-code/agent.yaml ./apps/workers/coder-acp-claude-code/agent.yaml
@@ -124,11 +127,13 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
 COPY apps/workers/coder-acp-claude-code/package.json ./apps/workers/coder-acp-claude-code/
 
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
+COPY --from=builder /app/packages/telemetry/dist ./packages/telemetry/dist/
 COPY --from=builder /app/apps/workers/coder-acp-claude-code/dist ./apps/workers/coder-acp-claude-code/dist/
 COPY apps/workers/coder-acp-claude-code/agent.yaml ./apps/workers/coder-acp-claude-code/agent.yaml
 COPY --from=builder /app/apps/workers/coder-acp-claude-code/agent.json ./apps/workers/coder-acp-claude-code/agent.json

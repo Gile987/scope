@@ -225,6 +225,9 @@ importers:
       shared:
         specifier: workspace:*
         version: link:../../packages/shared
+      telemetry:
+        specifier: workspace:*
+        version: link:../../packages/telemetry
     devDependencies:
       '@types/express':
         specifier: ^4.17.21
@@ -632,6 +635,9 @@ importers:
       shared:
         specifier: workspace:*
         version: link:../../../packages/shared
+      telemetry:
+        specifier: workspace:*
+        version: link:../../../packages/telemetry
     devDependencies:
       '@types/dockerode':
         specifier: ^4.0.1
