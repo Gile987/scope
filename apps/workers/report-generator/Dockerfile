@@ -12,16 +12,19 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
 COPY apps/workers/report-generator/package.json ./apps/workers/report-generator/
 
 RUN pnpm install --frozen-lockfile
 
 COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
+COPY packages/telemetry/tsconfig.json ./packages/telemetry/
+COPY packages/telemetry/src ./packages/telemetry/src/
 COPY apps/workers/report-generator/tsconfig.json ./apps/workers/report-generator/
 COPY apps/workers/report-generator/src ./apps/workers/report-generator/src/
 
-RUN pnpm --filter shared build && pnpm --filter report-generator build
+RUN pnpm --filter shared build && pnpm --filter telemetry build && pnpm --filter report-generator build
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev
@@ -43,11 +46,13 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
 COPY apps/workers/report-generator/package.json ./apps/workers/report-generator/
 
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
+COPY --from=builder /app/packages/telemetry/dist ./packages/telemetry/dist/
 COPY --from=builder /app/apps/workers/report-generator/dist ./apps/workers/report-generator/dist/
 
 WORKDIR /app/apps/workers/report-generator

@@ -11,6 +11,7 @@ import { PostProcessorDispatcher } from "./post-processor-dispatcher.js";
 import { StuckRunReaper } from "./stuck-run-reaper.js";
 import { RedisHeartbeatStore, type HeartbeatStore } from "shared";
 import type { RequestDocument } from "shared";
+import { initTelemetry, trackMetric, trackEvent, shutdownTelemetry } from "telemetry";
 
 // ── Configuration ────────────────────────────────────────────────────
 
@@ -146,6 +147,9 @@ function createHealthServer(): http.Server {
 // ── Main ─────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  initTelemetry("scope-scheduler");
+  const coldStartMs = process.uptime() * 1000;
+
   console.log("[Scheduler] Starting...");
   console.log(`[Scheduler] MongoDB: ${MONGO_URI.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
   console.log(`[Scheduler] Poll interval: ${POLL_INTERVAL_MS}ms`);
@@ -180,6 +184,8 @@ async function main(): Promise<void> {
   );
   scheduler.start();
   console.log("[Scheduler] Dispatch loop started");
+  trackMetric({ name: "scheduler.cold_start_ms", value: coldStartMs, properties: { service: "scheduler" } });
+  trackEvent({ name: "scheduler.dispatch_started", properties: { workerTypes: workerTypeConfigs.map(w => w.workerType).join(",") } });
 
   // Start the post-processor dispatcher
   const postProcessorQueueName = process.env.QUEUE_NAME_POST_PROCESSOR || "post-processor-queue";
@@ -252,6 +258,7 @@ async function main(): Promise<void> {
     if (heartbeatStore) await heartbeatStore.close();
     healthServer.close();
     await mongoClient.close();
+    await shutdownTelemetry();
     console.log("[Scheduler] Shutdown complete");
     process.exit(0);
   };

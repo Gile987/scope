@@ -284,6 +284,9 @@ importers:
       shared:
         specifier: workspace:*
         version: link:../../../packages/shared
+      telemetry:
+        specifier: workspace:*
+        version: link:../../../packages/telemetry
     devDependencies:
       '@types/node':
         specifier: ^22.7.0
@@ -306,6 +309,9 @@ importers:
       shared:
         specifier: workspace:*
         version: link:../../../packages/shared
+      telemetry:
+        specifier: workspace:*
+        version: link:../../../packages/telemetry
     devDependencies:
       '@types/node':
         specifier: ^22.7.0
@@ -497,6 +503,9 @@ importers:
       shared:
         specifier: workspace:*
         version: link:../../packages/shared
+      telemetry:
+        specifier: workspace:*
+        version: link:../../packages/telemetry
     devDependencies:
       '@types/express':
         specifier: ^4.17.21
@@ -537,6 +546,9 @@ importers:
       shared:
         specifier: workspace:*
         version: link:../../packages/shared
+      telemetry:
+        specifier: workspace:*
+        version: link:../../packages/telemetry
       uuid:
         specifier: ^10.0.0
         version: 10.0.0
@@ -728,6 +740,9 @@ importers:
       shared:
         specifier: workspace:*
         version: link:../../../packages/shared
+      telemetry:
+        specifier: workspace:*
+        version: link:../../../packages/telemetry
     devDependencies:
       '@types/node':
         specifier: ^22.7.0
@@ -753,6 +768,9 @@ importers:
       shared:
         specifier: workspace:*
         version: link:../../../packages/shared
+      telemetry:
+        specifier: workspace:*
+        version: link:../../../packages/telemetry
     devDependencies:
       '@types/node':
         specifier: ^22.7.0

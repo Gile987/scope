@@ -16,6 +16,7 @@ import {
   TokenManagerClient,
   type VisibilityHeartbeat,
 } from "shared";
+import { trackMetric, trackEvent } from "telemetry";
 import { createReportTools } from "./tools.js";
 import { REPORT_SYSTEM_PROMPT, withRetry } from "shared";
 
@@ -38,6 +39,7 @@ export interface ReportQueueProcessorConfig extends BaseQueueProcessorConfig {
 export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
   private reportConfig: ReportQueueProcessorConfig;
   private tokenClient: TokenManagerClient;
+  private static coldStartTracked = false;
 
   constructor(config: ReportQueueProcessorConfig) {
     super(config, "report-generator");
@@ -58,9 +60,16 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
     heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<void> {
+    const generationStart = Date.now();
     const reportId = doc._id;
     const requestId = doc.requestId;
 
+    if (!ReportQueueProcessor.coldStartTracked) {
+      ReportQueueProcessor.coldStartTracked = true;
+      trackMetric({ name: "report_generator.cold_start_ms", value: process.uptime() * 1000, properties: { service: "report-generator" } });
+    }
+
+    trackEvent({ name: "report_generator.generation_started", properties: { requestId, reportId, templateId: doc.templateId || "unknown" } });
     await log("info", `Starting report generation for run ${requestId}`);
 
     // --- Prepare snapshots temp directory ---
@@ -134,6 +143,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
 
       // --- Run Copilot SDK session ---
       const resolvedTimeoutMs = template.timeoutMs ?? this.reportConfig.sessionTimeoutMs ?? 5 * 60 * 1000;
+      const llmStart = Date.now();
       const content = await this.runCopilotSession(
         tools,
         resolvedUserPrompt,
@@ -142,6 +152,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
         resolvedTimeoutMs,
         log
       );
+      trackMetric({ name: "report_generator.llm_session_duration_ms", value: Date.now() - llmStart, properties: { service: "report-generator" } });
 
       // --- Persist report content ---
       await withRetry(() => this.collection.updateOne(
@@ -156,6 +167,8 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
       ));
 
       await log("info", `Report completed (${content.length} chars)`, { final: true });
+      trackMetric({ name: "report_generator.generation_duration_ms", value: Date.now() - generationStart, properties: { service: "report-generator" } });
+      trackEvent({ name: "report_generator.generation_completed", properties: { requestId, reportId } });
     } finally {
       // Clean up extracted snapshot files
       if (existsSync(snapshotsDir)) {

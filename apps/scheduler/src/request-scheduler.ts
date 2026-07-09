@@ -4,6 +4,7 @@
 import { Collection } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import type { RequestDocument } from "shared";
+import { trackMetric } from "telemetry";
 
 /**
  * Configuration for a single worker type's queue.
@@ -73,16 +74,23 @@ export class RequestScheduler {
   private async dispatch(): Promise<void> {
     if (this.dispatching) return;
     this.dispatching = true;
+    const cycleStart = Date.now();
+    let totalDispatched = 0;
     try {
       for (const wt of this.workerTypes) {
         try {
-          await this.dispatchForWorkerType(wt);
+          const dispatched = await this.dispatchForWorkerType(wt);
+          totalDispatched += dispatched;
         } catch (err) {
           console.error(`[Scheduler] Error dispatching for ${wt.workerType}:`, err);
         }
       }
     } finally {
       this.dispatching = false;
+      trackMetric({ name: "scheduler.dispatch_cycle_ms", value: Date.now() - cycleStart, properties: { service: "scheduler" } });
+      if (totalDispatched > 0) {
+        trackMetric({ name: "scheduler.requests_dispatched", value: totalDispatched, properties: { service: "scheduler" } });
+      }
     }
   }
 
@@ -90,14 +98,15 @@ export class RequestScheduler {
    * Fill available queue slots for a single worker type by claiming
    * the highest-priority pending requests from MongoDB.
    */
-  private async dispatchForWorkerType(wt: WorkerTypeConfig): Promise<void> {
+  private async dispatchForWorkerType(wt: WorkerTypeConfig): Promise<number> {
     // Read the actual Azure queue depth — cheap metadata call, not a message read
     const properties = await wt.queueClient.getProperties();
     const currentDepth = properties.approximateMessagesCount ?? 0;
 
     const slots = wt.targetQueueDepth - currentDepth;
-    if (slots <= 0) return;
+    if (slots <= 0) return 0;
 
+    let dispatched = 0;
     for (let i = 0; i < slots; i++) {
       const claimed = await this.collection.findOneAndUpdate(
         {
@@ -119,6 +128,7 @@ export class RequestScheduler {
 
       if (!claimed) break;
 
+      dispatched++;
       console.log(`[Scheduler] ${wt.workerType}: dispatched ${claimed._id} (priority=${claimed.priority}, depth=${currentDepth + i + 1}/${wt.targetQueueDepth})`);
 
       // Queue message carries requestId + runId (per PR #665 convention)
@@ -131,5 +141,6 @@ export class RequestScheduler {
 
       await wt.queueClient.sendMessage(message);
     }
+    return dispatched;
   }
 }

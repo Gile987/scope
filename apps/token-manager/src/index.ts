@@ -12,8 +12,10 @@ import { createAccountRouter } from "./account-routes.js";
 import { createMcpSecretRouter } from "./mcp-secret-routes.js";
 import { startTokenScheduler } from "./token-scheduler.js";
 import { validateToken } from "./token-validators.js";
+import { initTelemetry, trackMetric, trackEvent, shutdownTelemetry } from "telemetry";
 
 dotenv.config();
+initTelemetry("scope-token-manager");
 
 const port = parseInt(process.env.PORT || "3000", 10);
 const mongoUri = process.env.MONGO_CONNECTION_STRING || "mongodb://localhost:27000";
@@ -97,10 +99,11 @@ async function initializeClients(): Promise<void> {
   });
 
   // Graceful shutdown
-  const shutdownHandler = () => {
+  const shutdownHandler = async () => {
     console.log("[token-manager] Shutdown signal received, stopping scheduler...");
     scheduler.stop();
     client.close();
+    await shutdownTelemetry();
     process.exit(0);
   };
   process.on("SIGTERM", shutdownHandler);
@@ -121,9 +124,12 @@ app.use(
 );
 
 async function main(): Promise<void> {
+  const coldStartMs = process.uptime() * 1000;
   await initializeClients();
   app.listen(port, () => {
     console.log(`[token-manager] listening on port ${port}`);
+    trackMetric({ name: "token_manager.cold_start_ms", value: coldStartMs, properties: { service: "token-manager" } });
+    trackEvent({ name: "token_manager.service_started", properties: {} });
   });
 }
 

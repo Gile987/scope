@@ -10,6 +10,14 @@ graph TB
         API[scope-api]
         W1[coder-acp-copilot]
         W2[coder-acp-copilot-windows]
+        W3[coder-acp-claude-code]
+        W4[coder-vscode-electron]
+        J[scope-judge]
+        SCH[scope-scheduler]
+        TM[scope-token-manager]
+        PP[scope-post-processor]
+        RG[scope-report-generator]
+        MS[model-scanners]
     end
 
     subgraph "Telemetry Package<br/>(packages/telemetry)"
@@ -23,14 +31,6 @@ graph TB
         HTTP[HTTP requests/responses]
         DEPS[Dependencies: MongoDB, Redis, outgoing HTTP]
         EXC[Unhandled exceptions]
-    end
-
-    subgraph "Custom Metrics (workers)"
-        M1[worker.run_duration_ms]
-        M2[worker.first_ai_call_ms]
-        M3[worker.subprocess_idle_s]
-        M4[worker.cold_start_ms]
-        M5[worker.run_started event]
     end
 
     subgraph Azure
@@ -47,9 +47,7 @@ graph TB
         SECRET[K8s Secret → env var]
     end
 
-    API --> INIT
-    W1 --> INIT
-    W2 --> INIT
+    API & W1 & W2 & W3 & W4 & J & SCH & TM & PP & RG & MS --> INIT
 
     INIT --> HTTP
     INIT --> DEPS
@@ -57,10 +55,6 @@ graph TB
     INIT --> METER
     INIT --> TRACE
     INIT --> EVENT
-
-    W1 --> M1 & M2 & M3 & M4 & M5
-    W2 --> M1 & M2 & M3 & M4 & M5
-    M1 & M2 & M3 & M4 & M5 --> METER
 
     METER -->|"OTel SDK"| EXPORT
     TRACE -->|"structured JSON → console"| EXPORT
@@ -137,7 +131,6 @@ process.on("SIGTERM", async () => {
 
 ## Worker Metrics
 
-Emitted by `coder-acp-copilot` and `coder-acp-copilot-windows` during `processMessage()`.
 
 | Metric | Type | Description | Dimensions |
 |--------|------|-------------|------------|
@@ -146,6 +139,7 @@ Emitted by `coder-acp-copilot` and `coder-acp-copilot-windows` during `processMe
 | `worker.cold_start_ms` | Histogram | Container uptime at first run (`process.uptime() * 1000`) | `workerType` |
 | `worker.subprocess_idle_s` | Histogram | Gap between subprocess protocol events (hang detection) | `runId`, `workerType` |
 | `worker.run_started` | Counter | Run start event | `runId`, `workerType`, `model` |
+
 
 ### Idle Monitoring
 
@@ -163,6 +157,79 @@ The API calls `initTelemetry("scope-api")` at startup. No custom metrics — rel
 - HTTP request/response traces (Express routes)
 - Dependency tracking (MongoDB, Redis, Azure Storage, outgoing HTTP)
 - Unhandled exception capture
+
+## Judge Metrics
+
+Emitted by the `scope-judge` Express service in the POST `/api/v1/evaluate` handler.
+
+| Metric | Type | Description | Dimensions |
+|--------|------|-------------|------------|
+| `judge.evaluation_duration_ms` | Histogram | Total time for one evaluation request | `requestId` |
+| `judge.blob_download_ms` | Histogram | Time to download + extract workspace snapshot | `requestId` |
+| `judge.criteria_count` | Histogram | Number of criteria evaluated per request | `requestId` |
+| `judge.evaluation_started` | Counter | Evaluation started event | `requestId`, `strategy` |
+| `judge.evaluation_completed` | Counter | Evaluation completed event | `requestId` |
+
+## Scheduler Metrics
+
+Emitted by the `scope-scheduler` service from its three independent loops.
+
+| Metric | Type | Description | Dimensions |
+|--------|------|-------------|------------|
+| `scheduler.dispatch_cycle_ms` | Histogram | Request dispatch poll cycle duration | `service` |
+| `scheduler.requests_dispatched` | Histogram | Requests dispatched per cycle | `service` |
+| `scheduler.pp_dispatch_cycle_ms` | Histogram | Post-processor dispatch cycle duration | `service` |
+| `scheduler.pp_requests_dispatched` | Histogram | Post-processor requests dispatched per cycle | `service` |
+| `scheduler.reaper_sweep_ms` | Histogram | Stuck-run reaper sweep duration | `service` |
+| `scheduler.reaper_runs_failed` | Histogram | Runs failed by reaper per sweep | `service` |
+| `scheduler.cold_start_ms` | Histogram | Process startup time | `service` |
+| `scheduler.dispatch_started` | Counter | Service startup event | `workerTypes` |
+
+## Token Manager Metrics
+
+Emitted by the `scope-token-manager` Express service. HTTP route latencies are auto-instrumented; custom metrics cover the periodic validation scheduler.
+
+| Metric | Type | Description | Dimensions |
+|--------|------|-------------|------------|
+| `token_manager.validation_cycle_ms` | Histogram | Periodic token validation sweep time | `service` |
+| `token_manager.tokens_validated` | Histogram | Tokens checked per validation cycle | `service` |
+| `token_manager.tokens_invalidated` | Histogram | Tokens found invalid per cycle | `service` |
+| `token_manager.cold_start_ms` | Histogram | Process startup time | `service` |
+| `token_manager.service_started` | Counter | Service startup event | — |
+
+## Post-Processor Metrics
+
+Emitted by the `scope-post-processor` queue processor.
+
+| Metric | Type | Description | Dimensions |
+|--------|------|-------------|------------|
+| `post_processor.processing_duration_ms` | Histogram | Handler execution time | `service`, `handlerType` |
+| `post_processor.cold_start_ms` | Histogram | First message processing time | `service` |
+| `post_processor.processing_started` | Counter | Processing started event | `handlerType`, `requestId` |
+| `post_processor.processing_completed` | Counter | Processing completed event | `handlerType`, `requestId` |
+
+## Report Generator Metrics
+
+Emitted by the `scope-report-generator` queue processor.
+
+| Metric | Type | Description | Dimensions |
+|--------|------|-------------|------------|
+| `report_generator.generation_duration_ms` | Histogram | Total report generation time | `service` |
+| `report_generator.llm_session_duration_ms` | Histogram | Copilot SDK LLM session time | `service` |
+| `report_generator.cold_start_ms` | Histogram | First message processing time | `service` |
+| `report_generator.generation_started` | Counter | Generation started event | `requestId`, `reportId`, `templateId` |
+| `report_generator.generation_completed` | Counter | Generation completed event | `requestId`, `reportId` |
+
+## Model Scanner Metrics
+
+Emitted by both `model-scanner-copilot` and `model-scanner-anthropic` K8s Jobs. Short-lived processes — **must call `shutdownTelemetry()` before exit** to flush pending telemetry.
+
+| Metric | Type | Description | Dimensions |
+|--------|------|-------------|------------|
+| `model_scanner.scan_duration_ms` | Histogram | Total scan time | `service`, `provider` |
+| `model_scanner.token_acquisition_ms` | Histogram | Token Manager API latency | `service`, `provider` |
+| `model_scanner.models_found` | Histogram | Models discovered | `service`, `provider` |
+| `model_scanner.scan_completed` | Counter | Scan completed event | `provider`, `added`, `removed`, `unchanged` |
 
 ## Configuration
 
