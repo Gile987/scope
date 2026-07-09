@@ -285,11 +285,14 @@ its budget without passing, downstream gates are recorded as `skipped`.
   every gate its children are).
 - Prompts are **typed** (`type: PromptType`, one literal per gate); a gate's prompt
   must have `type === gate`. The Select gate's prompt is the request's task prompt.
-- For non-Select gates the judge can inspect captured command output via the
-  `read_tool_outputs` tool, not just the workspace files. The judge can also read
-  the coding agent's own response for the iteration under evaluation via the
-  `read_agent_response` tool (issue #1136), so criteria that grade what the agent
-  *said* (Q&A / no-code-change deliverables) are gradeable.
+- Whenever the coding agent captured tool calls in an iteration — **any gate,
+  including Select** — the judge can inspect the captured tool-call history from the
+  **whole run** (cumulative across iterations; issue #1255) via the
+  `list_tool_calls` / `search_tool_outputs` / `get_tool_output` tools, not just the
+  workspace files (availability is gate-agnostic; see `buildEvidenceGuidance`). The
+  judge can also read the coding agent's own response for the iteration under
+  evaluation via the `read_agent_response` tool (issue #1136), so criteria that
+  grade what the agent *said* (Q&A / no-code-change deliverables) are gradeable.
 - Per-gate outcomes are persisted on the request as `gateSummaries:
   GateRunSummary[]`; each `ConversationTurn` is tagged with its `gate`.
 

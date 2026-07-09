@@ -322,7 +322,7 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     expect((config.blobStorage as any).writeToolCalls).not.toHaveBeenCalled();
   });
 
-  it("does not record toolCallsUrl when extraction returns empty array", async () => {
+  it("does not record toolCallsUrl but warns when extraction returns empty array", async () => {
     mockSanitizeHarFile.mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
     mockExtractToolCalls.mockReturnValue([]);
 
@@ -338,6 +338,14 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     expect(result.turns[0].toolCallsUrl).toBeUndefined();
     expect(result.turns[0].toolCallCount).toBeUndefined();
     expect((config.blobStorage as any).writeToolCalls).not.toHaveBeenCalled();
+    // Gate 4: a captured HAR that yields zero tool calls must NOT be silent —
+    // it is almost always an unsupported wire format starving the judge of
+    // tool-call evidence, so the loop must emit a loud warning.
+    expect(mockLog).toHaveBeenCalledWith(
+      "warn",
+      expect.stringContaining("0 tool calls extracted"),
+      expect.anything()
+    );
   });
 
   it("logs warning but continues when tool call extraction fails", async () => {
@@ -672,6 +680,35 @@ describe("runMultiTurnLoop — optional criteria (issue #605)", () => {
     expect(judgeEvaluate).toHaveBeenCalledTimes(1);
     expect(judgeEvaluate).toHaveBeenCalledWith(
       expect.objectContaining({ currentAgentResponse: "The factorial of 5 is 120." }),
+    );
+  });
+
+  // Issue #1255: the judge assembles the whole run's tool calls and labels the
+  // current iteration by number, so the loop must forward the iteration index on
+  // every evaluate call.
+  it("forwards the current iteration number to the judge", async () => {
+    const judgeEvaluate = vi
+      .fn()
+      .mockResolvedValueOnce({ passed: false, feedback: "keep going" })
+      .mockResolvedValueOnce({ passed: true, feedback: "OK" });
+    const config = makeConfig({
+      criteria: ["has_button"],
+      maxIterations: 2,
+      processor: {
+        workerName: "test-worker",
+        processMessage: vi.fn().mockResolvedValue({ response: "did work" } satisfies WorkerResult),
+      },
+      judgeClient: { evaluate: judgeEvaluate },
+    });
+
+    await runMultiTurnLoop(config as any);
+
+    expect(judgeEvaluate).toHaveBeenCalledTimes(2);
+    expect(judgeEvaluate.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ iteration: 1 }),
+    );
+    expect(judgeEvaluate.mock.calls[1][0]).toEqual(
+      expect.objectContaining({ iteration: 2 }),
     );
   });
 

@@ -1108,7 +1108,7 @@ export const api = {
     // Multipart upload bypasses request(); scope it explicitly like a root create.
     const projectId = getSelectedProjectId();
     if (!projectId) throw new ProjectRequiredError();
-    const res = await fetch(`${BASE}${withProjectId("/codebases", projectId)}`, {
+    const res = await apiClient(`${BASE}${withProjectId("/codebases", projectId)}`, {
       method: "POST",
       body: form,
     });
@@ -1117,7 +1117,7 @@ export const api = {
       throw new Error(`Archive exceeds the ${MAX_ARCHIVE_UPLOAD_LABEL} upload limit.`);
     }
     if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: res.statusText }));
+      const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
       throw new Error(body.error || `HTTP ${res.status}`);
     }
     return res.json();
@@ -1159,7 +1159,7 @@ export const api = {
   uploadCodebaseArchive: async (id: string, file: File): Promise<CodebaseRevisionDocument> => {
     const form = new FormData();
     form.append("archive", file);
-    const res = await fetch(`${BASE}/codebases/${id}/upload`, {
+    const res = await apiClient(`${BASE}/codebases/${id}/upload`, {
       method: "POST",
       body: form,
     });
@@ -1168,7 +1168,7 @@ export const api = {
       throw new Error(`Archive exceeds the ${MAX_ARCHIVE_UPLOAD_LABEL} upload limit.`);
     }
     if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: res.statusText }));
+      const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
       throw new Error(body.error || `HTTP ${res.status}`);
     }
     return res.json();

@@ -85,6 +85,21 @@ For external API calls:
 - **Retry without backoff** -- can overwhelm a recovering service
 - **Retry without a cap** -- can hang indefinitely
 - **Retry non-idempotent POST without checking** -- can create duplicates
+- **Stacking retry layers** -- never combine an HTTP client's built-in retry with `withRetry`/`@Retry` around the same call, or attempts multiply (`maxRetries × client.limit`). See below.
+
+## Single retry layer
+
+Retry belongs to **exactly one** layer per call. The `ky` HTTP clients used by the
+CLI ([apps/cli/src/utils/api-client.ts](../../../apps/cli/src/utils/api-client.ts)) and Portal
+([apps/portal/src/lib/api-client.ts](../../../apps/portal/src/lib/api-client.ts)) set `retry: 0`
+precisely so they never stack with the shared cockatiel retry.
+
+If a call needs transient-failure retries, pick **one** layer:
+
+- **Enable the HTTP client's own `retry`** (with its own backoff), OR
+- **Wrap the call in `withRetry` / `@Retry`** from `packages/shared/src/utils/retry.ts`.
+
+Never both — combining them compounds attempts to `maxRetries × client.limit`.
 
 ## Reference
 

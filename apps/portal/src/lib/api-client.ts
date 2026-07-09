@@ -60,6 +60,12 @@ export const apiClient: KyInstance = ky.create({
   // No client-side timeout; cancellation is handled per-request via `signal`.
   timeout: false,
   // Preserve current single-attempt behavior; no automatic retries.
+  // NOTE: transient-failure retries are intentionally disabled here to avoid
+  // stacking with the shared cockatiel `withRetry`/`@Retry`
+  // (packages/shared/src/utils/retry.ts). If the portal ever needs to retry
+  // transient 429/503s, pick ONE layer — enable ky's `retry` (with its own
+  // backoff) or wrap the fetch in `withRetry` — never both, or attempts
+  // compound to `maxRetries × ky.limit`.
   retry: 0,
   hooks: { beforeRequest: [authHook] },
 });
