@@ -609,9 +609,9 @@ export const api = {
     return request("/mcp/servers", undefined, { scoped: true });
   },
 
-  /** Get a single MCP server by slug */
+  /** Get a single MCP server by slug (soft-scoped: prefers the active project's copy, else legacy global) */
   getMcpServer: (slug: string): Promise<McpServerDocument> => {
-    return request(`/mcp/servers/${encodeURIComponent(slug)}`);
+    return request(`/mcp/servers/${encodeURIComponent(slug)}`, undefined, { softScoped: true });
   },
 
   /** Create a new MCP server (upsert by slug) */
@@ -622,17 +622,17 @@ export const api = {
     }, { scoped: true });
   },
 
-  /** Update an MCP server */
+  /** Update an MCP server (soft-scoped: prefers the active project's copy, else legacy global) */
   updateMcpServer: (slug: string, body: UpdateMcpServerRequest): Promise<McpServerDocument> => {
     return request(`/mcp/servers/${encodeURIComponent(slug)}`, {
       method: "PUT",
       body: JSON.stringify(body),
-    });
+    }, { softScoped: true });
   },
 
-  /** Soft-delete an MCP server */
+  /** Soft-delete an MCP server (soft-scoped: prefers the active project's copy, else legacy global) */
   deleteMcpServer: (slug: string): Promise<{ id: string; deleted: boolean }> => {
-    return request(`/mcp/servers/${encodeURIComponent(slug)}`, { method: "DELETE" });
+    return request(`/mcp/servers/${encodeURIComponent(slug)}`, { method: "DELETE" }, { softScoped: true });
   },
 
   // ─── Analysis ──────────────────────────────────────────────────────────────
