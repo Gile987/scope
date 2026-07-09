@@ -25,9 +25,18 @@ const { mcpSecretClient } = ctx;
 /** Public identifier for a server = its human slug (falls back to legacy _id-as-slug rows). */
 const mcpSlug = (s: McpServerDocument): string => s.slug ?? s._id;
 
-/** Map a stored server doc to the API response shape (`id` and `slug` both = the human slug). */
+/**
+ * Map a stored server doc to the API response shape.
+ *
+ * After migration 027, `_id` is an internal random UUID and the human slug lives
+ * in `slug`. The API contract speaks only in slugs, so we mask `_id` back to the
+ * slug on the way out and never leak the internal UUID (`id` and `slug` both = the
+ * human slug too). Legacy rows (pre-027) still have `_id === slug`, so masking is a
+ * no-op for them. Mirrors `versionResponse` in profiles.ts.
+ */
 const toMcpResponse = (s: McpServerDocument): McpServerDocument & { id: string } => ({
   ...s,
+  _id: mcpSlug(s),
   slug: mcpSlug(s),
   id: mcpSlug(s),
 });

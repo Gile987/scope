@@ -105,6 +105,9 @@ describe("skills catalog — per-project isolation (migration 026)", () => {
     // Public id stays the human slug in both projects.
     expect(a.body.id).toBe("acme/tools/widget");
     expect(b.body.id).toBe("acme/tools/widget");
+    // Responses mask the internal UUID back to the slug — never leak _id.
+    expect(a.body._id).toBe("acme/tools/widget");
+    expect(b.body._id).toBe("acme/tools/widget");
 
     const rows = skillCollection._docs();
     expect(rows).toHaveLength(2);
@@ -160,6 +163,9 @@ describe("extensions catalog — per-project isolation (migration 026)", () => {
     expect(b.status).toBe(201);
     expect(a.body.id).toBe("acme.widget");
     expect(b.body.id).toBe("acme.widget");
+    // Responses mask the internal UUID back to the slug — never leak _id.
+    expect(a.body._id).toBe("acme.widget");
+    expect(b.body._id).toBe("acme.widget");
 
     const rows = extensionCollection._docs();
     expect(rows).toHaveLength(2);

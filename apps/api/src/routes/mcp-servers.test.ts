@@ -468,9 +468,14 @@ describe("POST /api/v1/mcp/servers — per-project slug isolation", () => {
     expect(docA._id).not.toBe(docB._id);
     expect(docA._id).not.toBe("ms-learn"); // _id is the internal UUID, never the slug
 
-    // The API surfaces the human slug as `id`/`slug`, never the internal UUID.
+    // The API surfaces the human slug as `_id`/`id`/`slug`, never the internal UUID.
+    // (Portal + CLI render `_id` as the "Slug" column — masking it here is what
+    // prevents the raw UUID from leaking into those views.)
+    expect(resA.body._id).toBe("ms-learn");
     expect(resA.body.id).toBe("ms-learn");
     expect(resA.body.slug).toBe("ms-learn");
+    expect(resA.body._id).not.toMatch(UUID_RE);
+    expect(resB.body._id).toBe("ms-learn");
     expect(resB.body.id).toBe("ms-learn");
   });
 
@@ -496,6 +501,7 @@ describe("POST /api/v1/mcp/servers — per-project slug isolation", () => {
     const miss = await request(app).get("/api/v1/mcp/servers/ms-learn?projectId=proj-b");
 
     expect(hit.status).toBe(200);
+    expect(hit.body._id).toBe("ms-learn"); // internal UUID masked back to the slug
     expect(hit.body.id).toBe("ms-learn");
     expect(miss.status).toBe(404); // slug from another project does not resolve
   });

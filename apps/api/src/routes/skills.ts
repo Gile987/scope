@@ -27,9 +27,18 @@ export function registerSkillsRoutes(ctx: RouteContext): void {
 /** Public identifier for a skill = its human slug (falls back to legacy _id-as-slug rows). */
 const skillSlug = (s: SkillDocument): string => s.slug ?? s._id;
 
-/** Map a stored skill doc to the API response shape (`id` and `slug` both = the human slug). */
+/**
+ * Map a stored skill doc to the API response shape.
+ *
+ * After migration 026, `_id` is an internal random UUID and the human slug lives
+ * in `slug`. The API contract speaks only in slugs, so we mask `_id` back to the
+ * slug on the way out and never leak the internal UUID (`id` and `slug` both = the
+ * human slug too). Legacy rows (pre-026) still have `_id === slug`, so masking is a
+ * no-op for them. Mirrors `versionResponse` in profiles.ts / `toMcpResponse`.
+ */
 const toSkillResponse = (s: SkillDocument): SkillDocument & { id: string } => ({
   ...s,
+  _id: skillSlug(s),
   slug: skillSlug(s),
   id: skillSlug(s),
 });
