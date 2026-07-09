@@ -14,6 +14,19 @@ variable "REGISTRY" {
   default = "scope-0-registry.localhost:5050"
 }
 
+# Worker version args — sourced from env (k3d-build.sh exports these from versions.env)
+variable "COPILOT_CLI_VERSION" {
+  default = ""
+}
+
+variable "CLAUDE_CODE_ACP_VERSION" {
+  default = ""
+}
+
+variable "CLAUDE_AGENT_SDK_VERSION" {
+  default = ""
+}
+
 group "default" {
   targets = [
     "api",
@@ -60,7 +73,7 @@ target "scheduler" {
 }
 
 target "gateway" {
-  dockerfile = "apps/gateway/Dockerfile"
+  dockerfile = "Dockerfile"
   context    = "apps/gateway"
   target     = "runtime"
   tags       = ["${REGISTRY}/scoped/gateway:latest"]
@@ -72,10 +85,17 @@ target "coder-acp-copilot" {
   dockerfile = "apps/workers/coder-acp-copilot/Dockerfile"
   context    = "."
   tags       = ["${REGISTRY}/scoped/coder-acp-copilot:latest"]
+  args = {
+    COPILOT_CLI_VERSION = "${COPILOT_CLI_VERSION}"
+  }
 }
 
 target "coder-acp-claude-code" {
   dockerfile = "apps/workers/coder-acp-claude-code/Dockerfile"
   context    = "."
   tags       = ["${REGISTRY}/scoped/coder-acp-claude-code:latest"]
+  args = {
+    CLAUDE_CODE_ACP_VERSION  = "${CLAUDE_CODE_ACP_VERSION}"
+    CLAUDE_AGENT_SDK_VERSION = "${CLAUDE_AGENT_SDK_VERSION}"
+  }
 }

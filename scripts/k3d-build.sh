@@ -57,6 +57,15 @@ done
 
 echo ">>> Building images → $REGISTRY"
 
+# ── Source worker version files as env vars for docker-bake.hcl ───────────
+for versions_file in apps/workers/*/versions.env apps/*/versions.env; do
+  if [ -f "$versions_file" ]; then
+    set -a
+    source "$versions_file"
+    set +a
+  fi
+done
+
 # ── Try parallel build with docker buildx bake ────────────────────────────
 # Uses the default "docker" driver so builds share the host network and can
 # push to the local k3d HTTP registry without insecure-registry workarounds.
@@ -85,11 +94,22 @@ if docker buildx bake --help &>/dev/null; then
   # Push images to local registry
   echo ""
   echo ">>> Pushing images to $REGISTRY..."
+  push_failed=0
   for svc in $PUSH_LIST; do
-    docker push "${REGISTRY}/scoped/${svc}:latest" --quiet &
+    if ! docker push "${REGISTRY}/scoped/${svc}:latest" --quiet 2>/dev/null; then
+      # Retry once — Docker Desktop proxy can cause transient failures
+      sleep 1
+      if ! docker push "${REGISTRY}/scoped/${svc}:latest" --quiet 2>/dev/null; then
+        echo "  ⚠ Failed to push $svc"
+        push_failed=1
+      fi
+    fi
   done
-  wait
-  echo "  ✓ All images pushed"
+  if [ "$push_failed" -eq 0 ]; then
+    echo "  ✓ All images pushed"
+  else
+    echo "  ⚠ Some pushes failed — check registry with: curl http://$REGISTRY/v2/_catalog"
+  fi
 
   exit 0
 fi
