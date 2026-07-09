@@ -280,7 +280,6 @@ export interface RequestDocument {
   persona?: Persona;             // Original persona object for traceability
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
   taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → TaskPromptDocument._id)
-  promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
   /**
   * FK → TaskPromptDocument._id of an AGENTS.md-typed prompt to deliver into
   * the agent's workspace for this run. When set, the worker writes the
@@ -837,18 +836,6 @@ export interface SuggestedPromptFeature {
   suggestedId: string;
   behavior: string;
   prompt: string;
-}
-
-/** Stored extraction result — maps a task prompt to its detected features */
-export interface PromptFeatureExtraction {
-  _id?: string;
-  taskText: string;
-  taskTextHash?: string;
-  promptFeatureResults: PromptFeatureResult[];
-  suggestedFeatures?: SuggestedPromptFeature[];
-  extractedAt: Date;
-  model?: string;
-  cached?: boolean;
 }
 
 // =============================================================================

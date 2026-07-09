@@ -29,7 +29,6 @@ import type {
   CriteriaResponseSchema,
   ExtensionResponseSchema,
   PromptFeatureResponseSchema,
-  PromptFeatureExtractionResponseSchema,
   InsightReferenceSchema,
   LogEventSchema,
   ReportResponseSchema,
@@ -49,7 +48,6 @@ import type {
 
 export type CriteriaDocument = z.infer<typeof CriteriaResponseSchema>;
 export type PromptFeatureDocument = z.infer<typeof PromptFeatureResponseSchema>;
-export type PromptFeatureExtractionDocument = z.infer<typeof PromptFeatureExtractionResponseSchema>;
 export type InsightReference = z.infer<typeof InsightReferenceSchema>;
 export type LogEvent = z.infer<typeof LogEventSchema>;
 export type ReportDocument = z.infer<typeof ReportResponseSchema>;
@@ -92,7 +90,6 @@ export interface RouteContext {
   projectCollection: Collection<ProjectDocument>;
   criteriaCollection: Collection<CriteriaDocument>;
   promptFeatureCollection: Collection<PromptFeatureDocument>;
-  promptFeatureExtractionCollection: Collection<PromptFeatureExtractionDocument>;
   reportCollection: Collection<ReportDocument>;
   reportTemplateCollection: Collection<ReportTemplateDocument>;
   agentCollection: Collection<CodingAgentDocument>;

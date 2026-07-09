@@ -25,6 +25,20 @@ export function registerProfilesRoutes(ctx: RouteContext): void {
 // Profiles API
 // =====================================================================
 
+/**
+ * Normalize a stored profile-version doc for API responses.
+ *
+ * After migration 027, `_id` is an internal random UUID and the composite
+ * `"<profileId>@<version>"` lives in `ref`. The API contract keeps surfacing the
+ * composite as `_id` (its historical value and the format stored in
+ * `requests.profileVersionId`), so we mask `_id` back to `ref` on the way out and
+ * never leak the internal UUID. Legacy rows (pre-027) still have `_id === ref`.
+ */
+const versionResponse = <T extends ProfileVersionDocument>(v: T): T => ({
+  ...v,
+  _id: v.ref ?? v._id,
+});
+
 // POST /api/v1/profiles — create a new profile (+ version 1)
 apiRoute(ctx.app, ctx.registry, {
   method: "post",
@@ -60,7 +74,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       const now = new Date();
       const profileId = uuidv4();
-      const versionId = `${profileId}@1`;
+      const versionRef = `${profileId}@1`;
 
       // Resolve extension versions (same pattern as run submission)
       let resolvedExtensions: string[] | undefined;
@@ -104,7 +118,8 @@ apiRoute(ctx.app, ctx.registry, {
       };
 
       const versionDoc: ProfileVersionDocument = {
-        _id: versionId,
+        _id: uuidv4(),
+        ref: versionRef,
         projectId,
         profileId,
         version: 1,
@@ -121,7 +136,7 @@ apiRoute(ctx.app, ctx.registry, {
       await ctx.profileCollection.insertOne(profileDoc);
       await ctx.profileVersionCollection.insertOne(versionDoc);
 
-      res.status(201).json({ ...profileDoc, version: versionDoc });
+      res.status(201).json({ ...profileDoc, version: versionResponse(versionDoc) });
     } catch (error) {
       next(error);
     }
@@ -146,7 +161,7 @@ apiRoute(ctx.app, ctx.registry, {
           const latestVersion = await ctx.profileVersionCollection.findOne(
             { profileId: profile._id, version: profile.latestVersion },
           );
-          return { ...profile, version: latestVersion! };
+          return { ...profile, version: versionResponse(latestVersion!) };
         }),
       );
 
@@ -184,7 +199,7 @@ apiRoute(ctx.app, ctx.registry, {
       const latestVersion = await ctx.profileVersionCollection.findOne(
         { profileId: profile._id, version: profile.latestVersion },
       );
-      res.json({ ...profile, version: latestVersion! });
+      res.json({ ...profile, version: versionResponse(latestVersion!) });
     } catch (error) {
       next(error);
     }
@@ -213,7 +228,7 @@ apiRoute(ctx.app, ctx.registry, {
         .find({ profileId: profile._id })
         .sort({ version: -1 })
         .toArray();
-      res.json(versions);
+      res.json(versions.map(versionResponse));
     } catch (error) {
       next(error);
     }
@@ -238,7 +253,7 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(404).json({ error: "Profile version not found" });
         return;
       }
-      res.json(versionDoc);
+      res.json(versionResponse(versionDoc));
     } catch (error) {
       next(error);
     }
@@ -287,7 +302,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       const now = new Date();
       const newVersion = profile.latestVersion + 1;
-      const versionId = `${profile._id}@${newVersion}`;
+      const versionRef = `${profile._id}@${newVersion}`;
 
       // Resolve extension versions
       let resolvedExtensions: string[] | undefined;
@@ -322,7 +337,8 @@ apiRoute(ctx.app, ctx.registry, {
       }
 
       const versionDoc: ProfileVersionDocument = {
-        _id: versionId,
+        _id: uuidv4(),
+        ref: versionRef,
         projectId: profile.projectId,
         profileId: profile._id,
         version: newVersion,
@@ -342,7 +358,7 @@ apiRoute(ctx.app, ctx.registry, {
         { $set: { latestVersion: newVersion, updatedAt: now } },
       );
 
-      res.status(201).json(versionDoc);
+      res.status(201).json(versionResponse(versionDoc));
     } catch (error) {
       next(error);
     }

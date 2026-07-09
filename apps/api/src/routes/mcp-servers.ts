@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   McpServerHeaderSchema,
@@ -10,11 +11,58 @@ import {
 } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { McpServerDocument, RouteContext } from "../route-context.js";
-import { ProjectIdQuerySchema, getQueryProjectId } from "../utils/project-scope.js";
+import {
+  ProjectIdQuerySchema,
+  OptionalProjectIdQuerySchema,
+  getQueryProjectId,
+  getOptionalQueryProjectId,
+} from "../utils/project-scope.js";
 
 export function registerMcpServersRoutes(ctx: RouteContext): void {
 
 const { mcpSecretClient } = ctx;
+
+/** Public identifier for a server = its human slug (falls back to legacy _id-as-slug rows). */
+const mcpSlug = (s: McpServerDocument): string => s.slug ?? s._id;
+
+/** Map a stored server doc to the API response shape (`id` and `slug` both = the human slug). */
+const toMcpResponse = (s: McpServerDocument): McpServerDocument & { id: string } => ({
+  ...s,
+  slug: mcpSlug(s),
+  id: mcpSlug(s),
+});
+
+/**
+ * Resolve a server by its human slug.
+ *
+ * New rows key `_id` to a random UUID and carry the slug in `slug`; legacy rows
+ * (pre-migration 027) still have `_id === slug`. When a `projectId` is provided
+ * the lookup is scoped to that project (slugs may repeat across projects), trying
+ * the `slug` field first then the legacy `_id` for un-backfilled rows. Without a
+ * `projectId` it falls back to a legacy global `_id` lookup for backward compat.
+ */
+const findServerBySlug = async (
+  slug: string,
+  projectId: string | undefined,
+): Promise<McpServerDocument | null> => {
+  if (projectId) {
+    const bySlug = await ctx.mcpServerCollection.findOne({
+      projectId,
+      slug,
+      deletedAt: { $exists: false },
+    });
+    if (bySlug) return bySlug as McpServerDocument;
+    return (await ctx.mcpServerCollection.findOne({
+      projectId,
+      _id: slug,
+      deletedAt: { $exists: false },
+    })) as McpServerDocument | null;
+  }
+  return (await ctx.mcpServerCollection.findOne({
+    _id: slug,
+    deletedAt: { $exists: false },
+  })) as McpServerDocument | null;
+};
 
 const CreateMcpServerBodySchema = z.object({
   _id: z
@@ -44,8 +92,8 @@ apiRoute(ctx.app, ctx.registry, {
     const servers = await ctx.mcpServerCollection
       .find({ projectId: getQueryProjectId(req), deletedAt: { $exists: false } })
       .toArray();
-    servers.sort((a, b) => a._id.localeCompare(b._id));
-    res.json(servers.map((s) => ({ ...s, id: s._id })));
+    servers.sort((a, b) => mcpSlug(a).localeCompare(mcpSlug(b)));
+    res.json(servers.map((s) => toMcpResponse(s)));
   },
 });
 
@@ -57,33 +105,31 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["MCP Servers"],
   summary: "Get MCP server",
   params: z.object({ id: z.string() }),
+  query: OptionalProjectIdQuerySchema,
   response: McpServerResponseSchema,
   handler: async (req, res) => {
-    const server = await ctx.mcpServerCollection.findOne({
-      _id: req.params.id,
-      deletedAt: { $exists: false },
-    });
+    const server = await findServerBySlug(req.params.id, getOptionalQueryProjectId(req));
     if (!server) {
       res.status(404).json({ error: "MCP server not found" });
       return;
     }
 
     if (mcpSecretClient) {
-      const items = await mcpSecretClient.listSecrets(server._id);
+      const items = await mcpSecretClient.listSecrets(server.projectId, mcpSlug(server));
       if (items.length > 0) {
         const masked = Object.fromEntries(items.map((item) => [item.name, "<secret>"]));
         // Return masked env or headers depending on transport type
         if (server.type === "stdio") {
-          res.json({ ...server, id: server._id, env: masked });
+          res.json({ ...toMcpResponse(server), env: masked });
         } else {
           const maskedHeaders = items.map((item) => ({ name: item.name, value: "<secret>" }));
-          res.json({ ...server, id: server._id, headers: maskedHeaders });
+          res.json({ ...toMcpResponse(server), headers: maskedHeaders });
         }
         return;
       }
     }
 
-    res.json({ ...server, id: server._id });
+    res.json(toMcpResponse(server));
   },
 });
 
@@ -99,7 +145,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: McpServerResponseSchema,
   handler: async (req, res) => {
     const projectId = getQueryProjectId(req);
-    const { _id, name, type, url, command, args, env, headers, sessionMode, version, description } = req.body;
+    const { _id: slug, name, type, url, command, args, env, headers, sessionMode, version, description } = req.body;
 
     const hasSecrets = (env && Object.keys(env).length > 0) || (headers && headers.length > 0);
     if (hasSecrets && !mcpSecretClient) {
@@ -108,23 +154,22 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     const now = new Date();
-    const existing = await ctx.mcpServerCollection.findOne({ _id });
+    // Look up an existing server with this slug WITHIN the project. New rows carry
+    // `slug`; legacy rows (pre-migration 027) still key `_id` to the slug — match either.
+    // Slugs may now repeat across projects, so there is no cross-project conflict.
+    const existing = await ctx.mcpServerCollection.findOne({
+      projectId,
+      $or: [{ slug }, { _id: slug }],
+    });
 
     if (existing) {
-      // `_id` is a globally-unique slug. Re-creating a slug that already lives in
-      // a different project would silently rewrite that project's server, so
-      // reject it — projectId is immutable.
-      if (existing.projectId && existing.projectId !== projectId) {
-        res.status(409).json({
-          error: `MCP server '${_id}' already exists in another project.`,
-        });
-        return;
-      }
-      // Upsert: un-delete if soft-deleted, update non-secret fields
+      // Upsert within the project: un-delete if soft-deleted, update non-secret
+      // fields, and backfill `slug` on legacy rows.
       await ctx.mcpServerCollection.updateOne(
-        { _id },
+        { _id: existing._id },
         {
           $set: {
+            slug,
             name,
             type,
             ...(url !== undefined ? { url } : {}),
@@ -143,7 +188,8 @@ apiRoute(ctx.app, ctx.registry, {
       );
     } else {
       const serverDoc: McpServerDocument = {
-        _id,
+        _id: randomUUID(),
+        slug,
         projectId,
         name,
         type,
@@ -158,18 +204,21 @@ apiRoute(ctx.app, ctx.registry, {
       await ctx.mcpServerCollection.insertOne(serverDoc);
     }
 
-    // Store secrets in Token Manager — replace all existing secrets for this server
+    // Store secrets in Token Manager — replace all existing secrets for this server.
+    // Secrets are keyed by (projectId, mcpId=slug, name), not the internal UUID _id.
     if (mcpSecretClient && hasSecrets) {
-      await mcpSecretClient.deleteAllSecrets(_id);
+      await mcpSecretClient.deleteAllSecrets(projectId, slug);
       if (env && Object.keys(env).length > 0) {
-        await mcpSecretClient.storeEnv(_id, env);
+        await mcpSecretClient.storeEnv(projectId, slug, env);
       } else if (headers && headers.length > 0) {
-        await mcpSecretClient.storeHeaders(_id, headers);
+        await mcpSecretClient.storeHeaders(projectId, slug, headers);
       }
     }
 
-    const updated = await ctx.mcpServerCollection.findOne({ _id });
-    res.status(existing ? 200 : 201).json({ ...updated, id: updated!._id });
+    const updated = await ctx.mcpServerCollection.findOne(
+      existing ? { _id: existing._id } : { projectId, slug },
+    );
+    res.status(existing ? 200 : 201).json(toMcpResponse(updated as McpServerDocument));
   },
 });
 
@@ -180,20 +229,21 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["MCP Servers"],
   summary: "Update MCP server",
   params: z.object({ id: z.string() }),
+  query: OptionalProjectIdQuerySchema,
   body: UpdateMcpServerInputSchema,
   response: McpServerResponseSchema,
   handler: async (req, res) => {
     const { id } = req.params;
     const { name, type, url, command, args, env, headers, sessionMode, version, description } = req.body;
 
-    const existing = await ctx.mcpServerCollection.findOne({
-      _id: id,
-      deletedAt: { $exists: false },
-    });
+    const existing = await findServerBySlug(id, getOptionalQueryProjectId(req));
     if (!existing) {
       res.status(404).json({ error: "MCP server not found" });
       return;
     }
+    const realId = existing._id;
+    const secretSlug = mcpSlug(existing);
+    const secretProjectId = existing.projectId;
 
     const hasSecrets = (env && Object.keys(env).length > 0) || (headers && headers.length > 0);
     if (hasSecrets && !mcpSecretClient) {
@@ -225,14 +275,14 @@ apiRoute(ctx.app, ctx.registry, {
       (mongoUpdate as any).$unset = { env: "", headers: "" };
     }
 
-    await ctx.mcpServerCollection.updateOne({ _id: id }, mongoUpdate);
+    await ctx.mcpServerCollection.updateOne({ _id: realId }, mongoUpdate);
 
     // When the transport kind changes (stdio ↔ non-stdio) and no explicit secret
     // reconciliation was requested, delete all existing secrets — GET would otherwise
     // re-interpret them as the wrong type (env ↔ headers).
     if (mcpSecretClient && typeChangesKind && !wantsSecretReconciliation) {
-      const itemsToDelete = await mcpSecretClient.listSecrets(id);
-      await Promise.all(itemsToDelete.map((item) => mcpSecretClient!.deleteSecret(id, item.name)));
+      const itemsToDelete = await mcpSecretClient.listSecrets(secretProjectId, secretSlug);
+      await Promise.all(itemsToDelete.map((item) => mcpSecretClient!.deleteSecret(secretProjectId, secretSlug, item.name)));
     }
 
     // Reconcile secrets in Token Manager when secret fields are provided.
@@ -241,7 +291,7 @@ apiRoute(ctx.app, ctx.registry, {
     // - An empty env object (`{}`) or empty headers array (`[]`) deletes all existing secrets.
     // Only one of env/headers may be present (enforced above).
     if (mcpSecretClient && wantsSecretReconciliation) {
-      const existingItems = await mcpSecretClient.listSecrets(id);
+      const existingItems = await mcpSecretClient.listSecrets(secretProjectId, secretSlug);
       const existingNames = new Set(existingItems.map((item) => item.name));
 
       if (env !== undefined) {
@@ -251,7 +301,7 @@ apiRoute(ctx.app, ctx.registry, {
         // Delete secrets that the client explicitly removed (including all when env is {}).
         for (const name of existingNames) {
           if (!submittedNames.has(name)) {
-            await mcpSecretClient.deleteSecret(id, name);
+            await mcpSecretClient.deleteSecret(secretProjectId, secretSlug, name);
           }
         }
 
@@ -259,7 +309,7 @@ apiRoute(ctx.app, ctx.registry, {
         for (const [name, rawValue] of submittedEntries) {
           const valueStr = String(rawValue ?? "");
           if (valueStr && valueStr !== "<secret>") {
-            await mcpSecretClient.storeSecret(id, name, valueStr);
+            await mcpSecretClient.storeSecret(secretProjectId, secretSlug, name, valueStr);
           }
         }
       }
@@ -270,21 +320,21 @@ apiRoute(ctx.app, ctx.registry, {
         // Delete secrets that the client explicitly removed (including all when headers is []).
         for (const name of existingNames) {
           if (!submittedNames.has(name)) {
-            await mcpSecretClient.deleteSecret(id, name);
+            await mcpSecretClient.deleteSecret(secretProjectId, secretSlug, name);
           }
         }
 
         // Upsert only explicit new values; keep existing values when masked/empty.
         for (const header of headers) {
           if (header.value && header.value !== "<secret>") {
-            await mcpSecretClient.storeSecret(id, header.name, header.value);
+            await mcpSecretClient.storeSecret(secretProjectId, secretSlug, header.name, header.value);
           }
         }
       }
     }
 
-    const updated = await ctx.mcpServerCollection.findOne({ _id: id });
-    res.json({ ...updated, id: updated!._id });
+    const updated = await ctx.mcpServerCollection.findOne({ _id: realId });
+    res.json(toMcpResponse(updated as McpServerDocument));
   },
 });
 
@@ -295,27 +345,25 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["MCP Servers"],
   summary: "Delete MCP server",
   params: z.object({ id: z.string() }),
+  query: OptionalProjectIdQuerySchema,
   response: z.object({ message: z.string() }),
   successStatus: 204,
   handler: async (req, res) => {
     const { id } = req.params;
 
-    const existing = await ctx.mcpServerCollection.findOne({
-      _id: id,
-      deletedAt: { $exists: false },
-    });
+    const existing = await findServerBySlug(id, getOptionalQueryProjectId(req));
     if (!existing) {
       res.status(404).json({ error: "MCP server not found" });
       return;
     }
 
-    // Best-effort cleanup of secrets before soft-delete
+    // Best-effort cleanup of secrets before soft-delete (keyed by projectId + slug)
     if (mcpSecretClient) {
-      await mcpSecretClient.deleteAllSecrets(id);
+      await mcpSecretClient.deleteAllSecrets(existing.projectId, mcpSlug(existing));
     }
 
     await ctx.mcpServerCollection.updateOne(
-      { _id: id },
+      { _id: existing._id },
       { $set: { deletedAt: new Date(), updatedAt: new Date() } },
     );
 

@@ -293,7 +293,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       }
       const mcpClient = new McpServerClient(apiBaseUrl);
       await log("info", `Resolving ${requestDoc.mcpServers.length} MCP server(s)`, { mcpServers: requestDoc.mcpServers });
-      mcpServerConfigs = await mcpClient.resolveServers(requestDoc.mcpServers);
+      mcpServerConfigs = await mcpClient.resolveServers(requestDoc.projectId, requestDoc.mcpServers);
       await log("info", `Resolved MCP servers: ${mcpServerConfigs.map(s => s.name).join(", ")}`);
 
       // Hydrate configs with real plaintext secrets from Token Manager
@@ -304,7 +304,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         mcpServerConfigs = await Promise.all(
           mcpServerConfigs.map(async (config) => {
             try {
-              const resolved = await secretClient.resolveSecrets(config.slug);
+              const resolved = await secretClient.resolveSecrets(requestDoc.projectId, config.slug);
               if ('env' in resolved && resolved.env && Object.keys(resolved.env).length > 0) {
                 hydratedNames.push(config.name);
                 return { ...config, env: resolved.env };

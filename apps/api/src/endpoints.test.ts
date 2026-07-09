@@ -1493,11 +1493,47 @@ describe("API Endpoints", () => {
         expect.arrayContaining([expect.stringContaining("model")])
       );
     });
-  });
 
-  // ===================================================================
-  // Reasoning effort validation
-  // ===================================================================
+    it("rejects an MCP slug that belongs to another project (project-scoped validation)", async () => {
+      (mocks.profileCollection.findOne as any).mockResolvedValue({
+        _id: "profile-1",
+        name: "My Profile",
+        latestVersion: 1,
+      });
+      (mocks.profileVersionCollection.findOne as any).mockResolvedValue({
+        _id: "pv-1",
+        profileId: "profile-1",
+        version: 1,
+        workerType: "coder-acp-copilot",
+        model: "claude-sonnet-4",
+        mcpServers: ["ms-learn"], // slug exists, but only in a different project
+        skillRevisions: [],
+        extensions: [],
+      });
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [{ agentVersion: "v1", status: "active", createdAt: new Date() }],
+        supportedModels: ["claude-sonnet-4"],
+      });
+      // The project-scoped lookup finds nothing — the slug lives in another project.
+      const findSpy = vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) });
+      (mocks.mcpServerCollection.find as any) = findSpy;
+
+      const res = await request(app)
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          profileId: "profile-1",
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("MCP server(s) not found");
+      expect(res.body.error).toContain("ms-learn");
+      // Validation query must be scoped to the request's project.
+      const filter = findSpy.mock.calls[0][0];
+      expect(filter).toHaveProperty("projectId", TEST_PROJECT_ID);
+    });
+  });
 
   describe("POST /api/v1/requests?worker=... (reasoning effort)", () => {
     it("rejects when effort is incompatible with model capabilities", async () => {

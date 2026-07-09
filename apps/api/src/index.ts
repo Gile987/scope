@@ -45,7 +45,6 @@ import type { RouteContext } from "./route-context.js";
 import type {
   CriteriaDocument,
   PromptFeatureDocument,
-  PromptFeatureExtractionDocument,
   ReportDocument,
   ReportTemplateDocument,
   InsightDocument,
@@ -91,7 +90,6 @@ let projectCollection: Collection<ProjectDocument>;
 let projectStore: ProjectStore;
 let criteriaCollection: Collection<CriteriaDocument>;
 let promptFeatureCollection: Collection<PromptFeatureDocument>;
-let promptFeatureExtractionCollection: Collection<PromptFeatureExtractionDocument>;
 let reportCollection: Collection<ReportDocument>;
 let agentCollection: Collection<CodingAgentDocument>;
 let modelCollection: Collection<ModelDocument>;
@@ -129,7 +127,6 @@ async function initializeClients(): Promise<void> {
   projectStore = new ProjectStore(projectCollection);
   criteriaCollection = db.collection<CriteriaDocument>("criteria");
   promptFeatureCollection = db.collection<PromptFeatureDocument>("prompt-features");
-  promptFeatureExtractionCollection = db.collection<PromptFeatureExtractionDocument>("prompt-feature-extractions");
   reportCollection = db.collection<ReportDocument>("reports");
   agentCollection = db.collection<CodingAgentDocument>("agents");
   modelCollection = db.collection<ModelDocument>("models");
@@ -258,7 +255,6 @@ const routeCtx: RouteContext = {
   get projectCollection() { return projectCollection; },
   get criteriaCollection() { return criteriaCollection; },
   get promptFeatureCollection() { return promptFeatureCollection; },
-  get promptFeatureExtractionCollection() { return promptFeatureExtractionCollection; },
   get reportCollection() { return reportCollection; },
   get reportTemplateCollection() { return reportTemplateCollection; },
   get agentCollection() { return agentCollection; },
@@ -361,7 +357,6 @@ export interface TestDependencies {
   runsCollection?: Collection<RunHistoryDocument>;
   criteriaCollection?: Collection<CriteriaDocument>;
   promptFeatureCollection?: Collection<PromptFeatureDocument>;
-  promptFeatureExtractionCollection?: Collection<PromptFeatureExtractionDocument>;
   reportCollection?: Collection<ReportDocument>;
   agentCollection?: Collection<CodingAgentDocument>;
   modelCollection?: Collection<ModelDocument>;
@@ -394,7 +389,6 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.runsCollection) runsCol = deps.runsCollection;
   if (deps.criteriaCollection) criteriaCollection = deps.criteriaCollection;
   if (deps.promptFeatureCollection) promptFeatureCollection = deps.promptFeatureCollection;
-  if (deps.promptFeatureExtractionCollection) promptFeatureExtractionCollection = deps.promptFeatureExtractionCollection;
   if (deps.reportCollection) reportCollection = deps.reportCollection;
   if (deps.agentCollection) agentCollection = deps.agentCollection;
   if (deps.modelCollection) modelCollection = deps.modelCollection;

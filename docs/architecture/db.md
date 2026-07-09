@@ -135,14 +135,14 @@ Feature definitions extracted from task prompts. The human `id` is unique **per 
 | `id` (superseded by 026) | `{ id: 1 }` | was unique | 002 |
 | `projectId_id` | `{ projectId: 1, id: 1 }` | unique † | 026 |
 
-### `prompt-feature-extractions`
+### `prompt-feature-extractions` (removed by migration 027)
 
-Cached results of prompt feature extraction (keyed by task text hash).
-
-| Index | Key | Options | Migration |
-|-------|-----|---------|-----------|
-| `_id` | `{ _id: 1 }` | default | — |
-| `taskTextHash` | `{ taskTextHash: 1 }` | unique | 002 |
+**Deleted.** This collection was dead code — `taskTextHash` was never computed and the
+collection was never read or written at runtime; real feature caching lives on the
+project-scoped `task-prompts` collection. Migration 027 drops it (guarded against a
+missing namespace so it is a no-op on envs where it never materialized). Its type,
+zod schema, API registration and the deprecated `RequestDocument.promptFeatureExtractionId`
+field were removed at the same time.
 
 ### `insights`
 
@@ -155,12 +155,20 @@ Generated analysis insights.
 
 ### `mcp-servers`
 
-MCP (Model Context Protocol) server configurations.
+MCP (Model Context Protocol) server configurations. **Per-project isolation (migration 027):**
+`_id` is a fresh UUID and the human slug lives in a `slug` field, unique *within* a project — so
+the same slug can be created in multiple projects (no cross-project 409). Stored references keep
+holding the **slug** (`requests.mcpServers[]`, `profileVersion.mcpServers[]`, `mcp-secrets.mcpId`);
+resolution is scoped `{ projectId, slug }`. Legacy rows (pre-027) still key `_id` to the slug;
+lookups match `slug` first, then fall back to the legacy `_id`. The public API id is unchanged
+(`id = slug`), so URLs and payloads stay the same.
 
 | Index | Key | Options | Migration |
 |-------|-----|---------|-----------|
 | `_id` | `{ _id: 1 }` | default | — |
 | `createdAt` | `{ createdAt: -1 }` | | 002 |
+| `projectId` | `{ projectId: 1 }` | | 025 |
+| `projectId_slug` | `{ projectId: 1, slug: 1 }` | unique † | 027 |
 
 ### `feature-flags`
 
@@ -185,12 +193,14 @@ Run configuration profiles — named collections of settings (worker, task, mode
 
 ### `profile-versions`
 
-Immutable versioned snapshots of profile configurations. Each version captures the full settings at a point in time.
+Immutable versioned snapshots of profile configurations. Each version captures the full settings at a point in time. **Per-project isolation (migration 027):** `_id` is a fresh UUID and the human composite key `"<profileId>@<version>"` lives in a `ref` field. Stored references keep holding the composite (`requests.profileVersionId`); resolution is scoped `{ projectId, ref }`. Legacy rows (pre-027) still key `_id` to the composite; lookups fall back to the legacy `_id`. Because `profileId` is already a UUID the composite was globally unique, so `{ projectId, ref }` is a guardrail/ordering index (cross-project resolution guard), not a dedup fix.
 
 | Index | Key | Options | Migration |
 |-------|-----|---------|-----------|
 | `_id` | `{ _id: 1 }` | default | — |
 | `profileId_version` | `{ profileId: 1, version: -1 }` | | 010 |
+| `projectId` | `{ projectId: 1 }` | | 025 |
+| `projectId_ref` | `{ projectId: 1, ref: 1 }` | unique † | 027 |
 
 ### Other collections
 
@@ -222,7 +232,7 @@ The migration **pre-asserts** there are no duplicate `{ projectId, keyId }` / `{
 
 > **† Cosmos DB unique-index caveat.** Azure Cosmos DB for MongoDB (RU-based) can only build a unique index while a collection is **empty** (at creation time, via the `CreateCollection` extension command); `createIndex(..., { unique: true })` on a **populated** collection fails with code 67 (`CannotCreateIndex`). Because migration 025 runs against collections that already hold data, it **degrades gracefully on Cosmos**: it creates a **non-unique** `{ projectId, keyId }` / `{ projectId, ref }` index (kept for lookup performance) and relies on the application-level `findOrCreate` for per-project dedup — which is already how these collections behaved on Cosmos before 025 (migration 003's `{ ref }` unique index silently no-op'd there). On real MongoDB (local/CI) the indexes are created **unique** as normal, so tests still assert true uniqueness. This deviation was found by validating 025 on real Cosmos (Gate V).
 
-Unscoped collections (`projects`, `agents`, `models`, `feature-flags`, `prompt-feature-extractions`, `accounts`, `_migrations`) do not carry `projectId`.
+Unscoped collections (`projects`, `agents`, `models`, `feature-flags`, `accounts`, `_migrations`) do not carry `projectId`.
 
 ### Per-project catalog isolation (migration 026)
 
@@ -242,4 +252,34 @@ The migration is **additive and non-destructive** — no document deletes, no `_
 
 It **pre-asserts** there are no duplicate `{ projectId, slug }` / `{ projectId, id }` pairs before creating each unique index, reuses 025's Cosmos-safe helpers, and its `down()` unsets `slug` (index changes are log-only). The same **† Cosmos unique-index caveat** applies: on Cosmos the composite indexes degrade to **non-unique** (per-project dedup enforced by the app's scoped `findOrCreate` / dup-check), while real MongoDB gets true unique indexes.
 
-> **MCP deferred.** `mcp-servers` (and MCP secrets) are the fifth tagged-but-not-isolated family. They are intentionally **not** part of migration 026 — the secret foreign key, gateway slug resolution, run-submit validation and worker `resolveServers` threading make them a larger change tracked separately.
+> **MCP now isolated (migration 027).** `mcp-servers` was the fifth tagged-but-not-isolated family
+> deferred out of 026. Migration 027 completes it (see below).
+
+### Per-project entity keying (migration 027)
+
+Migration 027 applies the uniform **"opaque UUID `_id` + human reference key + project-scoped
+resolution"** identity model (the same split 026 used for `skills`/`extensions`) to two more API-DB
+entities, and deletes one dead collection:
+
+| Entity | `_id` before | After | Reference key (unchanged format) | Per-project index |
+|--------|--------------|-------|----------------------------------|-------------------|
+| `mcp-servers` | slug | UUID `_id` + `slug` field | `slug` (in `requests.mcpServers[]`, `profileVersion.mcpServers[]`, `mcp-secrets.mcpId`) | `{ projectId, slug }` unique † |
+| `profile-versions` | `"<profileId>@<version>"` | UUID `_id` + `ref` field | `ref` (in `requests.profileVersionId`) | `{ projectId, ref }` unique † |
+| `prompt-feature-extractions` | ObjectId | **collection dropped** (dead code) | — | — |
+
+Like 026 it is **additive and non-destructive** for the surviving entities — no `_id` rewrite of
+existing rows (only **new** rows get a UUID `_id`); it backfills `slug`/`ref` from the legacy `_id`,
+pre-asserts no duplicate `{ projectId, slug }` / `{ projectId, ref }` pairs, reuses 025's Cosmos-safe
+helpers, and its `down()` unsets `slug`/`ref` (index changes log-only). The same **† Cosmos
+unique-index caveat** applies (composite indexes degrade to non-unique on Cosmos; app-level
+`findOrCreate` enforces per-project dedup). The dead `prompt-feature-extractions` drop is guarded
+against a missing namespace so it is a no-op where the collection never existed.
+
+**Reference-key formats do not change** — only *primary keys* and *resolution filters* change, so no
+referencing collection is rewritten. Every API response/param for these entities keeps surfacing the
+**human key** (`mcp-servers` → `id = slug`; `profile-versions` → `ref`); the UUID `_id` is internal
+only and never leaks into API output, CLI, portal URLs, or stored references.
+
+**MCP secrets** (`mcp-secrets`) live in the **Token Manager's own MongoDB**, not the API DB, so their
+`projectId` backfill and unique index swap `{ mcpId, name }` → `{ projectId, mcpId, name }` run at
+token-manager startup (not migration 027). See [token-manager.md](token-manager.md).

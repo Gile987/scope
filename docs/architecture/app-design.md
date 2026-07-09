@@ -207,10 +207,42 @@ criteria/prompt-features, pre-asserts no composite duplicates, and reuses 025's 
 (so the composite indexes degrade to non-unique on Cosmos, unique on real MongoDB). `down()` unsets
 `slug`; index changes are log-only.
 
-**MCP deferred.** `mcp-servers` and MCP secrets are the fifth tagged-but-not-isolated family. They
-are intentionally excluded from 026 because the secret foreign key
-(`McpSecretDocument.mcpId = server._id`), gateway slug resolution, run-submit validation, and worker
-`resolveServers` threading make them a larger change tracked separately.
+### Per-project entity keying (migration 027)
+
+Migration **`027-uuid-keys-mcp-profileversions`** picks up the MCP family 026 deferred and extends
+the uniform **"opaque UUID `_id` + human reference key + project-scoped resolution"** model to two
+more entities, and deletes one dead collection:
+
+| Entity | `_id` (before) | After | Reference key (unchanged) | Per-project index |
+|--------|----------------|-------|---------------------------|-------------------|
+| `mcp-servers` | slug | UUID `_id` + `slug` | `slug` (in `requests.mcpServers[]`, `profileVersion.mcpServers[]`, `mcp-secrets.mcpId`) | `{projectId, slug}` |
+| `profile-versions` | `"<profileId>@<version>"` | UUID `_id` + `ref` | `ref` (in `requests.profileVersionId`) | `{projectId, ref}` |
+| `prompt-feature-extractions` | ObjectId | **collection dropped** (dead code) | — | — |
+
+Key properties:
+
+- **Reference-key formats do not change** — only *primary keys* and *resolution filters* change, so
+  no referencing collection is rewritten. Cross-entity references keep holding the human key
+  (`requests.mcpServers[]` and `mcp-secrets.mcpId` keep the **slug**; `requests.profileVersionId`
+  keeps the composite `ref`).
+- **API-observable ids are unchanged** (governing principle: the API always surfaces the human key,
+  the UUID `_id` is internal only). `mcp-servers` still returns `id = slug`; `profile-versions`
+  surface `ref`. This **removes the cross-project 409** on `mcp-servers` (slug reusable per project)
+  and makes slug/ref resolution a cross-project isolation guardrail.
+- **Worker threading.** Run preparation resolves each MCP server by `{projectId, slug}`
+  (`McpServerClient.resolveServers(projectId, slugs)`) and hydrates its secret by
+  `{projectId, mcpId, name}` (`McpSecretClient.resolveSecrets(projectId, slug)`), threaded from
+  `requestDoc.projectId` in `queue-processor.ts`. The gateway keeps naming servers by **`config.slug`**
+  (`mapToMcpServerConfig` sets `config.slug = data.slug ?? data._id`) — see
+  [mcp-gateway.md](mcp-gateway.md) for the cross-project isolation invariant.
+- **MCP secrets** are project-scoped in the **Token Manager's own DB** (`{projectId, mcpId, name}`
+  index + startup backfill), not migration 027 — see [token-manager.md](token-manager.md).
+
+Migration 027 is **additive and non-destructive** for the surviving entities (no `_id` rewrite of
+existing rows; only new rows get a UUID `_id`): it backfills `slug`/`ref` from the legacy `_id`,
+pre-asserts no composite duplicates, reuses 025's Cosmos-safe helpers (composite indexes degrade to
+non-unique on Cosmos, unique on real MongoDB), and its `down()` unsets `slug`/`ref` (index changes
+log-only). The dead `prompt-feature-extractions` drop is guarded against a missing namespace.
 
 ## Judge Pipeline
 

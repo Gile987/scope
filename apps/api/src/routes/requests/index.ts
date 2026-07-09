@@ -276,7 +276,6 @@ apiRoute(ctx.app, ctx.registry, {
   summary: "Submit request(s)",
   body: CreateRequestInputSchema.extend({
     count: z.number().min(1).max(10).default(1),
-    promptFeatureExtractionId: z.string().optional(),
     skills: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
     codebase: z.string().optional(),
@@ -286,7 +285,7 @@ apiRoute(ctx.app, ctx.registry, {
   successStatus: 201,
   handler: async (req, res) => {
     const projectId = getQueryProjectId(req);
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, agentsMd: requestedAgentsMd, agentsMdParentIds: requestedAgentsMdParentIds, gates: requestedGates, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, agentsMd: requestedAgentsMd, agentsMdParentIds: requestedAgentsMdParentIds, gates: requestedGates, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId } = req.body;
     let worker = req.query.worker as string | undefined;
 
     // AGENTS.md body + lineage (for any caller that wants to attach an
@@ -545,9 +544,13 @@ apiRoute(ctx.app, ctx.registry, {
         let validatedMcpServers: string[] | undefined;
         if (effectiveMcpServers !== undefined && effectiveMcpServers.length > 0) {
           const existingServers = await ctx.mcpServerCollection
-            .find({ _id: { $in: effectiveMcpServers }, deletedAt: { $exists: false } })
+            .find({
+              projectId,
+              $or: [{ slug: { $in: effectiveMcpServers } }, { _id: { $in: effectiveMcpServers } }],
+              deletedAt: { $exists: false },
+            })
             .toArray();
-          const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s._id));
+          const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s.slug ?? s._id));
           const missingSlugs = effectiveMcpServers.filter((slug: string) => !existingSlugs.has(slug));
           if (missingSlugs.length > 0) {
             res.status(400).json({
@@ -649,14 +652,13 @@ apiRoute(ctx.app, ctx.registry, {
             ...(maxIterations ? { maxIterations } : {}),
             ...(personaInstructions ? { personaInstructions } : {}),
             ...(personaObj ? { persona: personaObj } : {}),
-            ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
             ...(r.mcpServers ? { mcpServers: r.mcpServers } : {}),
             ...(r.skillRevisions ? { skillRevisions: r.skillRevisions } : {}),
             ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
             ...(r.extensions ? { extensions: r.extensions } : {}),
             ...(r.agentVersion ? { agentVersion: r.agentVersion } : {}),
             profileId: r.profile._id,
-            profileVersionId: r.profileVersion._id,
+            profileVersionId: r.profileVersion.ref ?? r.profileVersion._id,
             ...(persistedVariationGates ? { gates: persistedVariationGates } : {}),
             submissionId,
             ...agentsMdFields,
@@ -724,7 +726,7 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
       profileId = profile._id;
-      profileVersionId = profileVersion._id;
+      profileVersionId = profileVersion.ref ?? profileVersion._id;
 
       // Reject requests where client-supplied fields conflict with profile values.
       // Clients should either omit these fields or send values that match the profile.
@@ -960,9 +962,13 @@ apiRoute(ctx.app, ctx.registry, {
       }
       if (effectiveMcpServers.length > 0) {
         const existingServers = await ctx.mcpServerCollection
-          .find({ _id: { $in: effectiveMcpServers }, deletedAt: { $exists: false } })
+          .find({
+            projectId,
+            $or: [{ slug: { $in: effectiveMcpServers } }, { _id: { $in: effectiveMcpServers } }],
+            deletedAt: { $exists: false },
+          })
           .toArray();
-        const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s._id));
+        const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s.slug ?? s._id));
         const missingSlugs = effectiveMcpServers.filter((slug: string) => !existingSlugs.has(slug));
         if (missingSlugs.length > 0) {
           res.status(400).json({ error: `MCP server(s) not found: ${missingSlugs.join(", ")}` });
@@ -1079,7 +1085,6 @@ apiRoute(ctx.app, ctx.registry, {
           ...(maxIterations ? { maxIterations } : {}),
           ...(personaInstructions ? { personaInstructions } : {}),
           ...(personaObj ? { persona: personaObj } : {}),
-          ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
           ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
           ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
@@ -1141,7 +1146,6 @@ apiRoute(ctx.app, ctx.registry, {
       ...(maxIterations ? { maxIterations } : {}),
       ...(personaInstructions ? { personaInstructions } : {}),
       ...(personaObj ? { persona: personaObj } : {}),
-      ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
       ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
       ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
       ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
@@ -1807,7 +1811,7 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(404).json({ error: `Profile version not found for profile: ${overrideProfileId}` });
         return;
       }
-      overrideProfileVersionId = overrideProfileVersion._id;
+      overrideProfileVersionId = overrideProfileVersion.ref ?? overrideProfileVersion._id;
 
       // Reject individual overrides that conflict with the profile's controlled fields
       const conflicts: string[] = [];
@@ -1882,7 +1886,10 @@ apiRoute(ctx.app, ctx.registry, {
           effectiveProfileVersionId = original.profileVersionId;
           // If the original had a profile, resolve its version for field overrides
           if (original.profileId && original.profileVersionId) {
-            activeProfileVersion = await ctx.profileVersionCollection.findOne({ _id: original.profileVersionId });
+            activeProfileVersion = await ctx.profileVersionCollection.findOne({
+              projectId: original.projectId,
+              $or: [{ ref: original.profileVersionId }, { _id: original.profileVersionId }],
+            });
           }
         }
 

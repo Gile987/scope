@@ -49,7 +49,8 @@ export interface ProfileDocument {
  * `ProfileDocument.latestVersion` atomically.
  */
 export interface ProfileVersionDocument {
-  _id: string;                    // Composite: "<profileId>@<version>" (e.g. "abc123@3")
+  _id: string;                    // Opaque UUID (internal). Legacy rows (pre-migration 027) key _id to the "<profileId>@<version>" composite.
+  ref: string;                    // Human reference key: "<profileId>@<version>" (e.g. "abc123@3"); unique per project
   profileId: string;              // FK → ProfileDocument._id
   projectId: string;              // FK → ProjectDocument._id (denormalized from profile)
   version: number;                // Auto-incrementing per profileId (1, 2, 3, …)

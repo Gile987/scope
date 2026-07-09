@@ -255,7 +255,6 @@ function buildApp(
     db: {} as any,
     criteriaCollection: {} as any,
     promptFeatureCollection: {} as any,
-    promptFeatureExtractionCollection: {} as any,
     reportCollection: {} as any,
     reportTemplateCollection: {} as any,
     agentCollection: {} as any,

@@ -1146,6 +1146,7 @@ describe("mcp-server schemas", () => {
     it("accepts valid response", () => {
       const result = McpServerResponseSchema.parse({
         _id: "ms1",
+        slug: "ms1",
         projectId: "proj-test",
         name: "Server",
         type: "http",

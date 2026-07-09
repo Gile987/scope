@@ -132,8 +132,6 @@ export interface Run {
   updatedAt?: string;
   deletedAt?: string;
   taskPromptId?: string;
-  /** @deprecated — use taskPromptId instead */
-  promptFeatureExtractionId?: string;
   mcpServers?: string[];
   skills?: string[];
   skillRevisions?: string[];
@@ -261,18 +259,6 @@ export interface SuggestedPromptFeature {
   prompt: string;
 }
 
-export interface PromptFeatureExtraction {
-  _id?: string;
-  taskText: string;
-  taskTextHash?: string;
-  promptFeatureResults: PromptFeatureResult[];
-  suggestedFeatures?: SuggestedPromptFeature[];
-  extractedAt: string;
-  model?: string;
-  cached?: boolean;
-}
-
-// Task Prompt types (first-class entity for benchmark task texts)
 export interface TaskPrompt {
   _id: string;                          // UUIDv5 content-addressed ID
   text?: string;                        // Full task prompt text (absent when blob-backed)

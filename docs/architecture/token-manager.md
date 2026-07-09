@@ -165,6 +165,28 @@ Each key tracks:
 
 This helps identify heavily-used tokens and detect potential issues with token distribution.
 
+## MCP Secrets
+
+Separately from Key Vault-backed API tokens, the Token Manager stores **MCP server secrets** (the
+`env` values and `headers` a run needs to authenticate to an MCP server) in its **own MongoDB
+collection** (`mcp-secrets`), exposed via `mcp-secret-routes.ts`. Secrets are **project-scoped**:
+
+- Each secret document carries a `projectId`, a `mcpId` (the MCP server's **human slug**, never the
+  server's internal UUID `_id`), and a `name`.
+- The unique index is `{ projectId, mcpId, name }` (was `{ mcpId, name }`), created at service
+  startup. So the same slug + secret name can exist independently in different projects.
+- Every route filter and the insert path require `projectId` (read from the request); all client
+  methods (`storeSecret`, `storeEnv`, `storeHeaders`, `listSecrets`, `resolveSecrets`,
+  `deleteSecret`, `deleteAllSecrets`) take `projectId` as their first argument and forward it.
+- On startup the service **backfills** `projectId` on any pre-existing secrets (deriving it from the
+  referenced server, which is unambiguous because slugs were globally unique before the Projects
+  feature) **before** creating the unique index.
+
+Because these secrets live in the Token Manager's DB, their index swap and backfill run here at
+service startup — **not** through `packages/db-migrations` (migration 027 covers only the API-DB
+entities). See [db.md → Per-project entity keying (migration 027)](db.md#per-project-entity-keying-migration-027)
+and [mcp-gateway.md](mcp-gateway.md) for how a run resolves and hydrates these secrets project-scoped.
+
 ## Configuration
 
 ### Environment Variables
