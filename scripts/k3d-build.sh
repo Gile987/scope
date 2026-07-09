@@ -96,19 +96,25 @@ if docker buildx bake --help &>/dev/null; then
   echo ">>> Pushing images to $REGISTRY..."
   push_failed=0
   for svc in $PUSH_LIST; do
-    if ! docker push "${REGISTRY}/scoped/${svc}:latest" --quiet 2>/dev/null; then
-      # Retry once — Docker Desktop proxy can cause transient failures
-      sleep 1
-      if ! docker push "${REGISTRY}/scoped/${svc}:latest" --quiet 2>/dev/null; then
-        echo "  ⚠ Failed to push $svc"
-        push_failed=1
+    pushed=false
+    for attempt in 1 2 3; do
+      if docker push "${REGISTRY}/scoped/${svc}:latest" --quiet 2>/dev/null; then
+        pushed=true
+        break
       fi
+      echo "  Retry $attempt/3 for $svc..."
+      sleep 3
+    done
+    if [ "$pushed" = "false" ]; then
+      echo "  ⚠ Failed to push $svc after 3 attempts"
+      push_failed=1
     fi
   done
   if [ "$push_failed" -eq 0 ]; then
     echo "  ✓ All images pushed"
   else
     echo "  ⚠ Some pushes failed — check registry with: curl http://$REGISTRY/v2/_catalog"
+    exit 1
   fi
 
   exit 0
