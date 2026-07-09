@@ -58,16 +58,15 @@ done
 echo ">>> Building images → $REGISTRY"
 
 # ── Try parallel build with docker buildx bake ────────────────────────────
+# Uses the default "docker" driver so builds share the host network and can
+# push to the local k3d HTTP registry without insecure-registry workarounds.
 if docker buildx bake --help &>/dev/null; then
-  # Ensure a builder capable of parallel builds exists
-  if ! docker buildx inspect scope-builder &>/dev/null; then
-    echo "  Creating buildx builder 'scope-builder'..."
-    docker buildx create --name scope-builder --driver docker-container --use
-  else
-    docker buildx use scope-builder 2>/dev/null || true
-  fi
+  # Use default builder (docker driver) — it shares host network so it can
+  # resolve the k3d registry on localhost. The docker-container driver runs
+  # in its own container and cannot reach localhost registries.
+  docker buildx use default 2>/dev/null || true
 
-  BAKE_ARGS=(--file docker-bake.hcl)
+  BAKE_ARGS=(--file docker-bake.hcl --load)
 
   if [ -n "$NO_CACHE" ]; then
     BAKE_ARGS+=(--no-cache)
@@ -76,19 +75,28 @@ if docker buildx bake --help &>/dev/null; then
   if [ ${#BUILD_TARGETS[@]} -eq 0 ]; then
     echo "    Services: ALL (parallel)"
     REGISTRY="$REGISTRY" docker buildx bake "${BAKE_ARGS[@]}"
+    PUSH_LIST=($ALL_SERVICES)
   else
     echo "    Services: ${BUILD_TARGETS[*]} (parallel)"
     REGISTRY="$REGISTRY" docker buildx bake "${BAKE_ARGS[@]}" "${BUILD_TARGETS[@]}"
+    PUSH_LIST=("${BUILD_TARGETS[@]}")
   fi
 
+  # Push images to local registry
   echo ""
-  echo ">>> All images pushed to $REGISTRY"
+  echo ">>> Pushing images to $REGISTRY..."
+  for svc in "${PUSH_LIST[@]}"; do
+    docker push "${REGISTRY}/scoped/${svc}:latest" --quiet &
+  done
+  wait
+  echo "  ✓ All images pushed"
+
   exit 0
 fi
 
 # ── Fallback: sequential docker build + push ──────────────────────────────
 echo "  ⚠ docker buildx bake unavailable — falling back to sequential builds"
-echo "    Install BuildKit for 3-4x faster parallel builds."
+echo "    Install BuildKit for faster parallel builds."
 echo ""
 
 get_dockerfile() {
