@@ -3,9 +3,10 @@
 # k3d-build.sh — Build and push Docker images to local k3d registry
 # =============================================================================
 # Usage:
-#   ./scripts/k3d-build.sh              # Build all services
+#   ./scripts/k3d-build.sh              # Build all services in parallel
 #   ./scripts/k3d-build.sh api          # Build only the api
 #   ./scripts/k3d-build.sh api portal   # Build api and portal
+#   ./scripts/k3d-build.sh --no-cache   # Full rebuild without cache
 # =============================================================================
 set -euo pipefail
 
@@ -28,14 +29,71 @@ REGISTRY="scope-${PORT_OFFSET}-registry.localhost:${REGISTRY_PORT}"
 export NO_PROXY="${NO_PROXY:+${NO_PROXY},}scope-${PORT_OFFSET}-registry.localhost,localhost,127.0.0.1"
 export no_proxy="$NO_PROXY"
 
-# Services available for local build (subset relevant for local dev)
+# Parse flags
+NO_CACHE=""
+BUILD_TARGETS=()
+for arg in "$@"; do
+  case "$arg" in
+    --no-cache) NO_CACHE="--no-cache" ;;
+    *) BUILD_TARGETS+=("$arg") ;;
+  esac
+done
+
+# All known services (must match targets in docker-bake.hcl)
 ALL_SERVICES="api judge portal token-manager scheduler gateway coder-acp-copilot coder-acp-claude-code"
+
+# Validate requested targets
+for svc in "${BUILD_TARGETS[@]}"; do
+  valid=false
+  for known in $ALL_SERVICES; do
+    if [ "$svc" = "$known" ]; then valid=true; break; fi
+  done
+  if [ "$valid" = "false" ]; then
+    echo "Error: Unknown service '$svc'"
+    echo "Available services: $ALL_SERVICES"
+    exit 1
+  fi
+done
+
+echo ">>> Building images → $REGISTRY"
+
+# ── Try parallel build with docker buildx bake ────────────────────────────
+if docker buildx bake --help &>/dev/null; then
+  # Ensure a builder capable of parallel builds exists
+  if ! docker buildx inspect scope-builder &>/dev/null; then
+    echo "  Creating buildx builder 'scope-builder'..."
+    docker buildx create --name scope-builder --driver docker-container --use
+  else
+    docker buildx use scope-builder 2>/dev/null || true
+  fi
+
+  BAKE_ARGS=(--file docker-bake.hcl)
+
+  if [ -n "$NO_CACHE" ]; then
+    BAKE_ARGS+=(--no-cache)
+  fi
+
+  if [ ${#BUILD_TARGETS[@]} -eq 0 ]; then
+    echo "    Services: ALL (parallel)"
+    REGISTRY="$REGISTRY" docker buildx bake "${BAKE_ARGS[@]}"
+  else
+    echo "    Services: ${BUILD_TARGETS[*]} (parallel)"
+    REGISTRY="$REGISTRY" docker buildx bake "${BAKE_ARGS[@]}" "${BUILD_TARGETS[@]}"
+  fi
+
+  echo ""
+  echo ">>> All images pushed to $REGISTRY"
+  exit 0
+fi
+
+# ── Fallback: sequential docker build + push ──────────────────────────────
+echo "  ⚠ docker buildx bake unavailable — falling back to sequential builds"
+echo "    Install BuildKit for 3-4x faster parallel builds."
+echo ""
 
 get_dockerfile() {
   local name=$1
   case "$name" in
-    api|judge|portal) echo "apps/${name}/Dockerfile" ;;
-    token-manager|scheduler) echo "apps/${name}/Dockerfile" ;;
     gateway) echo "apps/gateway/Dockerfile" ;;
     coder-acp-*) echo "apps/workers/${name}/Dockerfile" ;;
     *) echo "apps/${name}/Dockerfile" ;;
@@ -66,40 +124,15 @@ build_and_push() {
   local image="${REGISTRY}/scoped/${name}:latest"
 
   if [ ! -f "$dockerfile" ]; then
-    echo "Warning: Dockerfile not found at $dockerfile, skipping $name"
+    echo "  Warning: Dockerfile not found at $dockerfile, skipping $name"
     return 0
   fi
 
-  # Source pinned versions if available (e.g. versions.env)
-  local build_args=""
-  local versions_file
-  for versions_file in "apps/workers/${name}/versions.env" "apps/${name}/versions.env"; do
-    if [ -f "$versions_file" ]; then
-      local key value
-      while IFS='=' read -r key value; do
-        [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
-        build_args="${build_args} --build-arg ${key}=${value}"
-      done < "$versions_file"
-      break
-    fi
-  done
-
-  # --file is relative to repo root; context may differ per service
-  local abs_dockerfile="$REPO_ROOT/$dockerfile"
-
   local target_arg=""
-  if [ -n "$target" ]; then
-    target_arg="--target $target"
-  fi
+  if [ -n "$target" ]; then target_arg="--target $target"; fi
 
   echo "  Building $name..."
-  if ! docker build \
-    --file "$abs_dockerfile" \
-    --tag "$image" \
-    ${target_arg} \
-    ${build_args} \
-    --quiet \
-    "$context"; then
+  if ! docker build --file "$dockerfile" --tag "$image" ${target_arg} ${NO_CACHE} --quiet "$context"; then
     echo "  ⚠ Build failed for $name — skipping"
     return 0
   fi
@@ -108,30 +141,13 @@ build_and_push() {
   docker push "$image" --quiet
 }
 
-# Determine what to build
-if [ $# -eq 0 ]; then
+if [ ${#BUILD_TARGETS[@]} -eq 0 ]; then
   BUILD_LIST=($ALL_SERVICES)
 else
-  BUILD_LIST=("$@")
-  # Validate
-  for svc in "${BUILD_LIST[@]}"; do
-    valid=false
-    for known in $ALL_SERVICES; do
-      if [ "$svc" = "$known" ]; then
-        valid=true
-        break
-      fi
-    done
-    if [ "$valid" = "false" ]; then
-      echo "Error: Unknown service '$svc'"
-      echo "Available services: $ALL_SERVICES"
-      exit 1
-    fi
-  done
+  BUILD_LIST=("${BUILD_TARGETS[@]}")
 fi
 
-echo ">>> Building images → $REGISTRY"
-echo "    Services: ${BUILD_LIST[*]}"
+echo "    Services: ${BUILD_LIST[*]} (sequential)"
 echo ""
 
 for svc in "${BUILD_LIST[@]}"; do
