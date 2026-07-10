@@ -137,8 +137,8 @@ function ProjectFirstRunScreen() {
  * Route-level guard for **scoped** pages (mirrors `FeatureRoute`). When no
  * project is selected it renders the first-run pick/create screen instead of the
  * page, so scoped pages never fire a `?projectId=`-less request that would 400.
- * Unscoped routes (agents, models, secrets, admin, `/projects`, statistics) are
- * not wrapped and stay reachable without a selection.
+ * Unscoped routes (agents, models, secrets, admin, `/projects`) are not wrapped
+ * and stay reachable without a selection.
  */
 export function ProjectGate({ children }: { children: ReactNode }) {
   const { hasProject } = useProjectContext();

@@ -8,9 +8,16 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ProjectProvider } from "@/contexts/ProjectContext";
+import { PROJECT_STORAGE_KEY } from "@/lib/project-scope";
 import { Layout } from "./Layout";
 
-function renderLayout(path = "/runs") {
+function renderLayout(
+  path = "/runs",
+  { projectId = "proj-1" }: { projectId?: string | null } = {},
+) {
+  // Layout gates project-scoped nav on a selected project, so seed one by
+  // default; pass { projectId: null } to exercise the no-project state.
+  if (projectId) localStorage.setItem(PROJECT_STORAGE_KEY, projectId);
   // Layout now hosts <ProjectSwitcher />, which reads react-query + ProjectContext,
   // so the harness provides both (mirroring main.tsx).
   const queryClient = new QueryClient({
@@ -75,5 +82,43 @@ describe("Layout", () => {
     expect(promptsLink.getAttribute("href")).toBe("/task-prompts");
     // The legacy "Tasks" label must be gone.
     expect(within(sidebar).queryByRole("link", { name: "Tasks" })).toBeNull();
+  });
+
+  it("shows scoped nav and the New Run CTA when a project is selected", () => {
+    localStorage.setItem("scope:layout:sidebar-expanded", "1");
+
+    renderLayout("/runs");
+
+    const sidebar = screen.getByLabelText("Primary navigation");
+    // Scoped groups + the emphasized CTA are present with a project in use.
+    expect(within(sidebar).getByRole("link", { name: "New Run" })).toBeTruthy();
+    expect(within(sidebar).getByText("Activity")).toBeTruthy();
+    expect(within(sidebar).getByRole("link", { name: "Runs" })).toBeTruthy();
+    expect(within(sidebar).getByRole("link", { name: "MCP" })).toBeTruthy();
+    // Global group is present too.
+    expect(within(sidebar).getByText("Platform")).toBeTruthy();
+  });
+
+  it("hides project-scoped nav until a project is selected", () => {
+    localStorage.setItem("scope:layout:sidebar-expanded", "1");
+
+    renderLayout("/runs", { projectId: null });
+
+    const sidebar = screen.getByLabelText("Primary navigation");
+    // Global entries stay reachable without a selection.
+    expect(within(sidebar).getByRole("link", { name: "Projects" })).toBeTruthy();
+    expect(within(sidebar).getByText("Platform")).toBeTruthy();
+    expect(within(sidebar).getByRole("link", { name: "Agents" })).toBeTruthy();
+    expect(within(sidebar).getByRole("link", { name: "Models" })).toBeTruthy();
+    expect(within(sidebar).getByRole("link", { name: "Secrets" })).toBeTruthy();
+    // Scoped groups and their items are hidden.
+    expect(within(sidebar).queryByText("Activity")).toBeNull();
+    expect(within(sidebar).queryByText("Library")).toBeNull();
+    expect(within(sidebar).queryByText("Resources")).toBeNull();
+    expect(within(sidebar).queryByRole("link", { name: "Runs" })).toBeNull();
+    expect(within(sidebar).queryByRole("link", { name: "Prompts" })).toBeNull();
+    expect(within(sidebar).queryByRole("link", { name: "MCP" })).toBeNull();
+    // The New Run CTA is scoped too, so it's gone until a project is picked.
+    expect(within(sidebar).queryByRole("link", { name: "New Run" })).toBeNull();
   });
 });

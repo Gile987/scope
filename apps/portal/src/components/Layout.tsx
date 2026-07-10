@@ -47,6 +47,7 @@ import { VersionFooter } from "./VersionFooter";
 import { ThemeToggle } from "./ThemeToggle";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
+import { useProjectContext } from "@/contexts/ProjectContext";
 
 interface NavItem {
   to: string;
@@ -61,6 +62,13 @@ interface NavGroup {
   /** Human label shown in the mobile sheet and as the tooltip group hint. */
   label: string;
   items: NavItem[];
+  /**
+   * When true, every item in this group points to a project-scoped page (routes
+   * wrapped in `ProjectGate` in App.tsx), so the whole group is hidden until a
+   * project is selected. Global groups (e.g. Platform) omit this and stay
+   * visible without a selection.
+   */
+  scoped?: boolean;
 }
 
 /**
@@ -70,17 +78,19 @@ interface NavGroup {
  *   Resources - project-scoped integrations you wire up (MCP, extensions)
  *   Platform  - global infra shared across projects (agents, models, secrets)
  *
- * Resources are scoped to the active project; Platform items are not - they
- * live at the tenant level and are shared by every project, so they're pinned
- * last where the active-project selection doesn't apply.
+ * Activity, Library and Resources are `scoped`: their pages live behind a
+ * ProjectGate, so the sidebar hides them until a project is selected. Platform
+ * is global - it lives at the tenant level and is shared by every project, so
+ * it stays visible without a selection and is pinned last.
  *
- * The dev-only MDP view is pinned separately at the bottom; it's a
- * diagnostic tool, not part of any of these groups.
+ * The pinned Projects link (global) and the dev-only MDP view (scoped) are
+ * rendered outside these groups; New Run and MDP are gated on the selection too.
  */
 const navGroups: NavGroup[] = [
   {
     id: "activity",
     label: "Activity",
+    scoped: true,
     items: [
       { to: "/runs", label: "Runs", icon: List },
       { to: "/statistics", label: "Statistics", icon: BarChart3 },
@@ -91,6 +101,7 @@ const navGroups: NavGroup[] = [
   {
     id: "library",
     label: "Library",
+    scoped: true,
     items: [
       { to: "/task-prompts", label: "Prompts", icon: MessageSquareText },
       { to: "/criteria", label: "Criteria", icon: FlaskConical },
@@ -103,6 +114,7 @@ const navGroups: NavGroup[] = [
   {
     id: "resources",
     label: "Resources",
+    scoped: true,
     items: [
       { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },
       { to: "/extensions", label: "Extensions", icon: Puzzle, featureKey: "extensions" },
@@ -232,6 +244,7 @@ function SidebarIconLink({
 export function Layout() {
   const location = useLocation();
   const { isFeatureEnabled } = useFeatureFlags();
+  const { hasProject } = useProjectContext();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(() => {
     try {
@@ -256,11 +269,16 @@ export function Layout() {
     () =>
       navGroups
         .map((g) => ({ ...g, items: filterByFeature(g.items) }))
-        .filter((g) => g.items.length > 0),
+        // Scoped groups only appear once a project is in use; global groups
+        // (e.g. Platform) always show. Empty groups are dropped so no stray
+        // separator/label is left behind.
+        .filter((g) => (hasProject || !g.scoped) && g.items.length > 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isFeatureEnabled],
+    [isFeatureEnabled, hasProject],
   );
-  const visibleDevItems = filterByFeature(devNavItems);
+  // MDP points at /criteria/mdp (project-scoped), so hide the Dev section until
+  // a project is selected.
+  const visibleDevItems = hasProject ? filterByFeature(devNavItems) : [];
 
   const isFullBleed = useMemo(
     () =>
@@ -338,19 +356,25 @@ export function Layout() {
                 sidebarExpanded ? "px-2" : "items-center",
               )}
             >
-              {/* New Run — emphasized primary CTA */}
-              <SidebarIconLink
-                to="/runs/new"
-                label="New Run"
-                icon={Plus}
-                active={location.pathname === "/runs/new"}
-                expanded={sidebarExpanded}
-                emphasized
-              />
-              <div
-                className={cn("my-1 h-px bg-border/60", sidebarExpanded ? "w-full" : "w-6")}
-                aria-hidden
-              />
+              {/* New Run — emphasized primary CTA. Scoped (submitting a run needs
+                  a project), so it's hidden along with its divider until one is
+                  selected; Projects then becomes the first pinned item. */}
+              {hasProject && (
+                <>
+                  <SidebarIconLink
+                    to="/runs/new"
+                    label="New Run"
+                    icon={Plus}
+                    active={location.pathname === "/runs/new"}
+                    expanded={sidebarExpanded}
+                    emphasized
+                  />
+                  <div
+                    className={cn("my-1 h-px bg-border/60", sidebarExpanded ? "w-full" : "w-6")}
+                    aria-hidden
+                  />
+                </>
+              )}
               {/* Projects — pinned above the Activity group; the active project scopes everything below */}
               <SidebarIconLink
                 to="/projects"

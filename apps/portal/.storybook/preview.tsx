@@ -8,6 +8,7 @@ import { initialize, mswLoader } from "msw-storybook-addon";
 import { mswHandlers } from "./msw-handlers";
 import { FeatureFlagProvider } from "../src/contexts/FeatureFlagContext";
 import { ThemeProvider } from "../src/contexts/ThemeContext";
+import { ProjectProvider } from "../src/contexts/ProjectContext";
 import "../src/index.css";
 
 initialize({ onUnhandledRequest: "bypass" });
@@ -25,9 +26,11 @@ const preview: Preview = {
         <QueryClientProvider client={queryClient}>
           <FeatureFlagProvider>
             <ThemeProvider>
-              <MemoryRouter>
-                <Story />
-              </MemoryRouter>
+              <ProjectProvider>
+                <MemoryRouter>
+                  <Story />
+                </MemoryRouter>
+              </ProjectProvider>
             </ThemeProvider>
           </FeatureFlagProvider>
         </QueryClientProvider>
