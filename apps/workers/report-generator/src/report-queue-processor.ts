@@ -83,7 +83,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
         throw new Error(`Report ${reportId} has no templateId — reports without a template are no longer supported`);
       }
 
-      const template = await this.fetchReportTemplate(doc.templateId);
+      const template = await this.fetchReportTemplate(doc.templateId, doc.projectId);
       if (!template) {
         throw new Error(`Report template '${doc.templateId}' not found for report ${reportId}`);
       }
@@ -320,21 +320,27 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
   }
 
   /**
-   * Fetch a report template from the API by its slug ID.
-   * Returns null if the template is not found or on error.
+   * Fetch a report template from the API by its slug ID, scoped to the report's
+   * project. Report templates are project-scoped, so the slug `id` is only
+   * unique within a project; the `?projectId=` query param is required for the
+   * lookup to resolve (the API 4xxs a slug-only request). Returns null if the
+   * template is not found or on error.
    */
-  private async fetchReportTemplate(templateId: string): Promise<ReportTemplateDocument | null> {
+  private async fetchReportTemplate(
+    templateId: string,
+    projectId: string
+  ): Promise<ReportTemplateDocument | null> {
     try {
       const response = await fetch(
-        `${this.reportConfig.apiBaseUrl}/api/v1/report-templates/${encodeURIComponent(templateId)}`
+        `${this.reportConfig.apiBaseUrl}/api/v1/report-templates/${encodeURIComponent(templateId)}?projectId=${encodeURIComponent(projectId)}`
       );
       if (!response.ok) {
-        console.warn(`[report-generator] Failed to fetch template '${templateId}': ${response.status}`);
+        console.warn(`[report-generator] Failed to fetch template '${templateId}' (project ${projectId}): ${response.status}`);
         return null;
       }
       return await response.json() as ReportTemplateDocument;
     } catch (error) {
-      console.warn(`[report-generator] Error fetching template '${templateId}': ${error}`);
+      console.warn(`[report-generator] Error fetching template '${templateId}' (project ${projectId}): ${error}`);
       return null;
     }
   }
