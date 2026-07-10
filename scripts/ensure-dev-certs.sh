@@ -10,7 +10,9 @@
 # and does not re-prompt.
 #
 # Invoked automatically by scripts/dev-compose.sh when the `auth` profile is
-# active. The cert is mounted into the entra-local container (TLS_CERT/TLS_KEY).
+# active. The host key stays `0600` (owner-only); the entra-local-certs-init
+# compose service stages a copy into a named volume with UID 1000 ownership so
+# the emulator can read it on rootless / UID-remapped container engines too.
 # =============================================================================
 set -euo pipefail
 

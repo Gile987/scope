@@ -159,8 +159,9 @@ services:
   # entra-local — Microsoft Entra ID emulator for local auth development.
   # Opt-in via the `auth` profile (bundled into every `docker:dev:*` script).
   # Serves HTTPS using a locally-trusted mkcert certificate (provisioned by
-  # scripts/ensure-dev-certs.sh and mounted at /certs) so the browser trusts it
-  # with no manual cert step — MSAL requires an https authority. See the auth docs.
+  # scripts/ensure-dev-certs.sh and staged into a named volume by
+  # entra-local-certs-init) so the browser trusts it with no manual cert step —
+  # MSAL requires an https authority. See the auth docs.
   entra-local:
     image: ghcr.io/cmaneu/entra-local:0.0.3
     profiles: [auth]
@@ -182,12 +183,43 @@ services:
       ISSUER: "${ENTRA_LOCAL_ISSUER:-https://localhost:${ENTRA_LOCAL_PORT:-8443}/${AUTH_TENANT_ID:-11111111-1111-1111-1111-111111111111}/v2.0}"
     volumes:
       - entra_local_data:/app/data
-      - ./.certs:/certs:ro
+      # Certs come from the named volume (owned by UID 1000), not a direct host
+      # bind mount, so the emulator's `node` user can read the key on rootless /
+      # UID-remapped engines. See entra-local-certs-init.
+      - entra_local_certs:/certs:ro
+    depends_on:
+      entra-local-certs-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "node", "-e", "require('https').get({host:'localhost',port:8443,path:'/health',rejectUnauthorized:false},(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # entra-local-certs-init — one-shot: stage the host mkcert cert/key into a named
+  # volume with ownership/permissions the emulator's UID 1000 `node` user can read.
+  #
+  # Why: mkcert writes the key `0600`, owned by the host user. A direct
+  # `./.certs:/certs:ro` bind mount works on Docker Desktop (its VFS ignores host
+  # ownership) but fails on rootless podman / colima / userns-remapped docker,
+  # where the in-container `node` user does not own the host key and gets EACCES —
+  # aborting the whole `up`. Copying into a named volume and chowning to 1000:1000
+  # (the same ownership-fix pattern the devproxy services use) makes the key
+  # readable to the container user on every engine, while the host key stays
+  # `0600` and never gets loosened.
+  entra-local-certs-init:
+    image: busybox:1.37
+    profiles: [auth]
+    restart: "no"
+    command:
+      [
+        "sh",
+        "-c",
+        "set -e; echo 'Staging entra-local certs for UID 1000...'; cp /certs-src/entra-local.pem /certs/entra-local.pem; cp /certs-src/entra-local-key.pem /certs/entra-local-key.pem; chown -v 1000:1000 /certs /certs/entra-local.pem /certs/entra-local-key.pem; chmod -v 0644 /certs/entra-local.pem; chmod -v 0640 /certs/entra-local-key.pem; echo 'Done'",
+      ]
+    volumes:
+      - ./.certs:/certs-src:ro
+      - entra_local_certs:/certs
 
   # entra-local-init — one-shot: registers the dev Portal origin as an SPA
   # redirect URI on the seeded "Sample SPA" app so sign-in works with no manual
@@ -823,6 +855,7 @@ volumes:
   azurite_data:
   lowkey_vault_data:
   entra_local_data:
+  entra_local_certs:
   gateway_cert:
   copilot_har_output:
   copilot_devproxy_cert:
