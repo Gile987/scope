@@ -85,6 +85,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Report Templates"],
   summary: "Get report template",
   params: z.object({ id: z.string() }),
+  query: ProjectIdQuerySchema,
   response: ReportTemplateResponseSchema,
   errorResponses: {
     404: { description: "Report template not found" },
@@ -92,7 +93,7 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res, next) => {
     try {
       const { id } = req.params;
-      const template = await ctx.reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
+      const template = await ctx.reportTemplateCollection.findOne({ projectId: getQueryProjectId(req), id, deletedAt: { $exists: false } });
       if (!template) {
         res.status(404).json({ error: `Report template '${id}' not found` });
         return;
@@ -237,6 +238,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Report Templates"],
   summary: "Update report template",
   params: z.object({ id: z.string() }),
+  query: ProjectIdQuerySchema,
   body: UpdateReportTemplateInputSchema,
   response: ReportTemplateResponseSchema,
   errorResponses: {
@@ -245,9 +247,10 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res, next) => {
     try {
       const { id } = req.params;
+      const projectId = getQueryProjectId(req);
       const { name, description, userPrompt, systemPrompt, trigger, model, timeoutMs } = req.body;
 
-      const existing = await ctx.reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
+      const existing = await ctx.reportTemplateCollection.findOne({ projectId, id, deletedAt: { $exists: false } });
       if (!existing) {
         res.status(404).json({ error: `Report template '${id}' not found` });
         return;
@@ -314,8 +317,8 @@ apiRoute(ctx.app, ctx.registry, {
         }
       }
 
-      await ctx.reportTemplateCollection.updateOne({ id }, { $set: updateFields });
-      const updated = await ctx.reportTemplateCollection.findOne({ id });
+      await ctx.reportTemplateCollection.updateOne({ projectId, id }, { $set: updateFields });
+      const updated = await ctx.reportTemplateCollection.findOne({ projectId, id });
       res.json(updated);
     } catch (error) {
       next(error);
@@ -330,6 +333,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Report Templates"],
   summary: "Delete report template",
   params: z.object({ id: z.string() }),
+  query: ProjectIdQuerySchema,
   response: z.object({ message: z.string() }),
   successStatus: 204,
   errorResponses: {
@@ -338,15 +342,16 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res, next) => {
     try {
       const { id } = req.params;
+      const projectId = getQueryProjectId(req);
 
-      const existing = await ctx.reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
+      const existing = await ctx.reportTemplateCollection.findOne({ projectId, id, deletedAt: { $exists: false } });
       if (!existing) {
         res.status(404).json({ error: `Report template '${id}' not found` });
         return;
       }
 
       await ctx.reportTemplateCollection.updateOne(
-        { id },
+        { projectId, id },
         { $set: { deletedAt: new Date(), updatedAt: new Date() } }
       );
 

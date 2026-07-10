@@ -10,7 +10,7 @@ import { criterionIcon, dimTimestamp, errorText, successText, label, value, warn
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { withOutputOption, withProjectOption, getDefaultApiUrl } from "../utils/shared.js";
-import { requireProjectId, resolveProjectId } from "../utils/config.js";
+import { requireProjectId } from "../utils/config.js";
 import { apiFetch } from "../utils/api-client.js";
 import { mapYamlCriterion } from "../utils/yaml-mappers.js";
 
@@ -93,7 +93,7 @@ promptFeature
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const projectId = resolveProjectId(options.project);
+      const projectId = requireProjectId(options.project);
       const response = await apiFetch(options.url, `/prompt-features/${options.id}`, { projectId });
 
       if (!response.ok) {
@@ -179,7 +179,7 @@ promptFeature
 )
   .action(async (options) => {
     try {
-      const projectId = resolveProjectId(options.project);
+      const projectId = requireProjectId(options.project);
       const body: Record<string, unknown> = {};
       if (options.prompt !== undefined) body.prompt = options.prompt;
 
@@ -217,7 +217,7 @@ promptFeature
 )
   .action(async (options) => {
     try {
-      const projectId = resolveProjectId(options.project);
+      const projectId = requireProjectId(options.project);
       const response = await apiFetch(options.url, `/prompt-features/${options.id}`, {
         method: "DELETE",
         projectId,

@@ -35,17 +35,6 @@ interface RequestOpts {
    * (agents, models, secrets, projects) omit this.
    */
   scoped?: boolean;
-  /**
-   * **Soft** project scoping for backward-compatible point reads / by-slug
-   * mutations (skills, extensions, criteria, prompt-features). When a project
-   * is selected, its id is appended as `?projectId=` so the call resolves the
-   * **active project's copy**; when none is selected (e.g. a deep-link that
-   * renders outside {@link file://../components/ProjectGate.tsx ProjectGate}),
-   * the call falls back to the API's legacy global lookup **instead of
-   * throwing**. Use for routes that accept an *optional* `projectId` — never
-   * for routes that require it (those use {@link RequestOpts.scoped}).
-   */
-  softScoped?: boolean;
 }
 
 /**
@@ -104,12 +93,6 @@ async function request<T>(path: string, init?: RequestInit, opts?: RequestOpts):
     const projectId = getSelectedProjectId();
     if (!projectId) throw new ProjectRequiredError();
     finalPath = withProjectId(path, projectId);
-  } else if (opts?.softScoped) {
-    // Attach the active project so the call resolves that project's copy, but
-    // fall back to the API's legacy global lookup when none is selected rather
-    // than throwing — keeps deep-links to point-read detail pages working.
-    const projectId = getSelectedProjectId();
-    if (projectId) finalPath = withProjectId(path, projectId);
   }
   const res = await apiClient(`${BASE}${finalPath}`, {
     headers: { "Content-Type": "application/json" },
@@ -412,7 +395,7 @@ export const api = {
 
   /** Get a single criterion by ID (soft-scoped: prefers the active project's copy, else legacy global) */
   getCriterion: (id: string): Promise<CriteriaDocument & { dependents: string[] }> => {
-    return request(`/criteria/${id}`, undefined, { softScoped: true });
+    return request(`/criteria/${id}`, undefined, { scoped: true });
   },
 
   /** Create a new criterion */
@@ -428,12 +411,12 @@ export const api = {
     return request(`/criteria/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
-    }, { softScoped: true });
+    }, { scoped: true });
   },
 
   /** Delete a criterion (soft-scoped: prefers the active project's copy, else legacy global) */
   deleteCriterion: (id: string): Promise<{ id: string; deleted: boolean }> => {
-    return request(`/criteria/${id}`, { method: "DELETE" }, { softScoped: true });
+    return request(`/criteria/${id}`, { method: "DELETE" }, { scoped: true });
   },
 
   /** Get the full criteria dependency graph */
@@ -462,7 +445,7 @@ export const api = {
 
   /** Get a single prompt feature by ID (soft-scoped: prefers the active project's copy, else legacy global) */
   getPromptFeature: (id: string): Promise<PromptFeatureDocument & { dependents: string[] }> => {
-    return request(`/prompt-features/${id}`, undefined, { softScoped: true });
+    return request(`/prompt-features/${id}`, undefined, { scoped: true });
   },
 
   /** Create a new prompt feature */
@@ -478,12 +461,12 @@ export const api = {
     return request(`/prompt-features/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
-    }, { softScoped: true });
+    }, { scoped: true });
   },
 
   /** Delete a prompt feature (soft-scoped: prefers the active project's copy, else legacy global) */
   deletePromptFeature: (id: string): Promise<{ id: string; deleted: boolean }> => {
-    return request(`/prompt-features/${id}`, { method: "DELETE" }, { softScoped: true });
+    return request(`/prompt-features/${id}`, { method: "DELETE" }, { scoped: true });
   },
 
   /** Generate a prompt feature prompt from a behavior description using AI */
@@ -611,10 +594,10 @@ export const api = {
 
   /** Get a single MCP server by slug (soft-scoped: prefers the active project's copy, else legacy global) */
   getMcpServer: (slug: string): Promise<McpServerDocument> => {
-    return request(`/mcp/servers/${encodeURIComponent(slug)}`, undefined, { softScoped: true });
+    return request(`/mcp/servers/${encodeURIComponent(slug)}`, undefined, { scoped: true });
   },
 
-  /** Create a new MCP server (upsert by slug) */
+  /** Create a new MCP server (409s if the slug already exists in the active project) */
   createMcpServer: (body: CreateMcpServerRequest): Promise<McpServerDocument> => {
     return request("/mcp/servers", {
       method: "POST",
@@ -627,12 +610,12 @@ export const api = {
     return request(`/mcp/servers/${encodeURIComponent(slug)}`, {
       method: "PUT",
       body: JSON.stringify(body),
-    }, { softScoped: true });
+    }, { scoped: true });
   },
 
   /** Soft-delete an MCP server (soft-scoped: prefers the active project's copy, else legacy global) */
   deleteMcpServer: (slug: string): Promise<{ id: string; deleted: boolean }> => {
-    return request(`/mcp/servers/${encodeURIComponent(slug)}`, { method: "DELETE" }, { softScoped: true });
+    return request(`/mcp/servers/${encodeURIComponent(slug)}`, { method: "DELETE" }, { scoped: true });
   },
 
   // ─── Analysis ──────────────────────────────────────────────────────────────
@@ -755,7 +738,7 @@ export const api = {
 
   /** Get a single report template by slug ID */
   getReportTemplate: (id: string): Promise<ReportTemplate> => {
-    return request(`/report-templates/${id}`);
+    return request(`/report-templates/${id}`, undefined, { scoped: true });
   },
 
   /** List models available for report generation */
@@ -793,12 +776,12 @@ export const api = {
     return request(`/report-templates/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
-    });
+    }, { scoped: true });
   },
 
   /** Delete a report template (soft-delete) */
   deleteReportTemplate: (id: string): Promise<void> => {
-    return request(`/report-templates/${id}`, { method: "DELETE" });
+    return request(`/report-templates/${id}`, { method: "DELETE" }, { scoped: true });
   },
 
   // ─── Version ───────────────────────────────────────────────────────────────
@@ -1016,7 +999,7 @@ export const api = {
 
   /** Get a single skill by slug (soft-scoped: prefers the active project's copy, else legacy global) */
   getSkill: (slug: string): Promise<SkillDocument> => {
-    return request(`/skills/${slug}`, undefined, { softScoped: true });
+    return request(`/skills/${slug}`, undefined, { scoped: true });
   },
 
   /** Search skills in the internal library and the external skills.sh registry */
@@ -1049,17 +1032,17 @@ export const api = {
 
   /** Soft-delete a skill (soft-scoped: prefers the active project's copy, else legacy global) */
   deleteSkill: (slug: string): Promise<{ id: string; deleted: boolean }> => {
-    return request(`/skills/${slug}`, { method: "DELETE" }, { softScoped: true });
+    return request(`/skills/${slug}`, { method: "DELETE" }, { scoped: true });
   },
 
   /** Resolve a skill (create/update revision from GitHub) — soft-scoped to the active project */
   resolveSkill: (slug: string): Promise<SkillRevisionDocument> => {
-    return request(`/skills/${slug}/resolve`, { method: "POST" }, { softScoped: true });
+    return request(`/skills/${slug}/resolve`, { method: "POST" }, { scoped: true });
   },
 
   /** List revisions for a skill (soft-scoped: prefers the active project's copy, else legacy global) */
   listSkillRevisions: (slug: string): Promise<SkillRevisionDocument[]> => {
-    return request(`/skills/${slug}/revisions`, undefined, { softScoped: true });
+    return request(`/skills/${slug}/revisions`, undefined, { scoped: true });
   },
 
   // ─── Codebases ─────────────────────────────────────────────────────────────
@@ -1188,7 +1171,7 @@ export const api = {
 
   /** Get a single extension by ID (soft-scoped: prefers the active project's copy, else legacy global) */
   getExtension: (id: string): Promise<ExtensionDocument> => {
-    return request(`/extensions/${id}`, undefined, { softScoped: true });
+    return request(`/extensions/${id}`, undefined, { scoped: true });
   },
 
   /** Search extensions (internal + VS Code marketplace) — scoped to the active project */
@@ -1215,7 +1198,7 @@ export const api = {
 
   /** Soft-delete an extension (soft-scoped: prefers the active project's copy, else legacy global) */
   deleteExtension: (id: string): Promise<{ id: string; deleted: boolean }> => {
-    return request(`/extensions/${id}`, { method: "DELETE" }, { softScoped: true });
+    return request(`/extensions/${id}`, { method: "DELETE" }, { scoped: true });
   },
 
   // ─── Profiles ────────────────────────────────────────────────────────────

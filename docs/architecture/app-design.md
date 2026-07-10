@@ -120,12 +120,52 @@ never defaulted. The single carrier is the **`?projectId=` query parameter**. He
 | **Top-level list** (`GET /api/v1/{requests,profiles,criteria,…}`) | `?projectId=` (**required**) | **400** |
 | **List-like reads** (`GET /api/v1/criteria/graph`, `/criteria/mdp`, `/analysis`) | `?projectId=` (**required**) | **400** |
 | **Nested list** (under a parent in the path) | Derived from the parent id | n/a |
-| **Point read / by-`_id` mutation** (`GET/PATCH/DELETE /:id`) | Read from the stored doc (`_id` is globally unique) | n/a (query param ignored) |
+| **By-`id`/slug get · edit · soft-delete** (`GET/PUT/DELETE /:id` on scoped catalogs) | `?projectId=` (**required**), or derived from context (e.g. a run's `projectId`) — filter is always `{ projectId, slug\|id }` | **400** |
+| **By true `_id`** (internal code already holding the globally-unique UUID `_id`) | Act on `{ _id }` directly — already unambiguous | n/a |
 
 The **runs list** (`GET /api/v1/requests`) requires `?projectId=` and AND-filters every page,
 probe, facet, and grouping pipeline by it (`flat.projectId` → `composeFilter`). The
 `groupBy: "project"` option and the project facet were **removed** — moot under a required
 single-project list.
+
+### Never a global, slug-only action on a project-scoped entity (the by-id invariant)
+
+A **project-scoped** entity must **never** be read, edited, or soft-deleted by a global,
+slug-only query. The Mongo/Cosmos filter for every get / edit / soft-delete must always contain
+**`_id`** *or* **`projectId`** — a human slug/business `id` is **never a key on its own**.
+`projectId` is derived from **context** when available (a parent doc or the run-request), else
+supplied by the **client** (`?projectId=`), else the request **fails 400**. There is no
+`{ _id: slug }` / `{ id }` global fallback.
+
+| Caller holds | What the API does |
+|--------------|-------------------|
+| `projectId` + slug | Filter `{ projectId, slug }` (or `{ projectId, id }`). No widening, no global fallback. |
+| slug only, `projectId` in context (parent / run-request) | Derive `projectId` from context, then identical to row 1. |
+| slug only, no `projectId` anywhere | Issue **no query → 400**. Never fall back to `{ _id: slug }`. |
+| a real `_id` (globally-unique UUID) | Filter `{ _id }` directly — already unambiguous; `projectId` not needed. |
+
+Because post-migration the by-id CRUD routes receive a `:id` that is usually a **slug** (the route
+cannot tell a slug from a UUID), those routes **require** `?projectId=` and resolve scoped. The
+resolver signatures enforce this structurally — `findXBySlug(slug, projectId: string)` takes a
+**required** `projectId` with no global `else`, so the compiler rejects any unscoped call site. The
+only callers holding a true `_id` are internal code paths that already resolved the document.
+
+On CosmosDB this is also the RU-friendly shape: these catalog collections declare no shard key, so
+a `{ projectId, slug }` equality is served by the `{projectId, slug}` index in one logical
+partition. Cosmos degrades that index to **non-unique**, so per-project uniqueness is enforced at
+the app layer (scoped `findOrCreate` / existence checks) — which is *why* edits resolve the row
+first and then write by its real `_id`. See `db.md` for the index details. This invariant is
+recorded so future routes and entities keep obeying it; see also `criteria-provider.md`.
+
+A bounded audit brought every project-scoped catalog under this rule. Besides mcp-servers, skills,
+extensions, criteria, and prompt-features (whose resolvers now take a required `projectId`),
+**`report-templates`** by-id `GET/PUT/DELETE /:id` were switched from a global `{ id }` filter to
+the scoped `{ projectId, id }` and now require `?projectId=`; the report-generation path
+(`POST /api/v1/reports`) resolves its `templateId` within the **run's** `projectId` (context) rather
+than globally. `report-templates` keeps a globally-unique `id` (it is not part of the migration-026
+slug-reuse set), so scoping is a guardrail: a caller must know the project to touch the row, and a
+wrong-project id returns 404. Create-vs-upsert consistency across catalogs is tracked separately in
+issue #1266.
 
 ### Per-project copies for deterministic-key entities
 
@@ -189,10 +229,11 @@ Key properties:
 - **API-observable ids are unchanged.** Skills/extensions still return `id = slug ?? _id`, so URLs
   and payloads stay identical. Only the internal `_id` and the dedup scope change.
 - **Slug lookups are project-scoped.** `resolveSkillBySlug` / the extension equivalent match
-  `{projectId, slug}` with a legacy `{projectId, _id}` fallback for un-backfilled rows; a point read
-  **without** `?projectId=` falls back to the legacy global `findOne({_id: slug})` for
-  backward-compatibility. The Portal/CLI flag these slug point-reads `{scoped: true}` so
-  project-switching resolves the right copy.
+  `{projectId, slug}` with a legacy `{projectId, _id}` fallback for un-backfilled rows. Per the
+  **by-id invariant** above, a by-slug get/edit/soft-delete **without** a resolvable `projectId`
+  is rejected with **400** — there is no global `findOne({_id: slug})` fallback. The Portal/CLI
+  flag these slug point-reads as hard-scoped so project-switching resolves the right copy and a
+  project-less deep-link errors clearly.
 - **criteria** additionally confines DAG `dependsOn` resolution to the criterion's own `projectId`,
   so a dependency edge can never cross projects.
 - **Judge threading.** Because criteria are now project-scoped, the judge threads the **run's

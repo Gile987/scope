@@ -142,15 +142,11 @@ describe("API Endpoints", () => {
       expect(res.status).toBe(400);
     });
 
-    it("allows a point read by :id with no projectId (unscoped)", async () => {
+    it("rejects a by-id point read with no projectId (400 — never a global slug-only resolve)", async () => {
       const doc = { id: "c1", prompt: "Check it", dependsOn: [], createdAt: new Date() };
       (mocks.criteriaCollection.findOne as any).mockResolvedValue(doc);
-      (mocks.criteriaCollection.find as any).mockReturnValue({
-        toArray: vi.fn().mockResolvedValue([]),
-      });
       const res = await request(app).get("/api/v1/criteria/c1");
-      expect(res.status).toBe(200);
-      expect(res.body.id).toBe("c1");
+      expect(res.status).toBe(400);
     });
 
     it("allows a scoped list once projectId is supplied", async () => {
@@ -281,7 +277,7 @@ describe("API Endpoints", () => {
       const depCursor = { toArray: vi.fn().mockResolvedValue([]) };
       (mocks.criteriaCollection.find as any).mockReturnValue(depCursor);
 
-      const res = await request(app).get("/api/v1/criteria/c1");
+      const res = await request(app).get(`/api/v1/criteria/c1?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(res.body.id).toBe("c1");
     });
@@ -289,7 +285,7 @@ describe("API Endpoints", () => {
     it("returns 404 when criterion not found", async () => {
       (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
 
-      const res = await request(app).get("/api/v1/criteria/nonexistent");
+      const res = await request(app).get(`/api/v1/criteria/nonexistent?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(404);
     });
   });
@@ -302,7 +298,7 @@ describe("API Endpoints", () => {
         .mockResolvedValueOnce({ ...existing, prompt: "Updated" }); // after update
 
       const res = await request(app)
-        .put("/api/v1/criteria/c1")
+        .put(`/api/v1/criteria/c1?projectId=${TEST_PROJECT_ID}`)
         .send({ prompt: "Updated" });
 
       expect(res.status).toBe(200);
@@ -312,7 +308,7 @@ describe("API Endpoints", () => {
       (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
 
       const res = await request(app)
-        .put("/api/v1/criteria/missing")
+        .put(`/api/v1/criteria/missing?projectId=${TEST_PROJECT_ID}`)
         .send({ prompt: "Nope" });
 
       expect(res.status).toBe(404);
@@ -331,7 +327,7 @@ describe("API Endpoints", () => {
         toArray: vi.fn().mockResolvedValue([]),
       });
 
-      const res = await request(app).delete("/api/v1/criteria/c1");
+      const res = await request(app).delete(`/api/v1/criteria/c1?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("deleted", true);
     });
@@ -339,7 +335,7 @@ describe("API Endpoints", () => {
     it("returns 404 when criterion not found", async () => {
       (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
 
-      const res = await request(app).delete("/api/v1/criteria/missing");
+      const res = await request(app).delete(`/api/v1/criteria/missing?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(404);
     });
 
@@ -354,7 +350,7 @@ describe("API Endpoints", () => {
         toArray: vi.fn().mockResolvedValue([{ id: "child" }]),
       });
 
-      const res = await request(app).delete("/api/v1/criteria/c1");
+      const res = await request(app).delete(`/api/v1/criteria/c1?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(409);
     });
   });
@@ -1046,6 +1042,72 @@ describe("API Endpoints", () => {
     });
   });
 
+  // §16: report-templates is project-scoped; by-id GET/PUT/DELETE must never
+  // resolve a business `id` globally — they require ?projectId= and scope the
+  // Mongo filter to { projectId, id } (never a global slug-only { id }).
+  describe("Report templates by-id scoping (§16)", () => {
+    const TID = "rt-scope";
+    const seededTemplate = {
+      projectId: TEST_PROJECT_ID,
+      id: TID,
+      name: "Seed",
+      userPrompt: "Analyze",
+      createdAt: new Date(),
+    };
+
+    it("GET /:id without projectId → 400 (no global slug-only resolve)", async () => {
+      const res = await request(app).get(`/api/v1/report-templates/${TID}`);
+      expect(res.status).toBe(400);
+      expect(mocks.reportTemplateCollection.findOne).not.toHaveBeenCalled();
+    });
+
+    it("GET /:id?projectId scopes the read to { projectId, id }", async () => {
+      (mocks.reportTemplateCollection.findOne as any).mockResolvedValue(seededTemplate);
+      const res = await request(app).get(`/api/v1/report-templates/${TID}?projectId=${TEST_PROJECT_ID}`);
+      expect(res.status).toBe(200);
+      expect(mocks.reportTemplateCollection.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: TEST_PROJECT_ID, id: TID })
+      );
+    });
+
+    it("PUT /:id without projectId → 400 (never a global slug-only update)", async () => {
+      const res = await request(app).put(`/api/v1/report-templates/${TID}`).send({ name: "x" });
+      expect(res.status).toBe(400);
+      expect(mocks.reportTemplateCollection.updateOne).not.toHaveBeenCalled();
+    });
+
+    it("PUT /:id?projectId scopes both the existence check and the update to { projectId, id }", async () => {
+      (mocks.reportTemplateCollection.findOne as any).mockResolvedValue(seededTemplate);
+      const res = await request(app)
+        .put(`/api/v1/report-templates/${TID}?projectId=${TEST_PROJECT_ID}`)
+        .send({ name: "Renamed" });
+      expect(res.status).toBe(200);
+      expect(mocks.reportTemplateCollection.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: TEST_PROJECT_ID, id: TID })
+      );
+      expect(mocks.reportTemplateCollection.updateOne).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: TEST_PROJECT_ID, id: TID }),
+        expect.anything()
+      );
+    });
+
+    it("DELETE /:id without projectId → 400 (never a global slug-only soft-delete)", async () => {
+      const res = await request(app).delete(`/api/v1/report-templates/${TID}`);
+      expect(res.status).toBe(400);
+      expect(mocks.reportTemplateCollection.updateOne).not.toHaveBeenCalled();
+    });
+
+    it("DELETE /:id?projectId soft-deletes scoped to { projectId, id }", async () => {
+      (mocks.reportTemplateCollection.findOne as any).mockResolvedValue(seededTemplate);
+      const res = await request(app).delete(`/api/v1/report-templates/${TID}?projectId=${TEST_PROJECT_ID}`);
+      expect(res.status).toBe(204);
+      expect(mocks.reportTemplateCollection.updateOne).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: TEST_PROJECT_ID, id: TID }),
+        expect.objectContaining({ $set: expect.objectContaining({ deletedAt: expect.anything() }) })
+      );
+    });
+  });
+
   // ===================================================================
   // Feature Flags endpoints
   // ===================================================================
@@ -1271,7 +1333,7 @@ describe("API Endpoints", () => {
         createdAt: new Date(),
       });
 
-      const res = await request(app).get("/api/v1/prompt-features/pf1");
+      const res = await request(app).get(`/api/v1/prompt-features/pf1?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("id", "pf1");
     });
@@ -1279,7 +1341,7 @@ describe("API Endpoints", () => {
     it("returns 404 when prompt feature not found", async () => {
       (mocks.promptFeatureCollection.findOne as any).mockResolvedValue(null);
 
-      const res = await request(app).get("/api/v1/prompt-features/missing");
+      const res = await request(app).get(`/api/v1/prompt-features/missing?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(404);
     });
   });

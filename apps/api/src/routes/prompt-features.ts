@@ -240,15 +240,15 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Prompt Features"],
   summary: "Get feature",
   params: z.object({ id: z.string() }),
-  query: OptionalProjectIdQuerySchema,
+  query: ProjectIdQuerySchema,
   response: PromptFeatureResponseSchema,
   errorResponses: {
     404: { description: "Feature not found" },
   },
   handler: async (req, res) => {
     const { id } = req.params;
-    const projectId = getOptionalQueryProjectId(req);
-    const feature = await ctx.promptFeatureCollection.findOne({ ...(projectId ? { projectId } : {}), id, deletedAt: { $exists: false } });
+    const projectId = getQueryProjectId(req);
+    const feature = await ctx.promptFeatureCollection.findOne({ projectId, id, deletedAt: { $exists: false } });
     if (!feature) {
       res.status(404).json({ error: `Prompt feature '${id}' not found` });
       return;
@@ -315,7 +315,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Prompt Features"],
   summary: "Update feature",
   params: z.object({ id: z.string() }),
-  query: OptionalProjectIdQuerySchema,
+  query: ProjectIdQuerySchema,
   body: UpdatePromptFeatureInputSchema,
   response: PromptFeatureResponseSchema,
   errorResponses: {
@@ -325,8 +325,8 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res) => {
     const { id } = req.params;
     const { prompt } = req.body;
-    const projectId = getOptionalQueryProjectId(req);
-    const scope = projectId ? { projectId } : {};
+    const projectId = getQueryProjectId(req);
+    const scope = { projectId };
 
     const existing = await ctx.promptFeatureCollection.findOne({ ...scope, id, deletedAt: { $exists: false } });
     if (!existing) {
@@ -360,15 +360,15 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Prompt Features"],
   summary: "Soft-delete feature",
   params: z.object({ id: z.string() }),
-  query: OptionalProjectIdQuerySchema,
+  query: ProjectIdQuerySchema,
   response: z.object({ id: z.string(), deleted: z.boolean() }),
   errorResponses: {
     404: { description: "Feature not found" },
   },
   handler: async (req, res) => {
     const { id } = req.params;
-    const projectId = getOptionalQueryProjectId(req);
-    const scope = projectId ? { projectId } : {};
+    const projectId = getQueryProjectId(req);
+    const scope = { projectId };
 
     const existing = await ctx.promptFeatureCollection.findOne({ ...scope, id, deletedAt: { $exists: false } });
     if (!existing) {

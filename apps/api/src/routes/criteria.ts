@@ -402,15 +402,15 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Criteria"],
   summary: "Get criterion",
   params: z.object({ id: z.string() }),
-  query: OptionalProjectIdQuerySchema,
+  query: ProjectIdQuerySchema,
   response: CriteriaResponseSchema,
   errorResponses: {
     404: { description: "Criterion not found" },
   },
   handler: async (req, res) => {
     const { id } = req.params;
-    const projectId = getOptionalQueryProjectId(req);
-    const scope = projectId ? { projectId } : {};
+    const projectId = getQueryProjectId(req);
+    const scope = { projectId };
     const criterion = await ctx.criteriaCollection.findOne({
       ...scope,
       id,
@@ -460,7 +460,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Criteria"],
   summary: "Update criterion",
   params: z.object({ id: z.string() }),
-  query: OptionalProjectIdQuerySchema,
+  query: ProjectIdQuerySchema,
   body: UpdateCriteriaInputSchema,
   response: CriteriaResponseSchema,
   errorResponses: {
@@ -471,7 +471,7 @@ apiRoute(ctx.app, ctx.registry, {
     const { id } = req.params;
     const { prompt, dependsOn, gates } = req.body;
     try {
-      const updated = await getCriteriaStore(getOptionalQueryProjectId(req)).update(id, { prompt, dependsOn, gates });
+      const updated = await getCriteriaStore(getQueryProjectId(req)).update(id, { prompt, dependsOn, gates });
       res.json(updated);
     } catch (err) {
       if (!sendStoreError(res, err)) throw err;
@@ -486,7 +486,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Criteria"],
   summary: "Soft-delete criterion",
   params: z.object({ id: z.string() }),
-  query: OptionalProjectIdQuerySchema,
+  query: ProjectIdQuerySchema,
   response: z.object({ id: z.string(), deleted: z.boolean() }),
   errorResponses: {
     404: { description: "Criterion not found" },
@@ -495,7 +495,7 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res) => {
     const { id } = req.params;
     try {
-      await getCriteriaStore(getOptionalQueryProjectId(req)).delete(id);
+      await getCriteriaStore(getQueryProjectId(req)).delete(id);
       res.json({ id, deleted: true });
     } catch (err) {
       if (!sendStoreError(res, err)) throw err;

@@ -7,7 +7,7 @@ import { dimTimestamp, errorText, successText, label, value, warnBanner } from "
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { withOutputOption, withProjectOption, getDefaultApiUrl } from "../utils/shared.js";
-import { requireProjectId, resolveProjectId } from "../utils/config.js";
+import { requireProjectId } from "../utils/config.js";
 import { apiFetch } from "../utils/api-client.js";
 
 export function registerSkillCommands(program: Command): void {
@@ -113,7 +113,7 @@ skill
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const projectId = resolveProjectId(options.project);
+      const projectId = requireProjectId(options.project);
       const response = await apiFetch(options.url, `/skills/${options.id}`, { projectId });
       if (!response.ok) {
         const error = await response.json();
@@ -200,7 +200,7 @@ skill
 )
   .action(async (options) => {
     try {
-      const projectId = resolveProjectId(options.project);
+      const projectId = requireProjectId(options.project);
       const response = await apiFetch(options.url, `/skills/${options.id}`, {
         method: "DELETE",
         projectId,
@@ -227,7 +227,7 @@ skill
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const projectId = resolveProjectId(options.project);
+      const projectId = requireProjectId(options.project);
       const response = await apiFetch(options.url, `/skills/${options.id}/resolve`, {
         method: "POST",
         projectId,
@@ -272,7 +272,7 @@ skill
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const projectId = resolveProjectId(options.project);
+      const projectId = requireProjectId(options.project);
       const params = options.limit ? `?limit=${options.limit}` : '';
       const response = await apiFetch(options.url, `/skills/${options.id}/revisions${params}`, { projectId });
       if (!response.ok) {

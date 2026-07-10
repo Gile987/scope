@@ -14,7 +14,7 @@ import {
 import type { ExtensionSearchResult } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { ExtensionDocument, RouteContext } from "../route-context.js";
-import { ProjectIdQuerySchema, OptionalProjectIdQuerySchema, getQueryProjectId, getOptionalQueryProjectId } from "../utils/project-scope.js";
+import { ProjectIdQuerySchema, getQueryProjectId } from "../utils/project-scope.js";
 
 export function registerExtensionsRoutes(ctx: RouteContext): void {
 
@@ -42,32 +42,27 @@ const toExtensionResponse = (e: ExtensionDocument): ExtensionDocument & { id: st
 });
 
 /**
- * Resolve an extension by its human slug (`{publisher}.{name}`).
+ * Resolve an extension by its human slug (`{publisher}.{name}`), **always scoped
+ * to a project**.
  *
  * New rows key `_id` to a random UUID and carry the slug in `slug`; legacy rows
- * (pre-migration 026) still have `_id === slug`. When a `projectId` is provided
- * the lookup is scoped to that project (slugs may repeat across projects), trying
- * the `slug` field first then the legacy `_id`. Without a `projectId` it falls
- * back to a legacy global `_id` lookup for backward compatibility.
+ * (pre-migration 026) still have `_id === slug`. The lookup is confined to
+ * `projectId` (slugs may repeat across projects), trying the `slug` field first
+ * then the legacy `_id` for un-backfilled rows. There is **no global slug-only
+ * fallback**: a project-scoped entity is never resolved by slug alone.
  */
 const findExtensionBySlug = async (
   slug: string,
-  projectId: string | undefined,
+  projectId: string,
 ): Promise<ExtensionDocument | null> => {
-  if (projectId) {
-    const bySlug = await ctx.extensionCollection.findOne({
-      projectId,
-      slug,
-      deletedAt: { $exists: false },
-    });
-    if (bySlug) return bySlug as ExtensionDocument;
-    return (await ctx.extensionCollection.findOne({
-      projectId,
-      _id: slug,
-      deletedAt: { $exists: false },
-    })) as ExtensionDocument | null;
-  }
+  const bySlug = await ctx.extensionCollection.findOne({
+    projectId,
+    slug,
+    deletedAt: { $exists: false },
+  });
+  if (bySlug) return bySlug as ExtensionDocument;
   return (await ctx.extensionCollection.findOne({
+    projectId,
     _id: slug,
     deletedAt: { $exists: false },
   })) as ExtensionDocument | null;
@@ -167,10 +162,10 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Extensions"],
   summary: "Get extension by ID",
   params: z.object({ id: z.string() }),
-  query: OptionalProjectIdQuerySchema,
+  query: ProjectIdQuerySchema,
   response: ExtensionResponseSchema,
   handler: async (req, res) => {
-    const extension = await findExtensionBySlug(req.params.id, getOptionalQueryProjectId(req));
+    const extension = await findExtensionBySlug(req.params.id, getQueryProjectId(req));
     if (!extension) {
       res.status(404).json({ error: "Extension not found" });
       return;
@@ -239,13 +234,13 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Extensions"],
   summary: "Update extension",
   params: z.object({ id: z.string() }),
-  query: OptionalProjectIdQuerySchema,
+  query: ProjectIdQuerySchema,
   body: UpdateExtensionInputSchema,
   response: ExtensionResponseSchema,
   handler: async (req, res) => {
     const { name, description } = req.body;
 
-    const existing = await findExtensionBySlug(req.params.id, getOptionalQueryProjectId(req));
+    const existing = await findExtensionBySlug(req.params.id, getQueryProjectId(req));
     if (!existing) {
       res.status(404).json({ error: "Extension not found" });
       return;
@@ -268,11 +263,11 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Extensions"],
   summary: "Delete extension",
   params: z.object({ id: z.string() }),
-  query: OptionalProjectIdQuerySchema,
+  query: ProjectIdQuerySchema,
   response: z.object({ message: z.string() }),
   successStatus: 204,
   handler: async (req, res) => {
-    const existing = await findExtensionBySlug(req.params.id, getOptionalQueryProjectId(req));
+    const existing = await findExtensionBySlug(req.params.id, getQueryProjectId(req));
     if (!existing) {
       res.status(404).json({ error: "Extension not found" });
       return;

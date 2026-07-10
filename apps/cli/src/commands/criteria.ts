@@ -10,7 +10,7 @@ import { dimTimestamp, errorText, successText, label, value, warnBanner, styleTe
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { withOutputOption, withProjectOption, getDefaultApiUrl } from "../utils/shared.js";
-import { requireProjectId, resolveProjectId } from "../utils/config.js";
+import { requireProjectId } from "../utils/config.js";
 import { apiFetch } from "../utils/api-client.js";
 import { mapYamlCriterion } from "../utils/yaml-mappers.js";
 import { formatGateList, parseGateListOption, type GateId } from "../utils/gates.js";
@@ -89,7 +89,7 @@ criteria
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const projectId = resolveProjectId(options.project);
+      const projectId = requireProjectId(options.project);
       const response = await apiFetch(options.url, `/criteria/${options.id}`, { projectId });
 
       if (!response.ok) {
@@ -194,7 +194,7 @@ criteria
 )
   .action(async (options) => {
     try {
-      const projectId = resolveProjectId(options.project);
+      const projectId = requireProjectId(options.project);
       const body: Record<string, unknown> = {};
       if (options.prompt !== undefined) body.prompt = options.prompt;
       if (options.dependsOn !== undefined) body.dependsOn = options.dependsOn;
@@ -235,7 +235,7 @@ criteria
 )
   .action(async (options) => {
     try {
-      const projectId = resolveProjectId(options.project);
+      const projectId = requireProjectId(options.project);
       const response = await apiFetch(options.url, `/criteria/${options.id}`, {
         method: "DELETE",
         projectId,

@@ -70,17 +70,18 @@ mcpServer
     }
   });
 
-withOutputOption(
+withProjectOption(withOutputOption(
 mcpServer
   .command("get")
   .description("Get details of an MCP server")
   .requiredOption("-i, --id <id>", "MCP server slug")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await apiFetch(options.url, `/mcp/servers/${encodeURIComponent(options.id)}`);
+      const projectId = requireProjectId(options.project);
+      const response = await apiFetch(options.url, `/mcp/servers/${encodeURIComponent(options.id)}`, { projectId });
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -199,6 +200,7 @@ mcpServer
     }
   });
 
+withProjectOption(
 mcpServer
   .command("update")
   .description("Update an MCP server")
@@ -212,8 +214,10 @@ mcpServer
   .option("--description <desc>", "Description")
   .option("--header <header...>", "Headers in name:value format (replaces all headers)")
   .option("-u, --api-url <url>", "API base URL", getDefaultApiUrl())
+)
   .action(async (options) => {
     try {
+      const projectId = requireProjectId(options.project);
       const body: Record<string, unknown> = {};
       if (options.name) body.name = options.name;
       if (options.type) body.type = options.type;
@@ -231,6 +235,7 @@ mcpServer
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        projectId,
       });
       if (!response.ok) {
         const error = await response.json();
@@ -245,15 +250,19 @@ mcpServer
     }
   });
 
+withProjectOption(
 mcpServer
   .command("delete")
   .description("Delete an MCP server (soft-delete)")
   .requiredOption("-i, --id <id>", "MCP server slug")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+)
   .action(async (options) => {
     try {
+      const projectId = requireProjectId(options.project);
       const response = await apiFetch(options.url, `/mcp/servers/${encodeURIComponent(options.id)}`, {
         method: "DELETE",
+        projectId,
       });
       if (!response.ok) {
         const error = await response.json();

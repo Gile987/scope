@@ -109,17 +109,18 @@ reportTemplate
     }
   });
 
-withOutputOption(
+withProjectOption(withOutputOption(
 reportTemplate
   .command("get")
   .description("Get details of a single report template")
   .requiredOption("-i, --id <id>", "Report template ID (slug)")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
-      const response = await apiFetch(options.url, `/report-templates/${options.id}`);
+      const response = await apiFetch(options.url, `/report-templates/${options.id}`, { projectId });
 
       if (!response.ok) {
         const error = await response.json();
@@ -257,8 +258,10 @@ reportTemplate
   .option("--trigger-ids <ids...>", "Trigger IDs")
   .option("--trigger-match <match>", "Trigger match mode: any or all")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (options) => {
     try {
+      const projectId = requireProjectId(options.project);
       const body: Record<string, unknown> = {};
       if (options.name !== undefined) body.name = options.name;
       if (options.description !== undefined) body.description = options.description;
@@ -294,6 +297,7 @@ reportTemplate
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        projectId,
       });
 
       if (!response.ok) {
@@ -314,10 +318,13 @@ reportTemplate
   .description("Delete a report template (soft-delete)")
   .requiredOption("-i, --id <id>", "Report template ID (slug)")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (options) => {
     try {
+      const projectId = requireProjectId(options.project);
       const response = await apiFetch(options.url, `/report-templates/${options.id}`, {
         method: "DELETE",
+        projectId,
       });
 
       if (!response.ok) {
@@ -423,7 +430,7 @@ reportTemplate
       for (const t of allTemplates) {
         const id = t.id as string;
         // Try to GET existing
-        const getResp = await apiFetch(options.url, `/report-templates/${id}`);
+        const getResp = await apiFetch(options.url, `/report-templates/${id}`, { projectId });
         if (getResp.ok) {
           // Update
           const { id: _id, ...updateBody } = t;
@@ -431,6 +438,7 @@ reportTemplate
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(updateBody),
+            projectId,
           });
           if (resp.ok) {
             updated++;

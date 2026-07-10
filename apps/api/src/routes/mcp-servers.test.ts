@@ -129,7 +129,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
 
   it("upserts a real env value", async () => {
     const res = await request(app)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ env: { MY_KEY: "my-value" } });
 
     expect(res.status).toBe(200);
@@ -143,7 +143,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     listSecrets.mockResolvedValue([makeListItem("MY_KEY")]);
 
     const res = await request(app)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ env: { MY_KEY: "<secret>" } });
 
     expect(res.status).toBe(200);
@@ -157,7 +157,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     listSecrets.mockResolvedValue([makeListItem("MY_KEY")]);
 
     const res = await request(app)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ env: { MY_KEY: "" } });
 
     expect(res.status).toBe(200);
@@ -171,7 +171,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     listSecrets.mockResolvedValue([makeListItem("OLD_KEY"), makeListItem("KEEP_KEY")]);
 
     const res = await request(app)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ env: { KEEP_KEY: "<secret>" } }); // OLD_KEY omitted → delete
 
     expect(res.status).toBe(200);
@@ -186,7 +186,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     listSecrets.mockResolvedValue([makeListItem("A"), makeListItem("B")]);
 
     const res = await request(app)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ env: {} });
 
     expect(res.status).toBe(200);
@@ -200,7 +200,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
 
   it("upserts a real header value", async () => {
     const res = await request(app)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ headers: [{ name: "X-Api-Key", value: "token123" }] });
 
     expect(res.status).toBe(200);
@@ -214,7 +214,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     listSecrets.mockResolvedValue([makeListItem("X-Api-Key")]);
 
     const res = await request(app)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ headers: [{ name: "X-Api-Key", value: "<secret>" }] });
 
     expect(res.status).toBe(200);
@@ -228,7 +228,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     listSecrets.mockResolvedValue([makeListItem("X-Old"), makeListItem("X-Keep")]);
 
     const res = await request(app)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ headers: [{ name: "X-Keep", value: "<secret>" }] }); // X-Old omitted → delete
 
     expect(res.status).toBe(200);
@@ -243,7 +243,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     listSecrets.mockResolvedValue([makeListItem("X-Key-A"), makeListItem("X-Key-B")]);
 
     const res = await request(app)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ headers: [] });
 
     expect(res.status).toBe(200);
@@ -257,7 +257,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
 
   it("returns 400 when both env and headers are present", async () => {
     const res = await request(app)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ env: { K: "v" }, headers: [{ name: "X-H", value: "h" }] });
 
     expect(res.status).toBe(400);
@@ -271,7 +271,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
 
   it("does not call Token Manager when neither env nor headers are present", async () => {
     const res = await request(app)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ name: "Renamed" });
 
     expect(res.status).toBe(200);
@@ -286,7 +286,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     const { app: appNoClient } = buildCtx({ mcpSecretClient: null });
 
     const res = await request(appNoClient)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ env: { MY_KEY: "my-value" } });
 
     expect(res.status).toBe(503);
@@ -296,7 +296,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     const { app: appNoClient } = buildCtx({ mcpSecretClient: null });
 
     const res = await request(appNoClient)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ headers: [{ name: "X-Key", value: "token" }] });
 
     expect(res.status).toBe(503);
@@ -308,7 +308,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     listSecrets.mockRejectedValue(new Error("Token Manager unreachable"));
 
     const res = await request(app)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ env: { MY_KEY: "<secret>" } });
 
     // The error should propagate as a 500 (via the Express error handler)
@@ -325,7 +325,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     const { app: appNotFound } = buildCtx({ mcpSecretClient, findOneSpy });
 
     const res = await request(appNotFound)
-      .put("/api/v1/mcp/servers/missing")
+      .put("/api/v1/mcp/servers/missing?projectId=proj-1")
       .send({ name: "Ghost" });
 
     expect(res.status).toBe(404);
@@ -342,7 +342,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     const { app: appWithFind } = buildCtx({ mcpSecretClient, findOneSpy });
 
     const res = await request(appWithFind)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ type: "http", url: "https://example.com/mcp" });
 
     expect(res.status).toBe(200);
@@ -361,7 +361,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     const { app: appWithFind } = buildCtx({ mcpSecretClient, findOneSpy });
 
     const res = await request(appWithFind)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ type: "stdio", command: "npx my-server" });
 
     expect(res.status).toBe(200);
@@ -378,7 +378,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     const { app: appWithFind } = buildCtx({ mcpSecretClient, findOneSpy });
 
     const res = await request(appWithFind)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ type: "sse", url: "https://example.com/sse" });
 
     expect(res.status).toBe(200);
@@ -395,7 +395,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     const { app: appWithFind } = buildCtx({ mcpSecretClient, findOneSpy });
 
     const res = await request(appWithFind)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ type: "http", headers: [{ name: "X-New-Header", value: "token123" }] });
 
     expect(res.status).toBe(200);
@@ -414,7 +414,7 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
     const { app: appWithFind } = buildCtx({ mcpSecretClient, findOneSpy });
 
     const res = await request(appWithFind)
-      .put("/api/v1/mcp/servers/srv-1")
+      .put("/api/v1/mcp/servers/srv-1?projectId=proj-1")
       .send({ type: "http", url: "https://example.com/mcp" });
 
     expect(res.status).toBe(500);
@@ -479,6 +479,50 @@ describe("POST /api/v1/mcp/servers — per-project slug isolation", () => {
     expect(resB.body.id).toBe("ms-learn");
   });
 
+  it("409s a create when an active server with the slug already exists in the project", async () => {
+    const insertOneSpy = vi.fn().mockResolvedValue({ insertedId: "x" });
+    // Existence check ($or filter) finds an active server with this slug in the project.
+    const findOneSpy = vi.fn(async (filter: any) => {
+      if (filter.$or) {
+        return { _id: randomId(), slug: "ms-learn", projectId: "proj-a", name: "MS Learn", type: "http", createdAt: new Date() };
+      }
+      return null;
+    });
+    const { app } = buildCtx({ findOneSpy, insertOneSpy });
+
+    const res = await request(app)
+      .post("/api/v1/mcp/servers?projectId=proj-a")
+      .send({ _id: "ms-learn", name: "MS Learn", type: "http", url: "https://learn.microsoft.com/api/mcp" });
+
+    // Create must not overwrite an existing active server — that is the edit flow's job.
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/already exists/i);
+    expect(insertOneSpy).not.toHaveBeenCalled();
+  });
+
+  it("409s a create when a soft-deleted server with the slug exists (revive is the edit flow's job, not create)", async () => {
+    const insertOneSpy = vi.fn().mockResolvedValue({ insertedId: "x" });
+    const updateOneSpy = vi.fn().mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+    // Existence check finds a soft-deleted server with this slug in the project.
+    const findOneSpy = vi.fn(async (filter: any) => {
+      if (filter.$or) {
+        return { _id: randomId(), slug: "ms-learn", projectId: "proj-a", name: "MS Learn", type: "http", createdAt: new Date(), deletedAt: new Date() };
+      }
+      return null;
+    });
+    const { app } = buildCtx({ findOneSpy, insertOneSpy, updateOneSpy });
+
+    const res = await request(app)
+      .post("/api/v1/mcp/servers?projectId=proj-a")
+      .send({ _id: "ms-learn", name: "MS Learn", type: "http", url: "https://learn.microsoft.com/api/mcp" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/deleted/i);
+    // Neither insert (new) nor update (revive) happens in the create flow.
+    expect(insertOneSpy).not.toHaveBeenCalled();
+    expect(updateOneSpy).not.toHaveBeenCalled();
+  });
+
   it("400s a create with no ?projectId=", async () => {
     const { app } = buildCtx({});
     const res = await request(app)
@@ -504,6 +548,24 @@ describe("POST /api/v1/mcp/servers — per-project slug isolation", () => {
     expect(hit.body._id).toBe("ms-learn"); // internal UUID masked back to the slug
     expect(hit.body.id).toBe("ms-learn");
     expect(miss.status).toBe(404); // slug from another project does not resolve
+  });
+
+  it("400s a by-id GET/PUT/DELETE with no ?projectId= (never a global slug-only action)", async () => {
+    const findOneSpy = vi.fn(async () => {
+      throw new Error("findOne must not run — the request should 400 before any query");
+    });
+    const { app } = buildCtx({ mcpSecretClient: null, findOneSpy });
+
+    const get = await request(app).get("/api/v1/mcp/servers/ms-learn");
+    const put = await request(app)
+      .put("/api/v1/mcp/servers/ms-learn")
+      .send({ name: "x", type: "http", url: "https://example.com" });
+    const del = await request(app).delete("/api/v1/mcp/servers/ms-learn");
+
+    expect(get.status).toBe(400);
+    expect(put.status).toBe(400);
+    expect(del.status).toBe(400);
+    expect(findOneSpy).not.toHaveBeenCalled(); // no query was ever issued
   });
 });
 

@@ -229,3 +229,135 @@ describe("prompt-features catalog — per-project isolation (migration 026)", ()
     expect(promptFeatureCollection._docs()).toHaveLength(2);
   });
 });
+
+// ─── §16 — never a global, slug-only action on a project-scoped entity ────────
+// Every by-id get/edit/soft-delete must be scoped by (slug, projectId). Missing
+// projectId → 400 (no silent global resolve); a same-slug row in another project
+// is never read or mutated by a scoped call.
+
+describe("skills by-id resolution — project-scoped (§16)", () => {
+  function seedTwoProjects() {
+    const skillCollection = fakeCollection();
+    skillCollection.insertOne({
+      _id: "uuid-a", slug: "acme/tools/widget", projectId: "proj-a",
+      source: "acme/tools", skillName: "widget", name: "A", origin: "manual",
+    });
+    skillCollection.insertOne({
+      _id: "uuid-b", slug: "acme/tools/widget", projectId: "proj-b",
+      source: "acme/tools", skillName: "widget", name: "B", origin: "manual",
+    });
+    const { app } = buildCtx(registerSkillsRoutes, {
+      skillCollection,
+      skillRevisionStore: { deleteBySkill: vi.fn() } as any,
+    });
+    return { app, skillCollection };
+  }
+
+  it("400s a by-id GET with no projectId (never a global slug-only read)", async () => {
+    const { app } = seedTwoProjects();
+    const res = await request(app).get("/api/v1/skills/acme/tools/widget");
+    expect(res.status).toBe(400);
+  });
+
+  it("resolves the same slug to the requested project's row", async () => {
+    const { app } = seedTwoProjects();
+    const a = await request(app).get("/api/v1/skills/acme/tools/widget?projectId=proj-a");
+    const b = await request(app).get("/api/v1/skills/acme/tools/widget?projectId=proj-b");
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(a.body.name).toBe("A");
+    expect(b.body.name).toBe("B");
+  });
+
+  it("soft-deletes only the requested project's row, never the other project's", async () => {
+    const { app, skillCollection } = seedTwoProjects();
+    const del = await request(app).delete("/api/v1/skills/acme/tools/widget?projectId=proj-a");
+    expect(del.status).toBe(204);
+    const [rowA, rowB] = skillCollection._docs();
+    expect(rowA.deletedAt).toBeInstanceOf(Date); // proj-a soft-deleted
+    expect(rowB.deletedAt).toBeUndefined(); // proj-b untouched
+  });
+
+  it("400s a by-id DELETE with no projectId", async () => {
+    const { app, skillCollection } = seedTwoProjects();
+    const res = await request(app).delete("/api/v1/skills/acme/tools/widget");
+    expect(res.status).toBe(400);
+    for (const d of skillCollection._docs()) expect(d.deletedAt).toBeUndefined();
+  });
+});
+
+describe("extensions by-id resolution — project-scoped (§16)", () => {
+  function seedTwoProjects() {
+    const extensionCollection = fakeCollection();
+    extensionCollection.insertOne({
+      _id: "uuid-a", slug: "acme.widget", projectId: "proj-a",
+      publisher: "acme", name: "A", origin: "manual",
+    });
+    extensionCollection.insertOne({
+      _id: "uuid-b", slug: "acme.widget", projectId: "proj-b",
+      publisher: "acme", name: "B", origin: "manual",
+    });
+    const { app } = buildCtx(registerExtensionsRoutes, { extensionCollection });
+    return { app, extensionCollection };
+  }
+
+  it("400s a by-id GET with no projectId", async () => {
+    const { app } = seedTwoProjects();
+    const res = await request(app).get("/api/v1/extensions/acme.widget");
+    expect(res.status).toBe(400);
+  });
+
+  it("resolves the same slug to the requested project's row", async () => {
+    const { app } = seedTwoProjects();
+    const a = await request(app).get("/api/v1/extensions/acme.widget?projectId=proj-a");
+    const b = await request(app).get("/api/v1/extensions/acme.widget?projectId=proj-b");
+    expect(a.body.name).toBe("A");
+    expect(b.body.name).toBe("B");
+  });
+
+  it("soft-deletes only the requested project's row", async () => {
+    const { app, extensionCollection } = seedTwoProjects();
+    const del = await request(app).delete("/api/v1/extensions/acme.widget?projectId=proj-a");
+    expect(del.status).toBe(204);
+    const [rowA, rowB] = extensionCollection._docs();
+    expect(rowA.deletedAt).toBeInstanceOf(Date);
+    expect(rowB.deletedAt).toBeUndefined();
+  });
+});
+
+describe("prompt-features by-id resolution — project-scoped (§16)", () => {
+  function seedTwoProjects() {
+    const promptFeatureCollection = fakeCollection();
+    promptFeatureCollection.insertOne({ id: "shared_feature", projectId: "proj-a", prompt: "A" });
+    promptFeatureCollection.insertOne({ id: "shared_feature", projectId: "proj-b", prompt: "B" });
+    const { app } = buildCtx(registerPromptFeaturesRoutes, { promptFeatureCollection });
+    return { app, promptFeatureCollection };
+  }
+
+  it("400s by-id GET/PUT/DELETE with no projectId", async () => {
+    const { app } = seedTwoProjects();
+    expect((await request(app).get("/api/v1/prompt-features/shared_feature")).status).toBe(400);
+    expect((await request(app).put("/api/v1/prompt-features/shared_feature").send({ prompt: "x" })).status).toBe(400);
+    expect((await request(app).delete("/api/v1/prompt-features/shared_feature")).status).toBe(400);
+  });
+
+  it("updates only the requested project's row, never the other project's", async () => {
+    const { app, promptFeatureCollection } = seedTwoProjects();
+    const res = await request(app)
+      .put("/api/v1/prompt-features/shared_feature?projectId=proj-a")
+      .send({ prompt: "A2" });
+    expect(res.status).toBe(200);
+    const rows = promptFeatureCollection._docs();
+    expect(rows.find((d: any) => d.projectId === "proj-a").prompt).toBe("A2");
+    expect(rows.find((d: any) => d.projectId === "proj-b").prompt).toBe("B"); // untouched
+  });
+
+  it("soft-deletes only the requested project's row", async () => {
+    const { app, promptFeatureCollection } = seedTwoProjects();
+    const del = await request(app).delete("/api/v1/prompt-features/shared_feature?projectId=proj-a");
+    expect(del.status).toBe(200);
+    const rows = promptFeatureCollection._docs();
+    expect(rows.find((d: any) => d.projectId === "proj-a").deletedAt).toBeInstanceOf(Date);
+    expect(rows.find((d: any) => d.projectId === "proj-b").deletedAt).toBeUndefined();
+  });
+});

@@ -62,9 +62,9 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
 
-      // Verify the template exists (if specified)
+      // Verify the template exists (if specified) within the run's project
       if (templateId) {
-        const template = await ctx.reportTemplateCollection.findOne({ id: templateId, deletedAt: { $exists: false } });
+        const template = await ctx.reportTemplateCollection.findOne({ projectId: run.projectId, id: templateId, deletedAt: { $exists: false } });
         if (!template) {
           res.status(404).json({ error: `Report template '${templateId}' not found` });
           return;
