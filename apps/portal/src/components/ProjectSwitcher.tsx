@@ -130,7 +130,10 @@ export function ProjectSwitcher({ className }: { className?: string }) {
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["projects"],
-    queryFn: api.listProjects,
+    // Wrap rather than pass `api.listProjects` directly: its optional
+    // `{ includeDeleted? }` arg is a weak type, so react-query's
+    // QueryFunctionContext isn't assignable to it (TS "no common properties").
+    queryFn: () => api.listProjects(),
   });
 
   return (
