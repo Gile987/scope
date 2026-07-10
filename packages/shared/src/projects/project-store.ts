@@ -81,4 +81,18 @@ export class ProjectStore {
     );
     return result.modifiedCount > 0;
   }
+
+  /**
+   * Restore a soft-deleted project by clearing its `deletedAt`. Only matches a
+   * currently-deleted document, so restoring an already-active (or missing)
+   * project is a no-op that returns `null`. Returns the restored document.
+   */
+  async restore(id: string): Promise<ProjectDocument | null> {
+    const result = await this.collection.findOneAndUpdate(
+      { _id: id, deletedAt: { $exists: true } } as object,
+      { $unset: { deletedAt: "" } },
+      { returnDocument: "after" }
+    );
+    return (result as ProjectDocument | null) ?? null;
+  }
 }

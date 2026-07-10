@@ -1286,9 +1286,10 @@ export const api = {
   // created). Every other scoped family derives its scope from the selected
   // project (see `request(..., { scoped: true })`).
 
-  /** List all projects (newest first). */
-  listProjects: (): Promise<Project[]> => {
-    return request("/projects");
+  /** List all projects (newest first). Pass `includeDeleted` to also return soft-deleted ones. */
+  listProjects: (opts?: { includeDeleted?: boolean }): Promise<Project[]> => {
+    const qs = opts?.includeDeleted ? "?includeDeleted=true" : "";
+    return request(`/projects${qs}`);
   },
 
   /** Get a single project by id (404 if missing). */
@@ -1318,5 +1319,10 @@ export const api = {
    */
   deleteProject: (id: string): Promise<void> => {
     return request(`/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
+  /** Restore a soft-deleted project (clears its `deletedAt`). Returns the restored project. */
+  restoreProject: (id: string): Promise<Project> => {
+    return request(`/projects/${encodeURIComponent(id)}/restore`, { method: "POST" });
   },
 };

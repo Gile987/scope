@@ -32,8 +32,11 @@ function projectId(project: ProjectApiDocument): string {
   return project.id ?? project._id;
 }
 
-function projectFields(selectedId?: string): DisplayField<ProjectApiDocument>[] {
-  return [
+function projectFields(
+  selectedId?: string,
+  opts?: { includeDeleted?: boolean },
+): DisplayField<ProjectApiDocument>[] {
+  const fields: DisplayField<ProjectApiDocument>[] = [
     {
       key: "_id",
       label: "ID",
@@ -46,6 +49,15 @@ function projectFields(selectedId?: string): DisplayField<ProjectApiDocument>[] 
     { key: "creator", label: "Creator", formatter: (p) => p.creator ?? "—" },
     { key: "createdAt", label: "Created", formatter: (p) => new Date(p.createdAt).toLocaleString() },
   ];
+  if (opts?.includeDeleted) {
+    fields.push({
+      key: "deletedAt",
+      label: "Deleted",
+      formatter: (p) => (p.deletedAt ? new Date(p.deletedAt).toLocaleString() : "—"),
+      tableFormatter: (p) => (p.deletedAt ? errorText(new Date(p.deletedAt).toLocaleString()) : dimTimestamp("—")),
+    });
+  }
+  return fields;
 }
 
 /** Fetch a single project by id, returning `undefined` on 404. */
@@ -71,11 +83,14 @@ export function registerProjectCommands(program: Command): void {
     project
       .command("list")
       .description("List all projects (the active selection is marked with *)")
+      .option("--include-deleted", "Also list soft-deleted projects")
       .option("-u, --url <url>", "API base URL", getDefaultApiUrl()),
   ).action(async (options) => {
     const format = (options.output ?? "table") as OutputFormat;
     try {
-      const response = await apiFetch(options.url, "/projects");
+      const includeDeleted = options.includeDeleted === true;
+      const path = includeDeleted ? "/projects?includeDeleted=true" : "/projects";
+      const response = await apiFetch(options.url, path);
       if (!response.ok) throw new Error(await readError(response));
       const projects = (await response.json()) as ProjectApiDocument[];
       if (projects.length === 0) {
@@ -88,7 +103,7 @@ export function registerProjectCommands(program: Command): void {
       if (!isMachineReadable(format)) {
         console.log(label(`Found ${projects.length} project(s):\n`));
       }
-      console.log(formatData(projects, projectFields(selectedId), format));
+      console.log(formatData(projects, projectFields(selectedId, { includeDeleted }), format));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
@@ -254,4 +269,28 @@ export function registerProjectCommands(program: Command): void {
         process.exit(1);
       }
     });
+
+  // ─── restore ─────────────────────────────────────────────────────────────────
+  withOutputOption(
+    project
+      .command("restore")
+      .description("Restore a soft-deleted project")
+      .argument("<id>", "Project ID to restore")
+      .option("-u, --url <url>", "API base URL", getDefaultApiUrl()),
+  ).action(async (id: string, options) => {
+    const format = (options.output ?? "table") as OutputFormat;
+    try {
+      const response = await apiFetch(options.url, `/projects/${encodeURIComponent(id)}/restore`, { method: "POST" });
+      if (!response.ok) throw new Error(await readError(response));
+      const restored = (await response.json()) as ProjectApiDocument;
+      if (isMachineReadable(format)) {
+        console.log(formatData([restored], projectFields(getSelectedProjectId()), format));
+        return;
+      }
+      console.log(successText(`Project "${restored.name}" restored.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
 }

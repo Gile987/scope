@@ -52,10 +52,13 @@ function makeProjectCollection(seed: ProjectDocument[] = []) {
       if (update.$set) Object.assign(doc, update.$set);
       return { matchedCount: 1, modifiedCount: 1 };
     },
-    async findOneAndUpdate(filter: UnknownRecord, update: { $set?: Partial<ProjectDocument> }) {
+    async findOneAndUpdate(filter: UnknownRecord, update: { $set?: Partial<ProjectDocument>; $unset?: UnknownRecord }) {
       const doc = docs.find((candidate) => matches(candidate, filter));
       if (!doc) return null;
       if (update.$set) Object.assign(doc, update.$set);
+      if (update.$unset) {
+        for (const key of Object.keys(update.$unset)) delete doc[key as keyof ProjectDocument];
+      }
       return doc;
     },
   };
@@ -120,5 +123,35 @@ describe("ProjectStore", () => {
     expect(updated?.updatedAt).toBeInstanceOf(Date);
 
     expect(await store.update("missing", { name: "x" })).toBeNull();
+  });
+
+  it("lists soft-deleted projects when includeDeleted is set", async () => {
+    const collection = makeProjectCollection();
+    const store = new ProjectStore(collection as unknown as Collection<ProjectDocument>);
+    const kept = await store.create({ name: "Kept" });
+    const gone = await store.create({ name: "Gone" });
+    await store.softDelete(gone._id);
+
+    expect((await store.list()).map((p) => p._id)).toEqual([kept._id]);
+    const all = await store.list({ includeDeleted: true });
+    expect(all.map((p) => p._id).sort()).toEqual([kept._id, gone._id].sort());
+  });
+
+  it("restores a soft-deleted project and clears deletedAt", async () => {
+    const collection = makeProjectCollection();
+    const store = new ProjectStore(collection as unknown as Collection<ProjectDocument>);
+    const created = await store.create({ name: "Revivable" });
+    await store.softDelete(created._id);
+    expect(await store.get(created._id)).toBeNull();
+
+    const restored = await store.restore(created._id);
+    expect(restored?._id).toBe(created._id);
+    expect(restored?.deletedAt).toBeUndefined();
+    // The project is visible again through the default (non-deleted) reads.
+    expect((await store.get(created._id))?._id).toBe(created._id);
+
+    // Restoring an already-active or missing project is a no-op.
+    expect(await store.restore(created._id)).toBeNull();
+    expect(await store.restore("missing")).toBeNull();
   });
 });

@@ -4,7 +4,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Check, CircleCheck, FolderKanban, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowRight, Check, CircleCheck, FolderKanban, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { ProjectCreateForm } from "@/components/ProjectCreateForm";
@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { DataTable, ListLayout, type DataTableColumn } from "@/components/list-layout";
 import { useProjectContext } from "@/contexts/ProjectContext";
@@ -150,6 +151,7 @@ export function Projects() {
   const selectProject = useSelectProject();
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
+  const [showDeleted, setShowDeleted] = useState(false);
 
   /**
    * Select a project and open its dashboard. Selecting scopes the whole portal
@@ -158,19 +160,23 @@ export function Projects() {
    * the "Use project" button so the two entry points behave identically.
    */
   const openProject = (project: Project) => {
+    // Deleted projects are not selectable — they must be restored first.
+    if (project.deletedAt) return;
     const id = projectId(project);
     if (id !== selectedProjectId) selectProject(id);
     navigate("/statistics");
   };
 
   const { data: projects = [], isLoading } = useQuery({
-    queryKey: ["projects"],
-    queryFn: api.listProjects,
+    queryKey: ["projects", { includeDeleted: showDeleted }],
+    queryFn: () => api.listProjects({ includeDeleted: showDeleted }),
   });
 
-  const activeProjects = useMemo(
-    () => projects.filter((p) => !p.deletedAt),
-    [projects],
+  // The server already excludes soft-deleted projects unless includeDeleted is
+  // set, but filter defensively so toggling off never flashes a stale deleted row.
+  const visibleProjects = useMemo(
+    () => (showDeleted ? projects : projects.filter((p) => !p.deletedAt)),
+    [projects, showDeleted],
   );
 
   const deleteMutation = useMutation({
@@ -193,21 +199,42 @@ export function Projects() {
     },
   });
 
+  const restoreMutation = useMutation({
+    mutationFn: (project: Project) => api.restoreProject(projectId(project)),
+    onSuccess: (_data, project) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      toast.success(`Project "${project.name}" restored`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to restore project");
+    },
+  });
+
   const columns: DataTableColumn<Project>[] = [
     {
       id: "name",
       header: "Name",
       cell: (p) => {
         const isActive = projectId(p) === selectedProjectId;
+        const isDeleted = !!p.deletedAt;
         return (
           <div className="flex items-center gap-2">
             <FolderKanban className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="font-medium">{p.name}</span>
-            {isActive && (
-              <Badge className="gap-1 text-xs">
-                <Check className="h-3 w-3" />
-                Active
+            <span className={`font-medium ${isDeleted ? "text-muted-foreground line-through" : ""}`}>
+              {p.name}
+            </span>
+            {isDeleted ? (
+              <Badge variant="outline" className="gap-1 text-xs text-muted-foreground">
+                <Trash2 className="h-3 w-3" />
+                Deleted
               </Badge>
+            ) : (
+              isActive && (
+                <Badge className="gap-1 text-xs">
+                  <Check className="h-3 w-3" />
+                  Active
+                </Badge>
+              )
             )}
           </div>
         );
@@ -235,6 +262,26 @@ export function Projects() {
       align: "right",
       cell: (p) => {
         const isActive = projectId(p) === selectedProjectId;
+        if (p.deletedAt) {
+          return (
+            <div
+              className="flex items-center justify-end gap-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5"
+                aria-label={`Restore ${p.name}`}
+                disabled={restoreMutation.isPending}
+                onClick={() => restoreMutation.mutate(p)}
+              >
+                <RotateCcw className="h-4 w-4" />
+                Restore
+              </Button>
+            </div>
+          );
+        }
         return (
           <div
             className="flex items-center justify-end gap-1"
@@ -323,8 +370,19 @@ export function Projects() {
               project stays switchable from the top bar.
             </p>
           </div>
+          <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+            <Label htmlFor="show-deleted-projects" className="text-sm text-muted-foreground">
+              Show deleted
+            </Label>
+            <Switch
+              id="show-deleted-projects"
+              checked={showDeleted}
+              onCheckedChange={setShowDeleted}
+              aria-label="Show deleted projects"
+            />
+          </div>
           <DataTable
-            items={activeProjects}
+            items={visibleProjects}
             columns={columns}
             getRowId={(p) => projectId(p)}
             activeId={selectedProjectId ?? null}

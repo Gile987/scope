@@ -68,16 +68,24 @@ async function findScopedData(
  * pointing at a gone project. Callers must empty (or reassign) a project first.
  */
 export function registerProjectsRoutes(ctx: RouteContext): void {
-  // List all projects (newest first).
+  // List all projects (newest first). Pass `?includeDeleted=true` to also return
+  // soft-deleted projects (so the Portal/CLI can offer a restore affordance).
   apiRoute(ctx.app, ctx.registry, {
     method: "get",
     path: "/api/v1/projects",
     tags: ["Projects"],
     summary: "List all projects",
+    query: z.object({
+      includeDeleted: z
+        .enum(["true", "false"])
+        .optional()
+        .describe("When true, include soft-deleted projects in the result"),
+    }),
     response: z.array(ProjectResponseSchema),
-    handler: async (_req, res, next) => {
+    handler: async (req, res, next) => {
       try {
-        const projects = await ctx.projectStore.list();
+        const includeDeleted = req.query.includeDeleted === "true";
+        const projects = await ctx.projectStore.list({ includeDeleted });
         res.json(projects.map((p) => ({ ...p, id: p._id })));
       } catch (error) {
         next(error);
@@ -190,6 +198,39 @@ export function registerProjectsRoutes(ctx: RouteContext): void {
           return;
         }
         res.status(204).send();
+      } catch (error) {
+        next(error);
+      }
+    },
+  });
+
+  // Restore a soft-deleted project (clears `deletedAt`). Restoring a project
+  // that is not deleted is a no-op that returns it unchanged.
+  apiRoute(ctx.app, ctx.registry, {
+    method: "post",
+    path: "/api/v1/projects/:id/restore",
+    tags: ["Projects"],
+    summary: "Restore a soft-deleted project",
+    response: ProjectResponseSchema,
+    errorResponses: { 404: { description: "Project not found" } },
+    handler: async (req, res, next) => {
+      try {
+        const existing = await ctx.projectStore.get(req.params.id, { includeDeleted: true });
+        if (!existing) {
+          res.status(404).json({ error: "Project not found" });
+          return;
+        }
+        // Already active: nothing to restore, return the current document.
+        if (!existing.deletedAt) {
+          res.json({ ...existing, id: existing._id });
+          return;
+        }
+        const restored = await ctx.projectStore.restore(req.params.id);
+        if (!restored) {
+          res.status(404).json({ error: "Project not found" });
+          return;
+        }
+        res.json({ ...restored, id: restored._id });
       } catch (error) {
         next(error);
       }
