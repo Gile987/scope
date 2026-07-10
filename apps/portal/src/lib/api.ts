@@ -1314,8 +1314,8 @@ export const api = {
   },
 
   /**
-   * Soft-delete a project. The server returns **409** while the project still
-   * has scoped data, and **204** on success.
+   * Soft-delete a project. Always succeeds with **204** when the project exists
+   * (even if it still owns scoped data); reversible via {@link restoreProject}.
    */
   deleteProject: (id: string): Promise<void> => {
     return request(`/projects/${encodeURIComponent(id)}`, { method: "DELETE" });

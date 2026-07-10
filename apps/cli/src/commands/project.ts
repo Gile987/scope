@@ -254,7 +254,7 @@ export function registerProjectCommands(program: Command): void {
   // ─── delete ──────────────────────────────────────────────────────────────────
   project
     .command("delete")
-    .description("Soft-delete a project (blocked while it still has data)")
+    .description("Soft-delete a project (restore later with `project restore`)")
     .argument("<id>", "Project ID to delete")
     .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
     .action(async (id: string, options) => {

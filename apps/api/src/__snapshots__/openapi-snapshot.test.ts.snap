@@ -6791,6 +6791,22 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/projects": {
       "get": {
+        "parameters": [
+          {
+            "description": "When true, include soft-deleted projects in the result",
+            "in": "query",
+            "name": "includeDeleted",
+            "required": false,
+            "schema": {
+              "description": "When true, include soft-deleted projects in the result",
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "200": {
             "content": {
@@ -6851,11 +6867,8 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "404": {
             "description": "Project not found",
           },
-          "409": {
-            "description": "Project still has data and cannot be deleted",
-          },
         },
-        "summary": "Delete a project (only when empty)",
+        "summary": "Soft-delete a project",
         "tags": [
           "Projects",
         ],
@@ -6907,6 +6920,29 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Update a project",
+        "tags": [
+          "Projects",
+        ],
+      },
+    },
+    "/api/v1/projects/{id}/restore": {
+      "post": {
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Project not found",
+          },
+        },
+        "summary": "Restore a soft-deleted project",
         "tags": [
           "Projects",
         ],

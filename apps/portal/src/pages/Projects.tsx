@@ -189,13 +189,7 @@ export function Projects() {
       if (projectId(project) === selectedProjectId) selectProject(undefined);
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : "Failed to delete project";
-      // The API returns 409 while the project still owns scoped data.
-      toast.error(
-        /409|not empty|has scoped data|conflict/i.test(message)
-          ? "This project still contains data. Move or delete its runs and resources first."
-          : message,
-      );
+      toast.error(error instanceof Error ? error.message : "Failed to delete project");
     },
   });
 
@@ -326,8 +320,9 @@ export function Projects() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete project “{p.name}”?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This soft-deletes the project. A project that still contains runs or other
-                    resources cannot be deleted until they are removed.
+                    This soft-deletes the project and hides it (along with any runs and
+                    resources it contains) from the default lists. You can bring it back
+                    anytime with the <span className="font-medium">Show deleted</span> toggle.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

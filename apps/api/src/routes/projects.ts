@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 import { z } from "zod";
-import type { Collection } from "mongodb";
 import {
   CreateProjectInputSchema,
   UpdateProjectInputSchema,
@@ -12,60 +11,13 @@ import { apiRoute } from "../openapi/api-route.js";
 import type { RouteContext } from "../route-context.js";
 
 /**
- * Collections that carry a `projectId`. Used by the delete guard to decide
- * whether a project still has data filed under it. Kept in sync with the
- * scoped-collection set backfilled by migration `025-create-projects`.
- */
-function scopedCollections(
-  ctx: RouteContext,
-): Array<{ label: string; collection: Collection<{ projectId?: string }> }> {
-  return [
-    { label: "requests", collection: ctx.requestCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "runs", collection: ctx.runsCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "criteria", collection: ctx.criteriaCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "prompt-features", collection: ctx.promptFeatureCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "reports", collection: ctx.reportCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "report-templates", collection: ctx.reportTemplateCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "mcp-servers", collection: ctx.mcpServerCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "insights", collection: ctx.insightsCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "task-prompts", collection: ctx.taskPromptCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "skills", collection: ctx.skillCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "extensions", collection: ctx.extensionCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "skill-revisions", collection: ctx.skillRevisionCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "profiles", collection: ctx.profileCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "profile-versions", collection: ctx.profileVersionCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "codebases", collection: ctx.codebaseCollection as unknown as Collection<{ projectId?: string }> },
-    { label: "codebase-revisions", collection: ctx.codebaseRevisionCollection as unknown as Collection<{ projectId?: string }> },
-  ];
-}
-
-/**
- * Return the first scoped collection that still has a document filed under
- * `projectId`, or `null` when the project is empty. Runs the per-collection
- * probes in parallel and short-circuits on the first hit.
- */
-async function findScopedData(
-  ctx: RouteContext,
-  projectId: string,
-): Promise<string | null> {
-  const probes = scopedCollections(ctx).map(async ({ label, collection }) => {
-    const doc = await collection.findOne(
-      { projectId },
-      { projection: { _id: 1 } },
-    );
-    return doc ? label : null;
-  });
-  const hits = await Promise.all(probes);
-  return hits.find((h): h is string => h !== null) ?? null;
-}
-
-/**
  * Projects CRUD.
  *
  * A project is the top-level, **unscoped** container. It has no `projectId`
- * itself. Soft-delete is **blocked while the project still has data** — the
- * safest policy, so deleting a project can never strand scoped documents
- * pointing at a gone project. Callers must empty (or reassign) a project first.
+ * itself. Delete is a **soft-delete**: it is always allowed (even when the
+ * project still owns scoped data), because it is fully reversible via
+ * `POST /projects/:id/restore`. Soft-deleting a non-empty project simply hides
+ * it and its data from the default listings; restoring brings everything back.
  */
 export function registerProjectsRoutes(ctx: RouteContext): void {
   // List all projects (newest first). Pass `?includeDeleted=true` to also return
@@ -163,35 +115,21 @@ export function registerProjectsRoutes(ctx: RouteContext): void {
     },
   });
 
-  // Soft-delete a project — blocked while it still has scoped data.
+  // Soft-delete a project. Always allowed (even when non-empty) because it is
+  // reversible via POST /projects/:id/restore.
   apiRoute(ctx.app, ctx.registry, {
     method: "delete",
     path: "/api/v1/projects/:id",
     tags: ["Projects"],
-    summary: "Delete a project (only when empty)",
+    summary: "Soft-delete a project",
     response: z.any(),
     rawResponse: true,
     successStatus: 204,
     errorResponses: {
       404: { description: "Project not found" },
-      409: { description: "Project still has data and cannot be deleted" },
     },
     handler: async (req, res, next) => {
       try {
-        const project = await ctx.projectStore.get(req.params.id);
-        if (!project) {
-          res.status(404).json({ error: "Project not found" });
-          return;
-        }
-        const nonEmptyIn = await findScopedData(ctx, req.params.id);
-        if (nonEmptyIn) {
-          res.status(409).json({
-            error:
-              `Project '${req.params.id}' still has data (e.g. ${nonEmptyIn}) and ` +
-              `cannot be deleted. Remove or reassign its entities first.`,
-          });
-          return;
-        }
         const ok = await ctx.projectStore.softDelete(req.params.id);
         if (!ok) {
           res.status(404).json({ error: "Project not found" });
