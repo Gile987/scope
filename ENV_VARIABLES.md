@@ -465,6 +465,28 @@ How often the Token Manager's scheduler validates all active tokens against thei
 
 Host port mapping for the token-manager service in Docker Compose.
 
+## Kubedock Configuration (Container Access)
+
+### DOCKER_HOST
+**Default:** (none)
+**Type:** URI string
+
+Points to the Docker-compatible socket. When set, workers can create containers during Build/Test gates. The value is passed through to agent subprocesses so they can use standard Docker commands.
+
+- **Kubernetes:** Set in deployment manifest to `unix:///var/run/kubedock/kubedock.sock` (auto-configured when kubedock sidecar is present)
+- **Docker Compose:** Set to `unix:///var/run/docker.sock` (direct host socket mount)
+- **Used by:** `coder-acp-copilot`, `coder-acp-claude-code` (subprocess passthrough)
+
+### KUBEDOCK_ENABLED
+**Default:** (none)
+**Type:** boolean string (`true`)
+
+Enables kubedock-specific container cleanup (purge on setup, remove on teardown). **Must only be set when kubedock is the Docker backend** — if set with a direct Docker socket, the cleanup will force-remove ALL containers on the host.
+
+- **Kubernetes:** Set to `true` in deployment manifest (where kubedock manages container lifecycle)
+- **Docker Compose:** Do NOT set (direct socket — no cleanup needed)
+- **Used by:** `coder-acp-copilot`, `coder-acp-claude-code` (via `KubedockClient.isEnabled()`)
+
 ## Proxy & HAR Capture Configuration (Gateway / DevProxy)
 
 Workers capture agent↔provider traffic as HAR via one of two interchangeable backends,
