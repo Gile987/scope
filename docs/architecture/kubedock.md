@@ -48,10 +48,10 @@ deploy/
     kubedock/
       kustomization.yaml           # kind: Component declaration
       kubedock-sidecar-patch.yaml  # Strategic merge patch for both ACP workers
-  base/
-    workers/
       kubedock-rbac.yaml           # ServiceAccount, Role, RoleBinding
       kubedock-config.yaml         # Pod template ConfigMap
+  base/
+    workers/                       # No kubedock resources here (clean base)
   overlays/
     integration/
       kustomization.yaml           # components: [../../components/kubedock]  ← ENABLED
@@ -164,11 +164,26 @@ environment:
 ## RBAC
 
 The `kubedock-sa` ServiceAccount has a Role granting:
-- `pods`: create, get, list, watch, delete
-- `pods/log`: get
-- `pods/exec`: create
+- `pods`, `services`, `configmaps`: get, list, watch, create, update, patch, delete
+- `pods/log`: get, list, watch, create, update, patch, delete
+- `pods/exec`: get, list, watch, create, update, patch, delete
+- `pods/portforward`: get, create
 
-Scoped to the `scoped` namespace only.
+Scoped to the `scoped` namespace only. The RBAC resources (`kubedock-rbac.yaml`) live inside the Component — they are only deployed when the component is enabled.
+
+## Architecture Constraints
+
+### arm64 / Apple Silicon
+
+The pinned image `joyrex2001/kubedock:0.17.0` is **amd64-only**. On arm64 hosts (e.g. Apple Silicon under Docker Desktop emulation), it crashes immediately with `fatal error: lfstack.push invalid packing`.
+
+**This is correct for AKS** (amd64 nodes). For local ARM-based validation, temporarily use the multi-arch tag:
+
+```yaml
+image: joyrex2001/kubedock:latest  # multi-arch, includes arm64
+```
+
+Do not commit this change — it's for local testing only.
 
 ## Environment Variables
 
