@@ -24,13 +24,25 @@ describe("resolveMcpToolName", () => {
     });
   });
 
-  it("resolves a name re-prefixed with the mcp-gateway server name", () => {
+  // Real names captured from an integration run (mcpServers: ["ms-learn"]).
+  // The CLI always prefixes with `<cliServerName>-` (single hyphen); the gateway's
+  // `<slug>__<tool>` namespacing only appears inside the tool portion.
+  it("resolves a real gateway-routed name (mcp-gateway- prefix + slug__tool)", () => {
     expect(
-      resolveMcpToolName("mcp-gateway__github-mcp-server__search_code", ["github-mcp-server"]),
+      resolveMcpToolName("mcp-gateway-ms-learn__microsoft_docs_search", ["ms-learn"]),
     ).toEqual({
       isMcp: true,
-      server: "github-mcp-server",
-      tool: "search_code",
+      server: "ms-learn",
+      tool: "microsoft_docs_search",
+    });
+  });
+
+  it("does not flag the CLI-bundled github server when it isn't a configured MCP server", () => {
+    // github-mcp-server is bundled by the CLI, not routed through our gateway, so it's
+    // absent from the run's configured mcpServers and must not render an MCP badge.
+    expect(resolveMcpToolName("github-mcp-server-search_code", ["ms-learn"])).toEqual({
+      isMcp: false,
+      tool: "github-mcp-server-search_code",
     });
   });
 

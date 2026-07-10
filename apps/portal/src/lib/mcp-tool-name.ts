@@ -4,19 +4,25 @@
 /**
  * Helpers for detecting and presenting MCP tool calls in the conversation view.
  *
- * MCP tools reach the model through our MCP gateway (MCPJungle), which namespaces
- * each underlying server's tools by slug using a double underscore:
- * `<serverSlug>__<toolName>` (e.g. `github-mcp-server__search_code`). See
- * `docs/architecture/mcp-gateway.md`. The Copilot worker registers the gateway
- * with the CLI under a single server name (`mcp-gateway`), and the CLI may
- * re-prefix tool names with that server name, so the stored tool-call name can
- * also appear as `mcp-gateway__<serverSlug>__<toolName>`. Built-in tools
+ * Tool-call names (confirmed against real integration runs) are built by two
+ * layers. The Copilot CLI always prefixes a server's tools with
+ * `<cliServerName>-` (single hyphen). Our gateway-routed servers all reach the
+ * CLI under one registered server, `mcp-gateway` (the Copilot worker registers
+ * it at `coder-acp-copilot/src/index.ts`), and the MCP gateway (MCPJungle)
+ * additionally namespaces each underlying server's tools by slug with a double
+ * underscore: `<serverSlug>__<toolName>` (see `docs/architecture/mcp-gateway.md`).
+ *
+ * So a gateway-routed tool appears as `mcp-gateway-<serverSlug>__<toolName>`
+ * (e.g. `mcp-gateway-ms-learn__microsoft_docs_search`): the `__` lives only
+ * inside the tool portion. A CLI-bundled server that isn't routed through our
+ * gateway appears as `<cliServerName>-<toolName>` with no `__` (e.g.
+ * `github-mcp-server-search_code`); since it isn't in the run's configured MCP
+ * servers, it correctly resolves to a built-in (non-MCP) tool. Built-in tools
  * (e.g. `bash`, `view`, `edit`) carry no server prefix.
  *
- * Given the list of MCP server slugs configured on a run, we detect which tool
- * calls came from an MCP server and split out the server + tool name for display.
- * A legacy single-hyphen separator (`<serverSlug>-<toolName>`) is still accepted
- * as a fallback for older records.
+ * Given the list of MCP server slugs configured on a run, we strip an optional
+ * leading `mcp-gateway-` prefix, then detect the configured server slug and
+ * split out the server + tool name for display.
  */
 
 /** Server name the Copilot worker registers the gateway under with the CLI. */
