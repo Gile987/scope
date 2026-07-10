@@ -424,12 +424,19 @@ export const api = {
     return request("/criteria/graph", undefined, { scoped: true });
   },
 
-  /** Generate a criteria prompt from a behavior description using AI */
+  /**
+   * Generate a criteria prompt from a behavior description using AI.
+   *
+   * Scoped: the server derives its **parent/child suggestion pool** from the
+   * existing criteria filtered by `?projectId=`, so the suggested parents and
+   * children stay within the active project (never leak criteria from other
+   * projects). Matches the project scoping of the manual `listCriteria` picker.
+   */
   generateCriteriaPrompt: (behavior: string, currentId?: string, gates?: string[]): Promise<GeneratePromptResponse> => {
     return request("/criteria/generate-prompt", {
       method: "POST",
       body: JSON.stringify({ behavior, ...(currentId && { currentId }), ...(gates && gates.length > 0 && { gates }) }),
-    });
+    }, { scoped: true });
   },
 
   // ─── Prompt Features ───────────────────────────────────────────────────────
