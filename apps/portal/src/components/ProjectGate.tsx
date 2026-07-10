@@ -106,11 +106,12 @@ export function ProjectFirstRunView({
 }
 
 /**
- * First-run / no-selection screen shown by {@link ProjectGate}. Lets the user
- * pick an existing project or create one. Selecting either fills in the scope so
- * the gated page can fire its scoped requests.
+ * First-run / no-selection screen shown by {@link ProjectGate} (and by the
+ * unscoped home route, {@link file://./HomeRoute.tsx}). Lets the user pick an
+ * existing project or create one. Selecting either fills in the scope so the
+ * gated page can fire its scoped requests.
  */
-function ProjectFirstRunScreen() {
+export function ProjectFirstRunScreen() {
   const selectProject = useSelectProject();
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["projects"],

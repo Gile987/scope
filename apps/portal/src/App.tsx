@@ -60,6 +60,7 @@ import { Admin } from "@/pages/Admin";
 import { Projects } from "@/pages/Projects";
 import { FeatureRoute } from "@/components/FeatureRoute";
 import { ProjectGate } from "@/components/ProjectGate";
+import { HomeRoute } from "@/components/HomeRoute";
 import { useFavicon } from "@/hooks/useFavicon";
 
 export function App() {
@@ -68,17 +69,12 @@ export function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        {/* Root is the unscoped "home": show the project picker when nothing is
-            selected, otherwise fall through to the scoped Statistics landing. The
-            Scope logo clears the selection and routes here (see Layout.tsx). */}
-        <Route
-          path="/"
-          element={
-            <ProjectGate>
-              <Navigate to="/statistics" replace />
-            </ProjectGate>
-          }
-        />
+        {/* Root is the unscoped "home": `HomeRoute` clears any active project
+            and renders the project picker. Reaching `/` by any means (the MS
+            Scope logo, a typed URL, the back button) de-scopes; there is no
+            default project, so `/` is the picker, and it forwards to
+            `/statistics` only once the user picks a project. */}
+        <Route path="/" element={<HomeRoute />} />
         <Route path="/runs" element={<ProjectGate><RunsList /></ProjectGate>}>
           <Route path=":id/preview" element={<RunPreviewPanel />} />
         </Route>

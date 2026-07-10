@@ -48,7 +48,6 @@ import { ThemeToggle } from "./ThemeToggle";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 import { useProjectContext } from "@/contexts/ProjectContext";
-import { useSelectProject } from "@/hooks/useSelectProject";
 
 interface NavItem {
   to: string;
@@ -246,7 +245,6 @@ export function Layout() {
   const location = useLocation();
   const { isFeatureEnabled } = useFeatureFlags();
   const { hasProject } = useProjectContext();
-  const selectProject = useSelectProject();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(() => {
     try {
@@ -302,16 +300,13 @@ export function Layout() {
       >
         {/* Top header — logo on the left, controls on the right */}
         <header className="sticky top-0 z-50 flex h-12 shrink-0 items-center justify-between border-b border-border/60 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          {/* Logo doubles as "home": clear the active project and route to `/`,
-              which renders the project picker. Guard modifier-clicks so
-              cmd/ctrl/shift/alt-click (open in new tab/window) keeps the current
-              tab's selection intact. */}
+          {/* Logo doubles as "home": route to `/`, whose HomeRoute clears the
+              active project and shows the project picker. De-scoping lives in the
+              route (not this click handler), so the logo is a plain link — any
+              way of reaching `/` behaves the same, and open-in-new-tab needs no
+              special-casing. */}
           <Link
             to="/"
-            onClick={(e) => {
-              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-              selectProject(undefined);
-            }}
             className="flex items-center gap-2 font-bold"
             aria-label="Scope home"
           >
