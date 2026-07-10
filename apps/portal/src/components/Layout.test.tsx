@@ -3,13 +3,29 @@
 
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { PROJECT_STORAGE_KEY } from "@/lib/project-scope";
 import { Layout } from "./Layout";
+
+// The portal defines these build-time constants via Vite `define`; the root
+// Vitest run doesn't apply that config, so stub them for the routes (e.g. "/")
+// where <VersionFooter /> renders (non-full-bleed).
+beforeAll(() => {
+  vi.stubGlobal("__GIT_COMMIT__", "test-commit");
+  vi.stubGlobal("__BUILD_TIME__", "1970-01-01T00:00:00Z");
+  vi.stubGlobal("__GIT_BRANCH__", "test-branch");
+  // <VersionFooter /> and <ProjectSwitcher /> fire data fetches on mount; make
+  // them reject fast (handled by their own catch/react-query) so no request is
+  // left pending to abort at teardown and spam the log.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.reject(new Error("network disabled in test"))),
+  );
+});
 
 function renderLayout(
   path = "/runs",
@@ -30,6 +46,7 @@ function renderLayout(
           <MemoryRouter initialEntries={[path]}>
             <Routes>
               <Route element={<Layout />}>
+                <Route path="/" element={<div>Home page</div>} />
                 <Route path="/runs" element={<div>Runs page</div>} />
               </Route>
             </Routes>
@@ -120,5 +137,49 @@ describe("Layout", () => {
     expect(within(sidebar).queryByRole("link", { name: "MCP" })).toBeNull();
     // The New Run CTA is scoped too, so it's gone until a project is picked.
     expect(within(sidebar).queryByRole("link", { name: "New Run" })).toBeNull();
+  });
+
+  it("clears the active project and collapses scoped nav when the logo is clicked", () => {
+    localStorage.setItem("scope:layout:sidebar-expanded", "1");
+
+    renderLayout("/runs");
+
+    const sidebar = screen.getByLabelText("Primary navigation");
+    // Verify: scoped nav is present while a project is selected.
+    expect(within(sidebar).getByText("Activity")).toBeTruthy();
+    expect(within(sidebar).getByRole("link", { name: "New Run" })).toBeTruthy();
+    expect(localStorage.getItem(PROJECT_STORAGE_KEY)).toBe("proj-1");
+
+    // Clicking the "Scope home" logo clears the selection and routes to "/".
+    fireEvent.click(screen.getByRole("link", { name: "Scope home" }));
+
+    // Selection is cleared (persisted key removed)…
+    expect(localStorage.getItem(PROJECT_STORAGE_KEY)).toBeNull();
+    // …and the scoped groups collapse to the global-only nav.
+    expect(within(sidebar).queryByText("Activity")).toBeNull();
+    expect(within(sidebar).queryByText("Library")).toBeNull();
+    expect(within(sidebar).queryByText("Resources")).toBeNull();
+    expect(within(sidebar).queryByRole("link", { name: "New Run" })).toBeNull();
+    // Global entries remain reachable.
+    expect(within(sidebar).getByRole("link", { name: "Projects" })).toBeTruthy();
+    expect(within(sidebar).getByText("Platform")).toBeTruthy();
+  });
+
+  it("keeps the active project when the logo is cmd/ctrl-clicked (open in new tab)", () => {
+    localStorage.setItem("scope:layout:sidebar-expanded", "1");
+
+    renderLayout("/runs");
+
+    const logo = screen.getByRole("link", { name: "Scope home" });
+    // Modifier-clicks (open in new tab/window) must not wipe this tab's selection.
+    fireEvent.click(logo, { metaKey: true });
+    expect(localStorage.getItem(PROJECT_STORAGE_KEY)).toBe("proj-1");
+
+    fireEvent.click(logo, { ctrlKey: true });
+    expect(localStorage.getItem(PROJECT_STORAGE_KEY)).toBe("proj-1");
+
+    const sidebar = screen.getByLabelText("Primary navigation");
+    // Scoped nav stays put.
+    expect(within(sidebar).getByText("Activity")).toBeTruthy();
   });
 });

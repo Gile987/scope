@@ -68,7 +68,17 @@ export function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route path="/" element={<Navigate to="/statistics" replace />} />
+        {/* Root is the unscoped "home": show the project picker when nothing is
+            selected, otherwise fall through to the scoped Statistics landing. The
+            Scope logo clears the selection and routes here (see Layout.tsx). */}
+        <Route
+          path="/"
+          element={
+            <ProjectGate>
+              <Navigate to="/statistics" replace />
+            </ProjectGate>
+          }
+        />
         <Route path="/runs" element={<ProjectGate><RunsList /></ProjectGate>}>
           <Route path=":id/preview" element={<RunPreviewPanel />} />
         </Route>
