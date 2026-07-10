@@ -25,12 +25,12 @@ export class AddHandlerStatusIndex implements MigrationInterface {
         const exists = await requests.indexExists(createdName);
         console.log(
           exists
-            ? `[019] Created ${index.name} index on requests`
-            : `[019] ${index.name} was requested but is not visible in getIndexes()`,
+            ? `[026] Created ${index.name} index on requests`
+            : `[026] ${index.name} was requested but is not visible in getIndexes()`,
         );
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        console.log(`[019] ${index.name} already exists or couldn't be created: ${message}`);
+        console.log(`[026] ${index.name} already exists or couldn't be created: ${message}`);
       }
     }
   }
@@ -41,14 +41,14 @@ export class AddHandlerStatusIndex implements MigrationInterface {
     for (const index of HANDLER_STATUS_INDEXES) {
       try {
         await requests.dropIndex(index.name);
-        console.log(`[019-down] Dropped ${index.name} index`);
+        console.log(`[026-down] Dropped ${index.name} index`);
       } catch (err: unknown) {
         const codeName = typeof err === "object" && err !== null && "codeName" in err
           ? String((err as { codeName?: unknown }).codeName)
           : undefined;
         if (codeName !== "IndexNotFound") {
           const message = err instanceof Error ? err.message : String(err);
-          console.log(`[019-down] ${index.name} not found: ${message}`);
+          console.log(`[026-down] ${index.name} not found: ${message}`);
         }
       }
     }

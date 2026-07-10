@@ -102,9 +102,9 @@ When you run a command:
 | `007-rename-exhausted-to-finished` | Renames outcome `exhausted` → `finished` |
 | `008-backfill-ai-call-count` | Downloads HARs from blob storage to count AI completion calls per turn |
 | `009-add-requests-filter-indexes` | Adds indexes on `taskPromptId`, `status`, `outcome`, `workerType`, `deletedAt` for server-side filtering/grouping |
-| `018-migrate-services-to-handler-dag` | Replaces the legacy single `post-processor` service row with per-handler service registrations and dependencies |
-| `019-add-handler-status-index` | Adds a handler-specific dispatch index for `pp-atif` polling |
-| `020-backfill-handler-status` | Backfills `run.handlerStatus.pp-atif` from deprecated `run.postProcessorStatus` / `run.postProcessorVersion` fields |
+| `025-migrate-services-to-handler-dag` | Replaces the legacy single `post-processor` service row with per-handler service registrations and dependencies |
+| `026-add-handler-status-index` | Adds a handler-specific dispatch index for `pp-atif` polling |
+| `027-backfill-handler-status` | Backfills `run.handlerStatus.pp-atif` from deprecated `run.postProcessorStatus` / `run.postProcessorVersion` fields |
 
 ## CI/CD
 
