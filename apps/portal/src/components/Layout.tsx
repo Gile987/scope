@@ -65,11 +65,16 @@ interface NavGroup {
 
 /**
  * Sidebar nav grouped by domain noun:
- *   Activity  — what happened (runs and their outputs)
- *   Library   — content you author (tasks, criteria, profiles, …)
- *   Resources — infra you wire up (agents, models, secrets, …)
+ *   Activity  - what happened (runs and their outputs)
+ *   Library   - content you author (tasks, criteria, profiles, ...)
+ *   Resources - project-scoped integrations you wire up (MCP, extensions)
+ *   Platform  - global infra shared across projects (agents, models, secrets)
  *
- * The dev-only MDP view is pinned separately at the bottom — it's a
+ * Resources are scoped to the active project; Platform items are not - they
+ * live at the tenant level and are shared by every project, so they're pinned
+ * last where the active-project selection doesn't apply.
+ *
+ * The dev-only MDP view is pinned separately at the bottom; it's a
  * diagnostic tool, not part of any of these groups.
  */
 const navGroups: NavGroup[] = [
@@ -99,10 +104,18 @@ const navGroups: NavGroup[] = [
     id: "resources",
     label: "Resources",
     items: [
-      { to: "/agents", label: "Agents", icon: Bot, featureKey: "agents" },
-      { to: "/models", label: "Models", icon: Cpu, featureKey: "models" },
       { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },
       { to: "/extensions", label: "Extensions", icon: Puzzle, featureKey: "extensions" },
+    ],
+  },
+  {
+    // Global, non-project-scoped infra shared by every project. Pinned last so
+    // it reads as tenant-level and stays clear of the project-scoped groups.
+    id: "platform",
+    label: "Platform",
+    items: [
+      { to: "/agents", label: "Agents", icon: Bot, featureKey: "agents" },
+      { to: "/models", label: "Models", icon: Cpu, featureKey: "models" },
       { to: "/secrets", label: "Secrets", icon: KeyRound, featureKey: "tokens" },
     ],
   },
