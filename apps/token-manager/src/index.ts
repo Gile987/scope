@@ -83,6 +83,30 @@ async function initializeClients(): Promise<void> {
   // the { projectId, mcpId, name } unique index, so pre-feature secrets are project-scoped.
   await backfillSecretProjectIds(mcpSecretsCollection, mcpServerCollection);
 
+  // Drop the legacy pre-Projects unique index on { mcpId, name }. Before per-project
+  // scoping, secret uniqueness was global per server slug; now that server slugs are
+  // reused across projects, uniqueness moved to { projectId, mcpId, name } (created
+  // below). If the old unique index survives, a second project reusing a (server slug,
+  // secret name) pair — e.g. `github` + `GITHUB_TOKEN` — fails its insert with E11000
+  // → 500, silently defeating per-project secret isolation. This drop runs at every
+  // boot right before the composite index is (re)created, so ordering is guaranteed
+  // (mcp-secrets indexes are managed here at startup, not via a migration). Tolerate
+  // "index not found" (codes 26/27) so fresh DBs are a no-op. (On Cosmos the composite
+  // unique index degrades to non-unique; the app-level scoped dup-check in
+  // mcp-secret-routes still enforces per-project uniqueness.)
+  try {
+    await mcpSecretsCollection.dropIndex({ mcpId: 1, name: 1 } as any);
+    console.log("[token-manager] Dropped legacy mcp-secrets { mcpId, name } unique index");
+  } catch (err: any) {
+    if (err?.code === 26 || err?.code === 27) {
+      console.log("[token-manager] Legacy mcp-secrets { mcpId, name } index not present (skip drop)");
+    } else {
+      console.log(
+        `[token-manager] Could not drop legacy mcp-secrets { mcpId, name } index: ${err?.message ?? err}`,
+      );
+    }
+  }
+
   // Create unique index on { projectId, mcpId, name } to enforce no duplicate secret
   // names per server per project (server slugs are reused across projects).
   try {
