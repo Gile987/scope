@@ -147,17 +147,17 @@ impl ProxyPlugin for CapiHmacPlugin {
             }
         };
 
-        let key_bytes =
-            match base64::engine::general_purpose::STANDARD.decode(&config.signing_key) {
-                Ok(k) => k,
-                Err(e) => {
-                    warn!(
-                        "capi_hmac plugin: invalid base64 signingKey for session {}: {}",
-                        session_id, e
-                    );
-                    return;
-                }
-            };
+        let key_bytes = match base64::engine::general_purpose::STANDARD.decode(&config.signing_key)
+        {
+            Ok(k) => k,
+            Err(e) => {
+                warn!(
+                    "capi_hmac plugin: invalid base64 signingKey for session {}: {}",
+                    session_id, e
+                );
+                return;
+            }
+        };
 
         info!(
             "capi_hmac plugin: activated for session {} (targets={:?}, header={}, machine_id={})",
@@ -203,9 +203,8 @@ impl ProxyPlugin for CapiHmacPlugin {
                     e
                 )
             })?;
-        let header_value = HeaderValue::from_str(&signature).map_err(|e| {
-            anyhow::anyhow!("failed to encode signature as header value: {}", e)
-        })?;
+        let header_value = HeaderValue::from_str(&signature)
+            .map_err(|e| anyhow::anyhow!("failed to encode signature as header value: {}", e))?;
 
         headers.insert(header_name, header_value);
         debug!(
@@ -257,9 +256,7 @@ mod tests {
     #[tokio::test]
     async fn no_activation_when_settings_empty() {
         let plugin = CapiHmacPlugin::new();
-        plugin
-            .on_session_start(&"s1".to_string(), &json!({}))
-            .await;
+        plugin.on_session_start(&"s1".to_string(), &json!({})).await;
 
         let sessions = plugin.sessions.read();
         assert!(sessions.is_empty());
@@ -283,9 +280,7 @@ mod tests {
             "signingKey": "!!!not-valid-base64!!!",
             "machineId": "m1"
         });
-        plugin
-            .on_session_start(&"s1".to_string(), &settings)
-            .await;
+        plugin.on_session_start(&"s1".to_string(), &settings).await;
 
         let sessions = plugin.sessions.read();
         assert!(sessions.is_empty());
@@ -295,9 +290,7 @@ mod tests {
     async fn activation_with_valid_settings() {
         let plugin = CapiHmacPlugin::new();
         let settings = make_settings();
-        plugin
-            .on_session_start(&"s1".to_string(), &settings)
-            .await;
+        plugin.on_session_start(&"s1".to_string(), &settings).await;
 
         let sessions = plugin.sessions.read();
         assert!(sessions.contains_key("s1"));
@@ -362,7 +355,11 @@ mod tests {
             .await;
         assert!(result.is_ok());
 
-        let sig = headers.get("x-copilot-signature").unwrap().to_str().unwrap();
+        let sig = headers
+            .get("x-copilot-signature")
+            .unwrap()
+            .to_str()
+            .unwrap();
         assert!(sig.starts_with("v1:"), "signature should start with 'v1:'");
         // v1:{timestamp}:{base64}
         let parts: Vec<&str> = sig.splitn(3, ':').collect();
@@ -433,7 +430,8 @@ mod tests {
         let canonical = "GET\n/test\n1720000000\nm1";
         let mut mac = HmacSha256::new_from_slice(key).unwrap();
         mac.update(canonical.as_bytes());
-        let expected = base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
+        let expected =
+            base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
         assert_eq!(sig, format!("v1:1720000000:{}", expected));
     }
 
@@ -446,9 +444,7 @@ mod tests {
             "targetHosts": ["api.githubcopilot.com"],
             "signatureHeader": "x-custom-sig"
         });
-        plugin
-            .on_session_start(&"s1".to_string(), &settings)
-            .await;
+        plugin.on_session_start(&"s1".to_string(), &settings).await;
 
         let uri: Uri = "https://api.githubcopilot.com/v1/chat".parse().unwrap();
         let mut headers = HeaderMap::new();
