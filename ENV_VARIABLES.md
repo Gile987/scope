@@ -519,8 +519,6 @@ own token lifecycle: both Copilot ACP workers set `false` because the Copilot CL
 token minting/refresh itself (enabling the plugin caused upstream 502s — #1058). The VS Code
 Electron worker leaves it enabled.
 
-### DEV_PROXY_ENABLED
-
 ### CAPI_HMAC_MACHINE_ID
 **Default:** `"scope-gateway"`
 **Type:** string

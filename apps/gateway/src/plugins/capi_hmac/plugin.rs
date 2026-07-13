@@ -188,7 +188,10 @@ impl ProxyPlugin for CapiHmacPlugin {
             (state.config.clone(), state.key_bytes.clone())
         };
 
-        let method = "CONNECT"; // proxy sees the CONNECT method for tunneled requests
+        // The gateway operates as a CONNECT proxy: the outer HTTP method is always
+        // CONNECT regardless of the inner request method (GET, POST, etc.). The CAPI
+        // verifier expects the signature to use the tunnel method, not the inner one.
+        let method = "CONNECT";
         let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
         let timestamp = Self::now_unix_secs();
 
