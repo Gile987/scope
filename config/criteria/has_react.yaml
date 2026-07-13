@@ -4,3 +4,5 @@ prompt: |
   .jsx or .tsx files with React components.
 depends_on:
   - has_node
+gates:
+  - select

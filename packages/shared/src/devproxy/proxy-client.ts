@@ -9,6 +9,7 @@
  */
 
 import { writeFile, readFile, access } from "node:fs/promises";
+import { platform } from "node:os";
 import type { WorkerLogFn } from "../types/types.js";
 import type { HarCollectionResult } from "../har/extract-metadata.js";
 
@@ -118,12 +119,17 @@ export async function createCombinedCaBundle(
 
   const proxyCert = await readFile(proxyCertPath, "utf-8");
 
-  const systemCaBundlePaths = [
-    "/etc/ssl/certs/ca-certificates.crt",
-    "/etc/pki/tls/certs/ca-bundle.crt",
-    "/etc/ssl/ca-bundle.pem",
-    "/etc/ssl/cert.pem",
-  ];
+  // On Windows there are no PEM bundle files on disk — Node.js uses the
+  // Windows certificate store natively. Only search for system bundles on
+  // Linux/macOS where they exist as files.
+  const systemCaBundlePaths = platform() === "win32"
+    ? []
+    : [
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/ca-bundle.pem",
+        "/etc/ssl/cert.pem",
+      ];
 
   let systemCerts = "";
   for (const bundlePath of systemCaBundlePaths) {

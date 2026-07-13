@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y \
   rustc \
   cargo \
     && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/$(uname -m)/docker-27.5.1.tgz" \
+        | tar -xz --strip-components=1 -C /usr/local/bin docker/docker \
     && ARCH=$(dpkg --print-architecture) \
   && case "$ARCH" in amd64) PS_ARCH=x64; DOTNET_ARCH=x64; JAVA_ARCH=x64;; arm64) PS_ARCH=arm64; DOTNET_ARCH=arm64; JAVA_ARCH=aarch64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac \
     && curl -fsSL -o /tmp/powershell.tar.gz \
@@ -60,6 +62,15 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
+
+# Disable Claude Code "policy skills" (auto-loaded, Anthropic-managed Agent Skills).
+# As of claude-agent-acp 0.52.0 / claude-agent-sdk 0.3.191 the bundled agent auto-invokes
+# a "claude-api" policy skill on ordinary coding prompts; its injected payload overflows the
+# context window available to Claude subscription OAuth tokens, so the turn fails with
+# "Internal error: Prompt is too long". Earlier agent versions never loaded it. Setting this
+# at the container level (so the worker, claude-agent-acp, and the bundled `claude` binary it
+# spawns all inherit it) restores the prior behavior and keeps benchmark runs reproducible.
+ENV CLAUDE_CODE_DISABLE_POLICY_SKILLS=1
 
 # --- Builder stage: compile TypeScript ---
 FROM base AS builder

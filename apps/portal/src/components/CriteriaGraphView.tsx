@@ -1,8 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useMemo } from "react";
+import { useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import {
   ReactFlow,
   Background,
@@ -14,7 +15,7 @@ import {
 } from "@xyflow/react";
 import dagre from "dagre";
 import { api } from "@/lib/api";
-import type { LogEvent, CriterionResult } from "@/types";
+import type { LogEvent, CriterionResult, GateId } from "@/types";
 import { cn } from "@/lib/utils";
 import "@xyflow/react/dist/style.css";
 
@@ -102,7 +103,7 @@ function CriterionNode({ data }: NodeProps<Node<CriterionNodeData>>) {
   return (
     <div
       className={cn(
-        "rounded-md border px-3 py-2 text-xs font-mono shadow-sm min-w-[140px] text-center whitespace-nowrap",
+        "rounded-md border px-3 py-2 text-xs font-mono shadow-sm min-w-[140px] text-center whitespace-nowrap cursor-pointer transition-shadow hover:ring-1 hover:ring-slate-400",
         statusStyles[status]
       )}
       title={data.prompt}
@@ -146,11 +147,21 @@ function collectAncestors(
 
 // ─── Extract criteria results from streaming logs ───────────────────────────
 
-function extractCriteriaStatus(logs: LogEvent[]): Map<string, CriterionResult & { iteration?: number }> {
+export function extractCriteriaStatus(
+  logs: LogEvent[],
+  gate?: GateId
+): Map<string, CriterionResult & { iteration?: number }> {
   const statusMap = new Map<string, CriterionResult & { iteration?: number }>();
 
   for (const log of logs) {
     if (!log.data) continue;
+
+    // When a gate is specified, only consider events emitted for that gate.
+    // Legacy events without a gate tag are treated as belonging to the Select gate.
+    if (gate) {
+      const eventGate = (log.data.gate as GateId | undefined) ?? "select";
+      if (eventGate !== gate) continue;
+    }
 
     if (log.data.type === "criterion_result") {
       const d = log.data;
@@ -188,9 +199,15 @@ interface CriteriaGraphViewProps {
   scenarioCriteria: string[];
   /** Streaming log events — used to derive real-time criteria status */
   logs: LogEvent[];
+  /**
+   * When provided, status coloring is scoped to log events tagged with this gate
+   * (events without a gate tag are treated as the Select gate).
+   */
+  gate?: GateId;
 }
 
-export function CriteriaGraphView({ scenarioCriteria, logs }: CriteriaGraphViewProps) {
+export function CriteriaGraphView({ scenarioCriteria, logs, gate }: CriteriaGraphViewProps) {
+  const navigate = useNavigate();
   // Fetch the full criteria graph from the API
   const { data: graphData, isLoading } = useQuery({
     queryKey: ["criteria-graph"],
@@ -198,8 +215,15 @@ export function CriteriaGraphView({ scenarioCriteria, logs }: CriteriaGraphViewP
     staleTime: 5 * 60 * 1000, // Graph structure rarely changes
   });
 
+  const onNodeClick = useCallback(
+    (_: unknown, node: Node<CriterionNodeData>) => {
+      navigate(`/criteria/${node.id}`);
+    },
+    [navigate],
+  );
+
   // Derive criteria status from streaming logs
-  const criteriaStatus = useMemo(() => extractCriteriaStatus(logs), [logs]);
+  const criteriaStatus = useMemo(() => extractCriteriaStatus(logs, gate), [logs, gate]);
 
   // Build the filtered React Flow graph
   const { flowNodes, flowEdges } = useMemo(() => {
@@ -272,6 +296,7 @@ export function CriteriaGraphView({ scenarioCriteria, logs }: CriteriaGraphViewP
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}
+        onNodeClick={onNodeClick}
         fitView
         fitViewOptions={{ padding: 0.3 }}
         nodesDraggable={false}

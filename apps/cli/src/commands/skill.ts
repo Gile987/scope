@@ -6,7 +6,8 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { apiFetch } from "../utils/api-client.js";
 
 export function registerSkillCommands(program: Command): void {
 // ─── Skill management ────────────────────────────────────────────────────────
@@ -29,7 +30,7 @@ skill
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills`);
+      const response = await apiFetch(options.url, `/skills`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -60,7 +61,7 @@ skill
 withOutputOption(
 skill
   .command("search")
-  .description("Search skills (internal + skills.sh registry)")
+  .description("Search skills in the internal library and the external skills.sh registry (content is always sourced from GitHub)")
   .requiredOption("-q, --query <query>", "Search query")
   .option("--limit <number>", "Maximum results", parseInt)
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
@@ -70,7 +71,7 @@ skill
     try {
       const params = new URLSearchParams({ q: options.query });
       if (options.limit) params.set('limit', String(options.limit));
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/search?${params}`);
+      const response = await apiFetch(options.url, `/skills/search?${params}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -109,7 +110,7 @@ skill
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/${options.id}`);
+      const response = await apiFetch(options.url, `/skills/${options.id}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -148,9 +149,9 @@ skill
 
 skill
   .command("import")
-  .description("Import a skill from a GitHub repository")
+  .description("Import a skill from a GitHub repository into the internal library")
   .requiredOption("--source <source>", "GitHub repo (e.g. vercel-labs/agent-skills)")
-  .requiredOption("--skill-name <name>", "Skill name within the repo")
+  .requiredOption("--skill-name <name>", "Skill directory name within the repo")
   .requiredOption("--name <displayName>", "Display name")
   .option("--description <desc>", "Description")
   .option("--origin <origin>", "Origin: skills-sh or manual", "manual")
@@ -165,7 +166,7 @@ skill
       };
       if (options.description) body.description = options.description;
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills`, {
+      const response = await apiFetch(options.url, `/skills`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -190,7 +191,7 @@ skill
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/${options.id}`, {
+      const response = await apiFetch(options.url, `/skills/${options.id}`, {
         method: "DELETE",
       });
       if (!response.ok) {
@@ -215,7 +216,7 @@ skill
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/${options.id}/resolve`, {
+      const response = await apiFetch(options.url, `/skills/${options.id}/resolve`, {
         method: "POST",
       });
       if (!response.ok) {
@@ -259,7 +260,7 @@ skill
     const format = (options.output || 'table') as OutputFormat;
     try {
       const params = options.limit ? `?limit=${options.limit}` : '';
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/${options.id}/revisions${params}`);
+      const response = await apiFetch(options.url, `/skills/${options.id}/revisions${params}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));

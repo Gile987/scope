@@ -43,6 +43,16 @@ async function handleArchive(
   pack.pipe(gzip).pipe(res);
 
   const archiveResource = { ...resource, run: targetRun } as unknown as ArchivableRun;
+
+  // Attach the seeding codebase revision (if any) so its provenance lands in
+  // run.yaml and its snapshot is bundled as codebase.tar.gz.
+  if (resource.codebaseRevisionId) {
+    const revision = await ctx.codebaseRevisionStore.get(resource.codebaseRevisionId);
+    if (revision) {
+      archiveResource.codebase = { ...revision } as ArchivableRun["codebase"];
+    }
+  }
+
   await packRunIntoTar(pack, archiveResource, containerClient, id, isBlobNotFound, logsContainerClient);
 
   pack.finalize();

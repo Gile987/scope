@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { parseGateListOption, type GateId } from "./gates.js";
+
 /**
  * Map a raw YAML document to a criterion API payload.
  * Supports both snake_case (YAML convention) and camelCase field names.
@@ -8,8 +10,9 @@
 export function mapYamlCriterion(
   doc: Record<string, unknown>,
   filename: string,
-  _docIndex: number
-): { id: string; prompt: string; dependsOn?: string[] } | null {
+  _docIndex: number,
+  options: { includeGates?: boolean } = {},
+): { id: string; prompt: string; dependsOn?: string[]; gates?: GateId[] } | null {
   const id = doc.id as string | undefined;
   const prompt = doc.prompt as string | undefined;
   if (!id || !prompt) return null;
@@ -18,10 +21,14 @@ export function mapYamlCriterion(
   const depsRaw = (doc.depends_on ?? doc.dependsOn) as string[] | undefined;
   const dependsOn = Array.isArray(depsRaw) ? depsRaw.map(d => String(d).trim()) : undefined;
 
+  const gatesRaw = doc.gates as string | string[] | undefined;
+  const gates = options.includeGates ? parseGateListOption(gatesRaw) : undefined;
+
   return {
     id: id.trim(),
     prompt: prompt.trim(),
     ...(dependsOn && dependsOn.length > 0 ? { dependsOn } : {}),
+    ...(gates !== undefined ? { gates } : {}),
   };
 }
 

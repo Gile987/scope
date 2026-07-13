@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useMemo, useState, useEffect, useCallback, Fragment, type Key, type ReactNode } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams, useSearchParams } from "react-router-dom";
 import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, ArrowUpDown, FileText, Download, Lock, Eye } from "lucide-react";
 import { FaLinux } from "react-icons/fa";
@@ -25,6 +25,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
+import { TaskPromptBadge } from "@/components/TaskPromptBadge";
+import { ShortId } from "@/components/ShortId";
 import {
   ListLayout,
   FilterRail,
@@ -45,10 +47,11 @@ import {
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
+import { useDebounce } from "@/hooks/useDebounce";
 import { useModelCapabilities, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { formatDate, formatId, formatDuration, truncate, cn } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
-import type { Run, RunStatus, RunOutcome, IterationOp, BulkResubmitOverrides } from "@/types";
+import type { Run, RunStatus, RunOutcome, IterationOp, BulkResubmitOverrides, RunSortField, RunFacetBucket } from "@/types";
 
 const FILTER_KEYS = ["worker", "status", "outcome", "taskPromptId", "submissionId", "criteria", "model", "profile", "os", "priority", "version", "dateFrom", "dateTo", "groupBy", "turns", "turnsOp", "maxIter", "maxIterOp"] as const;
 
@@ -65,18 +68,79 @@ type RunsPageCursor =
 /** Sentinel value used in multi-value filters to match rows missing the underlying field. */
 const EMPTY_FILTER_VALUE = "__empty__";
 
+/** Sortable column ids that map 1:1 to the server-side `sortBy` field (issue #1138). */
+const SERVER_SORT_FIELDS = new Set<RunSortField>([
+  "created",
+  "updated",
+  "priority",
+  "worker",
+  "status",
+  "id",
+  "duration",
+]);
+
+type FilterOption = { value: string; label: string; count: number };
+
+/** Build a value→count lookup from server facet buckets. */
+function facetCountMap(buckets: RunFacetBucket[] | undefined): Map<string, number> {
+  return new Map((buckets ?? []).map((b) => [b.value, b.count]));
+}
+
 /**
- * Helper for multi-value filter logic that supports the `EMPTY_FILTER_VALUE` sentinel.
- * Returns true if the row matches the current selection (either by explicit value or because
- * the row is missing the field and the sentinel is selected).
+ * Build filter-rail options from a fixed enum list, layering server facet counts
+ * (full-dataset, issue #1138) on top so every known value stays visible — even at
+ * count 0 — and the `(Unknown)` sentinel is appended when rows are missing the field.
  */
-function matchMultiValueFilter(selected: string[], rawValue: string | null | undefined): boolean {
-  if (selected.length === 0) return true;
-  const wantsEmpty = selected.includes(EMPTY_FILTER_VALUE);
-  const explicit = selected.filter((v) => v !== EMPTY_FILTER_VALUE);
-  if (!rawValue) return wantsEmpty;
-  if (explicit.length === 0) return false; // only "(Unknown)" selected and row has a value
-  return explicit.includes(rawValue);
+function enumFacetOptions(values: readonly string[], buckets: RunFacetBucket[] | undefined): FilterOption[] {
+  const counts = facetCountMap(buckets);
+  const opts: FilterOption[] = values.map((v) => ({ value: v, label: v, count: counts.get(v) ?? 0 }));
+  const emptyCount = counts.get(EMPTY_FILTER_VALUE) ?? 0;
+  if (emptyCount > 0) opts.push({ value: EMPTY_FILTER_VALUE, label: "(Unknown)", count: emptyCount });
+  return opts;
+}
+
+/**
+ * Build filter-rail options purely from server facet buckets, for open-ended
+ * dimensions (model / profile / OS / priority / version). `labelFor` maps a raw
+ * value to a display label; `sortValues` orders the concrete values. The
+ * `(Unknown)` sentinel is appended last when present.
+ */
+function dynamicFacetOptions(
+  buckets: RunFacetBucket[] | undefined,
+  opts?: { labelFor?: (value: string) => string; sortValues?: (a: string, b: string) => number },
+): FilterOption[] {
+  const concrete = (buckets ?? []).filter((b) => b.value !== EMPTY_FILTER_VALUE);
+  const empty = (buckets ?? []).find((b) => b.value === EMPTY_FILTER_VALUE);
+  const sorter = opts?.sortValues ?? ((a: string, b: string) => a.localeCompare(b));
+  const out: FilterOption[] = concrete
+    .slice()
+    .sort((a, b) => sorter(a.value, b.value))
+    .map((b) => ({ value: b.value, label: opts?.labelFor ? opts.labelFor(b.value) : b.value, count: b.count }));
+  if (empty && empty.count > 0) out.push({ value: EMPTY_FILTER_VALUE, label: "(Unknown)", count: empty.count });
+  return out;
+}
+
+/**
+ * Page size for lazily-loaded group member runs (issue #1138). The list API caps
+ * `limit` at 100, so larger groups are paged in via the cursor on "Load more".
+ */
+const GROUP_MEMBER_PAGE = 100;
+
+/**
+ * Map a server group key (issue #1138 server-side grouping) to the extra
+ * server-side filter that selects that group's member runs. `task` groups by
+ * `taskPromptId`, `profile` by `profileId`, `submissionId` by `submissionId`
+ * (the literal `no-submission`/`no-profile` keys mean "missing", expressed as
+ * the `__empty__` sentinel so the API matches rows lacking the field).
+ */
+function groupKeyExtraFilter(
+  groupBy: "task" | "submissionId" | "profile",
+  key: string,
+): { taskPromptId?: string; submissionId?: string; profileId?: string[] } {
+  if (groupBy === "task") return { taskPromptId: key };
+  if (groupBy === "profile")
+    return { profileId: [key === "no-profile" ? EMPTY_FILTER_VALUE : key] };
+  return { submissionId: key === "no-submission" ? EMPTY_FILTER_VALUE : key };
 }
 
 /** Compact inline badges with overflow (+N) dropdown for dense table cells. */
@@ -241,6 +305,11 @@ function AggregateProgress({
 // (used as a dependency by useColumnOrder via the column-id signature).
 const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "id", label: "ID", required: true },
+  // Status and Outcome lead the row so the run's headline result is visible
+  // before the metadata that produced it (per
+  // growth-ecosystems/scope-project#127).
+  { id: "status", label: "Status" },
+  { id: "outcome", label: "Outcome" },
   { id: "submission", label: "Submission" },
   { id: "task", label: "Task" },
   { id: "criteria", label: "Criteria" },
@@ -254,8 +323,6 @@ const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "extensions", label: "Extensions" },
   { id: "profile", label: "Profile" },
   { id: "priority", label: "Priority" },
-  { id: "status", label: "Status" },
-  { id: "outcome", label: "Outcome" },
   { id: "report", label: "Report" },
   { id: "attempt", label: "Attempt" },
   { id: "turns", label: "Turns" },
@@ -263,6 +330,7 @@ const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "duration", label: "Duration" },
   { id: "tokens", label: "Tokens" },
   { id: "created", label: "Created" },
+  { id: "updated", label: "Updated" },
 ];
 const COLUMN_IDS = COLUMN_OPTIONS.map((o) => o.id);
 
@@ -335,12 +403,12 @@ function NumericComparatorRow({
   onChange: (next: { op: IterationOp; value: string }) => void;
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-16 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
+    <div className="flex min-w-0 items-center gap-1.5">
+      <span className="w-12 shrink-0 truncate text-xs font-medium text-muted-foreground" title={label}>{label}</span>
       <Select value={op} onValueChange={(v) => onChange({ op: v as IterationOp, value })}>
         <SelectTrigger
           aria-label={`${ariaLabel} comparator`}
-          className="h-8 w-16 px-2 text-xs"
+          className="h-8 w-14 shrink-0 px-2 text-xs"
         >
           <SelectValue />
         </SelectTrigger>
@@ -371,7 +439,7 @@ function NumericComparatorRow({
           if (!Number.isFinite(n) || n < 0) return;
           onChange({ op, value: String(Math.floor(n)) });
         }}
-        className="h-8 flex-1 text-xs"
+        className="h-8 w-full min-w-0 flex-1 text-xs"
       />
     </div>
   );
@@ -395,16 +463,16 @@ export function RunsList() {
   // Persist sort preference to localStorage
   usePersistentSort(state, { pageKey: "runs" });
 
-  // Column visibility — persisted under scope:hidden-columns:runs:v2.
-  // The `:v2` suffix forces the new default set to apply for users who had
-  // an older preference stored under the unversioned key.
-  // Default visible: ID, Submission, Task, Criteria, Worker, Version, OS, MCP,
-  // Skills, Extensions, Profile, Priority, Status, Outcome.
+  // Column visibility — persisted under scope:hidden-columns:runs:v3.
+  // The `:v3` suffix forces the new default set + order to apply for users
+  // who had an older preference stored under a previous versioned key.
+  // Default visible: ID, Status, Outcome, Submission, Task, Criteria, Worker,
+  // Version, OS, MCP, Skills, Extensions, Profile, Priority.
   // Hidden by default (opt-in via Customize columns): Report, Attempt,
   // Turns, LLM Calls, Duration, Tokens, Created. Model is shown next to
   // Worker so users can see what model each run used at a glance.
   const columnVisibility = useHiddenColumns({
-    storageKey: "runs:v2",
+    storageKey: "runs:v3",
     defaultHidden: [
       "report",
       "attempt",
@@ -413,17 +481,21 @@ export function RunsList() {
       "duration",
       "tokens",
       "created",
+      "updated",
     ],
   });
   // Persisted column order (matches the customize panel). The `id` column is
   // marked `required` in COLUMN_OPTIONS and is locked from reordering by the
   // panel; `actions` lives outside COLUMN_OPTIONS and is always pinned right.
   const columnOrder = useColumnOrder({
-    storageKey: "runs:v2",
+    storageKey: "runs:v3",
     columnIds: COLUMN_IDS,
   });
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(new Set());
+  // Per-group count of 100-row member pages to load (issue #1138 load-more).
+  // Absent key ⇒ 1 page; "Load more" bumps the entry, collapsing drops it.
+  const [groupMemberPages, setGroupMemberPages] = useState<Record<string, number>>({});
   
   // Get groupBy from URL state
   const groupBy = (state.getFilter("groupBy") ?? "none") as "none" | "profile" | "task" | "submissionId";
@@ -473,6 +545,8 @@ export function RunsList() {
         maxIterOp: state.getFilter("maxIterOp"),
         groupBy: state.getFilter("groupBy"),
         pageSize: state.pageSize,
+        sort: state.sort,
+        sortDir: state.sortDir,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -518,15 +592,75 @@ export function RunsList() {
 
   const currentCursor: RunsPageCursor = cursorStack[state.page - 1] ?? { kind: "first" };
 
-  // The server only accepts a single explicit value per filter; if multiple values
-  // are selected or the special `(Unknown)` sentinel is selected, we fetch the
-  // broader set and filter client-side.
-  const singleServerValue = (vals: string[]): string | undefined =>
-    vals.length === 1 && vals[0] !== EMPTY_FILTER_VALUE ? vals[0] : undefined;
-  const serverWorker = singleServerValue(workers);
-  const serverStatus = singleServerValue(statuses);
-  const serverOutcome = singleServerValue(outcomes);
-  const serverProfile = singleServerValue(profiles);
+  // All categorical filters are evaluated server-side (issue #1138). Multi-value
+  // arrays — including the `__empty__`/"(Unknown)" sentinel — are forwarded as-is;
+  // an empty array means "no filter" for that dimension.
+  const asArray = (vals: string[]): string[] | undefined => (vals.length ? vals : undefined);
+  // Debounce the free-text search that drives the runs + facets queries. Search
+  // is server-side now (issue #1138), so firing on every keystroke would issue a
+  // request (plus the 9-way facets fan-out) per character. The input stays bound
+  // to the immediate URL state below, so typing and the address bar stay
+  // responsive; only the data fetch waits for a ~300ms pause.
+  const debouncedSearch = useDebounce(state.search, 300);
+  const searchValue = debouncedSearch.trim() || undefined;
+  // The Created filter is date-level; translate it to an inclusive server-side
+  // createdAt range (start-of-day .. end-of-day) so it composes with pagination
+  // instead of filtering the loaded page client-side.
+  const createdAfter = dateFrom ? new Date(`${dateFrom}T00:00:00.000`).toISOString() : undefined;
+  const createdBefore = dateTo ? new Date(`${dateTo}T23:59:59.999`).toISOString() : undefined;
+  // Server-side sort: sortable column ids map 1:1 to the API sort fields. When no
+  // sort is set we omit sortBy so the server keeps its default (createdAt desc).
+  const sortBy =
+    state.sort && SERVER_SORT_FIELDS.has(state.sort as RunSortField) ? (state.sort as RunSortField) : undefined;
+  const sortDir = sortBy ? state.sortDir : undefined;
+
+  // Shared server-side filter arguments for the flat list, grouped list, and the
+  // per-group member fetch. Categorical dimensions are full multi-value arrays.
+  const runFilterArgs = useMemo(
+    () => ({
+      worker: asArray(workers),
+      status: asArray(statuses),
+      outcome: asArray(outcomes),
+      model: asArray(models),
+      os: asArray(osList),
+      priority: asArray(priorities),
+      agentVersion: asArray(versions),
+      profileId: asArray(profiles),
+      taskPromptId,
+      submissionId,
+      criteria,
+      search: searchValue,
+      createdAfter,
+      createdBefore,
+      turns: turnsValue,
+      turnsOp: turnsValue !== undefined ? turnsOp : undefined,
+      maxIterations: maxIterValue,
+      maxIterationsOp: maxIterValue !== undefined ? maxIterOp : undefined,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      workers.join(","),
+      statuses.join(","),
+      outcomes.join(","),
+      models.join(","),
+      osList.join(","),
+      priorities.join(","),
+      versions.join(","),
+      profiles.join(","),
+      taskPromptId,
+      submissionId,
+      criteria,
+      searchValue,
+      createdAfter,
+      createdBefore,
+      turnsValue,
+      turnsOp,
+      maxIterValue,
+      maxIterOp,
+    ],
+  );
+  // Stable string of all server filter args, for query keys.
+  const runFilterKey = JSON.stringify(runFilterArgs);
 
   // Serialize cursor into a stable string for the query key.
   const cursorKey =
@@ -535,20 +669,13 @@ export function RunsList() {
       : `${currentCursor.kind}:${currentCursor.cursor}`;
 
   const { data: runsResponse, isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", serverWorker, serverStatus, serverOutcome, taskPromptId, submissionId, criteria, serverProfile, turnsValue, turnsOp, maxIterValue, maxIterOp, state.pageSize, cursorKey],
+    queryKey: ["runs", runFilterKey, sortBy, sortDir, state.pageSize, cursorKey],
+    enabled: groupBy === "none",
     queryFn: () =>
       api.listRuns({
-        worker: serverWorker,
-        status: serverStatus,
-        outcome: serverOutcome,
-        taskPromptId,
-        submissionId,
-        criteria,
-        profileId: serverProfile,
-        turns: turnsValue,
-        turnsOp: turnsValue !== undefined ? turnsOp : undefined,
-        maxIterations: maxIterValue,
-        maxIterationsOp: maxIterValue !== undefined ? maxIterOp : undefined,
+        ...runFilterArgs,
+        sortBy,
+        sortDir,
         limit: state.pageSize,
         after: currentCursor.kind === "after" ? currentCursor.cursor : undefined,
         before: currentCursor.kind === "before" ? currentCursor.cursor : undefined,
@@ -556,6 +683,17 @@ export function RunsList() {
       }),
     refetchInterval: 10_000,
   });
+
+  // Server-computed filter facets drive the filter rail. Counts are absolute over
+  // all non-deleted runs (they ignore every active filter), so this query takes no
+  // arguments — one shared key for all callers, served from a short-TTL server cache.
+  const { data: facetsResponse } = useQuery({
+    queryKey: ["run-facets"],
+    queryFn: () => api.listRunFacets(),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+  const facets = facetsResponse?.facets;
   const { data: profilesData } = useQuery({
     queryKey: ["profiles", "runs-list-grouping"],
     queryFn: () => api.listProfiles(),
@@ -575,100 +713,113 @@ export function RunsList() {
     staleTime: 60_000,
   });
 
-  const allRuns = runsResponse?.data ?? [];
-  const cursors = runsResponse?.cursors ?? { next: null, prev: null };
-  const estimatedTotal = runsResponse?.estimatedTotal;
   const profileNameById = useMemo(
     () => new Map((profilesData ?? []).map((profile) => [profile._id, profile.name])),
     [profilesData],
   );
 
-  // Client-side filtering for multi-value selections + search.
-  const filteredRuns = useMemo(() => {
-    const q = state.search.trim().toLowerCase();
-    return allRuns.filter((r) => {
-      // Run client-side filter for worker/status/outcome whenever the server-side
-      // filter can't fully express the selection (multi-value or `(Unknown)`).
-      if (workers.length > 0 && !serverWorker && !matchMultiValueFilter(workers, r.workerType)) return false;
-      if (statuses.length > 0 && !serverStatus && !matchMultiValueFilter(statuses, r.run?.status)) return false;
-      if (outcomes.length > 0 && !serverOutcome && !matchMultiValueFilter(outcomes, r.run?.outcome)) return false;
-      // Profile is also server-narrowed when a single non-sentinel is selected.
-      if (profiles.length > 0 && !serverProfile && !matchMultiValueFilter(profiles, r.profileId)) return false;
-      if (!matchMultiValueFilter(models, r.model)) return false;
-      if (!matchMultiValueFilter(osList, r.run?.os?.platform)) return false;
-      if (!matchMultiValueFilter(priorities, r.priority != null ? String(r.priority) : null)) return false;
-      if (!matchMultiValueFilter(versions, r.agentVersion)) return false;
-      if (dateFrom || dateTo) {
-        const ts = r.createdAt ? new Date(r.createdAt).getTime() : NaN;
-        if (Number.isNaN(ts)) return false;
-        if (dateFrom) {
-          const fromTs = Date.parse(`${dateFrom}T00:00:00`);
-          if (!Number.isNaN(fromTs) && ts < fromTs) return false;
-        }
-        if (dateTo) {
-          const toTs = Date.parse(`${dateTo}T00:00:00`);
-          if (!Number.isNaN(toTs) && ts >= toTs + 86_400_000) return false;
-        }
-      }
-      if (q) {
-        const hay =
-          (r._id + " " + (r.scenario?.task ?? "") + " " + (r.model ?? "") + " " + (r.workerType ?? "")).toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [allRuns, workers, statuses, outcomes, models, profiles, osList, priorities, versions, dateFrom, dateTo, serverWorker, serverStatus, serverOutcome, serverProfile, state.search]);
+  // Flat-mode rows: the server already applied every filter and the sort, so the
+  // loaded page is rendered as-is (no client-side filtering/sorting — issue #1138).
+  const flatRuns = runsResponse?.data ?? [];
 
-  const sortedRuns = useMemo(() => {
-    if (!state.sort) return filteredRuns;
-    const out = [...filteredRuns];
-    out.sort((a, b) => {
-      const av = sortKey(a, state.sort!);
-      const bv = sortKey(b, state.sort!);
-      if (av < bv) return -1;
-      if (av > bv) return 1;
-      return 0;
-    });
-    if (state.sortDir === "desc") out.reverse();
-    return out;
-  }, [filteredRuns, state.sort, state.sortDir]);
-
-  // Group runs by the selected groupBy option
-  const groupedAndDisplayedRuns = useMemo(() => {
-    if (groupBy === "none") return sortedRuns;
-    
-    const groups = new Map<string, Run[]>();
-    for (const run of sortedRuns) {
-      let key = "";
-      switch (groupBy) {
-        case "profile":
-          key = run.profileId ?? "(No Profile)";
-          break;
-        case "task":
-          key = run.scenario?.task ?? "(No Task)";
-          break;
-        case "submissionId":
-          key = run.submissionId ?? "(No Submission)";
-          break;
-      }
-      if (!groups.has(key)) {
-        groups.set(key, []);
-      }
-      groups.get(key)!.push(run);
-    }
-    return Array.from(groups.entries()).map(([groupKey, runs]) => ({
-      groupKey,
-      runs,
-    }));
-  }, [sortedRuns, groupBy]);
-  const groupedRuns = useMemo(
-    () => (groupBy === "none" ? [] : (groupedAndDisplayedRuns as Array<{ groupKey: string; runs: Run[] }>)),
-    [groupBy, groupedAndDisplayedRuns],
+  // ── Server-side grouping (issue #1138) ────────────────────────────────────
+  // Grouped mode fetches groups for the *whole* filtered dataset (paginated by
+  // group), then lazily fetches member runs only for the groups the user expands.
+  const { data: groupsResponse, isLoading: isGroupsLoading } = useQuery({
+    queryKey: ["run-groups", groupBy, runFilterKey, sortBy, sortDir, state.pageSize, cursorKey],
+    enabled: groupBy !== "none",
+    queryFn: () =>
+      api.listRunGroups({
+        groupBy: groupBy as "task" | "submissionId" | "profile",
+        ...runFilterArgs,
+        sortBy,
+        sortDir,
+        limit: state.pageSize,
+        after: currentCursor.kind === "after" ? currentCursor.cursor : undefined,
+        before: currentCursor.kind === "before" ? currentCursor.cursor : undefined,
+        last: currentCursor.kind === "last" ? true : undefined,
+      }),
+    refetchInterval: 10_000,
+  });
+  const serverGroups = useMemo(() => groupsResponse?.data ?? [], [groupsResponse]);
+  // key → RunGroup, so the group header cell can render full-dataset aggregates
+  // (count, status/outcome distribution, turn/duration/token stats) for every
+  // group — including collapsed ones whose member runs are not loaded.
+  const groupByKey = useMemo(
+    () => new Map(serverGroups.map((g) => [g.key, g])),
+    [serverGroups],
   );
+  const groupSectionKeys = useMemo(() => serverGroups.map((g) => g.key), [serverGroups]);
+
+  // Lazily fetch member runs for the currently-expanded groups only.
+  const expandedKeyList = useMemo(
+    () => groupSectionKeys.filter((k) => expandedGroupKeys.has(k)),
+    [groupSectionKeys, expandedGroupKeys],
+  );
+  const expandedKeysKey = expandedKeyList
+    .map((k) => `${k}:${groupMemberPages[k] ?? 1}`)
+    .join("|");
+  const { data: groupMembersData, isFetching: isMembersFetching } = useQuery({
+    queryKey: ["group-members", groupBy, runFilterKey, sortBy, sortDir, expandedKeysKey],
+    enabled: groupBy !== "none" && expandedKeyList.length > 0,
+    // Keep the already-loaded member rows visible while a "Load more" refetch runs.
+    placeholderData: keepPreviousData,
+    queryFn: async () => {
+      const gb = groupBy as "task" | "submissionId" | "profile";
+      const entries = await Promise.all(
+        expandedKeyList.map(async (key) => {
+          // Walk the list cursor up to the group's requested page count. The list
+          // API caps `limit` at 100, so members beyond the first page are reached
+          // by following `cursors.next` rather than a larger limit.
+          const pagesWanted = groupMemberPages[key] ?? 1;
+          const runs: Run[] = [];
+          let after: string | undefined;
+          let hasMore = false;
+          for (let page = 0; page < pagesWanted; page++) {
+            const resp = await api.listRuns({
+              ...runFilterArgs,
+              ...groupKeyExtraFilter(gb, key),
+              sortBy,
+              sortDir,
+              limit: GROUP_MEMBER_PAGE,
+              after,
+            });
+            runs.push(...resp.data);
+            after = resp.cursors?.next ?? undefined;
+            hasMore = Boolean(after);
+            if (!after) break;
+          }
+          return [key, { runs, hasMore }] as const;
+        }),
+      );
+      return Object.fromEntries(entries) as Record<string, { runs: Run[]; hasMore: boolean }>;
+    },
+    refetchInterval: 10_000,
+  });
+  const groupMembers = useMemo(() => groupMembersData ?? {}, [groupMembersData]);
+
+  // Flattened member rows for expanded groups, in server-group order. Feeds the
+  // DataTable `items`; collapsed groups still render via the `sectionKeys` prop.
   const groupedTableItems = useMemo(
-    () => groupedRuns.flatMap(({ runs }) => runs),
-    [groupedRuns],
+    () =>
+      serverGroups.flatMap((g) =>
+        expandedGroupKeys.has(g.key) ? (groupMembers[g.key]?.runs ?? []) : [],
+      ),
+    [serverGroups, expandedGroupKeys, groupMembers],
   );
+
+  // The rows visible on the current page (flat list, or the loaded members of
+  // expanded groups). Used for row selection and the report-summary fetch.
+  const pageRuns = groupBy === "none" ? flatRuns : groupedTableItems;
+  // `allRuns` retains its original meaning for the flat-mode option/selection
+  // helpers below; in grouped mode it is the set of loaded member rows.
+  const allRuns = pageRuns;
+
+  // Pagination + loading reflect the active mode's response.
+  const activeResponse = groupBy === "none" ? runsResponse : groupsResponse;
+  const cursors = activeResponse?.cursors ?? { next: null, prev: null };
+  const estimatedTotal = activeResponse?.estimatedTotal;
+  const listLoading = groupBy === "none" ? isLoading : isGroupsLoading;
 
   const totalPages = useMemo(() => {
     if (estimatedTotal == null) return undefined;
@@ -854,7 +1005,26 @@ export function RunsList() {
       else next.add(groupKey);
       return next;
     });
+    // Reset the group's load-more depth when it is collapsed, so re-expanding it
+    // starts from the first page again.
+    setGroupMemberPages((prev) => {
+      if (!(groupKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[groupKey];
+      return next;
+    });
   }, []);
+
+  // Bump a group's loaded page count so the member query walks one more cursor page.
+  const loadMoreGroupMembers = useCallback((groupKey: string) => {
+    setGroupMemberPages((prev) => ({ ...prev, [groupKey]: (prev[groupKey] ?? 1) + 1 }));
+  }, []);
+
+  // Any change to the filter/sort/grouping invalidates the per-group load-more
+  // depth, so reset it to avoid re-fetching many pages against a new result set.
+  useEffect(() => {
+    setGroupMemberPages({});
+  }, [runFilterKey, sortBy, sortDir, groupBy]);
 
   const selectedRunsList = useMemo(
     () => allRuns.filter((r) => selectedIds.has(r._id)),
@@ -961,10 +1131,10 @@ export function RunsList() {
     () => availableAgents.find((a) => a._id === effectiveWorker),
     [availableAgents, effectiveWorker],
   );
-  const availableModels = effectiveAgent?.supportedModels ?? [];
-
-  // Effort-aware model capabilities for the dialog.
-  const { capabilitiesMap: resubmitCapabilitiesMap } = useModelCapabilities(effectiveWorker || undefined);
+  const { capabilitiesMap: resubmitCapabilitiesMap, activeModelIds: resubmitActiveModelIds } = useModelCapabilities(effectiveWorker || undefined);
+  const availableModels = resubmitActiveModelIds.length > 0
+    ? resubmitActiveModelIds
+    : (effectiveAgent?.supportedModels ?? []);
   const effectiveModel = activeProfile
     ? activeProfile.version.model
     : (resubmitOverrides.model ?? selectedRunsSummary.model);
@@ -1050,114 +1220,39 @@ export function RunsList() {
     batchDownloadMutation.mutate([...selectedIds]);
   }, [batchDownloadMutation, selectedIds]);
 
-  // Filter options derived from current page (counts reflect this page only).
-  const workerOptions = useMemo(() => {
-    const opts = WORKER_TYPES.map((w) => ({
-      value: w as string,
-      label: w as string,
-      count: allRuns.filter((r) => r.workerType === w).length,
-    }));
-    const emptyCount = allRuns.filter((r) => !r.workerType).length;
-    if (emptyCount > 0) opts.push({ value: EMPTY_FILTER_VALUE, label: "(Unknown)", count: emptyCount });
-    return opts;
-  }, [allRuns]);
-
-  const statusOptions = useMemo(() => {
-    const opts = STATUS_LIST.map((s) => ({
-      value: s as string,
-      label: s as string,
-      count: allRuns.filter((r) => r.run?.status === s).length,
-    }));
-    const emptyCount = allRuns.filter((r) => !r.run?.status).length;
-    if (emptyCount > 0) opts.push({ value: EMPTY_FILTER_VALUE, label: "(Unknown)", count: emptyCount });
-    return opts;
-  }, [allRuns]);
-
-  const outcomeOptions = useMemo(() => {
-    const opts = OUTCOME_LIST.map((o) => ({
-      value: o as string,
-      label: o as string,
-      count: allRuns.filter((r) => r.run?.outcome === o).length,
-    }));
-    const emptyCount = allRuns.filter((r) => !r.run?.outcome).length;
-    if (emptyCount > 0) opts.push({ value: EMPTY_FILTER_VALUE, label: "(Unknown)", count: emptyCount });
-    return opts;
-  }, [allRuns]);
-
-  const modelOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    let emptyCount = 0;
-    for (const r of allRuns) {
-      if (r.model) counts.set(r.model, (counts.get(r.model) ?? 0) + 1);
-      else emptyCount += 1;
-    }
-    const opts = [...counts.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([value, count]) => ({ value, label: value, count }));
-    if (emptyCount > 0) opts.push({ value: EMPTY_FILTER_VALUE, label: "(Unknown)", count: emptyCount });
-    return opts;
-  }, [allRuns]);
-
-  const profileOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    let emptyCount = 0;
-    for (const r of allRuns) {
-      if (r.profileId) counts.set(r.profileId, (counts.get(r.profileId) ?? 0) + 1);
-      else emptyCount += 1;
-    }
-    const opts = [...counts.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([value, count]) => ({ value, label: profileNameById.get(value) ?? formatId(value), count }));
-    if (emptyCount > 0) opts.push({ value: EMPTY_FILTER_VALUE, label: "(Unknown)", count: emptyCount });
-    return opts;
-  }, [allRuns, profileNameById]);
-
-  const osOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    let emptyCount = 0;
-    for (const r of allRuns) {
-      const p = r.run?.os?.platform;
-      if (p) counts.set(p, (counts.get(p) ?? 0) + 1);
-      else emptyCount += 1;
-    }
-    const opts = [...counts.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([value, count]) => ({ value, label: value, count }));
-    if (emptyCount > 0) opts.push({ value: EMPTY_FILTER_VALUE, label: "(Unknown)", count: emptyCount });
-    return opts;
-  }, [allRuns]);
-
-  const priorityOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    let emptyCount = 0;
-    for (const r of allRuns) {
-      if (r.priority != null) {
-        const k = String(r.priority);
-        counts.set(k, (counts.get(k) ?? 0) + 1);
-      } else {
-        emptyCount += 1;
-      }
-    }
-    const opts = [...counts.entries()]
-      .sort(([a], [b]) => Number(a) - Number(b))
-      .map(([value, count]) => ({ value, label: value, count }));
-    if (emptyCount > 0) opts.push({ value: EMPTY_FILTER_VALUE, label: "(Unknown)", count: emptyCount });
-    return opts;
-  }, [allRuns]);
-
-  const versionOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    let emptyCount = 0;
-    for (const r of allRuns) {
-      if (r.agentVersion) counts.set(r.agentVersion, (counts.get(r.agentVersion) ?? 0) + 1);
-      else emptyCount += 1;
-    }
-    const opts = [...counts.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([value, count]) => ({ value, label: value, count }));
-    if (emptyCount > 0) opts.push({ value: EMPTY_FILTER_VALUE, label: "(Unknown)", count: emptyCount });
-    return opts;
-  }, [allRuns]);
+  // Filter-rail options come from the server facets endpoint (issue #1138), so
+  // every selectable value appears with an accurate full-dataset count — not just
+  // the values present on the loaded page. Enum dimensions show all known values
+  // (even at count 0); open-ended dimensions show only values that exist.
+  const workerOptions = useMemo(
+    () => enumFacetOptions(WORKER_TYPES as readonly string[], facets?.workerType),
+    [facets],
+  );
+  const statusOptions = useMemo(
+    () => enumFacetOptions(STATUS_LIST as readonly string[], facets?.status),
+    [facets],
+  );
+  const outcomeOptions = useMemo(
+    () => enumFacetOptions(OUTCOME_LIST as readonly string[], facets?.outcome),
+    [facets],
+  );
+  const modelOptions = useMemo(() => dynamicFacetOptions(facets?.model), [facets]);
+  const profileOptions = useMemo(
+    () =>
+      dynamicFacetOptions(facets?.profileId, {
+        labelFor: (value) => profileNameById.get(value) ?? formatId(value),
+      }),
+    [facets, profileNameById],
+  );
+  const osOptions = useMemo(() => dynamicFacetOptions(facets?.os), [facets]);
+  const priorityOptions = useMemo(
+    () =>
+      dynamicFacetOptions(facets?.priority, {
+        sortValues: (a, b) => Number(a) - Number(b),
+      }),
+    [facets],
+  );
+  const versionOptions = useMemo(() => dynamicFacetOptions(facets?.agentVersion), [facets]);
 
   // Lazy: only fetch report summary when the "report" column is visible.
   const reportColumnVisible = !columnVisibility.isHidden("report");
@@ -1180,7 +1275,7 @@ export function RunsList() {
       width: "120px",
       sticky: "left",
       stickyOffset: "40px",
-      cell: (r) => <span className="font-mono text-xs">{formatId(r._id)}</span>,
+      cell: (r) => <ShortId id={r._id} label="run ID" />,
     },
     {
       id: "submission",
@@ -1189,7 +1284,7 @@ export function RunsList() {
       hidden: columnVisibility.isHidden("submission"),
       cell: (r) =>
         r.submissionId ? (
-          <span className="font-mono text-xs">{formatId(r.submissionId)}</span>
+          <ShortId id={r.submissionId} label="submission ID" />
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
         ),
@@ -1200,14 +1295,11 @@ export function RunsList() {
       hidden: columnVisibility.isHidden("task"),
       cell: (r) =>
         r.scenario?.task ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="text-sm cursor-default">{truncate(r.scenario.task, 60)}</span>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-sm whitespace-pre-wrap text-xs">
-              {r.scenario.task}
-            </TooltipContent>
-          </Tooltip>
+          <TaskPromptBadge taskPromptId={r.taskPromptId} className="block truncate">
+            <span className="text-sm cursor-pointer hover:underline">
+              {truncate(r.scenario.task, 60)}
+            </span>
+          </TaskPromptBadge>
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
         ),
@@ -1524,7 +1616,17 @@ export function RunsList() {
       sortable: true,
       width: "120px",
       hidden: columnVisibility.isHidden("status"),
-      cell: (r) => (r.run?.status ? <StatusBadge status={r.run.status} /> : <span className="text-xs text-muted-foreground">—</span>),
+      cell: (r) =>
+        r.run?.status ? (
+          <StatusBadge
+            status={r.run.status}
+            worker={r.run.worker}
+            lastHeartbeatAt={r.run.lastHeartbeatAt}
+            startedAt={r.run.startedAt}
+          />
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
     },
     {
       id: "outcome",
@@ -1635,6 +1737,16 @@ export function RunsList() {
       width: "160px",
       hidden: columnVisibility.isHidden("created"),
       cell: (r) => <span className="text-xs text-muted-foreground">{formatDate(r.createdAt)}</span>,
+    },
+    {
+      id: "updated",
+      header: "Updated",
+      sortable: true,
+      width: "160px",
+      hidden: columnVisibility.isHidden("updated"),
+      cell: (r) => (
+        <span className="text-xs text-muted-foreground">{r.updatedAt ? formatDate(r.updatedAt) : "–"}</span>
+      ),
     },
     {
       id: "actions",
@@ -1756,7 +1868,7 @@ export function RunsList() {
     <ListLayout
       title="Runs"
       description={
-        estimatedTotal != null
+        estimatedTotal != null && estimatedTotal > 0
           ? `~${estimatedTotal.toLocaleString()} runs total`
           : "Manage and monitor benchmark runs"
       }
@@ -2018,7 +2130,7 @@ export function RunsList() {
 
         {groupBy === "none" ? (
           <DataTable
-            items={sortedRuns}
+            items={flatRuns}
             columns={orderedColumns}
             getRowId={(r) => r._id}
             activeId={activeId}
@@ -2031,7 +2143,7 @@ export function RunsList() {
             sort={state.sort}
             sortDir={state.sortDir}
             onSortChange={state.toggleSort}
-            loading={isLoading}
+            loading={listLoading}
             loadingRows={state.pageSize}
             emptyState={
               state.hasActiveFilters
@@ -2053,22 +2165,58 @@ export function RunsList() {
                 onToggleAll: (ids) => toggleAllSelection(ids),
               }}
               grouping={{
+                // Group keys mirror the server `RunGroup.key` so loaded member
+                // rows map onto the explicit `sectionKeys` sections below.
                 getGroupKey: (run) => {
                   switch (groupBy) {
                     case "profile":
-                      return run.profileId ?? "(No Profile)";
+                      return run.profileId ?? "no-profile";
                     case "task":
-                      return run.scenario?.task ?? "(No Task)";
+                      // `taskPromptId` is always materialized server-side, so it
+                      // matches the server group key 1:1 (no raw-text fallback).
+                      return run.taskPromptId ?? "";
                     case "submissionId":
-                      return run.submissionId ?? "(No Submission)";
+                      return run.submissionId ?? "no-submission";
                     default:
                       return "";
                   }
                 },
+                sectionKeys: groupSectionKeys,
                 expandedGroupKeys,
                 onToggleGroup: toggleGroupExpansion,
-                renderGroupCell: (column, runs, expanded) => {
-                  const total = runs.length;
+                renderSectionFooter: (groupKey, items) => {
+                  // Surface the lazy-load cap: the header shows the full-dataset
+                  // count, but only the loaded pages render. The member cursor's
+                  // `hasMore` is the authoritative "another page exists" signal
+                  // (the count comes from a separate aggregation and can be
+                  // transiently stale), so it gates the Load more button.
+                  const member = groupMembers[groupKey];
+                  if (!member?.hasMore) return null;
+                  const total = groupByKey.get(groupKey)?.aggregates?.count;
+                  const loaded = items.length;
+                  return (
+                    <div className="flex items-center gap-3 py-2 pl-9 pr-3 text-xs text-muted-foreground">
+                      <span>
+                        Showing {loaded}
+                        {total != null ? ` of ${total}` : ""}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        disabled={isMembersFetching}
+                        onClick={() => loadMoreGroupMembers(groupKey)}
+                      >
+                        {isMembersFetching ? "Loading…" : "Load more"}
+                      </Button>
+                    </div>
+                  );
+                },
+                renderGroupCell: (column, groupKey, runs, expanded) => {
+                  const group = groupByKey.get(groupKey);
+                  const agg = group?.aggregates;
+                  const total = agg?.count ?? runs.length;
                   if (column.id === "id") {
                     return (
                       <div className="flex items-center gap-1.5">
@@ -2084,12 +2232,14 @@ export function RunsList() {
                     );
                   }
                   if (column.id === "status") {
-                    const doneCount = runs.filter((r) => r.run?.status === "done").length;
-                    // A run is considered "failed" at the status level when it
-                    // reached the terminal `done` state with a non-succeeded outcome.
-                    const failedAtStatus = runs.filter(
-                      (r) => r.run?.status === "done" && r.run?.outcome === "failed",
-                    ).length;
+                    // Server aggregates cover the whole group (issue #1138), so the
+                    // bar is correct even for collapsed groups whose members aren't
+                    // loaded. "failed at status" ≈ runs that finished with a failed
+                    // outcome (outcome is only set once a run reaches `done`).
+                    const doneCount = agg?.statusCounts?.done ?? runs.filter((r) => r.run?.status === "done").length;
+                    const failedAtStatus =
+                      agg?.outcomeCounts?.failed ??
+                      runs.filter((r) => r.run?.status === "done" && r.run?.outcome === "failed").length;
                     return (
                       <AggregateProgress
                         count={doneCount - failedAtStatus}
@@ -2101,8 +2251,8 @@ export function RunsList() {
                     );
                   }
                   if (column.id === "outcome") {
-                    const passCount = runs.filter((r) => r.run?.outcome === "succeeded").length;
-                    const failedCount = runs.filter((r) => r.run?.outcome === "failed").length;
+                    const passCount = agg?.outcomeCounts?.succeeded ?? runs.filter((r) => r.run?.outcome === "succeeded").length;
+                    const failedCount = agg?.outcomeCounts?.failed ?? runs.filter((r) => r.run?.outcome === "failed").length;
                     return (
                       <AggregateProgress
                         count={passCount}
@@ -2115,13 +2265,17 @@ export function RunsList() {
                     );
                   }
                   if (column.id === "os") {
-                    const platforms = Array.from(
-                      new Set(
-                        runs
-                          .map((r) => r.run?.os?.platform)
-                          .filter((p): p is string => !!p),
-                      ),
-                    ).sort();
+                    // Prefer the server uniform platform (full group); fall back to
+                    // the distinct platforms across loaded members when mixed.
+                    const platforms = group?.uniform?.platform
+                      ? [group.uniform.platform]
+                      : Array.from(
+                          new Set(
+                            runs
+                              .map((r) => r.run?.os?.platform)
+                              .filter((p): p is string => !!p),
+                          ),
+                        ).sort();
                     if (platforms.length === 0) {
                       return <span className="text-xs text-muted-foreground">—</span>;
                     }
@@ -2134,11 +2288,12 @@ export function RunsList() {
                     );
                   }
                   if (column.id === "profile" && groupBy === "profile") {
-                    const groupKey = runs[0]?.profileId ?? "(No Profile)";
-                    const profileLabel =
-                      groupKey !== "(No Profile)"
-                        ? (profileNameById.get(groupKey) ?? formatId(groupKey))
-                        : "—";
+                    // The group key IS the profileId for profile grouping (server key);
+                    // "no-profile" denotes runs without a profile.
+                    const hasProfile = groupKey !== "no-profile";
+                    const profileLabel = hasProfile
+                      ? (profileNameById.get(groupKey) ?? formatId(groupKey))
+                      : "—";
                     return (
                       <div className="flex min-w-0 items-center gap-1.5">
                         <Tooltip>
@@ -2414,7 +2569,7 @@ export function RunsList() {
                 renderGroupHeader: (groupKey, runs, expanded) => {
                   const groupLabel = groupBy === "submissionId" ? "Submission ID" : groupBy === "profile" ? "Profile" : "Task";
                   const groupDisplayKey =
-                    groupBy === "profile" && groupKey !== "(No Profile)"
+                    groupBy === "profile" && groupKey !== "no-profile"
                       ? (profileNameById.get(groupKey) ?? formatId(groupKey))
                       : groupKey;
                   return (
@@ -2449,11 +2604,11 @@ export function RunsList() {
               sort={state.sort}
               sortDir={state.sortDir}
               onSortChange={state.toggleSort}
-              loading={isLoading}
+              loading={isGroupsLoading}
               loadingRows={state.pageSize}
               emptyState=""
             />
-            {groupedRuns.length === 0 && (
+            {!isGroupsLoading && serverGroups.length === 0 && (
               <div className="text-center py-8 text-muted-foreground">
                 {state.hasActiveFilters
                   ? "No runs match the current filters."
@@ -2470,7 +2625,7 @@ export function RunsList() {
           onPageSizeChange={state.setPageSize}
           hasNext={!!cursors.next}
           hasPrev={state.page > 1}
-          itemLabel="runs"
+          itemLabel={groupBy === "none" ? "runs" : "groups"}
         />
       </div>
 
@@ -3113,29 +3268,6 @@ function parseProfileVersion(pvId?: string): number | null {
   const v = pvId.split("@")[1];
   const n = v ? Number(v) : NaN;
   return Number.isFinite(n) ? n : null;
-}
-
-function sortKey(r: Run, col: string): string | number {
-  switch (col) {
-    case "id":
-      return r._id;
-    case "worker":
-      return r.workerType;
-    case "priority":
-      return r.priority ?? 0;
-    case "status":
-      return r.run?.status ?? "";
-    case "duration": {
-      const start = r.run?.startedAt;
-      const end = r.run?.finishedAt;
-      if (!start || !end) return 0;
-      return new Date(end).getTime() - new Date(start).getTime();
-    }
-    case "created":
-      return new Date(r.createdAt).getTime();
-    default:
-      return "";
-  }
 }
 
 // Suppress unused warnings for re-exported types kept for callers.

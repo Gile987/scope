@@ -50,14 +50,16 @@ Body content here.
     });
   });
 
-  it('should throw if name is missing', () => {
+  it('should default name to empty when missing (recoverable from directory)', () => {
     const raw = `---
 description: A skill without a name
 ---
 
 Body.
 `;
-    expect(() => parseSkillMd(raw)).toThrow('missing required frontmatter field: name');
+    const result = parseSkillMd(raw);
+    expect(result.frontmatter.name).toBe('');
+    expect(result.frontmatter.description).toBe('A skill without a name');
   });
 
   it('should throw if description is missing', () => {

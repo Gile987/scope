@@ -248,6 +248,48 @@ Docker Compose works seamlessly in [git worktrees](https://git-scm.com/docs/git-
 
 No manual configuration is needed — just run `pnpm docker:dev:copilot` from any worktree.
 
+### Docker Access for Agents
+
+Worker containers mount the host Docker socket by default, enabling agents to run Docker commands during Build/Test gate scenarios. This is the local development equivalent of the kubedock sidecar used in Kubernetes.
+
+**How it works:**
+- The host's Docker socket is mounted into the worker container
+- `DOCKER_HOST=unix:///var/run/docker.sock` is set automatically
+- The `node` user is granted socket access via `group_add`
+
+**Platform configuration:**
+
+| Platform | Configuration | Notes |
+|----------|--------------|-------|
+| Docker Desktop (macOS/Windows) | Works out of the box | Default socket path and GID 0 |
+| Docker Engine (Linux) | Set `DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)` | Socket GID varies by distro |
+| Podman (macOS) | Set `DOCKER_SOCK=/run/podman/podman.sock` | Socket path inside Podman VM |
+
+Environment variables (set in `.env` or inline):
+- `DOCKER_SOCK` — Path to Docker-compatible socket (default: `/var/run/docker.sock`)
+- `DOCKER_GID` — GID of the socket file for group access (default: `0`)
+
+**Example: Submit a gated run with Docker operations:**
+
+```bash
+# Start the stack
+GITHUB_TOKEN=$(gh auth token) pnpm docker:dev:copilot
+
+# From another terminal, submit a run
+npx tsx apps/cli/src/index.ts run submit \
+  -m "Run 'docker run -d --name test-pg -e POSTGRES_PASSWORD=test postgres:16-alpine' then verify with 'docker exec test-pg psql -U postgres -c SELECT 1'. Remove the container when done." \
+  -w coder-acp-copilot \
+  -c "Agent successfully ran a Docker container and queried it" \
+  --max-iterations 1 \
+  --gates '[{"gate":"select","maxIterations":1},{"gate":"build","promptText":"Pull the postgres:16-alpine Docker image and start a container","maxIterations":1},{"gate":"test","promptText":"Verify the container responds to a query via docker exec","maxIterations":1}]' \
+  -u http://localhost:3100 \
+  --no-stream
+```
+
+> **Note:** In Kubernetes, kubedock provides `localhost` port-forward access to spawned containers. In Compose, spawned containers are accessible via Docker network names or published ports (`-p`) instead. Agents using `docker exec` for verification (the common case) work identically in both environments.
+
+> **Note:** Container cleanup (`purgeContainers`) is disabled in Compose (controlled by `KUBEDOCK_ENABLED` env var, only set in K8s manifests). Orphaned containers from local dev runs must be cleaned up manually with `docker rm`.
+
 ### Environment Variables
 
 See [ENV_VARIABLES.md](ENV_VARIABLES.md) for a full reference of configurable environment variables.
@@ -349,7 +391,8 @@ scope-core/
 │   ├── db-migrations/                          # MongoDB migration framework (mongo-migrate-ts)
 │   ├── github-auth/                            # GitHub OAuth / device-code utilities
 │   ├── model-scanning/                         # Shared model scanning logic
-│   └── version-checking/                       # Version comparison utilities
+│   ├── version-checking/                       # Version comparison utilities
+│   └── llm-eval/                               # LLM-graded eval harness (grader, sampling, rate-limit retry)
 ├── config/
 │   ├── criteria/                               # Evaluation criteria YAML definitions
 │   ├── personas/                               # Reviewer persona configurations
@@ -368,3 +411,25 @@ scope-core/
 ├── docker-compose.yml
 └── package.json
 ```
+
+## Contributing
+
+This project welcomes contributions and suggestions. Most contributions require you to agree to a
+Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
+the rights to use your contribution. For details, visit https://cla.opensource.microsoft.com.
+
+When you submit a pull request, a CLA bot will automatically determine whether you need to provide
+a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
+provided by the bot. You will only need to do this once across all repos using our CLA.
+
+This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
+For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
+contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+
+## Trademarks
+
+This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
+trademarks or logos is subject to and must follow
+[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
+Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
+Any use of third-party trademarks or logos are subject to those third-party's policies.

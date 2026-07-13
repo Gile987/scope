@@ -17,6 +17,7 @@
     "@radix-ui/react-dialog": "^1.1.4",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-label": "^2.1.1",
+    "@radix-ui/react-popover": "^1.1.17",
     "@radix-ui/react-scroll-area": "^1.2.2",
     "@radix-ui/react-select": "^2.1.5",
     "@radix-ui/react-separator": "^1.1.1",
@@ -30,6 +31,7 @@
     "clsx": "^2.1.1",
     "dagre": "^0.8.5",
     "jsqr": "^1.4.0",
+    "ky": "^2.0.2",
     "lucide-react": "^0.469.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -42,7 +44,8 @@
     "remark-gfm": "^4.0.0",
     "remark-github-markdown-alerts": "^1.2.2",
     "sonner": "^1.7.0",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^2.6.0",
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@storybook/react-vite": "^10.4.0",

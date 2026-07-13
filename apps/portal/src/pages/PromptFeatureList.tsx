@@ -21,7 +21,13 @@ import {
   useListUrlState,
   type DataTableColumn,
 } from "@/components/list-layout";
-import type { PromptFeatureDocument } from "@/types";
+import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { HelpTooltip } from "@/components/HelpTooltip";
+import type { PromptFeatureDocument, PromptType } from "@/types";
+
+const FILTER_KEYS = ["type"] as const;
 
 export function PromptFeatureList() {
   const queryClient = useQueryClient();
@@ -29,11 +35,12 @@ export function PromptFeatureList() {
   const detailOutlet = useOutlet();
   const { id: activeId } = useParams<{ id?: string }>();
 
-  const state = useListUrlState({ defaultPageSize: 25, filterKeys: [] });
+  const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
+  const typeFilter = (state.getFilter("type") as PromptType | null) ?? undefined;
 
   const { data: allFeatures = [], isLoading, isRefetching } = useQuery({
-    queryKey: ["prompt-features", state.search],
-    queryFn: () => api.listPromptFeatures(state.search || undefined),
+    queryKey: ["prompt-features", state.search, typeFilter],
+    queryFn: () => api.listPromptFeatures(state.search || undefined, typeFilter),
   });
 
   const deleteMutation = useMutation({
@@ -82,6 +89,16 @@ export function PromptFeatureList() {
       ),
     },
     {
+      id: "type",
+      header: "Type",
+      width: "120px",
+      cell: (f) => (
+        <Badge variant={f.type === "agents.md" ? "secondary" : "outline"} className="font-mono text-xs">
+          {f.type ?? "select"}
+        </Badge>
+      ),
+    },
+    {
       id: "actions",
       header: "",
       width: "60px",
@@ -122,7 +139,16 @@ export function PromptFeatureList() {
 
   return (
     <ListLayout
-      title="Prompt Features"
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          Prompt Features
+          <HelpTooltip
+            text="Detection rules that flag whether the agent's prompt or output uses specific capabilities (tools, agents, plans). Used for capability tracking and analytics."
+            docs="promptFeatures"
+            size="md"
+          />
+        </span>
+      }
       description="Manage prompt feature detection"
       railStorageKey="prompt-features"
       actions={
@@ -145,8 +171,21 @@ export function PromptFeatureList() {
             />
           }
         >
-          <div className="p-3 text-xs text-muted-foreground">
-            Use the search above to filter by ID or prompt text.
+          <div className="p-3 space-y-2">
+            <Label className="text-xs font-medium">Type</Label>
+            <Select
+              value={typeFilter ?? "all"}
+              onValueChange={(v) => state.setFilter("type", v === "all" ? null : v)}
+            >
+              <SelectTrigger className="w-full" aria-label="Filter by type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All types</SelectItem>
+                <SelectItem value="select">Task</SelectItem>
+                <SelectItem value="agents.md">AGENTS.md</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </FilterRail>
       }

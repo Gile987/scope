@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { z } from "zod";
+import { durationSetFields } from "shared";
 import { apiRoute } from "../../openapi/api-route.js";
 import type { RouteContext } from "../../route-context.js";
 
@@ -23,6 +24,7 @@ async function cancelRequest(
     return { success: false, previousStatus: currentStatus, error: `Cannot cancel a paused request. Resume it first or delete it.` };
   }
 
+  const finishedAt = new Date();
   const result = await ctx.requestCollection.updateOne(
     {
       _id: id,
@@ -34,7 +36,9 @@ async function cancelRequest(
         "run.status": "done",
         "run.outcome": "failed",
         "run.error": "Run cancelled by user",
-        "run.finishedAt": new Date(),
+        "run.finishedAt": finishedAt,
+        // Denormalize duration for server-side sort (no-op if never started).
+        ...durationSetFields(doc.run?.startedAt, finishedAt),
         "run.updatedAt": new Date(),
         updatedAt: new Date(),
       },

@@ -17,13 +17,21 @@ export function buildGroupingPipeline(
   const groupField =
     groupBy === "task" ? "$taskPromptId" : groupBy === "profile" ? "$profileId" : "$submissionId";
   const fallbackGroupField =
-    groupBy === "task" ? "$scenario.task" : groupBy === "profile" ? { $literal: "no-profile" } : { $literal: "no-submission" };
+    groupBy === "profile" ? { $literal: "no-profile" } : { $literal: "no-submission" };
+  // `task` groups purely by the always-present `taskPromptId` — it is
+  // materialized on every run-creation path (findOrCreate → taskPrompt._id) and
+  // backfilled onto legacy docs by migration 001, so the group key is always a
+  // real id the member-fetch filter (`{ taskPromptId: key }`) can match. Only
+  // `profile`/`submission` fall back to a fixed literal sentinel for runs that
+  // genuinely lack the field.
+  const groupKeyExpr =
+    groupBy === "task" ? groupField : { $ifNull: [groupField, fallbackGroupField] };
 
   return [
     // 1. Compute per-run derived values
     {
       $addFields: {
-        _groupKey: { $ifNull: [groupField, fallbackGroupField] },
+        _groupKey: groupKeyExpr,
         _turnCount: { $cond: { if: { $isArray: "$run.turns" }, then: { $size: "$run.turns" }, else: null } },
         _duration: {
           $cond: {

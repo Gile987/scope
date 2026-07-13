@@ -25,6 +25,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, ChevronDown, ChevronRight, Save, Trash2, Loader2 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
+import { CriteriaBadge } from "@/components/CriteriaBadge";
+import { TaskPromptBadge } from "@/components/TaskPromptBadge";
 import { TaskPromptIdPicker } from "@/components/TaskPromptIdPicker";
 
 function DefaultSystemPromptViewer() {
@@ -394,9 +396,28 @@ export function ReportTemplateDetail() {
               <div>
                 <Label className="text-muted-foreground text-xs">Trigger</Label>
                 <div className="mt-1">
-                  <Badge variant="secondary" className="text-xs font-mono">
-                    {triggerSummary(template.trigger)}
-                  </Badge>
+                  {template.trigger?.type === "taskPrompt" ? (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">taskPrompt:</span>
+                      {template.trigger.taskPromptIds.map((id) => (
+                        <TaskPromptBadge key={id} taskPromptId={id} />
+                      ))}
+                    </div>
+                  ) : template.trigger?.type === "criteria" ? (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">criteria:</span>
+                      {template.trigger.criteriaIds.map((id) => (
+                        <CriteriaBadge key={id} criterionId={id} />
+                      ))}
+                      <span className="text-xs text-muted-foreground">
+                        (match: {template.trigger.match ?? "all"})
+                      </span>
+                    </div>
+                  ) : (
+                    <Badge variant="secondary" className="text-xs font-mono">
+                      {triggerSummary(template.trigger)}
+                    </Badge>
+                  )}
                 </div>
               </div>
               <div>

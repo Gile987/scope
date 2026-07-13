@@ -14,16 +14,23 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ArrowLeft, Loader2, Sparkles } from "lucide-react";
+import type { GateId } from "@/lib/gates";
 
 interface CreateCriterionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Called with the new criterion ID after successful creation */
   onCreated: (id: string) => void;
+  /** Pre-populated gate compatibility for the new criterion (defaults to ["select"]) */
+  defaultGates?: GateId[];
+  /** Gates that cannot be unselected (e.g. the gate this criterion is created for) */
+  lockedGates?: GateId[];
 }
 
-export function CreateCriterionDialog({ open, onOpenChange, onCreated }: CreateCriterionDialogProps) {
+export function CreateCriterionDialog({ open, onOpenChange, onCreated, defaultGates, lockedGates }: CreateCriterionDialogProps) {
   const wizard = useCriteriaWizard({
+    initialGates: defaultGates,
+    lockedGates,
     onSuccess: (id) => {
       onCreated(id);
       handleOpenChange(false);

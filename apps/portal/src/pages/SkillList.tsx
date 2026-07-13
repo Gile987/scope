@@ -36,6 +36,7 @@ import {
   type DataTableColumn,
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 const FILTER_KEYS = ["origin"] as const;
 
@@ -249,7 +250,16 @@ export function SkillList() {
   return (
     <>
       <ListLayout
-        title="Skills"
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            Skills
+            <HelpTooltip
+              text="Reusable instruction packs (Markdown + assets) attached to the prompt so the agent has consistent guidance."
+              docs="skills"
+              size="md"
+            />
+          </span>
+        }
         description="Manage agent skills injected into coding agent prompts"
         railStorageKey="skills"
         actions={
@@ -332,7 +342,7 @@ export function SkillList() {
             emptyState={
               state.hasActiveFilters
                 ? "No skills match your filters"
-                : "No skills imported yet. Click Import Skill to add one from a GitHub repository."
+                : "No skills imported yet. Click Import Skill to add one."
             }
           />
           <Pagination
@@ -374,7 +384,7 @@ export function SkillList() {
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Import Skill</DialogTitle>
+            <DialogTitle>Import from GitHub</DialogTitle>
           </DialogHeader>
           <SkillPicker selected={[]} onChange={() => {}} importOnly />
         </DialogContent>

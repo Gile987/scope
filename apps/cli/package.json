@@ -15,7 +15,7 @@
     "directory": "apps/cli"
   },
   "scripts": {
-    "build": "tsx build.ts",
+    "build": "tsc --noEmit && tsx build.ts",
     "build:tsc": "tsc --noEmit",
     "dev": "tsx src/index.ts",
     "start": "node dist/scope.mjs",
@@ -28,8 +28,9 @@
     "csv-stringify": "^6.6.0",
     "dotenv": "^16.6.1",
     "eventsource": "^2.0.2",
-
+    "ky": "^2.0.2",
     "semver": "^7.8.0",
+    "shared": "workspace:*",
     "yaml": "^2.8.3"
   },
   "devDependencies": {

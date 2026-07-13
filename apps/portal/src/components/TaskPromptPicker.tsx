@@ -8,12 +8,17 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search } from "lucide-react";
 import { truncate, formatId } from "@/lib/utils";
+import { promptTypeLabel } from "@/lib/gates";
+import type { TaskPrompt, PromptType } from "@/types";
 
 interface TaskPromptPickerProps {
   onSelect: (text: string) => void;
+  onSelectPrompt?: (prompt: TaskPrompt) => void;
+  type?: PromptType;
+  placeholder?: string;
 }
 
-export function TaskPromptPicker({ onSelect }: TaskPromptPickerProps) {
+export function TaskPromptPicker({ onSelect, onSelectPrompt, type, placeholder }: TaskPromptPickerProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -21,8 +26,8 @@ export function TaskPromptPicker({ onSelect }: TaskPromptPickerProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["task-prompts-picker", query],
-    queryFn: () => api.listTaskPrompts({ search: query || undefined, limit: 8 }),
+    queryKey: ["task-prompts-picker", query, type],
+    queryFn: () => api.listTaskPrompts({ search: query || undefined, limit: 8, type }),
   });
 
   const items = useMemo(() => data?.items ?? [], [data]);
@@ -44,12 +49,13 @@ export function TaskPromptPicker({ onSelect }: TaskPromptPickerProps) {
   }, []);
 
   const selectItem = useCallback(
-    (text: string) => {
-      onSelect(text);
+    (prompt: TaskPrompt) => {
+      onSelect(prompt.text ?? "");
+      onSelectPrompt?.(prompt);
       setQuery("");
       setOpen(false);
     },
-    [onSelect],
+    [onSelect, onSelectPrompt],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -62,7 +68,7 @@ export function TaskPromptPicker({ onSelect }: TaskPromptPickerProps) {
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (items[highlightIdx]) {
-        selectItem(items[highlightIdx].text);
+        selectItem(items[highlightIdx]);
       }
     } else if (e.key === "Escape") {
       setOpen(false);
@@ -75,7 +81,7 @@ export function TaskPromptPicker({ onSelect }: TaskPromptPickerProps) {
         <Search className="h-4 w-4 text-muted-foreground" />
         <Input
           ref={inputRef}
-          placeholder="Search existing task prompts…"
+          placeholder={placeholder ?? (type ? `Search ${promptTypeLabel(type)} prompts…` : "Search existing task prompts…")}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -109,13 +115,18 @@ export function TaskPromptPicker({ onSelect }: TaskPromptPickerProps) {
                       ? "bg-accent text-accent-foreground"
                       : "hover:bg-accent/50"
                   }`}
-                  onClick={() => selectItem(tp.text)}
+                  onClick={() => selectItem(tp)}
                   onMouseEnter={() => setHighlightIdx(idx)}
                 >
                   <span className="font-mono text-xs text-muted-foreground mr-2">
                     {formatId(tp._id)}
                   </span>
-                  {truncate(tp.text.replace(/\n/g, " "), 80)}
+                  {!type && (
+                    <span className="mr-2 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                      {promptTypeLabel(tp.type)}
+                    </span>
+                  )}
+                  {truncate((tp.text ?? "").replace(/\n/g, " "), 80)}
                 </li>
               ))}
             </ul>

@@ -43,7 +43,7 @@ export function TaskPromptIdPicker({ selected, onChange }: TaskPromptIdPickerPro
   const promptMap = useMemo(() => {
     const map = new Map<string, string>();
     for (const tp of allPrompts?.items ?? []) {
-      map.set(tp._id, tp.text);
+      map.set(tp._id, tp.text ?? "");
     }
     return map;
   }, [allPrompts]);
@@ -162,7 +162,7 @@ export function TaskPromptIdPicker({ selected, onChange }: TaskPromptIdPickerPro
                   {formatId(tp._id)}
                 </span>
                 <span className="text-xs truncate">
-                  {truncate(tp.text.replace(/\n/g, " "), 80)}
+                  {truncate((tp.text ?? "").replace(/\n/g, " "), 80)}
                 </span>
               </button>
             ))}

@@ -4,6 +4,7 @@
 import {
   ConversationTurn,
   CriterionResult,
+  GateId,
   TokenUsage,
   WorkerProcessor,
   WorkerProcessorOptions,
@@ -15,7 +16,7 @@ import type { SkillConfig } from "../types/skill.js";
 import type { ExtensionConfig } from "../types/extension.js";
 import { BlobStorage, BlobStorageConfig } from "../storage/blob-storage.js";
 import { sanitizeHarFile, extractToolCalls } from "../har/har-parser.js";
-import { JudgeClient } from "./judge-client.js";
+import { JudgeClient, JudgeInfrastructureError } from "./judge-client.js";
 
 export interface MultiTurnConfig {
   /** The coding worker processor (unchanged interface, called per iteration) */
@@ -58,6 +59,19 @@ export interface MultiTurnConfig {
   skillConfigs?: SkillConfig[];
   /** Resolved VS Code extension configurations for runtime installation */
   extensionConfigs?: ExtensionConfig[];
+  /**
+   * Which gate this loop is evaluating. Stamped on every turn and passed to the
+   * judge so it can scope evaluation and inspect tool outputs (build/test/run).
+   * Absent ⇒ treated as the Select gate. See docs/design/gates.md §4.4.
+   */
+  gate?: GateId;
+  /**
+   * Global iteration offset. The loop labels its iterations
+   * `iterationOffset + 1 .. iterationOffset + maxIterations` so that, when
+   * several gates run sequentially against the same run, iteration numbers (and
+   * therefore blob paths `iteration-N/...`) stay globally unique. Defaults to 0.
+   */
+  iterationOffset?: number;
 }
 
 export interface MultiTurnResult {
@@ -101,6 +115,8 @@ export async function runMultiTurnLoop(
     skillConfigs,
     extensionConfigs,
     workspacePath,
+    gate,
+    iterationOffset = 0,
   } = config;
 
   // Defensive: criteria is required when maxIterations > 1
@@ -123,16 +139,17 @@ export async function runMultiTurnLoop(
     extensions: extensionConfigs?.map((e) => e.id) ?? [],
   });
 
-  for (let iteration = 1; iteration <= maxIterations; iteration++) {
+  for (let i = 1; i <= maxIterations; i++) {
+    const iteration = iterationOffset + i;
     // Create a per-iteration logger that automatically injects the iteration number
     // into every log event's data. This ensures all downstream log calls (including
     // those from inside workers) carry iteration context for the CLI to display.
     const iterLog: typeof log = async (level, message, data) =>
-      log(level, message, { ...data, iteration });
+      log(level, message, { ...data, iteration, ...(gate && { gate }) });
 
     const iterationStartedAt = new Date();
 
-    await iterLog("info", `--- Iteration ${iteration}/${maxIterations} ---`, {
+    await iterLog("info", `--- Iteration ${i}/${maxIterations} ---`, {
       promptLength: nextPrompt.length,
       iterationHeader: true,
     });
@@ -181,6 +198,15 @@ export async function runMultiTurnLoop(
               await iterLog("info", `Extracted ${extracted.length} tool call(s) from HAR`, {
                 toolCallsUrl: turnToolCallsUrl,
                 toolCallCount: turnToolCallCount,
+              });
+            } else {
+              // A HAR was captured but yielded zero tool calls. This is almost
+              // always an unsupported wire format (e.g. a new API shape the
+              // parser doesn't recognize) rather than a genuinely tool-less
+              // session — surface it loudly so the judge isn't silently starved
+              // of tool-call evidence.
+              await iterLog("warn", "HAR captured but 0 tool calls extracted — possible unsupported API format; judge will have no tool-call evidence", {
+                harUrl: turnHarUrl,
               });
             }
           } catch (extractError) {
@@ -297,6 +323,7 @@ export async function runMultiTurnLoop(
       // Persist a partial turn so HAR/video URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
+        ...(gate && { gate }),
         codingAgentResponse: `Coding agent failed: ${errorMsg}`,
         judgeFeedback: "",
         snapshotUrl: "",
@@ -342,6 +369,7 @@ export async function runMultiTurnLoop(
       // Persist a partial turn so video/HAR URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
+        ...(gate && { gate }),
         ...(codingResponse && { codingAgentResponse: codingResponse }),
         judgeFeedback: `Snapshot upload failed: ${errorMsg}`,
         snapshotUrl: "",
@@ -378,6 +406,7 @@ export async function runMultiTurnLoop(
 
       const turn: ConversationTurn = {
         iteration,
+        ...(gate && { gate }),
         ...(codingResponse && { codingAgentResponse: codingResponse }),
         judgeFeedback: "No criteria — judge evaluation skipped",
         snapshotUrl,
@@ -421,19 +450,34 @@ export async function runMultiTurnLoop(
         conversationHistory: turns,
         personaInstructions,
         requestId,
+        iteration,
+        ...(gate && { gate }),
+        ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
+        ...(codingResponse && { currentAgentResponse: codingResponse }),
       });
       judgePassed = judgeResult.passed;
       judgeFeedback = judgeResult.feedback;
       criteriaResults = judgeResult.criteriaResults;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      await iterLog("error", `Judge evaluation failed: ${errorMsg}`, { error: errorMsg });
+      const isInfra = error instanceof JudgeInfrastructureError;
+      const label = isInfra
+        ? "Judge infrastructure error (evaluation could not run — not a criteria failure)"
+        : "Judge evaluation failed";
+      await iterLog("error", `${label}: ${errorMsg}`, {
+        error: errorMsg,
+        ...(isInfra && {
+          judgeInfrastructureError: true,
+          ...(error.isVersionMismatch && { protocolVersionMismatch: true }),
+        }),
+      });
 
       // Persist a partial turn so video/snapshot URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
+        ...(gate && { gate }),
         ...(codingResponse && { codingAgentResponse: codingResponse }),
-        judgeFeedback: `Judge evaluation failed: ${errorMsg}`,
+        judgeFeedback: `${label}: ${errorMsg}`,
         snapshotUrl,
         passed: false,
         timestamp: new Date(),
@@ -459,7 +503,7 @@ export async function runMultiTurnLoop(
         turns,
         passed: false,
         hadError: true,
-        finalResult: `Judge evaluation failed on iteration ${iteration}: ${errorMsg}`,
+        finalResult: `${label} on iteration ${iteration}: ${errorMsg}`,
       };
     }
 
@@ -483,6 +527,7 @@ export async function runMultiTurnLoop(
     // Step 4: Record the turn
     const turn: ConversationTurn = {
       iteration,
+      ...(gate && { gate }),
       ...(codingResponse && { codingAgentResponse: codingResponse }),
       judgeFeedback,
       snapshotUrl,

@@ -30,6 +30,12 @@ Central documentation hub for the Scope platform — an AI coding agent benchmar
 |----------|-------------|
 | [Delta Storage](research/delta-storage.md) | Approaches for space-efficient storage of coding agent iteration snapshots |
 
+## Tips & Tricks
+
+| Document | Description |
+|----------|-------------|
+| [Developer Tips & Tricks](tips/README.md) | Short, practical tips for working productively in this repo (one file per tip) |
+
 ## Decisions
 
 Architecture Decision Records (ADRs) capture significant design choices and their rationale.

@@ -6,9 +6,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { TaskPrompt } from "@/types";
+import type { TaskPrompt, PromptType } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -21,12 +22,17 @@ import { Badge } from "@/components/ui/badge";
 import { Trash2, Eye, Plus, List, ArrowRight, ArrowLeft, Info, Loader2, MessageSquareText } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
+import { TaskPromptBadge } from "@/components/TaskPromptBadge";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { Stepper } from "@/components/Stepper";
+import { GATE_METADATA, promptTypeLabel } from "@/lib/gates";
+import { useVisibleGates } from "@/hooks/useVisibleGates";
 import { KbdBadge } from "@/components/KbdBadge";
 import {
   ListLayout,
   FilterRail,
+  FilterSection,
+  CheckboxFilterGroup,
   ClearFiltersLink,
   CustomizeColumnsLink,
   CustomizeColumnsPanel,
@@ -38,13 +44,15 @@ import {
   type DataTableColumn,
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
+import { HelpTooltip } from "@/components/HelpTooltip";
 
 const DIALOG_STEPS = ["Task Text", "Features"];
-const FILTER_KEYS = [] as const;
+const FILTER_KEYS = ["type"] as const;
 
 const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "id", label: "ID", required: true },
   { id: "text", label: "Text" },
+  { id: "type", label: "Type" },
   { id: "features", label: "Features" },
   { id: "created", label: "Created" },
   { id: "actions", label: "Actions" },
@@ -54,7 +62,9 @@ export function TaskPromptList() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogStep, setDialogStep] = useState<1 | 2>(1);
   const [newText, setNewText] = useState("");
+  const [newType, setNewType] = useState<PromptType>("select");
   const [customizeOpen, setCustomizeOpen] = useState(false);
+  const visibleGates = useVisibleGates();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const detailOutlet = useOutlet();
@@ -65,9 +75,12 @@ export function TaskPromptList() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
+  const selectedTypes = state.getFilterList("type") as PromptType[];
+  const typeFilter = selectedTypes.length === 1 ? selectedTypes[0] : undefined;
+
   const { data, isLoading } = useQuery({
-    queryKey: ["task-prompts", state.search],
-    queryFn: () => api.listTaskPrompts({ search: state.search || undefined }),
+    queryKey: ["task-prompts", state.search, typeFilter],
+    queryFn: () => api.listTaskPrompts({ search: state.search || undefined, type: typeFilter }),
   });
 
   const items = data?.items ?? [];
@@ -92,7 +105,7 @@ export function TaskPromptList() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (text: string) => api.createTaskPrompt(text),
+    mutationFn: ({ text, type }: { text: string; type: PromptType }) => api.createTaskPrompt(text, type),
     onSuccess: (prompt) => {
       queryClient.invalidateQueries({ queryKey: ["task-prompts"] });
       resetDialog();
@@ -104,6 +117,7 @@ export function TaskPromptList() {
     setDialogOpen(false);
     setDialogStep(1);
     setNewText("");
+    setNewType("select");
     createMutation.reset();
   };
 
@@ -153,10 +167,12 @@ export function TaskPromptList() {
       width: "140px",
       hidden: visibility.isHidden("id"),
       cell: (tp) => (
-        <span className="flex items-center gap-1.5 font-mono text-xs">
-          <MessageSquareText className="h-3.5 w-3.5 text-muted-foreground" />
-          {formatId(tp._id)}
-        </span>
+        <TaskPromptBadge taskPromptId={tp._id} prompt={tp}>
+          <span className="flex items-center gap-1.5 font-mono text-xs">
+            <MessageSquareText className="h-3.5 w-3.5 text-muted-foreground" />
+            {formatId(tp._id)}
+          </span>
+        </TaskPromptBadge>
       ),
     },
     {
@@ -164,7 +180,18 @@ export function TaskPromptList() {
       header: "Text",
       hidden: visibility.isHidden("text"),
       cell: (tp) => (
-        <span className="text-sm text-muted-foreground">{truncate(tp.text, 80)}</span>
+        <span className="text-sm text-muted-foreground">{truncate(tp.text ?? "", 80)}</span>
+      ),
+    },
+    {
+      id: "type",
+      header: "Type",
+      width: "110px",
+      hidden: visibility.isHidden("type"),
+      cell: (tp) => (
+        <Badge variant="secondary" className="text-xs">
+          {promptTypeLabel(tp.type)}
+        </Badge>
       ),
     },
     {
@@ -246,8 +273,17 @@ export function TaskPromptList() {
 
   return (
     <ListLayout
-      title="Task Prompts"
-      description="Browse and manage content-addressed task prompt entities"
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          Prompt Library
+          <HelpTooltip
+            text="Reusable, content-addressed task instructions you pick when submitting a run. Prompts are deduplicated by hash so identical text shares one entry across all runs."
+            docs="taskPrompts"
+            size="md"
+          />
+        </span>
+      }
+      description="Reusable task instructions you can pick when submitting a run — prompts are deduplicated by hash and shared across runs"
       railStorageKey="task-prompts"
       actions={
         <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) resetDialog(); else setDialogOpen(true); }}>
@@ -270,7 +306,22 @@ export function TaskPromptList() {
 
             {dialogStep === 1 ? (
               <>
-                <TaskPromptPicker onSelect={(text) => setNewText(text)} />
+                <div className="space-y-2">
+                  <Select value={newType} onValueChange={(value) => setNewType(value as PromptType)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Prompt type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {visibleGates.map((gate) => (
+                        <SelectItem key={gate} value={gate}>
+                          {GATE_METADATA[gate].label}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="agents.md">{promptTypeLabel("agents.md")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <TaskPromptPicker type={newType} onSelect={(text) => setNewText(text)} />
                 <Textarea
                   placeholder="Enter task prompt text..."
                   value={newText}
@@ -317,7 +368,7 @@ export function TaskPromptList() {
                     <ArrowLeft className="h-4 w-4" /> Back
                   </Button>
                   <Button
-                    onClick={() => createMutation.mutate(newText)}
+                    onClick={() => createMutation.mutate({ text: newText, type: newType })}
                     disabled={createMutation.isPending}
                     className="gap-1.5"
                     data-command-enter
@@ -350,7 +401,16 @@ export function TaskPromptList() {
             </>
           }
         >
-          {null}
+          <FilterSection title="Prompt type" defaultOpen>
+            <CheckboxFilterGroup
+              options={[
+                ...visibleGates.map((gate) => ({ value: gate, label: GATE_METADATA[gate].label })),
+                { value: "agents.md", label: promptTypeLabel("agents.md") },
+              ]}
+              selected={selectedTypes}
+              onToggle={(value) => state.setFilter("type", selectedTypes.includes(value as PromptType) ? [] : [value])}
+            />
+          </FilterSection>
         </FilterRail>
       }
       secondaryPanel={

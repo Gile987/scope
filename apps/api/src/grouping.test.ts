@@ -27,8 +27,9 @@ describe("buildGroupingPipeline", () => {
   it("groups by taskPromptId for task grouping", () => {
     const pipeline = buildGroupingPipeline("task");
     const addFields = pipeline[0].$addFields as Record<string, unknown>;
-    // _groupKey should reference $taskPromptId with fallback to scenario.task
-    expect(addFields._groupKey).toBeDefined();
+    // `task` groups purely by the always-present taskPromptId — no raw-text
+    // fallback, so the server key always matches the client member-fetch filter.
+    expect(addFields._groupKey).toBe("$taskPromptId");
   });
 
   it("groups by submissionId for submissionId grouping", () => {

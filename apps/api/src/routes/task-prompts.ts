@@ -6,6 +6,7 @@ import {
   CreateTaskPromptInputSchema,
   PatchTaskPromptFeatureInputSchema,
   PromptFeatureResultSchema,
+  PromptTypeSchema,
   SuggestedPromptFeatureSchema,
   TaskPromptResponseSchema,
 } from "shared";
@@ -46,7 +47,10 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Fetch recent task prompts as context (avoid duplicates)
     const recentPrompts = await ctx.taskPromptCollection
-      .find({ deletedAt: { $exists: false } })
+      .find({
+        deletedAt: { $exists: false },
+        $or: [{ type: "select" }, { type: { $exists: false } }],
+      })
       .sort({ createdAt: -1 })
       .limit(20)
       .project({ text: 1, _id: 0 })
@@ -75,6 +79,7 @@ apiRoute(ctx.app, ctx.registry, {
     limit: z.coerce.number().optional(),
     offset: z.coerce.number().optional(),
     search: z.string().optional(),
+    type: PromptTypeSchema.optional(),
   }),
   response: z.object({
     items: z.array(TaskPromptResponseSchema),
@@ -86,8 +91,9 @@ apiRoute(ctx.app, ctx.registry, {
     const limit = req.query.limit ?? 50;
     const offset = req.query.offset ?? 0;
     const search = req.query.search;
+    const type = req.query.type;
 
-    const { items, total } = await ctx.taskPromptStore.getAll({ limit, offset, search });
+    const { items, total } = await ctx.taskPromptStore.getAll({ limit, offset, search, type });
     res.json({ items, total, limit, offset });
   },
 });
@@ -114,7 +120,41 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
-// POST /api/v1/task-prompts — create (or find existing) task prompt. Idempotent.
+// GET /api/v1/task-prompts/:id/content — get the resolved plain-text body
+// (inline or downloaded from blob). Used by workers to fetch AGENTS.md / task text.
+//
+// NOTE: This returns any prompt body by ID with no authorization check. That is
+// consistent with the rest of the API, which has no auth/tenancy model today
+// (see index.ts: just cors() + express.json()). Because prompts are globally
+// content-addressed and deduplicated via taskPromptStore.findOrCreate, this route
+// implicitly assumes a trusted-network, single-tenant deployment. If auth or
+// multi-tenancy is ever introduced, revisit this: the dedup store is NOT tenant-safe
+// and this endpoint would leak prompt bodies across tenants.
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/task-prompts/:id/content",
+  tags: ["Task Prompts"],
+  summary: "Get resolved task prompt content",
+  params: z.object({ id: z.string() }),
+  response: z.object({ id: z.string(), text: z.string() }),
+  errorResponses: {
+    404: { description: "Task prompt not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const taskPrompt = await ctx.taskPromptStore.get(id);
+      if (!taskPrompt) {
+        res.status(404).json({ error: "Task prompt not found" });
+        return;
+      }
+      const text = await ctx.taskPromptStore.resolvePromptText(taskPrompt);
+      res.json({ id, text });
+    } catch (err) {
+      next(err);
+    }
+  },
+});
 apiRoute(ctx.app, ctx.registry, {
   method: "post",
   path: "/api/v1/task-prompts",
@@ -126,14 +166,18 @@ apiRoute(ctx.app, ctx.registry, {
     400: { description: "Empty text string" },
   },
   handler: async (req, res, next) => {
-    const { text } = req.body;
+    const { text, type } = req.body;
     if (!text || typeof text !== "string" || !text.trim()) {
       res.status(400).json({ error: "Body must contain a non-empty 'text' string" });
       return;
     }
 
-    const taskPrompt = await ctx.taskPromptStore.findOrCreate(text);
-    res.status(201).json(taskPrompt);
+    try {
+      const taskPrompt = await ctx.taskPromptStore.findOrCreate(text, type);
+      res.status(201).json(taskPrompt);
+    } catch (err) {
+      next(err);
+    }
   },
 });
 
@@ -211,13 +255,21 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    // Scope candidate features to the prompt's own type: task prompts get task
+    // features; AGENTS.md prompts get agents.md features. Absent type ⇒ select.
+    const promptType = taskPrompt.type ?? "select";
+    const typeFilter: Record<string, unknown> =
+      promptType === "select"
+        ? { $or: [{ type: "select" }, { type: { $exists: false } }] }
+        : { type: promptType };
     const allFeatures = await ctx.promptFeatureCollection
-      .find({ deletedAt: { $exists: false } })
+      .find({ deletedAt: { $exists: false }, ...typeFilter })
       .toArray();
 
     const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt }));
     try {
-      const { results, suggestedFeatures } = await extractPromptFeatures(taskPrompt.text, featureConfigs, model);
+      const promptText = await ctx.taskPromptStore.resolvePromptText(taskPrompt);
+      const { results, suggestedFeatures } = await extractPromptFeatures(promptText, featureConfigs, model);
 
       // Store features on the task prompt entity
       const updated = await ctx.taskPromptStore.attachFeatures(id, results);

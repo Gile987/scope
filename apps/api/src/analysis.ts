@@ -48,6 +48,18 @@ export interface AnalysisResponse {
   availableCriteria: string[];
   /** Criteria IDs that were used to define success (empty = use turn.passed) */
   selectedCriteria: string[];
+  /** Union of all detected task-prompt feature IDs across all runs (before filtering) */
+  availableFeatures: string[];
+  /** Task-prompt feature IDs used to filter runs (empty = no feature filter) */
+  selectedFeatures: string[];
+  /**
+   * True when the analyzed run set was capped to a most-recent-N window to bound
+   * memory (see ANALYSIS_MAX_RUNS). Older runs are excluded from the metrics;
+   * the portal surfaces this as a banner. Absent/false = the full set was analyzed.
+   */
+  truncated?: boolean;
+  /** The configured run cap (max runs analyzed) — only meaningful when `truncated`. */
+  runLimit?: number;
 }
 
 /** Per-criterion result stored on each turn */
@@ -64,6 +76,8 @@ import { computeTaskPromptId } from 'shared';
 export interface AnalyzableRun {
   scenario: { task: string; criteria?: string[] };
   taskPromptId?: string;
+  /** Detected/evaluated features of this run's task prompt (for feature filtering) */
+  promptFeatures?: Array<{ featureId: string; detected: boolean }>;
   workerType: string;
   status: string;
   outcome?: string;
@@ -168,6 +182,19 @@ function isPassedRun(run: AnalyzableRun, selectedCriteria?: string[]): boolean {
 }
 
 /**
+ * Cap a run list to a maximum size, reporting whether truncation occurred.
+ *
+ * The analysis endpoint fetches the most-recent `max + 1` runs so it can detect
+ * "there are more than `max`" in a single query; this helper trims back to `max`
+ * and flags truncation. Bounding the in-memory run set is what keeps the analysis
+ * pass from loading an unbounded number of documents.
+ */
+export function capRunsToLimit<T>(runs: T[], max: number): { runs: T[]; truncated: boolean } {
+  if (runs.length <= max) return { runs, truncated: false };
+  return { runs: runs.slice(0, max), truncated: true };
+}
+
+/**
  * Group runs by (task, workerType) and compute metrics
  * @param runs - All runs to analyze
  * @param kValues - Values of k for pass@k calculation
@@ -176,7 +203,8 @@ function isPassedRun(run: AnalyzableRun, selectedCriteria?: string[]): boolean {
 export function computeAnalysis(
   runs: AnalyzableRun[],
   kValues: number[],
-  selectedCriteria?: string[]
+  selectedCriteria?: string[],
+  selectedFeatures?: string[]
 ): AnalysisResponse {
   // Filter out runs without a valid scenario
   const allValidRuns = runs.filter(run => run.scenario?.task);
@@ -192,13 +220,37 @@ export function computeAnalysis(
   }
   const availableCriteria = Array.from(availableCriteriaSet).sort();
 
+  // Collect all detected task-prompt feature IDs from all runs (before filtering).
+  // Only detected===true counts: a task prompt stores a row for every evaluated
+  // feature (detected:true|false), so presence alone is not meaningful.
+  const availableFeaturesSet = new Set<string>();
+  for (const run of allValidRuns) {
+    if (run.promptFeatures) {
+      for (const f of run.promptFeatures) {
+        if (f.detected) availableFeaturesSet.add(f.featureId);
+      }
+    }
+  }
+  const availableFeatures = Array.from(availableFeaturesSet).sort();
+
   // Filter runs: if selectedCriteria is provided, only include runs that have ALL selected criteria
-  const validRuns = selectedCriteria && selectedCriteria.length > 0
+  const criteriaFilteredRuns = selectedCriteria && selectedCriteria.length > 0
     ? allValidRuns.filter(run => {
         const runCriteria = new Set(run.scenario.criteria || []);
         return selectedCriteria.every(c => runCriteria.has(c));
       })
     : allValidRuns;
+
+  // Further filter by selected task-prompt features (AND: keep a run only if its
+  // task prompt has every selected feature detected===true).
+  const validRuns = selectedFeatures && selectedFeatures.length > 0
+    ? criteriaFilteredRuns.filter(run => {
+        const detected = new Set(
+          (run.promptFeatures || []).filter(f => f.detected).map(f => f.featureId)
+        );
+        return selectedFeatures.every(f => detected.has(f));
+      })
+    : criteriaFilteredRuns;
   
   // Group by taskPromptId + workerType (falls back to computing ID from text for legacy runs)
   const groupMap = new Map<string, AnalyzableRun[]>();
@@ -327,5 +379,7 @@ export function computeAnalysis(
     summary,
     availableCriteria,
     selectedCriteria: selectedCriteria || [],
+    availableFeatures,
+    selectedFeatures: selectedFeatures || [],
   };
 }

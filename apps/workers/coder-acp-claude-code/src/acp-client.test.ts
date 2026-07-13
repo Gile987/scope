@@ -5,7 +5,228 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ACPClientHandler, selectReasoningEffort } from "./acp-client.js";
+import { ACPClientHandler, selectReasoningEffort, formatToolArgs, formatToolContent } from "./acp-client.js";
+
+describe("formatToolArgs", () => {
+  it("returns an empty string for non-object input", () => {
+    expect(formatToolArgs(undefined)).toBe("");
+    expect(formatToolArgs(null)).toBe("");
+    expect(formatToolArgs("hello")).toBe("");
+  });
+
+  it("returns an empty string for an empty object", () => {
+    expect(formatToolArgs({})).toBe("");
+  });
+
+  it("formats arguments as key=value pairs with collapsed whitespace", () => {
+    expect(formatToolArgs({ command: "npm   install", path: "src" })).toBe(
+      "command=npm install, path=src"
+    );
+  });
+
+  it("truncates long previews with an ellipsis", () => {
+    const result = formatToolArgs({ path: "a".repeat(300) }, 20);
+    expect(result.length).toBe(20);
+    expect(result.endsWith("…")).toBe(true);
+  });
+
+  it("redacts values of sensitive keys", () => {
+    expect(
+      formatToolArgs({ url: "https://x", token: "sk-123", password: "p" })
+    ).toBe("url=https://x, token=[redacted], password=[redacted]");
+  });
+});
+
+describe("formatToolContent", () => {
+  it("returns an empty string for non-array or empty input", () => {
+    expect(formatToolContent(undefined)).toBe("");
+    expect(formatToolContent(null)).toBe("");
+    expect(formatToolContent([])).toBe("");
+  });
+
+  it("formats a diff variant as `diff <path> <newText>`", () => {
+    expect(
+      formatToolContent([
+        { type: "diff", path: "/tmp/app.js", newText: "const x = 1", oldText: null },
+      ])
+    ).toBe("diff /tmp/app.js const x = 1");
+  });
+
+  it("redacts diff text for sensitive file paths", () => {
+    expect(
+      formatToolContent([
+        { type: "diff", path: "/app/.env", newText: "API_KEY=sk-123", oldText: null },
+      ])
+    ).toBe("diff /app/.env [redacted]");
+  });
+
+  it("formats a terminal variant as `terminal <terminalId>`", () => {
+    expect(
+      formatToolContent([{ type: "terminal", terminalId: "term-123" }])
+    ).toBe("terminal term-123");
+  });
+
+  it("formats a text content block as its text", () => {
+    expect(
+      formatToolContent([
+        { type: "content", content: { type: "text", text: "hello world" } },
+      ])
+    ).toBe("hello world");
+  });
+
+  it("formats non-text content blocks as a bracketed type", () => {
+    expect(
+      formatToolContent([
+        { type: "content", content: { type: "image", data: "..." } },
+      ])
+    ).toBe("[image]");
+  });
+
+  it("truncates long previews with an ellipsis", () => {
+    const result = formatToolContent(
+      [{ type: "diff", path: "f", newText: "a".repeat(300) }],
+      20
+    );
+    expect(result.length).toBe(20);
+    expect(result.endsWith("…")).toBe(true);
+  });
+});
+
+describe("ACPClientHandler tool call logging", () => {
+  let workspace: string;
+  let logs: string[];
+  let handler: ACPClientHandler;
+
+  beforeEach(() => {
+    workspace = mkdtempSync(join(tmpdir(), "acp-tool-log-"));
+    logs = [];
+    handler = new ACPClientHandler((msg) => logs.push(msg), workspace);
+  });
+
+  afterEach(() => {
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it("logs a tool call with an argument preview", async () => {
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "toolu_bdrk_123",
+        title: "Create Astro project",
+        status: "pending",
+        kind: "execute",
+        rawInput: { command: "npm create astro@latest" },
+      },
+    } as never);
+
+    expect(logs).toEqual([
+      "Tool call: [execute] Create Astro project command=npm create astro@latest (pending)",
+    ]);
+  });
+
+  it("shows the title (not the opaque id) and carries kind forward on updates", async () => {
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "toolu_bdrk_123",
+        title: "Create Astro project",
+        status: "pending",
+        kind: "execute",
+      },
+    } as never);
+    logs.length = 0;
+
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "toolu_bdrk_123",
+        status: "completed",
+      },
+    } as never);
+
+    expect(logs).toEqual(["Tool update: [execute] Create Astro project - completed"]);
+  });
+
+  it("falls back to content (diff) preview when an update has no rawInput", async () => {
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "toolu_bdrk_123",
+        title: "Write",
+        status: "pending",
+        kind: "edit",
+      },
+    } as never);
+    logs.length = 0;
+
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "toolu_bdrk_123",
+        content: [
+          { type: "diff", path: "/tmp/app.js", newText: "const x = 1", oldText: null },
+        ],
+      },
+    } as never);
+
+    expect(logs).toEqual([
+      "Tool update: [edit] Write diff /tmp/app.js const x = 1",
+    ]);
+  });
+
+  it("falls back to the tool call id when no title was seen", async () => {
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "toolu_bdrk_unknown",
+        status: "completed",
+      },
+    } as never);
+
+    expect(logs).toEqual(["Tool update: toolu_bdrk_unknown - completed"]);
+  });
+
+  it("drops the cached title once the tool call completes", async () => {
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "toolu_bdrk_789",
+        title: "Write",
+        status: "pending",
+        kind: "edit",
+      },
+    } as never);
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "toolu_bdrk_789",
+        status: "completed",
+      },
+    } as never);
+    logs.length = 0;
+
+    // A late update reusing the same id no longer finds the cached title,
+    // confirming the entry was pruned on completion.
+    await handler.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "toolu_bdrk_789",
+        status: "failed",
+      },
+    } as never);
+
+    expect(logs).toEqual(["Tool update: toolu_bdrk_789 - failed"]);
+  });
+});
 
 describe("ACPClientHandler", () => {
   let workspace: string;
