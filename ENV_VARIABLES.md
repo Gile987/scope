@@ -520,6 +520,14 @@ token minting/refresh itself (enabling the plugin caused upstream 502s — #1058
 Electron worker leaves it enabled.
 
 ### DEV_PROXY_ENABLED
+
+### CAPI_HMAC_MACHINE_ID
+**Default:** `"scope-gateway"`
+**Type:** string
+
+Default machine identifier used in CAPI HMAC signature payloads when the session's `capiHmac.machineId` field is not provided. Only relevant when the `capi_hmac` gateway plugin is activated for a session.
+
+### DEV_PROXY_ENABLED
 **Default:** `false`
 **Type:** boolean (`true` | `false`)
 
