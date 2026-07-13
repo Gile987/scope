@@ -27,7 +27,7 @@ use crate::plugin::{HttpExchange, ProxyPlugin, SessionId};
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Per-session configuration provided at session start under the `"capiHmac"` key.
+/// Per-session configuration provided at session start under the `"capi_hmac"` key.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionConfig {

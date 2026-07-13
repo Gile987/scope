@@ -354,14 +354,14 @@ The CAPI HMAC plugin (`plugins/capi_hmac`) computes and attaches HMAC-SHA256 sig
 
 **How it works:**
 
-1. Session starts with `capiHmac` settings containing a base64-encoded signing key
+1. Session starts with `capi_hmac` settings containing a base64-encoded signing key
 2. On each outbound request to a target host, the plugin:
    - Builds a canonical string: `{method}\n{path}\n{unix_timestamp}\n{machineId}`
    - Computes HMAC-SHA256 with the signing key
    - Attaches the signature header: `v1:{timestamp}:{base64(hmac)}`
 3. CAPI validates the signature server-side
 
-**Session settings (passed under `"capiHmac"` key):**
+**Session settings (passed under `"capi_hmac"` key):**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -372,7 +372,7 @@ The CAPI HMAC plugin (`plugins/capi_hmac`) computes and attaches HMAC-SHA256 sig
 
 **Key behaviors:**
 
-- **Per-session activation**: Only sessions that provide `capiHmac` settings are signed. Other sessions are unaffected.
+- **Per-session activation**: Only sessions that provide `capi_hmac` settings are signed. Other sessions are unaffected.
 - **Composable**: Works alongside the `copilot_token` plugin — both can modify headers on the same request in sequence (token first, then signature).
 - **Pre-decoded key**: The base64 signing key is decoded once at session start, avoiding per-request decode overhead.
 - **Invalid key rejection**: If the signing key is not valid base64, the session is not activated (logged as a warning).
@@ -387,7 +387,7 @@ POST /api/v1/sessions
     "har": { "redactCredentials": true },
     "copilotToken": {
     },
-    "capiHmac": {
+    "capi_hmac": {
       "signingKey": "base64-encoded-secret-key",
       "machineId": "worker-001",
       "targetHosts": ["api.githubcopilot.com"]
