@@ -284,6 +284,19 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
+    // Fail fast on a missing project scope. Every downstream resolver below
+    // (MCP servers, skills, secrets, and the report-generator) builds
+    // `?projectId=${encodeURIComponent(projectId)}` URLs, so an absent value
+    // would `encodeURIComponent(undefined)` into the literal string
+    // "undefined" and silently query a project named "undefined" — a confusing
+    // 404 instead of a clear error. A run should never reach here without a
+    // projectId (the API sets it on submit and migration 026 backfills legacy
+    // docs), so treat its absence as a hard, explicit failure.
+    if (!requestDoc.projectId) {
+      throw new Error(
+        `Request ${requestDoc._id} has no projectId — cannot resolve project-scoped resources (MCP servers, skills, secrets)`,
+      );
+    }
     // Resolve MCP server slugs to configs via API
     let mcpServerConfigs: McpServerConfig[] | undefined;
     if (requestDoc.mcpServers && requestDoc.mcpServers.length > 0) {

@@ -155,10 +155,13 @@ manages the selection:
 
 | Command | Purpose |
 |---------|---------|
-| `scope project list` | List projects |
-| `scope project create <name>` | Create a project |
-| `scope project use <id>` | Persist the selected project to `~/.config/scope/config.json` |
+| `scope project list [--include-deleted]` | List projects (optionally including soft-deleted ones) |
+| `scope project create --name <name> [--description <text>] [--use]` | Create a project (`--use` selects it after creating) |
 | `scope project show` | Show the currently selected project |
+| `scope project use <id>` | Persist the selected project to `~/.config/scope/config.json` |
+| `scope project update <id> [--name <name>] [--description <text>]` | Update a project's name or description |
+| `scope project delete <id>` | Soft-delete a project |
+| `scope project restore <id>` | Restore a soft-deleted project |
 
 Scoped commands (`run list`/`run submit`, and every entity `list`/`search`/`create`/
 `import`) resolve the effective project with this precedence:

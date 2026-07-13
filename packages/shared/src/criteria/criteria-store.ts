@@ -64,7 +64,27 @@ export class CriteriaStore {
     dependsOn?: string[];
     gates?: GateId[];
   }): Promise<CriteriaDocument> {
-    const { projectId, id, prompt, dependsOn = [], gates } = input;
+    const { projectId: inputProjectId, id, prompt, dependsOn = [], gates } = input;
+
+    // Guard against scope confusion: the uniqueness/dedup checks below run
+    // through `scoped()` (i.e. against `this.projectId`), but the row is written
+    // with the project id resolved here. If a caller ever constructs the store
+    // scoped to project A yet passes `input.projectId = B`, the dedup would run
+    // in A while the row lands in B — a silent cross-project write. Refuse only
+    // when both are present and disagree; a scoped store may fill in an omitted
+    // input, and an unscoped store (legacy/tests) defers entirely to the input.
+    if (
+      this.projectId !== undefined &&
+      inputProjectId !== undefined &&
+      this.projectId !== inputProjectId
+    ) {
+      throw new CriteriaValidationError(
+        `projectId mismatch: store is scoped to '${this.projectId}' but create() was given '${inputProjectId}'`,
+      );
+    }
+    // Write with the same scope the uniqueness check used, so the check and the
+    // insert can never target different projects.
+    const projectId = this.projectId ?? inputProjectId;
 
     // Validate ID format
     if (!/^[a-z][a-z0-9_]*$/.test(id)) {

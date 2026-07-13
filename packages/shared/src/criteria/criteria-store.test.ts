@@ -377,5 +377,32 @@ describe("CriteriaStore per-project isolation (migration 026)", () => {
       storeA.create({ projectId: "proj-a", id: "child", prompt: "c", dependsOn: ["parent"] }),
     ).resolves.toBeTruthy();
   });
+
+  it("rejects create() when input.projectId disagrees with the store's scope", async () => {
+    // The dedup/uniqueness checks run through `scoped()` (this.projectId) while the
+    // row is written with the resolved project id. If they disagreed, the check
+    // would run in one project and the insert land in another — a silent
+    // cross-project write. A scoped store must refuse a mismatched input.
+    const col = fakeCollection();
+    const storeA = new CriteriaStore(col, "proj-a");
+
+    await expect(
+      storeA.create({ projectId: "proj-b", id: "x", prompt: "p" }),
+    ).rejects.toThrow(CriteriaValidationError);
+
+    // Nothing was written.
+    expect(col._docs()).toHaveLength(0);
+  });
+
+  it("writes under the store's scope even if input omits projectId", async () => {
+    // A scoped store is the source of truth for the project id; the check and the
+    // insert must both use it.
+    const col = fakeCollection();
+    const storeA = new CriteriaStore(col, "proj-a");
+
+    await storeA.create({ projectId: undefined as unknown as string, id: "y", prompt: "p" });
+
+    expect(col._docs()).toEqual([expect.objectContaining({ id: "y", projectId: "proj-a" })]);
+  });
 });
 
