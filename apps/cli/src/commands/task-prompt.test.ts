@@ -11,12 +11,25 @@ function makeProgram(): Command {
   return program;
 }
 
-function mockFetchWith(body: unknown): void {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => body }));
+/** Captures the outgoing request that the `ky` engine handed to `fetch`. */
+interface CapturedRequest {
+  url: string;
+  method: string;
+  body: string;
 }
 
-function fetchMock(): ReturnType<typeof vi.fn> {
-  return fetch as unknown as ReturnType<typeof vi.fn>;
+let lastRequest: CapturedRequest | undefined;
+
+function mockFetchWith(body: unknown): void {
+  lastRequest = undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (req: Request) => {
+      // `ky` calls `fetch(request)` with a single `Request`; capture it before the body is consumed.
+      lastRequest = { url: req.url, method: req.method, body: await req.text() };
+      return { ok: true, status: 200, json: async () => body };
+    }),
+  );
 }
 
 describe("task-prompt list", () => {
@@ -37,8 +50,7 @@ describe("task-prompt list", () => {
       logSpy.mockRestore();
     }
 
-    const url = fetchMock().mock.calls[0][0] as string;
-    expect(url).toContain("type=agents.md");
+    expect(lastRequest?.url).toContain("type=agents.md");
   });
 
   it("renders blob-backed prompts without crashing on missing text", async () => {
@@ -82,8 +94,7 @@ describe("task-prompt create", () => {
       logSpy.mockRestore();
     }
 
-    const init = fetchMock().mock.calls[0][1] as { body: string };
-    expect(JSON.parse(init.body)).toEqual({ text: "# Guidance", type: "agents.md" });
+    expect(JSON.parse(lastRequest!.body)).toEqual({ text: "# Guidance", type: "agents.md" });
   });
 
   it("defaults type to select when not provided", async () => {
@@ -100,7 +111,6 @@ describe("task-prompt create", () => {
       logSpy.mockRestore();
     }
 
-    const init = fetchMock().mock.calls[0][1] as { body: string };
-    expect(JSON.parse(init.body)).toEqual({ text: "plain task", type: "select" });
+    expect(JSON.parse(lastRequest!.body)).toEqual({ text: "plain task", type: "select" });
   });
 });

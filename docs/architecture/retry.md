@@ -68,6 +68,19 @@ Returns `true` if the error message contains `"TooManyRequests"` or `"Request ra
 - **Use `withRetry`** when you need conditional logic inside the retry loop (e.g., distinguishing 4xx from 5xx before deciding to retry).
 - **Always set `isRetryable`** explicitly for non-database calls. The default predicate only matches CosmosDB 429 errors.
 - **Wrap best-effort calls in try/catch** at the call site if the operation should not fail the parent workflow (e.g., report triggering should not fail post-processing).
+- **Never stack retry layers.** Retry belongs to exactly one layer per call. Do not combine an HTTP client's built-in retry with `withRetry`/`@Retry` around the same call — attempts compound to `maxRetries × client.limit`.
+
+## Layering with HTTP clients (`ky`)
+
+The `ky` clients used by the CLI (`apps/cli/src/utils/api-client.ts`) and Portal
+(`apps/portal/src/lib/api-client.ts`) deliberately set `retry: 0`, so today there is no
+overlap with the server-side cockatiel retry. If the CLI or Portal ever needs to retry
+transient `429`/`503`s, pick **one** layer:
+
+- enable `ky`'s `retry` (with its own backoff), **or**
+- wrap the call in `withRetry` / `@Retry`.
+
+Do not enable both, or attempts multiply to `maxRetries × ky.limit`.
 
 ## Usage in the codebase
 

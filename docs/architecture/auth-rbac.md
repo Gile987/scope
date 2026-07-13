@@ -661,24 +661,48 @@ downstream service applies the same ownership scoping). When that's required:
 > per-service credential (§6), not via the human CLI.
 
 > [!IMPORTANT]
-> **Large cross-cutting refactor — centralized `apiFetch()`.** The CLI today calls
-> `fetch` directly in ~every command ([apps/cli/src/commands/run.ts](../../apps/cli/src/commands/run.ts)
-> alone has a dozen call sites, plus `run-get-action.ts`, `hooks/useRequestSubmit.ts`,
-> and every other command module). Auth makes a **single shared `apiFetch()` wrapper**
+> **Large cross-cutting refactor — centralized `apiFetch()` on top of [`ky`](https://github.com/sindresorhus/ky).**
+> The CLI today calls `fetch` directly in ~every command
+> ([apps/cli/src/commands/run.ts](../../apps/cli/src/commands/run.ts)
+> alone has a dozen call sites, plus `run-get-action.ts`, and every other command
+> module), and the **Portal** has its own ad-hoc `fetch` paths in
+> [apps/portal/src/lib/api.ts](../../apps/portal/src/lib/api.ts) and
+> `hooks/useHarExtraction.ts`. Auth makes a **single shared `apiFetch()` wrapper**
 > mandatory — it must own bearer/service header injection, `401`→re-auth handling,
 > base-URL normalization, and error shaping. **Migrating all existing call sites to it
 > is a large, repo-wide change** and should be treated as its own tracked workstream
-> (it touches every CLI command and their tests), not a side effect of one subtask.
+> (it touches every CLI command, the Portal API layer, and their tests), not a side
+> effect of one subtask.
+>
+> **Use `ky` as the internal HTTP engine — keep an API-client facade in front of it.**
+> Do **not** hand-roll a `fetch` wrapper. The facade (`apiFetch()` in the CLI, the
+> `api`/`request()` layer in the Portal) is the only surface call sites see; **`ky`**
+> lives *behind* it as the transport. This buys us `ky`'s hook pipeline
+> (`beforeRequest` for auth-header injection, `afterResponse`/`beforeError` for
+> response handling), first-class `Request`/`Response` semantics, and a single place to
+> later enable retry/backoff. The facade configures one `ky` instance with
+> `throwHttpErrors: false` (call sites keep their existing `response.ok` / `response.json()`
+> handling and **must not** start catching thrown `HTTPError`s), `timeout: false`, and
+> `retry: 0` for now (transient-retry is a later, opt-in tightening). Auth is injected
+> in a `beforeRequest` hook from a **pluggable token provider** (CLI: `SCOPE_TOKEN` today,
+> `SecretStore` later; Portal: MSAL token later) and must never clobber a caller-supplied
+> `Authorization`. **Note:** `ky` invokes the global `fetch` with a `Request` object
+> (`fetch(request, options)`), so tests that asserted `fetch(urlString, init)` must be
+> updated to inspect the `Request` instead — this is expected and the assertions stay
+> semantically equivalent (same URL, method, body, headers).
 >
 > **Design `apiFetch()` for debuggability from day one.** Route every request/response
 > through a pluggable logging sink that can capture: method, URL, redacted headers
 > (tokens/keys **always** scrubbed), request/response bodies (size-capped, secrets
-> redacted), status, timing, and a correlation id. This unlocks a
-> **`scope --debug-zip <file>`** global flag: run any command with full request/response
-> + client log capture, then bundle a redacted, shareable **support package** (a `.zip`
-> containing the request log, CLI version/`about` info, OS info, and sanitized config)
-> that users can send to the developers. Redaction is mandatory and tested — the zip
-> must never contain a live token, refresh token, or any service key
+> redacted), status, timing, and a correlation id. Because `ky`'s `afterResponse` hook
+> clones the response on every call, the sink is wired in the **facade** (guarded so it
+> only clones when a sink is actually registered) rather than as an always-on `ky` hook —
+> this keeps the zero-overhead default path and avoids breaking thin mock responses in
+> tests. This unlocks a **`scope --debug-zip <file>`** global flag: run any command with
+> full request/response + client log capture, then bundle a redacted, shareable **support
+> package** (a `.zip` containing the request log, CLI version/`about` info, OS info, and
+> sanitized config) that users can send to the developers. Redaction is mandatory and
+> tested — the zip must never contain a live token, refresh token, or any service key
 > (`INTERNAL_API_KEY_<NAME>`).
 
 ### 8. Portal authentication
@@ -801,16 +825,37 @@ local dev exercises the same verification path as production. New env vars are d
    client config is hardcoded (§7/§8). **Done when** endpoints return correct data and
    role/permission changes take effect on next request. Depends on 3, 4.
 
-7. ⬜ **Centralized `apiFetch()` refactor** *(large, cross-cutting)* — Introduce a single
-   `apiFetch()` wrapper in the CLI that owns base-URL normalization, **`Authorization:
-   Bearer` injection** (from `SecretStore`/`SCOPE_TOKEN`), `401`→re-auth handling, error
-   shaping, and a **pluggable logging sink** with mandatory secret redaction (no
-   `X-Dev-User` path — dev mode is gone). **Migrate every existing `fetch` call site**
-   ([apps/cli/src/commands/run.ts](../../apps/cli/src/commands/run.ts),
-   `run-get-action.ts`, `hooks/useRequestSubmit.ts`, and all other command modules) plus
-   their tests. **Done when** no CLI module calls `fetch` directly and the existing CLI
-   test suite passes against the wrapper. Depends on 6 (independent of 8 for the
-   refactor itself, but auth header injection lands here).
+7. ✅ **Centralized `apiFetch()` refactor on `ky`** *(large, cross-cutting)* — Introduce a single
+   `apiFetch()` wrapper in the CLI — **built on [`ky`](https://github.com/sindresorhus/ky)** as the
+   internal transport behind the facade — that owns base-URL normalization, **`Authorization:
+   Bearer` injection** (from `SecretStore`/`SCOPE_TOKEN`) via a `ky` `beforeRequest` hook, `401`→re-auth
+   handling, error shaping, and a **pluggable logging sink** with mandatory secret redaction (no
+   `X-Dev-User` path — dev mode is gone). **Migrate every existing `fetch` call site** — the CLI
+   ([apps/cli/src/commands/run.ts](../../apps/cli/src/commands/run.ts), `run-get-action.ts`, and all
+   other command modules) **and the Portal** ([apps/portal/src/lib/api.ts](../../apps/portal/src/lib/api.ts)
+   `request()` + raw `fetch` sites, `hooks/useHarExtraction.ts`) — plus their tests. **Done when** no
+   CLI/Portal module calls `fetch` directly (bar the documented health/external exceptions) and the
+   existing CLI **and** Portal test suites pass against the wrapper. Depends on 6 (independent of 8 for
+   the refactor itself, but auth header injection lands here).
+   > **Delivered.** **CLI** — [apps/cli/src/utils/api-client.ts](../../apps/cli/src/utils/api-client.ts)
+   > (tests in `api-client.test.ts`): `apiFetch(baseUrl, path, init?)` joins `normalizeUrl(baseUrl)` + path
+   > and calls a cached `ky` instance (`throwHttpErrors: false`, `timeout: false`, `retry: 0`). A `ky`
+   > `beforeRequest` hook injects `Authorization: Bearer` from the pluggable token provider
+   > (default `process.env.SCOPE_TOKEN`) without clobbering caller headers and honouring a per-call
+   > `skipAuth`. `401`→re-auth retry-once and the redacting logging sink live in the facade (the sink
+   > clones the response only when registered, so the default path stays zero-overhead and thin test
+   > mocks don't need `clone()`). Seams for subtasks 8/9: `setTokenProvider`, `setReauthHandler`,
+   > `setApiLogSink`, `resetApiClient`; error shaping via `ApiError` + `readApiError(response)`. **Portal** —
+   > [apps/portal/src/lib/api-client.ts](../../apps/portal/src/lib/api-client.ts) exports a shared `ky`
+   > instance (`apiClient`) with the same config + a `setApiTokenProvider` auth seam; `lib/api.ts`
+   > `request()`/`batchArchive` and `hooks/useHarExtraction.ts` now route through it (`recordServerDate`
+   > stays in the facade). The **only** remaining direct `fetch` calls are: the wrappers themselves, the
+   > CLI's external GitHub Releases poll in `utils/update-check.ts` (its own `token` auth — must never
+   > receive `SCOPE_TOKEN`), and the Portal's root-level `/ready` health probe in `getReadiness` (no auth,
+   > bespoke `503` handling). Because `ky` calls `fetch` with a `Request`, the few tests that asserted
+   > `fetch(urlString, init)` were updated to inspect the `Request`. SecretStore/MSAL tokens (subtask 8)
+   > and `--debug-zip` (subtask 9) plug into these seams without touching call sites. EventSource/SSE log
+   > streams are left on direct `EventSource` pending subtask 13.
 
 8. ⬜ **CLI auth** — `@azure/msal-node`; `scope auth login/logout/status/whoami`;
    **secure token storage via the Scope `SecretStore` abstraction** (default backend

@@ -8,7 +8,7 @@ import {
   DetailedEvaluationResult,
   DependencyGraph,
   GateId,
-  ToolCall,
+  IterationToolCalls,
 } from "shared";
 import { getCriteriaProvider } from "shared/criteria-provider-factory";
 import { createJudgeStrategy } from "./judge-strategies.js";
@@ -23,8 +23,12 @@ export interface EvaluationInput {
   onProgress?: (result: CriterionResult) => void;
   /** Which gate is being evaluated. Defaults to select. */
   gate?: GateId;
-  /** This iteration's captured tool calls/outputs, exposed to the judge via read_tool_outputs. */
-  toolCalls?: ToolCall[];
+  /** The coding agent's captured tool calls/outputs grouped per iteration across
+   *  the whole run (1..N), exposed to the judge via list_tool_calls /
+   *  search_tool_outputs / get_tool_output. */
+  iterationToolCalls?: IterationToolCalls[];
+  /** The coding agent's response (prose) for the iteration being judged, exposed to the judge via read_agent_response. */
+  currentAgentResponse?: string;
 }
 
 export interface EvaluationResult {
@@ -102,7 +106,8 @@ export async function evaluateWorkspace(
       personaInstructions: input.personaInstructions,
       onProgress: input.onProgress,
       gate: input.gate,
-      toolCalls: input.toolCalls,
+      iterationToolCalls: input.iterationToolCalls,
+      currentAgentResponse: input.currentAgentResponse,
     });
 
     console.log(

@@ -6,7 +6,8 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { apiFetch } from "../utils/api-client.js";
 
 export function registerInsightCommands(program: Command): void {
 // ─── Insight management ──────────────────────────────────────────────────────
@@ -35,7 +36,7 @@ insight
       if (options.query) params.set("q", options.query);
       if (options.blocked) params.set("blocked", "true");
       const qs = params.toString();
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights${qs ? `?${qs}` : ""}`);
+      const response = await apiFetch(options.url, `/insights${qs ? `?${qs}` : ""}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -72,7 +73,7 @@ insight
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}`);
+      const response = await apiFetch(options.url, `/insights/${encodeURIComponent(options.id)}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -139,7 +140,7 @@ insight
       if (options.category) body.category = options.category;
       if (options.tags) body.tags = options.tags.split(",").map((t: string) => t.trim()).filter(Boolean);
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights`, {
+      const response = await apiFetch(options.url, `/insights`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -177,7 +178,7 @@ insight
         console.error(errorText("Error: provide at least one field to update"));
         process.exit(1);
       }
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}`, {
+      const response = await apiFetch(options.url, `/insights/${encodeURIComponent(options.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -201,7 +202,7 @@ insight
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}`, {
+      const response = await apiFetch(options.url, `/insights/${encodeURIComponent(options.id)}`, {
         method: "DELETE",
       });
       if (!response.ok) {
@@ -223,7 +224,7 @@ insight
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/upvote`, {
+      const response = await apiFetch(options.url, `/insights/${encodeURIComponent(options.id)}/upvote`, {
         method: "POST",
       });
       if (!response.ok) {
@@ -246,7 +247,7 @@ insight
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/downvote`, {
+      const response = await apiFetch(options.url, `/insights/${encodeURIComponent(options.id)}/downvote`, {
         method: "POST",
       });
       if (!response.ok) {
@@ -269,7 +270,7 @@ insight
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/block`, {
+      const response = await apiFetch(options.url, `/insights/${encodeURIComponent(options.id)}/block`, {
         method: "POST",
       });
       if (!response.ok) {
@@ -291,7 +292,7 @@ insight
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/unblock`, {
+      const response = await apiFetch(options.url, `/insights/${encodeURIComponent(options.id)}/unblock`, {
         method: "POST",
       });
       if (!response.ok) {

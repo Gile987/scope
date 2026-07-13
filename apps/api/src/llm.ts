@@ -18,8 +18,8 @@ Given a natural-language description of a behavior or pattern to detect, you mus
 
 1. Write a concise evaluation prompt (1-3 sentences) that a judge LLM will use to decide whether the behavior is present. The judge weighs TWO complementary, equally authoritative sources of evidence:
    - The codebase — the resulting files, patterns, and configuration the agent produced.
-   - The agent's captured tool outputs — the logs, results, and exit status of the build, test, run, and deploy commands the agent actually executed.
-   Pick whichever source best fits the behavior and phrase the prompt around it. Behaviors about whether something builds, compiles, tests, runs, serves, or deploys are best judged from the captured command output and exit status, NOT from inspecting files. Behaviors about how the code is written or structured are best judged from the codebase. The judge cannot run any commands itself, so never instruct it to run, execute, or re-run anything — judge from evidence that already exists. Keep it factual and objective.
+   - The agent's captured tool-call history — the logs, results, and exit status of every command or tool the agent actually ran while doing the task. This history is CUMULATIVE across the whole run: it spans every iteration so far, not just the last one, so a one-time action the agent performed once in an earlier iteration (a bootstrap, scaffold, install, or other one-off command) is still recorded and still counts as done. This covers the build, test, run, and deploy commands, but also any other command or tool it invoked (e.g. starting or curling a server, running a script, searching or inspecting the workspace).
+   Pick whichever source best fits the behavior and phrase the prompt around it. Behaviors about whether something builds, compiles, tests, runs, serves, or deploys are best judged from the captured command output and exit status, NOT from inspecting files. More generally, any behavior about what the agent actually did or ran — a command it executed, a check it performed, output it observed — is best judged from the captured tool-call history, which may reveal what the resulting files alone do not. Behaviors about how the code is written or structured are best judged from the codebase. The judge cannot run any commands itself, so never instruct it to run, execute, or re-run anything — judge from evidence that already exists. Keep it factual and objective.
 
 2. Suggest a short, descriptive snake_case identifier for this criterion. The ID must:
    - Start with a lowercase letter
@@ -31,6 +31,7 @@ Here are examples of good criteria prompts:
 - Codebase evidence: "The project uses Azure Bicep for infrastructure as code. Look for *.bicep files, bicepconfig.json, or a main.bicep entry point."
 - Tool-output evidence: "The project builds successfully. The captured output of the build command (e.g. npm run build) finishes with a zero exit status and no compilation errors."
 - Tool-output evidence: "The unit tests pass. The captured output of the test command shows the suite running with no failing tests and a successful exit status."
+- Tool-output evidence (non-gate command): "The agent verified the running server responds. The captured tool-call history contains a request to the local endpoint (e.g. a curl to http://localhost) that returned a 2xx status."
 
 Respond with ONLY a JSON object in this exact format (no markdown, no code fences):
 {"prompt": "your evaluation prompt here", "suggestedId": "your_suggested_id"}`;
@@ -50,10 +51,20 @@ const GATE_EVIDENCE: Partial<Record<GateId, string>> = {
 
 /**
  * Builds a short, gate-aware steering note appended to the author user message.
- * When the criterion targets any tool-output gate (build/test/run/deploy) it
- * directs the prompt toward captured command output; when it only targets
- * `select` it directs the prompt toward the codebase. Omitted/empty gates add no
- * note so generic authoring (and backward-compatible callers) is unaffected.
+ * It never restricts availability, because the judge can read the agent's full
+ * captured tool-call history whenever tool calls exist, regardless of gate (that
+ * availability lives, unconditionally, in SYSTEM_PROMPT_AUTHOR). When the
+ * criterion targets any tool-output gate (build/test/run/deploy) it centers the
+ * prompt on captured command output. When it only targets `select` it presents
+ * BOTH sources and gives a per-behavior decision rule: structural / how-the-code-
+ * is-written behaviors are judged from the codebase, but behaviors about something
+ * the agent DID or RAN (a command it executed, a bootstrap/scaffold step, a
+ * tool/skill/MCP invocation) make the captured tool-call history the PRIMARY
+ * evidence even under the select gate. An earlier version led with "judge it
+ * primarily from the codebase", which the model obeyed and dropped tool-history
+ * mentions for exactly the select-gated action criteria #1225 targets. Omitted/
+ * empty gates add no note so generic authoring (and backward-compatible callers)
+ * is unaffected.
  */
 function authorGateHint(gates?: GateId[]): string {
   if (!gates || gates.length === 0) return "";
@@ -62,9 +73,9 @@ function authorGateHint(gates?: GateId[]): string {
     .map((g) => (GATE_EVIDENCE[g] ? `the ${g} gate (evidence: ${GATE_EVIDENCE[g]})` : null))
     .filter((x): x is string => x !== null);
   if (toolEvidence.length === 0) {
-    return `\n\nThis criterion targets the select gate (evidence: ${GATE_EVIDENCE.select}); judge it from the codebase files the agent produced.`;
+    return `\n\nThis criterion targets the select gate (evidence: ${GATE_EVIDENCE.select}). Two equally authoritative sources of evidence are available; choose whichever fits the behavior. If the behavior is about how the resulting code is written, structured, or configured — files that exist, dependencies, patterns — judge it from the codebase. If the behavior is about something the agent DID or RAN — a command it executed, a bootstrap or scaffold step, or a tool, skill, or MCP server it invoked — then the agent's captured tool-call history is the PRIMARY evidence, even though this criterion is select-gated, because that action may not be visible in the resulting files alone; phrase the prompt around that captured tool-call history. That history is cumulative across the whole run (all iterations), so a one-time action performed once in an earlier iteration is still recorded — never require the action to have run in the latest iteration.`;
   }
-  return `\n\nThis criterion targets ${toolEvidence.join(" and ")}. Phrase the evaluation prompt around that captured tool output and exit status rather than file inspection.`;
+  return `\n\nThis criterion targets ${toolEvidence.join(" and ")}. Center the evaluation prompt on that captured tool output and exit status rather than file inspection.`;
 }
 
 interface SuggestDirectionCopy {
@@ -74,6 +85,9 @@ interface SuggestDirectionCopy {
   test: string;
   /** A positive example (a candidate that SHOULD be suggested) for this direction. */
   positiveExample: string;
+  /** A negative example (a candidate that must NOT be suggested) that guards the
+   *  one-directional specialization edge against being fired in reverse. */
+  negativeExample: string;
   /** Heading used to label the candidate list in the user message. */
   candidatesHeading: string;
 }
@@ -84,7 +98,9 @@ const DIRECTION_COPY: Record<SuggestDirection, SuggestDirectionCopy> = {
       "existing criteria that are genuine PREREQUISITES of the new criterion — i.e. the new criterion cannot be meaningfully evaluated unless that criterion already passes.",
     test: "Include a candidate ONLY if the new criterion is impossible or meaningless when that candidate fails.",
     positiveExample:
-      'A new criterion "uses_express" (the Express web framework) genuinely depends on "has_node": Express is a Node.js library and cannot exist without Node, so has_node is a true prerequisite.',
+      'Specialization: a narrower new criterion depends on a broader candidate — e.g. new "has_unit_tests" depends on "has_tests" because unit tests are a kind of test (no tests ⇒ no unit tests). Functional: new "uses_express" depends on "has_node" because Express is a Node.js library and cannot exist without Node.',
+    negativeExample:
+      'Do NOT suggest a candidate that is NARROWER than the new criterion as a parent. E.g. for a new "has_tests", "has_unit_tests" is NOT a parent — has_unit_tests is the narrower one (a child of has_tests), so it must never be returned here.',
     candidatesHeading: "CANDIDATE CRITERIA (use only these IDs):",
   },
   children: {
@@ -92,7 +108,9 @@ const DIRECTION_COPY: Record<SuggestDirection, SuggestDirectionCopy> = {
       "existing criteria for which the new criterion is a genuine PREREQUISITE — i.e. that criterion cannot be meaningfully evaluated unless the new criterion already passes.",
     test: "Include a candidate ONLY if that candidate is impossible or meaningless when the new criterion fails.",
     positiveExample:
-      'A new criterion "has_node" is a genuine prerequisite of "uses_express": Express is a Node.js library and cannot exist without Node, so uses_express should depend on it.',
+      'Specialization: a broader new criterion has narrower candidates as children — e.g. new "has_tests" has "has_unit_tests" as a child because unit tests are a kind of test (no tests ⇒ no unit tests). Functional: new "has_node" is a prerequisite of "uses_express", so "uses_express" is a child because Express cannot exist without Node.',
+    negativeExample:
+      'Do NOT suggest a candidate that is BROADER than the new criterion as a child. E.g. for a new "has_unit_tests", "has_tests" is NOT a child — has_tests is the broader one (the parent of has_unit_tests), so it must never be returned here.',
     candidatesHeading: "CANDIDATE CRITERIA (use only these IDs):",
   },
 };
@@ -103,7 +121,7 @@ const DIRECTION_COPY: Record<SuggestDirection, SuggestDirectionCopy> = {
  * that should be related to the new criterion in the given direction.
  */
 function suggestSystemPrompt(direction: SuggestDirection): string {
-  const { relationship, test, positiveExample } = DIRECTION_COPY[direction];
+  const { relationship, test, positiveExample, negativeExample } = DIRECTION_COPY[direction];
   return `You are an expert at organising evaluation criteria for AI coding agent benchmarks into a dependency graph.
 
 A dependency edge A → B means "B cannot be meaningfully evaluated unless A passes first". Equivalently, B can never be true while A is false — B's truth REQUIRES A's truth. Only TRUE prerequisite relationships are edges. Two criteria that merely belong to the same topic or family are SIBLINGS, not a parent/child pair.
@@ -114,11 +132,14 @@ ${test}
 
 INDEPENDENCE TEST (apply to every candidate): ask whether each criterion can be true or false irrespective of the other's outcome. If both can independently be true or false, they are INDEPENDENT — there is no dependency in either direction, so do not suggest the candidate. A dependency exists only when one criterion's truth would be impossible without the other's.
 
+SPECIALIZATION IS A REAL DEPENDENCY (do not misclassify it as a sibling): when one criterion is a narrower, more specific form of another — such that the specific one being true logically guarantees the broader one is also true — that is a genuine dependency edge. The broader criterion is the prerequisite (the PARENT); the narrower criterion is the dependent (the CHILD). The edge is one-directional: the narrower one depends on the broader one, never the reverse. For example "has_unit_tests" is a specialization of "has_tests" (unit tests are a kind of test): if there are no tests at all there can be no unit tests, so has_tests is the parent of has_unit_tests (and has_unit_tests is NOT a parent of has_tests). This differs from two co-equal specializations of the same broader concept — e.g. "has_unit_tests" and "has_integration_tests" are both kinds of test but neither implies the other, so they are independent siblings.
+
 STRICT RULES:
 - Do NOT suggest a candidate just because it is topically related, in the same family, or commonly seen together. Relatedness is not a dependency.
 - Reject siblings and independent criteria. Example: "has_unit_tests" and "has_integration_tests" are both about testing, but each can be true or false regardless of the other — they are independent, so NEITHER should ever be suggested as a parent or child of the other.
 - A real prerequisite is a hard requirement: if it fails, the dependent criterion is impossible or meaningless to assess.
 - ${positiveExample}
+- ${negativeExample}
 - When in doubt, leave it out: prefer an empty array over a weak or speculative edge.
 
 Only suggest IDs from the provided candidate list. If none are appropriate, return an empty array.
@@ -305,11 +326,22 @@ export async function generateCriteriaPrompt(
     ? existingCriteria.filter((c) => gatesSatisfyInvariant(newGates, c.gates))
     : existingCriteria;
 
-  const [authored, suggestedParents, suggestedChildren] = await Promise.all([
+  const [authored, suggestedParents, suggestedChildrenRaw] = await Promise.all([
     author(llm, modelName, behavior, newGates),
     suggestDeps("parents", llm, modelName, behavior, parentPool),
     suggestDeps("children", llm, modelName, behavior, childPool),
   ]);
+
+  // The parent and child suggestion calls are independent, so the model can return
+  // the same id in both directions for a tightly-coupled pair (e.g. it flags
+  // "has_tests" as both a parent and a child of "has_unit_tests"). That is a
+  // logical contradiction — a 2-cycle — and the create/update layer would reject the
+  // child link anyway. Reconcile deterministically by preferring the parent edge:
+  // declaring a parent only affects the new criterion, whereas a child edge mutates
+  // an existing criterion, so on directional ambiguity keep the safer parent edge and
+  // drop the id from the child set.
+  const parentSet = new Set(suggestedParents);
+  const suggestedChildren = suggestedChildrenRaw.filter((id) => !parentSet.has(id));
 
   return {
     prompt: authored.prompt,

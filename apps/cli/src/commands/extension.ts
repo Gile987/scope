@@ -6,7 +6,8 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { apiFetch } from "../utils/api-client.js";
 
 export function registerExtensionCommands(program: Command): void {
 // ─── Extension management ────────────────────────────────────────────────────
@@ -29,7 +30,7 @@ extension
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/extensions`);
+      const response = await apiFetch(options.url, `/extensions`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -70,7 +71,7 @@ extension
     try {
       const params = new URLSearchParams({ q: options.query });
       if (options.limit) params.set('limit', String(options.limit));
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/extensions/search?${params}`);
+      const response = await apiFetch(options.url, `/extensions/search?${params}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -108,7 +109,7 @@ extension
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/extensions/${options.id}`);
+      const response = await apiFetch(options.url, `/extensions/${options.id}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -163,7 +164,7 @@ extension
       };
       if (options.description) body.description = options.description;
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/extensions`, {
+      const response = await apiFetch(options.url, `/extensions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -188,7 +189,7 @@ extension
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/extensions/${options.id}`, {
+      const response = await apiFetch(options.url, `/extensions/${options.id}`, {
         method: "DELETE",
       });
       if (!response.ok) {
