@@ -28,6 +28,7 @@ packages/
   github-auth/                  # GitHub OAuth/device-code auth utilities
   model-scanning/               # Shared model scanning logic
   version-checking/             # Version comparison utilities
+  llm-eval/                     # LLM-graded eval harness (grader, sampling, rate-limit retry)
 config/                         # Benchmark definitions (YAML)
 deploy/                         # Kubernetes manifests (Kustomize + FluxCD)
 ```
@@ -212,6 +213,7 @@ pnpm test:integration             # Integration tests (requires .env + Docker)
 | [docs/architecture/cli-distribution.md](docs/architecture/cli-distribution.md) | CLI bundling, publishing, installation, update check |
 | [docs/architecture/retry.md](docs/architecture/retry.md) | Retry utilities: `withRetry` function and `@Retry` decorator |
 | [docs/architecture/post-processing.md](docs/architecture/post-processing.md) | Post-processing pipeline, ATIF generation, handler extensibility |
+| [docs/architecture/kubedock.md](docs/architecture/kubedock.md) | Kubedock sidecar, container access for agents, Kustomize Component toggle |
 | [docs/research/realtime-data-flow.md](docs/research/realtime-data-flow.md) | SSE + Change Streams, Redis pub/sub, polling patterns |
 | [docs/research/delta-storage.md](docs/research/delta-storage.md) | Space-efficient storage of iteration snapshots |
 | [docs/shared-dev-infra.md](docs/shared-dev-infra.md) | Shared dev infrastructure (CosmosDB) setup and worktree isolation |

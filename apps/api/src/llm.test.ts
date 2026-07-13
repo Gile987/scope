@@ -82,6 +82,26 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
     expect(res.suggestedChildren).toEqual(["select_b"]);
   });
 
+  it("reconciles a contradictory id by keeping the parent edge and dropping it from children", async () => {
+    // The independent parent/child calls can both return the same id for a
+    // tightly-coupled pair (a logical 2-cycle). Reconciliation must prefer the
+    // parent edge and remove the id from the child set, while keeping any other
+    // legitimate child.
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") return reply({ prompt: "p", suggestedId: "x" });
+      if (kind === "parents") return reply({ suggestions: ["build_a"] });
+      // build_a is contradictory (also a parent); select_b is a genuine child.
+      return reply({ suggestions: ["build_a", "select_b"] });
+    });
+
+    const res = await generateCriteriaPrompt("behave", existing, ["select", "build"]);
+
+    expect(res.suggestedParents).toEqual(["build_a"]);
+    // build_a removed (kept as parent), the legitimate child retained.
+    expect(res.suggestedChildren).toEqual(["select_b"]);
+  });
+
   it("issues all three calls in parallel", async () => {
     postSpy.mockImplementation(async ({ body }: any) => {
       const kind = kindOf(body);
@@ -150,7 +170,7 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
     expect(authorUserMsg).toMatch(/tool output/i);
   });
 
-  it("steers the author prompt toward the codebase for the select gate", async () => {
+  it("presents both sources for a select-gated criterion and elevates the captured tool-call history for agent-action behaviors", async () => {
     let authorUserMsg = "";
     postSpy.mockImplementation(async ({ body }: any) => {
       const kind = kindOf(body);
@@ -164,6 +184,34 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
     await generateCriteriaPrompt("uses typescript", existing, ["select"]);
 
     expect(authorUserMsg).toContain("select gate");
-    expect(authorUserMsg).not.toMatch(/captured tool output/i);
+    // The codebase stays an option for structural / how-the-code-is-written behaviors...
+    expect(authorUserMsg).toMatch(/codebase/i);
+    // ...but the select hint must NOT force "primarily from the codebase": that lead
+    // made the model drop tool-history mentions for select-gated agent-action
+    // criteria (e.g. "ran npx bootstrap", "used a skill + MCP"). See #1225.
+    expect(authorUserMsg).not.toMatch(/primarily from the codebase/i);
+    // For behaviors about what the agent actually did or ran, the captured tool-call
+    // history is the PRIMARY evidence even under the select gate.
+    expect(authorUserMsg).toMatch(/tool-call history/i);
+    expect(authorUserMsg).toMatch(/primary evidence/i);
+  });
+
+  it("advertises the full captured tool-call history in the author system prompt, not just gate commands", async () => {
+    let authorSystemMsg = "";
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") {
+        authorSystemMsg = body.messages[0].content;
+        return reply({ prompt: "p", suggestedId: "x" });
+      }
+      return reply({ suggestions: [] });
+    });
+
+    await generateCriteriaPrompt("agent curled the running server", existing, ["select"]);
+
+    // The generator must convey that the judge sees the agent's ENTIRE captured
+    // tool-call history — not only build/test/run/deploy gate commands. See #1225.
+    expect(authorSystemMsg).toMatch(/tool-call history/i);
+    expect(authorSystemMsg).toMatch(/any other command or tool/i);
   });
 });

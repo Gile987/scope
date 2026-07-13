@@ -50,6 +50,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
+import { TaskPromptBadge } from "@/components/TaskPromptBadge";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { formatDuration, cn } from "@/lib/utils";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
@@ -346,9 +347,11 @@ function InsightsRow({ insights }: { insights: DerivedInsights }) {
             </Badge>
           </CardHeader>
           <CardContent className="space-y-2">
-            <p className="font-medium leading-tight" title={topPerformer.task}>
-              {truncateTask(topPerformer.task, 48)}
-            </p>
+            <TaskPromptBadge taskPromptId={topPerformer.taskPromptId} className="block">
+              <p className="font-medium leading-tight cursor-pointer hover:underline">
+                {truncateTask(topPerformer.task, 48)}
+              </p>
+            </TaskPromptBadge>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Badge variant="outline" className="font-mono text-[10px]">
                 {topPerformer.workerType}
@@ -391,12 +394,11 @@ function InsightsRow({ insights }: { insights: DerivedInsights }) {
             </Badge>
           </CardHeader>
           <CardContent className="space-y-2">
-            <p
-              className="font-medium leading-tight"
-              title={needsAttention.task}
-            >
-              {truncateTask(needsAttention.task, 48)}
-            </p>
+            <TaskPromptBadge taskPromptId={needsAttention.taskPromptId} className="block">
+              <p className="font-medium leading-tight cursor-pointer hover:underline">
+                {truncateTask(needsAttention.task, 48)}
+              </p>
+            </TaskPromptBadge>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Badge variant="outline" className="font-mono text-[10px]">
                 {needsAttention.workerType}
@@ -489,11 +491,13 @@ function PerformanceTable({ data }: { data: AnalysisResponse }) {
               const failed = group.completed - group.passed;
               return (
                 <TableRow key={getGroupKey(group)}>
-                  <TableCell
-                    className="font-medium max-w-[260px] truncate"
-                    title={group.task}
-                  >
-                    {truncateTask(group.task, 36)}
+                  <TableCell className="font-medium max-w-[260px] truncate">
+                    <TaskPromptBadge
+                      taskPromptId={group.taskPromptId}
+                      className="block max-w-full truncate hover:underline"
+                    >
+                      <span className="cursor-pointer">{truncateTask(group.task, 36)}</span>
+                    </TaskPromptBadge>
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className="font-mono text-xs">
@@ -617,11 +621,13 @@ function PassAtKTable({ data }: { data: AnalysisResponse }) {
           <TableBody>
             {groups.map((group) => (
               <TableRow key={getGroupKey(group)}>
-                <TableCell
-                  className="font-medium max-w-[200px] truncate"
-                  title={group.task}
-                >
-                  {truncateTask(group.task)}
+                <TableCell className="font-medium max-w-[200px] truncate">
+                  <TaskPromptBadge
+                    taskPromptId={group.taskPromptId}
+                    className="block max-w-full truncate hover:underline"
+                  >
+                    <span className="cursor-pointer">{truncateTask(group.task)}</span>
+                  </TaskPromptBadge>
                 </TableCell>
                 <TableCell>
                   <Badge variant="outline" className="font-mono text-xs">

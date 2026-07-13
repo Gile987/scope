@@ -1714,6 +1714,110 @@ describe("API Endpoints", () => {
   });
 
   // ===================================================================
+  // Submit with profile variations AND gates (regression: #1214)
+  // Gates are the shared evaluation harness applied to every variation
+  // (including the base), not a per-variation controlled field.
+  // ===================================================================
+
+  describe("POST /api/v1/requests (profile variations + gates)", () => {
+    beforeEach(() => {
+      // Base + variation profiles resolved by _id.
+      (mocks.profileCollection.findOne as any).mockImplementation(
+        async (q: { _id: string }) => {
+          if (q._id === "base-profile") return { _id: "base-profile", name: "Base", latestVersion: 1 };
+          if (q._id === "var-profile") return { _id: "var-profile", name: "Var", latestVersion: 1 };
+          return null;
+        },
+      );
+      // Profile versions resolved by profileId — each variation supplies its own
+      // controlled config (worker/model) so no top-level fields are needed.
+      (mocks.profileVersionCollection.findOne as any).mockImplementation(
+        async (q: { profileId: string }) => {
+          if (q.profileId === "base-profile")
+            return { _id: "pv-base", profileId: "base-profile", version: 1, workerType: "coder-acp-copilot", model: "m1", mcpServers: [], skillRevisions: [], extensions: [] };
+          if (q.profileId === "var-profile")
+            return { _id: "pv-var", profileId: "var-profile", version: 1, workerType: "coder-acp-copilot", model: "m2", mcpServers: [], skillRevisions: [], extensions: [] };
+          return null;
+        },
+      );
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
+        supportedModels: [],
+      });
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([
+          { id: "builds_clean", gates: ["build"] },
+          { id: "works", gates: [] },
+        ]),
+      });
+      (mocks.taskPromptStore.findOrCreate as any).mockImplementation(
+        async (text: string, type?: string) => ({ _id: type ? `tp-${type}` : "tp-select", text, type }),
+      );
+      (mocks.taskPromptCollection.findOne as any).mockImplementation(
+        async (q: { _id: string }) => ({ _id: q._id, type: q._id.replace("tp-", "") }),
+      );
+    });
+
+    it("persists the same resolved gates on every variation request doc", async () => {
+      const res = await request(app)
+        .post("/api/v1/requests")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          profileId: "base-profile",
+          profileVariations: ["var-profile"],
+          gates: [
+            { gate: "select", criteria: ["works"] },
+            { gate: "build", promptText: "  Build the project and fix errors.  ", criteria: ["builds_clean"] },
+          ],
+        });
+
+      expect(res.status).toBe(201);
+      // Free-text gate prompt is materialized into a typed prompt.
+      expect(mocks.taskPromptStore.findOrCreate).toHaveBeenCalledWith("Build the project and fix errors.", "build");
+
+      const docs = (mocks.collection.insertMany as any).mock.calls[0][0];
+      // base + 1 variation = 2 request docs, each carrying the gates.
+      expect(docs).toHaveLength(2);
+      expect(new Set(docs.map((d: { profileId: string }) => d.profileId))).toEqual(
+        new Set(["base-profile", "var-profile"]),
+      );
+      for (const doc of docs) {
+        expect(Array.isArray(doc.gates)).toBe(true);
+        const selectGate = doc.gates.find((g: { gate: string }) => g.gate === "select");
+        const buildGate = doc.gates.find((g: { gate: string }) => g.gate === "build");
+        // Select gate's prompt is stamped with the resolved task prompt id.
+        expect(selectGate.promptId).toBe("tp-select");
+        // Non-select gate's free-text prompt is resolved to a typed prompt id
+        // and the transient promptText is stripped before persistence.
+        expect(buildGate.promptId).toBe("tp-build");
+        expect(buildGate.promptText).toBeUndefined();
+      }
+      // Response surfaces the configured gate count.
+      expect(res.body.gates).toBe(2);
+    });
+
+    it("fails the whole submit (400) without inserting when a gate is invalid", async () => {
+      const res = await request(app)
+        .post("/api/v1/requests")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          profileId: "base-profile",
+          profileVariations: ["var-profile"],
+          gates: [
+            { gate: "select", criteria: ["works"] },
+            // Build gate has neither promptId nor promptText → invalid.
+            { gate: "build", criteria: ["builds_clean"] },
+          ],
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("missing a prompt");
+      expect(mocks.collection.insertMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // ===================================================================
   // Bulk resubmit
   // ===================================================================
 
