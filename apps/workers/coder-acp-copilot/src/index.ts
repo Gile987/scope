@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, KubedockClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -10,14 +10,28 @@ dotenv.config();
 /**
  * Build the environment variables for the copilot subprocess.
  *
- * When DevProxy is active, configures proxy-related env vars so the subprocess
- * routes traffic through the DevProxy MITM proxy.
- * When DevProxy is disabled (or setup failed), strips proxy env vars and clears
+ * When the proxy is active, configures proxy-related env vars so the subprocess
+ * routes model traffic through the MITM proxy (DevProxy or gateway) for HAR
+ * capture. The Copilot CLI is a Node.js app, so it trusts the proxy's MITM cert
+ * via NODE_EXTRA_CA_CERTS (set from `certPath`).
+ *
+ * The GitHub auth endpoints (github.com/api.github.com) are excluded from the
+ * proxy via NO_PROXY so the CLI's auth + Copilot-token-mint handshake goes
+ * direct. The gateway performs TLS interception, and the CLI rejects the
+ * gateway's CA on those endpoints with a `UnknownCA` fatal alert (surfacing as
+ * `-32000 Authentication required`); bypassing the proxy for auth avoids this
+ * while still recording the model endpoint's WebSocket traffic. Mirrors the
+ * Windows Copilot worker, which already runs on the gateway.
+ *
+ * When the proxy is disabled (or setup failed), strips proxy env vars and clears
  * NODE_EXTRA_CA_CERTS to prevent the subprocess from loading a non-existent cert.
  *
  * @param proxyUrl - Optional session-scoped proxy URL (e.g. http://sessionId@host:port).
  *   When provided, overrides the inherited HTTP_PROXY/HTTPS_PROXY so the subprocess
  *   routes through the correct session.
+ * @param certPath - Optional path to a CA bundle (system CAs + proxy CA). When
+ *   provided, set as NODE_EXTRA_CA_CERTS so the Node-based CLI trusts the proxy's
+ *   MITM cert for the intercepted model endpoint.
  */
 export function buildSubprocessEnv(
   githubToken: string,
@@ -25,18 +39,28 @@ export function buildSubprocessEnv(
   currentNodeOptions?: string,
   gatewayUrl?: string,
   proxyUrl?: string,
-  sslCertFile?: string,
+  certPath?: string,
 ): Record<string, string> {
   const gatewayHost = gatewayUrl ? new URL(gatewayUrl).hostname : null;
-  const noProxy = ["localhost", "127.0.0.1", ...(gatewayHost ? [gatewayHost] : [])].join(",");
+  const noProxy = [
+    "localhost",
+    "127.0.0.1",
+    // Exclude auth endpoints so the CLI's github.com/api.github.com auth +
+    // Copilot-token-mint handshake goes direct instead of through the gateway's
+    // TLS interception (which the CLI rejects with UnknownCA, breaking auth).
+    "github.com",
+    "api.github.com",
+    ...(gatewayHost ? [gatewayHost] : []),
+  ].join(",");
   return {
     GITHUB_TOKEN: githubToken,
+    ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}),
     ...(devProxyEnabled ? {
       NODE_OPTIONS: [currentNodeOptions, "--use-env-proxy"].filter(Boolean).join(" "),
       NODE_TLS_REJECT_UNAUTHORIZED: "0",
+      ...(certPath ? { NODE_EXTRA_CA_CERTS: certPath } : {}),
       NO_PROXY: noProxy,
       no_proxy: noProxy,
-      ...(sslCertFile ? { SSL_CERT_FILE: sslCertFile } : {}),
       ...(proxyUrl ? {
         HTTP_PROXY: proxyUrl,
         HTTPS_PROXY: proxyUrl,
@@ -62,6 +86,7 @@ class CopilotProcessor implements WorkerProcessor {
   workspacePath: string | undefined = undefined;
   private gateway: McpGatewayClient | null = null;
   private mcpConfigs: McpServerConfig[] = [];
+  private kubedock: KubedockClient | null = null;
 
   getAgentVersion(): string {
     return AGENT_VERSION;
@@ -77,6 +102,17 @@ class CopilotProcessor implements WorkerProcessor {
     this.workspacePath = createFreshWorkspace();
     await log("info", "Fresh workspace created", { workspacePath: this.workspacePath });
 
+    // Purge orphan containers from previous runs (crash recovery)
+    if (KubedockClient.isEnabled()) {
+      this.kubedock = new KubedockClient();
+      try {
+        const purged = await this.kubedock.purgeContainers();
+        if (purged > 0) await log("info", "Purged orphan containers from previous run", { count: purged });
+      } catch (err) {
+        await log("warn", `Failed to purge orphan containers — continuing anyway`, { error: String(err) });
+      }
+    }
+
     this.mcpConfigs = options?.mcpServerConfigs ?? [];
     if (this.mcpConfigs.length > 0) {
       if (!McpGatewayClient.isEnabled()) {
@@ -90,6 +126,17 @@ class CopilotProcessor implements WorkerProcessor {
   }
 
   async teardown(log: WorkerLogFn): Promise<void> {
+    // Clean up containers spawned during this run
+    if (this.kubedock) {
+      try {
+        const removed = await this.kubedock.purgeContainers();
+        if (removed > 0) await log("info", "Cleaned up containers from run", { count: removed });
+      } catch (err) {
+        await log("warn", `Failed to clean up containers — will be purged on next run`, { error: String(err) });
+      }
+      this.kubedock = null;
+    }
+
     if (this.gateway && this.mcpConfigs.length > 0) {
       await Promise.all(this.mcpConfigs.map((c) =>
         this.gateway!.deregisterServer(c.slug).catch((err) => {
@@ -126,20 +173,23 @@ class CopilotProcessor implements WorkerProcessor {
 
     // Proxy integration — start recording if enabled
     let devProxy: ProxyClient | null = null;
-    let sslCertFile: string | undefined;
+    let caCertBundlePath: string | undefined;
     if (isProxyEnabled()) {
       const proxy = createProxyClient();
       try {
         await log("info", `Proxy enabled [${proxy.backend}] — waiting for sidecar to be ready...`);
         await proxy.waitForReady();
-        // Download CA cert if needed (for NODE_EXTRA_CA_CERTS)
+        // Download the proxy CA cert and build a combined bundle (system CAs +
+        // proxy CA). The Copilot CLI is a Node.js app, so it trusts this bundle
+        // via NODE_EXTRA_CA_CERTS — required for the gateway's TLS interception
+        // of the model endpoint (githubcopilot.com) to succeed. Auth endpoints
+        // (github.com/api.github.com) bypass the proxy (see NO_PROXY in
+        // buildSubprocessEnv), so they are never intercepted.
         const certPath = process.env.NODE_EXTRA_CA_CERTS || "/tmp/dev-proxy-ca.crt";
         await proxy.downloadCertificate(certPath);
-        // Create combined CA bundle for native binaries (SSL_CERT_FILE)
-        // The copilot binary is a native executable that doesn't use NODE_EXTRA_CA_CERTS
         const bundlePath = "/tmp/ca-bundle-combined.crt";
-        sslCertFile = await proxy.createCombinedCaBundle(certPath, bundlePath);
-        await log("info", "Proxy CA cert installed for native binaries", { sslCertFile });
+        caCertBundlePath = await proxy.createCombinedCaBundle(certPath, bundlePath);
+        await log("info", "Proxy CA cert installed for the Copilot CLI", { caCertBundlePath });
         await proxy.startRecording();
         devProxy = proxy;
         await log("info", `Proxy recording started [${proxy.backend}]`, { proxyUrl: proxy.proxyUrl });
@@ -177,7 +227,7 @@ class CopilotProcessor implements WorkerProcessor {
       const result = await runACPSession(message, {
         command: "copilot",
         args,
-        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL, devProxy?.proxyUrl, sslCertFile),
+        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL, devProxy?.proxyUrl, caCertBundlePath),
         cwd: this.workspacePath!,
         onLog: async (msg) => {
           await log("debug", msg);

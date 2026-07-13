@@ -40,19 +40,22 @@ describe("buildSubprocessEnv", () => {
       expect(env.https_proxy).toBe(proxyUrl);
     });
 
-    it("does not set NODE_EXTRA_CA_CERTS (inherits from process.env)", () => {
+    it("does not set NODE_EXTRA_CA_CERTS when no cert path is provided", () => {
       const env = buildSubprocessEnv(token, true);
       expect(env).not.toHaveProperty("NODE_EXTRA_CA_CERTS");
     });
 
-    it("sets SSL_CERT_FILE when sslCertFile is provided", () => {
-      const env = buildSubprocessEnv(token, true, undefined, undefined, undefined, "/tmp/ca-bundle.crt");
-      expect(env.SSL_CERT_FILE).toBe("/tmp/ca-bundle.crt");
+    it("sets NODE_EXTRA_CA_CERTS when a CA bundle path is provided", () => {
+      const env = buildSubprocessEnv(token, true, undefined, undefined, undefined, "/tmp/ca-bundle-combined.crt");
+      expect(env.NODE_EXTRA_CA_CERTS).toBe("/tmp/ca-bundle-combined.crt");
     });
 
-    it("does not set SSL_CERT_FILE when sslCertFile is omitted", () => {
-      const env = buildSubprocessEnv(token, true);
-      expect(env).not.toHaveProperty("SSL_CERT_FILE");
+    it("excludes GitHub auth endpoints from the proxy so auth goes direct", () => {
+      const env = buildSubprocessEnv(token, true, undefined, undefined, "http://session-123@gateway:18000");
+      const noProxy = env.NO_PROXY.split(",");
+      expect(noProxy).toContain("github.com");
+      expect(noProxy).toContain("api.github.com");
+      expect(env.no_proxy).toBe(env.NO_PROXY);
     });
   });
 

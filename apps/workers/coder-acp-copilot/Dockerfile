@@ -16,6 +16,8 @@ RUN apt-get update && apt-get install -y \
   rustc \
   cargo \
     && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/$(uname -m)/docker-27.5.1.tgz" \
+        | tar -xz --strip-components=1 -C /usr/local/bin docker/docker \
     && ARCH=$(dpkg --print-architecture) \
     && curl -fsSL "https://download.docker.com/linux/static/stable/$(uname -m)/docker-27.5.1.tgz" \
         | tar -xz --strip-components=1 -C /usr/local/bin docker/docker \

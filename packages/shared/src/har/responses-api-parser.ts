@@ -18,7 +18,9 @@
  */
 
 import type { ToolCall } from "./types.js";
+import type { HarWebSocketMessage } from "./types.js";
 import type { ParsedBody } from "./parsed-body.js";
+import { tryParseJson } from "./parsed-body.js";
 
 /**
  * Build a ToolCall from an OpenAI Responses API item.
@@ -174,5 +176,73 @@ export function extractResponsesApiFromRequestBody(
         toolResponses.set(callId, outStr);
       }
     }
+  }
+}
+
+/**
+ * Extract Responses API tool calls *and* their outputs from captured WebSocket
+ * frames.
+ *
+ * gpt-5.x via the Copilot CLI can carry the Responses API over a **WebSocket**
+ * instead of HTTP (when `copilot_cli_websocket_responses` is enabled). In that
+ * case the request/response payloads never appear in HTTP bodies — they live in
+ * the HAR entry's `_webSocketMessages` frames. This function is the transport
+ * unwrapper: it reads each text frame's JSON and hands it to the *same* semantic
+ * extractors used for the HTTP path, so no format logic is duplicated.
+ *
+ *   - `send` frames (client→server) are `response.create` messages carrying the
+ *     accumulated `input[]` transcript (calls + their `*_output` results) — the
+ *     same shape as an HTTP request body → {@link extractResponsesApiFromRequestBody}.
+ *   - `receive` frames (server→client) are individual streamed response events
+ *     (e.g. `response.output_item.done`) — the same objects as SSE `data:`
+ *     payloads → collected into a synthetic {@link ParsedBody} and passed to
+ *     {@link extractResponsesApiToolCallsFromBody}.
+ *
+ * Only text frames (opcode 1) carry JSON; binary frames (opcode 2) and any
+ * non-object / unparseable payload are skipped. A non-array `messages` (e.g.
+ * `undefined` for an HTTP-only entry) is a no-op, so this is safe to call for
+ * every entry.
+ */
+export function extractResponsesApiFromWebSocketMessages(
+  messages: HarWebSocketMessage[] | undefined,
+  timestamp: string,
+  toolCalls: Map<string, ToolCall>,
+  toolResponses: Map<string, string>,
+): void {
+  if (!Array.isArray(messages)) return;
+
+  // Receive frames are individual streamed events (same shape as SSE `data:`
+  // payloads); collect them so the response extractor can consume them as one
+  // synthetic SSE body. Send frames are handled inline (each is a full request
+  // transcript).
+  const receiveEvents: unknown[] = [];
+
+  for (const frame of messages) {
+    if (!frame || typeof frame !== "object") continue;
+    // Skip binary frames (opcode 2); only text frames (opcode 1) carry JSON.
+    if (frame.opcode === 2) continue;
+    const data = frame.data;
+    if (typeof data !== "string" || !data) continue;
+
+    const json = tryParseJson(data);
+    if (!json || typeof json !== "object") continue;
+
+    if (frame.type === "send") {
+      // Client→server `response.create`: reuse the request-body extractor, which
+      // reads the accumulated `input[]` transcript (calls + `*_output` results).
+      extractResponsesApiFromRequestBody(json, timestamp, toolCalls, toolResponses);
+    } else if (frame.type === "receive") {
+      receiveEvents.push(json);
+    }
+  }
+
+  if (receiveEvents.length > 0) {
+    // Response events are the only place the terminal call (e.g. `task_complete`)
+    // appears; feed them through the response extractor via a synthetic body.
+    extractResponsesApiToolCallsFromBody(
+      { json: null, sseEvents: receiveEvents },
+      timestamp,
+      toolCalls,
+    );
   }
 }

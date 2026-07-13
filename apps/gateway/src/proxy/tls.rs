@@ -28,6 +28,7 @@ use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio::sync::watch;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tracing::{debug, info, warn};
 
@@ -401,6 +402,14 @@ async fn handle_websocket_in_tls(
         )
         .await;
 
+        // Subscribe to the session's cancel signal so an explicit stop breaks
+        // the relay and flushes the accumulated frames. Fall back to a dropped
+        // receiver (parks forever) if the session is already gone.
+        let cancel_rx = state_owned
+            .session_manager
+            .subscribe_cancel(&session_id_owned)
+            .unwrap_or_else(|| watch::channel(false).1);
+
         // Relay frames bidirectionally, recording all messages.
         let messages = websocket::relay_websocket_bidirectional(
             client_ws,
@@ -408,6 +417,7 @@ async fn handle_websocket_in_tls(
             &domain_owned,
             &session_id_owned,
             &state_owned,
+            cancel_rx,
         )
         .await;
 
