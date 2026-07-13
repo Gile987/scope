@@ -88,7 +88,8 @@ describe("Bundle integration tests", () => {
   it("--help shows usage information", async () => {
     const { stdout } = await runScope("--help");
     expect(stdout).toContain("scope");
-    expect(stdout).toContain("Scope");
+    expect(stdout).toContain("Scope — The AI Agentic Experience Evaluation Platform");
+    expect(stdout).not.toContain("MS Scope");
     expect(stdout).toContain("run");
     expect(stdout).toContain("criteria");
   });
