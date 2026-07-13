@@ -55,7 +55,13 @@ export function ProjectSwitcherView({
   className?: string;
 }) {
   const active = projects.find((p) => projectId(p) === activeProjectId);
-  const label = active?.name ?? (activeProjectId ? activeProjectId : "Select project");
+  // Never surface the raw id in the trigger. While the list is still loading
+  // show "Loading…", and if an active id has no match once loaded (e.g. the
+  // project was deleted in another tab) show a soft "Unknown project" rather
+  // than a bare UUID.
+  const label =
+    active?.name ??
+    (!activeProjectId ? "Select project" : isLoading ? "Loading…" : "Unknown project");
 
   return (
     <DropdownMenu>

@@ -106,3 +106,25 @@ export const Loading: Story = {
     await expect(await screen.findByText(/loading/i)).toBeVisible();
   },
 };
+
+export const ActiveWhileLoading: Story = {
+  // An active project is selected but the list hasn't loaded yet, so it isn't
+  // resolvable. The trigger must show "Loading…", never the raw id.
+  render: () => <SwitcherHarness projects={[]} initialActive="p-alpha" isLoading />,
+  play: async ({ canvas }) => {
+    const trigger = canvas.getByRole("button", { name: /switch project/i });
+    await expect(trigger).toHaveTextContent(/loading/i);
+    await expect(trigger).not.toHaveTextContent("p-alpha");
+  },
+};
+
+export const ActiveNotFound: Story = {
+  // The active id has no match once the list has loaded (e.g. the project was
+  // deleted in another tab). The trigger shows a soft fallback, not the UUID.
+  render: () => <SwitcherHarness projects={PROJECTS} initialActive="p-ghost" />,
+  play: async ({ canvas }) => {
+    const trigger = canvas.getByRole("button", { name: /switch project/i });
+    await expect(trigger).toHaveTextContent(/unknown project/i);
+    await expect(trigger).not.toHaveTextContent("p-ghost");
+  },
+};
