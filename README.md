@@ -312,6 +312,7 @@ The [`docs/`](docs/README.md) directory contains architecture and research docum
 | Path | Contents |
 |------|----------|
 | `docs/architecture/` | System design — app design, criteria provider, DB migrations, token manager, skills |
+| `docs/ops/` | Operational runbooks — Cosmos DB backup & restore (`pnpm db:dump` / `pnpm db:restore`) |
 | `docs/research/` | Research spikes — delta storage, real-time data flow |
 
 ## Deployment

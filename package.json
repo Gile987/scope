@@ -55,6 +55,8 @@
     "migrate:up": "pnpm --filter db-migrations migrate:up",
     "migrate:down": "pnpm --filter db-migrations migrate:down",
     "migrate:status": "pnpm --filter db-migrations migrate:status",
+    "db:dump": "scripts/cosmos-dump.sh",
+    "db:restore": "scripts/cosmos-restore.sh",
     "check:versions:acp-copilot": "pnpm --filter version-checker-acp-copilot check",
     "check:versions:vscode-web": "pnpm --filter version-checker-vscode-web check",
     "check:versions:vscode-electron": "pnpm --filter version-checker-vscode-electron check",

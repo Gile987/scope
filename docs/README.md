@@ -24,6 +24,12 @@ Central documentation hub for the Scope platform — an AI coding agent benchmar
 | [AKS Node Pool Separation](infrastructure/aks-node-pool-separation.md) | Taints, tolerations, node selectors for workload isolation |
 | [Azure Developer CLI](infrastructure/azd-deployment.md) | Provisioning with `azd up`, feature flags, environment variables |
 
+## Operations
+
+| Document | Description |
+|----------|-------------|
+| [Cosmos DB Backup & Restore](ops/cosmos-backup-restore.md) | `pnpm db:dump` / `pnpm db:restore` rollback tooling, presets, verification, Cosmos caveats |
+
 ## Research
 
 | Document | Description |
