@@ -38,7 +38,7 @@ that is already allowed to reach the account (e.g. a VNet-joined host).
 |---------|----------------|-------|
 | `db-scope-v2-int` | `aks-scope-v2-int` (its Cosmos private DNS resolves + TCP 10255 OK from this cluster) | Use `--via-kubectl --kube-context aks-scope-v2-int`. This is the account the `integration` overlay (a main-merge deploy) targets. |
 | `db-scope-v2-prd` | `aks-scope-v2-prd` | Use `--via-kubectl --kube-context aks-scope-v2-prd`. |
-| `db-scope-v2-int2` | *no dedicated AKS cluster in kubeconfig*; its private DNS is **not** linked to the `aks-scope-v2-int` VNet | Not reachable from the int cluster. Run from int2's own VNet/cluster if one exists, or use **PITR** (below). |
+| `db-scope-v2-int2` | **nothing currently** - `vnet-scope-v2-int2` has no AKS cluster/nodes (no `rg-scope-v2-int2-nodes`, zero NICs in its `aks-nodes` subnet), and its mongo private DNS zone is linked only to `vnet-scope-v2-int2` | Not reachable from any existing cluster. All env VNets share `10.1.0.0/16`, so they **cannot** be peered. Dump requires either an AKS cluster provisioned in `vnet-scope-v2-int2` (then `--via-kubectl --kube-context <int2>`), or a mutation (temp IP allowlist / throwaway ACI in the VNet). Otherwise use **PITR** (below). |
 
 ## Prerequisites
 
@@ -154,23 +154,40 @@ All three accounts have **continuous backup** (`Continuous30Days`) enabled, so y
 can restore the account (or specific databases/collections) to any point in the
 last 30 days without a dump at all. PITR always restores into a **new account**.
 
-This is the rollback lever for **int2**, which is not reachable from the int
-cluster. Example (restore int2 to a timestamp just before a bad deploy):
+This is the rollback lever for **int2**, which currently has no cluster in its
+VNet to run `mongodump` from (see reachability table). PITR needs no compute and
+no infra changes.
+
+**Verified int2 restore coordinates** (as of 2026-07-14; re-check before use):
+
+| Field | Value |
+|-------|-------|
+| Account | `db-scope-v2-int2` / `rg-scope-v2-int2` |
+| Restorable instance id | `c23f0296-96cc-431a-a06b-5fc293afa121` |
+| Location | `West US 3` |
+| Oldest restorable time | `2026-06-14T20:11:03Z` (rolling 30-day window) |
+| Live data (Azure Monitor) | ~9,335 documents, ~520 MB |
+
+**Pre-deploy checklist for a risky int2 migration (e.g. #1241 `025`/`026`):**
+
+1. **Before merging/deploying**, record the current UTC time - this is your
+   rollback target: `date -u +%Y-%m-%dT%H:%M:%SZ`.
+2. Deploy. If the migration corrupts data, restore int2 to that timestamp:
 
 ```bash
-# 1) Get the account's restorable instance id:
+# 1) Confirm the restorable instance + window (values above may have rolled):
 az cosmosdb restorable-database-account list \
-  --query "[?accountName=='db-scope-v2-int2'].{id:id,loc:location}" -o table
+  --query "[?accountName=='db-scope-v2-int2'].{id:name,loc:location,oldest:oldestRestorableTime}" -o table
 
-# 2) Restore to a new account at a chosen UTC time within the last 30 days:
+# 2) Restore to a NEW account at the pre-deploy UTC timestamp:
 az cosmosdb restore \
   --target-database-account-name db-scope-v2-int2-restored \
   --account-name db-scope-v2-int2 \
   --resource-group rg-scope-v2-int2 \
-  --location <location> \
-  --restore-timestamp 2026-07-14T18:00:00+00:00
+  --location "West US 3" \
+  --restore-timestamp <pre-deploy-UTC-timestamp>
 
-# 3) Point the app at the restored account, or export the needed data back.
+# 3) Point the app at the restored account, or copy the needed data back.
 ```
 
 Because PITR creates a new account, cutting over means repointing the app's
