@@ -215,9 +215,14 @@ pushing (install the [gitleaks CLI](https://github.com/gitleaks/gitleaks#install
 # Full history — matches the push / scheduled CI job
 gitleaks git . --log-opts="--all" --config .gitleaks.toml --redact
 
-# Only your branch's new commits — matches the pull_request CI job
+# Only your branch's new commits — approximates the pull_request CI job
 gitleaks git . --log-opts="main..HEAD" --config .gitleaks.toml --redact
 ```
+
+> The CI `pull_request` job scans the exact PR range (`base.sha..head.sha`). Locally,
+> `main..HEAD` is a close approximation — run `git fetch origin main` first, and note it can
+> differ if `main` has advanced since you branched (use `origin/main...HEAD` to compare against
+> the merge base).
 
 ### VS Code Shortcuts
 
