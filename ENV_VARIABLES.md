@@ -400,6 +400,14 @@ The reaper reuses `SCOPE_RUN_HEARTBEAT_STALE_MS` (Worker Configuration, below) a
 
 Maximum time the `coder-acp-copilot` worker waits for a Copilot CLI ACP session to complete before terminating it. If the agent takes longer than this to produce a response, the session is killed and the iteration fails with a timeout error. Increase for complex tasks that require extended processing. Set to `0` to disable the timeout entirely (not recommended in production).
 
+### COPILOT_AUTO_UPDATE
+**Default:** `false` (set by the `coder-acp-copilot` and `coder-acp-copilot-windows` workers on the spawned CLI subprocess)
+**Type:** boolean-ish (`"false"` to disable auto-update)
+
+Disables the GitHub Copilot CLI's in-session auto-updater for the copilot workers. In headless `--acp --yolo` stdio mode the CLI otherwise downloads a newer binary mid-run, logs `restart to update`, and then **never restarts** — nothing relaunches it under ACP, so the process freezes after creating the ACP session but before its first model completion. The run records 0 turns / 0 AI calls / 0 tokens and rides the full `ACP_SESSION_TIMEOUT_MS` (60-min) timeout. See [issue #1179](https://github.com/growth-ecosystems/scope-core/issues/1179).
+
+The workers set this env var in `buildSubprocessEnv` **and** pass `--no-auto-update` on the CLI args (belt-and-suspenders). This pins each run to the image's baked CLI version, making benchmarks deterministic and removing a per-cold-start binary download from the hot path. This is the actual fix for the hang — pinning the worker image version alone does **not** help, because the running binary still tries to update to "latest".
+
 ### CLAUDE_CODE_DISABLE_POLICY_SKILLS
 **Default:** `1` (set in the `coder-acp-claude-code` Dockerfile)
 **Type:** boolean-ish (`1` to disable, unset/`0` to allow)
