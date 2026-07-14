@@ -110,6 +110,9 @@ When you run a command:
 | `008-backfill-ai-call-count` | Downloads HARs from blob storage to count AI completion calls per turn |
 | `009-add-requests-filter-indexes` | Adds indexes on `taskPromptId`, `status`, `outcome`, `workerType`, `deletedAt` for server-side filtering/grouping |
 | `025-create-projects` | Data Organization: Projects — seeds one initial project and backfills immutable `projectId` on all 16 scoped collections; backfills `task-prompts.keyId = _id`; swaps deterministic-key unique indexes to `{projectId,keyId}` / `{projectId,ref}` and adds `{projectId}` scoping indexes (see [db.md](db.md#project-scoping-migration-025)) |
+| `026-isolate-catalogs-per-project` | Per-project catalog isolation for `skills`, `extensions`, `criteria`, `prompt-features` — backfills `slug = _id`, swaps global-unique `{id}`/slug indexes to `{projectId,slug}` / `{projectId,id}` (see [db.md](db.md#per-project-catalog-isolation-migration-026)) |
+| `027-uuid-keys-mcp-profileversions` | Opaque UUID `_id` + reference key for `mcp-servers` (`slug`) and `profile-versions` (`ref`) with `{projectId,slug}` / `{projectId,ref}` indexes; drops dead `prompt-feature-extractions` (see [db.md](db.md#per-project-entity-keying-migration-027)) |
+| `028-isolate-mcp-secrets-per-project` | Reconciles the token-manager `mcp-secrets` unique index — drops the legacy global-unique `{mcpId,name}` and (re)creates the per-project `{projectId,mcpId,name}` (see [token-manager.md](token-manager.md#mcp-secrets)) |
 
 ## CI/CD
 

@@ -173,19 +173,25 @@ collection** (`mcp-secrets`), exposed via `mcp-secret-routes.ts`. Secrets are **
 
 - Each secret document carries a `projectId`, a `mcpId` (the MCP server's **human slug**, never the
   server's internal UUID `_id`), and a `name`.
-- The unique index is `{ projectId, mcpId, name }` (was `{ mcpId, name }`), created at service
-  startup. So the same slug + secret name can exist independently in different projects.
+- The unique index is `{ projectId, mcpId, name }` (was the global-unique `{ mcpId, name }`), so the
+  same slug + secret name can exist independently in different projects. The index is reconciled by
+  **migration 028**, which drops the legacy global-unique `{ mcpId, name }` and (re)creates the
+  compound `{ projectId, mcpId, name }`. token-manager also creates the compound index idempotently
+  at startup (a harmless no-op once the migration has run).
 - Every route filter and the insert path require `projectId` (read from the request); all client
   methods (`storeSecret`, `storeEnv`, `storeHeaders`, `listSecrets`, `resolveSecrets`,
   `deleteSecret`, `deleteAllSecrets`) take `projectId` as their first argument and forward it.
 - On startup the service **backfills** `projectId` on any pre-existing secrets (deriving it from the
   referenced server, which is unambiguous because slugs were globally unique before the Projects
-  feature) **before** creating the unique index.
+  feature).
 
-Because these secrets live in the Token Manager's DB, their index swap and backfill run here at
-service startup — **not** through `packages/db-migrations` (migration 027 covers only the API-DB
-entities). See [db.md → Per-project entity keying (migration 027)](db.md#per-project-entity-keying-migration-027)
-and [mcp-gateway.md](mcp-gateway.md) for how a run resolves and hydrates these secrets project-scoped.
+These secrets live in the Token Manager's DB, but the db-migration Job reaches the same MongoDB (both
+mount `mongo-config` + `mongo-secrets`, so they resolve the same `MONGO_DATABASE` /
+`MONGO_CONNECTION_STRING`). The unique-index reconciliation therefore runs through
+`packages/db-migrations` as **migration 028**; only the `projectId` value backfill still runs at
+token-manager startup (moving that backfill into a migration too is a noted follow-up). See
+[db.md → Per-project entity keying](db.md#per-project-entity-keying-migration-027) and
+[mcp-gateway.md](mcp-gateway.md) for how a run resolves and hydrates these secrets project-scoped.
 
 ## Configuration
 

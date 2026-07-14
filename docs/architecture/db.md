@@ -280,6 +280,11 @@ referencing collection is rewritten. Every API response/param for these entities
 **human key** (`mcp-servers` → `id = slug`; `profile-versions` → `ref`); the UUID `_id` is internal
 only and never leaks into API output, CLI, portal URLs, or stored references.
 
-**MCP secrets** (`mcp-secrets`) live in the **Token Manager's own MongoDB**, not the API DB, so their
-`projectId` backfill and unique index swap `{ mcpId, name }` → `{ projectId, mcpId, name }` run at
-token-manager startup (not migration 027). See [token-manager.md](token-manager.md).
+**MCP secrets** (`mcp-secrets`) live in the **Token Manager's own MongoDB**, but the db-migration Job
+reaches the same DB (both mount `mongo-config` + `mongo-secrets`). So the unique-index reconciliation
+`{ mcpId, name }` → `{ projectId, mcpId, name }` runs as **migration 028** (drop the legacy
+global-unique index + (re)create the compound per-project index; token-manager also creates the
+compound index idempotently at startup). Only the `projectId` value backfill still runs at
+token-manager startup. Same **† Cosmos unique-index caveat** as 026/027 (the compound index degrades
+to non-unique on Cosmos; the token-manager routes' scoped dup-check enforces per-project uniqueness).
+See [token-manager.md](token-manager.md).
