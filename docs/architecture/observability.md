@@ -1,8 +1,12 @@
 # Observability
 
-Application-level telemetry for Scope services using Azure Application Insights and the modern `@azure/monitor-opentelemetry` OpenTelemetry distro.
+Application-level telemetry for Scope services using Azure Application Insights with dual-mode export: either directly via `@azure/monitor-opentelemetry` or through an in-cluster OTel Collector gateway.
 
 ## Data Flow
+
+The telemetry package supports two export modes. When `OTEL_COLLECTOR_ENDPOINT` is set, services send OTLP HTTP to the collector which forwards to App Insights. Otherwise, services export directly.
+
+### Collector Mode (recommended for production)
 
 ```mermaid
 graph TB
@@ -27,14 +31,13 @@ graph TB
         EVENT["trackEvent<br/>(Counter API)"]
     end
 
-    subgraph "Auto-Instrumentation<br/>(useAzureMonitor)"
-        HTTP[HTTP requests/responses]
-        DEPS[Dependencies: MongoDB, Redis, outgoing HTTP]
-        EXC[Unhandled exceptions]
+    subgraph "OTel Collector Gateway<br/>(deploy/components/otel-collector)"
+        RECV["OTLP HTTP Receiver<br/>:4318"]
+        PROC["Processors<br/>(memory_limiter → batch)"]
+        AZEXP["Azure Monitor Exporter"]
     end
 
     subgraph Azure
-        EXPORT["Azure Monitor Exporter<br/>(HTTPS POST → Breeze /v2.1/track)"]
         AI[Application Insights]
         LA[Log Analytics Workspace]
         GRAFANA[Azure Managed Grafana]
@@ -49,21 +52,14 @@ graph TB
 
     API & W1 & W2 & W3 & W4 & J & SCH & TM & PP & RG & MS --> INIT
 
-    INIT --> HTTP
-    INIT --> DEPS
-    INIT --> EXC
     INIT --> METER
     INIT --> TRACE
     INIT --> EVENT
 
-    METER -->|"OTel SDK"| EXPORT
-    TRACE -->|"structured JSON → console"| EXPORT
-    EVENT -->|"OTel SDK"| EXPORT
-    HTTP -->|"OTel SDK"| EXPORT
-    DEPS -->|"OTel SDK"| EXPORT
-    EXC -->|"OTel SDK"| EXPORT
+    METER & TRACE & EVENT -->|"OTLP HTTP<br/>(JSON over HTTP)"| RECV
+    RECV --> PROC --> AZEXP
 
-    EXPORT -->|"HTTPS POST<br/>Azure Breeze JSON"| AI
+    AZEXP -->|"HTTPS POST<br/>Azure Breeze JSON"| AI
     AI -->|"ingestion pipeline"| LA
     LA -->|"KQL via Azure Monitor<br/>data source (HTTPS)"| GRAFANA
     LA -->|"KQL scheduled queries"| ALERTS
@@ -72,18 +68,22 @@ graph TB
     ESO -->|"K8s API"| SECRET
 ```
 
+### Direct Mode (fallback)
+
+When `OTEL_COLLECTOR_ENDPOINT` is unset but `APPLICATIONINSIGHTS_CONNECTION_STRING` is set, services export directly to App Insights via `useAzureMonitor()`. This is the fallback mode — remove the `otel-collector` component from the overlay to use it.
+
 ## Transport Protocols
 
 | Hop | Protocol | Format | Notes |
 |-----|----------|--------|-------|
-| OTel SDK → App Insights | HTTPS POST to Breeze endpoint (`/v2.1/track`) | Azure Monitor `TelemetryItem` JSON (not OTLP) | Endpoint URL from connection string `IngestionEndpoint` |
+| Service → OTel Collector | OTLP HTTP POST (`:4318`) | OpenTelemetry JSON protobuf | In-cluster, no TLS |
+| OTel Collector → App Insights | HTTPS POST to Breeze endpoint (`/v2.1/track`) | Azure Monitor `TelemetryItem` JSON | `azuremonitor` exporter in `otel-collector-contrib` |
+| Service → App Insights (direct) | HTTPS POST to Breeze endpoint (`/v2.1/track`) | Azure Monitor `TelemetryItem` JSON | Only when collector is not configured |
 | App Insights → Log Analytics | Internal Azure pipeline | — | Automatic, no user configuration |
 | Log Analytics → Grafana | HTTPS | KQL queries via Azure Monitor data source plugin | Grafana polls on dashboard refresh interval |
 | Log Analytics → Alert Rules | HTTPS | KQL scheduled query evaluation | Configured per alert rule |
 | Key Vault → ESO | HTTPS | Azure Key Vault REST API | ESO polls on `refreshInterval` |
 | ESO → Pod | K8s API | K8s Secret mounted as `envFrom` | kubelet injects as environment variable |
-
-> **Note:** Despite being built on OpenTelemetry, the Azure Monitor distro does **not** use the standard OTLP protocol (gRPC or HTTP/protobuf). The `@azure/monitor-opentelemetry-exporter` converts OTel spans, metrics, and logs into Azure's proprietary `TelemetryItem` JSON envelope and POSTs them to the Breeze ingestion endpoint.
 
 ## Telemetry Module
 
@@ -99,15 +99,19 @@ import { initTelemetry } from "telemetry";
 initTelemetry("scope-api");
 ```
 
-`initTelemetry(serviceName)` calls `useAzureMonitor()` with:
-- Connection string from `APPLICATIONINSIGHTS_CONNECTION_STRING`
-- Sampling ratio from `TELEMETRY_SAMPLING_RATIO` (default 1.0)
-- Live Metrics enabled
-- `OTEL_SERVICE_NAME` set to `serviceName`
+`initTelemetry(serviceName)` selects the export mode based on environment variables:
+
+| Priority | Env Var | Mode | Behavior |
+|----------|---------|------|----------|
+| 1 | `OTEL_COLLECTOR_ENDPOINT` | Collector | OTLP HTTP to in-cluster OTel Collector |
+| 2 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Direct | `useAzureMonitor()` to App Insights Breeze |
+| 3 | Neither set | No-op | All helpers are no-ops, zero cost |
+
+Use `getExportMode()` to check the active mode (`"collector"`, `"direct"`, or `"none"`).
 
 ### Graceful No-Op
 
-When `APPLICATIONINSIGHTS_CONNECTION_STRING` is unset, `initTelemetry()` returns early. All helper functions (`trackMetric`, `trackTrace`, `trackEvent`) check `isTelemetryEnabled()` and return immediately — zero runtime cost, no errors, no conditional logic needed at call sites.
+When neither env var is set, `initTelemetry()` returns early. All helper functions (`trackMetric`, `trackTrace`, `trackEvent`) check `isTelemetryEnabled()` and return immediately — zero runtime cost, no errors, no conditional logic needed at call sites.
 
 ### Custom Metrics API
 
@@ -235,11 +239,37 @@ Emitted by both `model-scanner-copilot` and `model-scanner-anthropic` K8s Jobs. 
 
 | Env Var | Default | Description |
 |---------|---------|-------------|
-| `APPLICATIONINSIGHTS_CONNECTION_STRING` | *(none — telemetry disabled)* | Connection string from App Insights resource |
-| `TELEMETRY_SAMPLING_RATIO` | `1.0` | Fraction of telemetry to sample (0.0–1.0) |
+| `OTEL_COLLECTOR_ENDPOINT` | *(none)* | OTLP HTTP endpoint of the in-cluster OTel Collector (e.g., `http://otel-collector.scoped.svc.cluster.local:4318`). When set, takes priority over direct export. |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | *(none — telemetry disabled)* | Connection string from App Insights resource. Used for direct export when collector is not configured. |
+| `TELEMETRY_SAMPLING_RATIO` | `1.0` | Fraction of telemetry to sample (0.0–1.0). Only applies in direct mode. |
 | `TELEMETRY_LOG_LEVEL` | `Warning` | Minimum severity for subprocess log forwarding to App Insights |
 
 ## Deployment
+
+### OTel Collector Gateway
+
+The collector is deployed as a Kustomize Component at `deploy/components/otel-collector/`. Enable it by adding to an overlay's `components:` list:
+
+```yaml
+components:
+  - ../../components/otel-collector
+```
+
+The component deploys:
+- **Deployment** — `otel-collector-contrib:0.115.0` with OTLP HTTP receiver on `:4318`
+- **Service** — ClusterIP `otel-collector` on port `4318`
+- **ConfigMap** — Collector pipeline config (OTLP receiver → memory_limiter → batch → azuremonitor exporter)
+- **Env injection** — Patches all Deployments with `OTEL_COLLECTOR_ENDPOINT` pointing to the collector Service
+
+The collector reads `APPLICATIONINSIGHTS_CONNECTION_STRING` from the `appinsights-secrets` K8s Secret.
+
+#### Collector Pipeline
+
+```
+OTLP HTTP (:4318) → memory_limiter (400 MiB) → batch (1024/5s) → azuremonitor exporter → App Insights
+```
+
+Resource limits: 100m–500m CPU, 256Mi–512Mi memory.
 
 ### Secret Delivery
 
@@ -252,6 +282,7 @@ The connection string flows from Azure Key Vault to pods via External Secrets Op
 
 ### Kubernetes Manifests
 
+- `deploy/components/otel-collector/` — OTel Collector Kustomize Component (Deployment, Service, ConfigMap, env patches)
 - `deploy/base/external-secret.yaml` — `appinsights-secrets` ExternalSecret
 - `deploy/base/workers/worker-secrets.yaml` — adds `APPLICATIONINSIGHTS_CONNECTION_STRING` to shared worker secrets
 - `deploy/base/api.yaml` — `appinsights-secrets` secretRef (optional)

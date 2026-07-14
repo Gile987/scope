@@ -552,18 +552,28 @@ Host port mapping for the Copilot DevProxy REST API in Docker Compose.
 
 ## Observability
 
+### OTEL_COLLECTOR_ENDPOINT
+**Default:** *(none — collector mode disabled)*
+**Type:** URL
+**Used by:** All services
+
+OTLP HTTP endpoint for an in-cluster OTel Collector gateway (e.g., `http://otel-collector.scoped.svc.cluster.local:4318`). When set, services export telemetry via OTLP HTTP to the collector instead of directly to App Insights. The collector handles forwarding to Azure Monitor via the `azuremonitor` exporter.
+
+Takes priority over `APPLICATIONINSIGHTS_CONNECTION_STRING` for export mode selection. Automatically injected by the `otel-collector` Kustomize Component (`deploy/components/otel-collector/`).
+
 ### APPLICATIONINSIGHTS_CONNECTION_STRING
 **Default:** *(none — telemetry disabled when unset)*
 **Type:** Azure Application Insights connection string
+**Used by:** API, all workers, judge, scheduler, token-manager, post-processor, report-generator, model-scanners
 
-Connection string for Azure Application Insights. When set, enables automatic HTTP/dependency tracking and custom metrics emission (e.g., `worker.run_duration_ms`, `worker.first_ai_call_ms`). When unset, all telemetry calls are no-ops and the service operates normally without instrumentation.
+Connection string for Azure Application Insights. Used for direct export mode (when `OTEL_COLLECTOR_ENDPOINT` is not set). Also consumed by the OTel Collector's `azuremonitor` exporter when the collector component is deployed.
 
-The telemetry module is initialized via `initTelemetry()` from `packages/shared/src/telemetry/` and must be called early in the service startup (before Express/MongoDB connections) to ensure auto-instrumentation patches are applied.
+When both this and `OTEL_COLLECTOR_ENDPOINT` are unset, all telemetry calls are no-ops and the service operates normally without instrumentation.
+
+The telemetry module is initialized via `initTelemetry()` from `packages/telemetry/` and must be called early in the service startup (before Express/MongoDB connections) to ensure auto-instrumentation patches are applied.
 
 - **Docker Compose:** Set in `.env` file or leave unset for local development
 - **Kubernetes:** Sourced from `appinsights-secrets` ExternalSecret (workers) or `appinsights-secrets` secretRef (API), which reads from Key Vault secret `appinsights-connection-string`
-
-The telemetry module uses the modern `@azure/monitor-opentelemetry` distribution (OpenTelemetry-based). Custom metrics are emitted through the OpenTelemetry Meter API. `initTelemetry()` sets `OTEL_SERVICE_NAME` to the service name so it appears as the resource `service.name`.
 
 ### TELEMETRY_SAMPLING_RATIO
 **Default:** `1.0`
