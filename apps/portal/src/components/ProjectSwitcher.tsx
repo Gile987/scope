@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useProjectContext } from "@/contexts/ProjectContext";
+import { useProjectSwitcherLock } from "@/contexts/ProjectSwitcherLockContext";
 import { useSelectProject } from "@/hooks/useSelectProject";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -46,6 +47,7 @@ export function ProjectSwitcherView({
   onSelect,
   onNewProject,
   className,
+  locked = false,
 }: {
   projects: Project[];
   activeProjectId?: string;
@@ -53,6 +55,13 @@ export function ProjectSwitcherView({
   onSelect: (id: string) => void;
   onNewProject: () => void;
   className?: string;
+  /**
+   * When true, render a static, non-interactive label (folder icon + project
+   * name) instead of the dropdown. Used on entity detail pages where the project
+   * is fixed by the entity being viewed. Presentation-only — see
+   * {@link file://../contexts/ProjectSwitcherLockContext.tsx ProjectSwitcherLockContext}.
+   */
+  locked?: boolean;
 }) {
   const active = projects.find((p) => projectId(p) === activeProjectId);
   // Never surface the raw id in the trigger. While the list is still loading
@@ -62,6 +71,26 @@ export function ProjectSwitcherView({
   const label =
     active?.name ??
     (!activeProjectId ? "Select project" : isLoading ? "Loading…" : "Unknown project");
+
+  // Locked mode: the switcher is shown for context but can't be operated. Render
+  // a plain label (no dropdown, no chevron, non-interactive) with a native title
+  // explaining why. Programmatic selection (auto-scope, self-heal) is unaffected.
+  if (locked) {
+    return (
+      <span
+        className={cn(
+          "inline-flex h-8 max-w-[12rem] cursor-default select-none items-center gap-1.5 px-2 text-sm font-medium",
+          className,
+        )}
+        aria-label="Current project (locked)"
+        aria-disabled="true"
+        title="Project is set by the item you're viewing"
+      >
+        <FolderKanban className="h-4 w-4 shrink-0" />
+        <span className="truncate">{label}</span>
+      </span>
+    );
+  }
 
   return (
     <DropdownMenu>
@@ -132,7 +161,14 @@ export function ProjectSwitcherView({
 export function ProjectSwitcher({ className }: { className?: string }) {
   const { selectedProjectId } = useProjectContext();
   const selectProject = useSelectProject();
+  const { locked } = useProjectSwitcherLock();
   const [createOpen, setCreateOpen] = useState(false);
+
+  // Only actually lock once a project is resolved. If a detail page is opened
+  // cold with no selection (e.g. a deep link to a Tier-2 entity that can't
+  // auto-scope), keep the switcher interactive so the user can pick a project
+  // rather than being stranded with a non-interactive "Select project".
+  const switcherLocked = locked && Boolean(selectedProjectId);
 
   const { data: projects = [], isLoading, isSuccess } = useQuery({
     queryKey: ["projects"],
@@ -165,6 +201,7 @@ export function ProjectSwitcher({ className }: { className?: string }) {
         onSelect={selectProject}
         onNewProject={() => setCreateOpen(true)}
         className={className}
+        locked={switcherLocked}
       />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>

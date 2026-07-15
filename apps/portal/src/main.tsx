@@ -10,6 +10,7 @@ import { App } from "./App";
 import { FeatureFlagProvider } from "@/contexts/FeatureFlagContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ProjectProvider } from "@/contexts/ProjectContext";
+import { ProjectSwitcherLockProvider } from "@/contexts/ProjectSwitcherLockContext";
 import { Toaster } from "@/components/ui/sonner";
 import "./index.css";
 
@@ -27,10 +28,12 @@ createRoot(document.getElementById("root")!).render(
     <ThemeProvider>
       <FeatureFlagProvider>
         <ProjectProvider>
-          <BrowserRouter>
-            <App />
-            <Toaster />
-          </BrowserRouter>
+          <ProjectSwitcherLockProvider>
+            <BrowserRouter>
+              <App />
+              <Toaster />
+            </BrowserRouter>
+          </ProjectSwitcherLockProvider>
         </ProjectProvider>
       </FeatureFlagProvider>
     </ThemeProvider>

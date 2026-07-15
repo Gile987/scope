@@ -36,10 +36,12 @@ function SwitcherHarness({
   projects,
   initialActive,
   isLoading,
+  locked,
 }: {
   projects: Project[];
   initialActive?: string;
   isLoading?: boolean;
+  locked?: boolean;
 }) {
   const [active, setActive] = useState<string | undefined>(initialActive);
   const [created, setCreated] = useState(0);
@@ -52,6 +54,7 @@ function SwitcherHarness({
           isLoading={isLoading}
           onSelect={setActive}
           onNewProject={() => setCreated((c) => c + 1)}
+          locked={locked}
         />
         <span data-testid="created-count">{created}</span>
       </div>
@@ -126,5 +129,20 @@ export const ActiveNotFound: Story = {
     const trigger = canvas.getByRole("button", { name: /switch project/i });
     await expect(trigger).toHaveTextContent(/unknown project/i);
     await expect(trigger).not.toHaveTextContent("p-ghost");
+  },
+};
+
+export const Locked: Story = {
+  // Detail pages lock the switcher: it shows the active project as context but is
+  // not interactive — no button, no dropdown.
+  render: () => <SwitcherHarness projects={PROJECTS} initialActive="p-alpha" locked />,
+  play: async ({ canvas }) => {
+    // The project name is still shown for context.
+    await expect(canvas.getByText("Alpha")).toBeVisible();
+    // But there is no interactive switcher button to open a menu.
+    await expect(canvas.queryByRole("button", { name: /switch project/i })).toBeNull();
+    // The static label is marked non-interactive for assistive tech.
+    const label = canvas.getByLabelText(/current project/i);
+    await expect(label).toHaveAttribute("aria-disabled", "true");
   },
 };

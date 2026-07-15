@@ -8,6 +8,8 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { ProjectProvider } from "@/contexts/ProjectContext";
+import { ProjectSwitcherLockProvider } from "@/contexts/ProjectSwitcherLockContext";
+import { LockProjectSwitcher } from "@/components/LockProjectSwitcher";
 import { PROJECT_STORAGE_KEY } from "@/lib/project-scope";
 import type { Project } from "@/types";
 import { ProjectSwitcher } from "./ProjectSwitcher";
@@ -37,6 +39,27 @@ function renderSwitcher(storedProjectId?: string) {
         <MemoryRouter>
           <ProjectSwitcher />
         </MemoryRouter>
+      </ProjectProvider>
+    </QueryClientProvider>,
+  );
+}
+
+/** Renders the switcher wrapped as a detail page does: lock provider + wrapper. */
+function renderLockedSwitcher(storedProjectId?: string) {
+  if (storedProjectId) localStorage.setItem(PROJECT_STORAGE_KEY, storedProjectId);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ProjectProvider>
+        <ProjectSwitcherLockProvider>
+          <MemoryRouter>
+            <LockProjectSwitcher>
+              <ProjectSwitcher />
+            </LockProjectSwitcher>
+          </MemoryRouter>
+        </ProjectSwitcherLockProvider>
       </ProjectProvider>
     </QueryClientProvider>,
   );
@@ -91,5 +114,40 @@ describe("ProjectSwitcher self-heal", () => {
     await waitFor(() => expect(listProjects).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText("Unknown project")).toBeTruthy());
     expect(localStorage.getItem(PROJECT_STORAGE_KEY)).toBe("p-alpha");
+  });
+});
+
+describe("ProjectSwitcher locked (detail pages)", () => {
+  beforeEach(() => {
+    listProjects.mockReset();
+  });
+
+  it("renders a non-interactive label when a detail page locks the switcher", async () => {
+    listProjects.mockResolvedValue([
+      project("p-alpha", "Alpha"),
+      project("p-bravo", "Bravo"),
+    ]);
+
+    renderLockedSwitcher("p-bravo");
+
+    // The active project is shown for context...
+    await waitFor(() => expect(screen.getByText("Bravo")).toBeTruthy());
+    // ...but there is no interactive switcher button (no dropdown to open).
+    expect(screen.queryByRole("button", { name: /switch project/i })).toBeNull();
+    expect(
+      screen.getByLabelText(/current project/i).getAttribute("aria-disabled"),
+    ).toBe("true");
+  });
+
+  it("stays interactive while locked when no project is selected (avoids stranding)", async () => {
+    // A detail page opened cold with no selection must not trap the user: the
+    // lock only engages once a project is actually selected.
+    listProjects.mockResolvedValue([project("p-alpha", "Alpha")]);
+
+    renderLockedSwitcher(undefined);
+
+    // The interactive switch button remains so the user can still pick a project.
+    await waitFor(() => expect(listProjects).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: /switch project/i })).toBeTruthy();
   });
 });
