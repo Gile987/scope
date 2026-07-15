@@ -6,7 +6,8 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, withProjectOption, getDefaultApiUrl } from "../utils/shared.js";
+import { requireProjectId } from "../utils/config.js";
 import { apiFetch } from "../utils/api-client.js";
 
 export function registerProfileCommands(program: Command): void {
@@ -21,16 +22,17 @@ const profile = program
 
 configureHelp(profile);
 
-withOutputOption(
+withProjectOption(withOutputOption(
 profile
   .command("list")
   .description("List all profiles")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
-      const response = await apiFetch(options.url, `/profiles`);
+      const response = await apiFetch(options.url, `/profiles`, { projectId });
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -120,8 +122,10 @@ profile
   .option("--skills <refs...>", "Skill revision references")
   .option("--extensions <ids...>", "Extension IDs (publisher.name or publisher.name@version)")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (options) => {
     try {
+      const projectId = requireProjectId(options.project);
       const body: Record<string, unknown> = {
         name: options.name,
         workerType: options.worker,
@@ -137,6 +141,7 @@ profile
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        projectId,
       });
 
       if (!response.ok) {

@@ -90,6 +90,201 @@ To support submitting an AGENTS.md prompt with a run, the request carries:
   (`[]`/absent = root, `[p]` = mutation, `[i, j]` = merge) for callers that know
   parentage at submit time.
 
+## Data Organization: Projects
+
+A **Project** (`projects` collection, `ProjectStore`) is the top-level container that
+partitions all user-facing data. Every scoped entity carries one **immutable `projectId`**,
+set at creation and never changed. This is the data-organization layer only — it is a
+**filter, not a security boundary** (access control lives in `auth-rbac.md`; any caller may
+pass any `projectId`).
+
+### Scoped vs. unscoped entities
+
+| Class | Collections | How `projectId` is set |
+|-------|-------------|------------------------|
+| **Root** (no parent) | `requests`, `profiles`, `criteria`, `prompt-features`, `mcp-servers`, `report-templates`, `skills`, `extensions`, `codebases` | From the `?projectId=` query param at create time |
+| **Child** (references a parent) | `runs` (history), `profile-versions`, `codebase-revisions`, `reports`, `insights` | Copied from the parent doc's `projectId` |
+| **Special** (deterministic key → per-project copies) | `task-prompts`, `skill-revisions` | From the run's `projectId`; see below |
+| **Unscoped** | `projects`, `agents`, `models`, tokens/accounts, feature-flags | n/a — never filtered by project |
+
+### Resolution model (no default, fail-fast)
+
+`projectId` is always **explicit and visible** — never a header, never ambient middleware,
+never defaulted. The single carrier is the **`?projectId=` query parameter**. Helpers live in
+`apps/api/src/utils/project-scope.ts`.
+
+| Operation | `projectId` source | If unresolvable |
+|-----------|--------------------|-----------------|
+| Create a **root** entity | `?projectId=` query param | **400** |
+| Create a **child** entity | Copied from the referenced parent | **400** (parent missing / cross-project) |
+| **Top-level list** (`GET /api/v1/{requests,profiles,criteria,…}`) | `?projectId=` (**required**) | **400** |
+| **List-like reads** (`GET /api/v1/criteria/graph`, `/criteria/mdp`, `/analysis`) | `?projectId=` (**required**) | **400** |
+| **Nested list** (under a parent in the path) | Derived from the parent id | n/a |
+| **By-`id`/slug get · edit · soft-delete** (`GET/PUT/DELETE /:id` on scoped catalogs) | `?projectId=` (**required**), or derived from context (e.g. a run's `projectId`) — filter is always `{ projectId, slug\|id }` | **400** |
+| **By true `_id`** (internal code already holding the globally-unique UUID `_id`) | Act on `{ _id }` directly — already unambiguous | n/a |
+
+The **runs list** (`GET /api/v1/requests`) requires `?projectId=` and AND-filters every page,
+probe, facet, and grouping pipeline by it (`flat.projectId` → `composeFilter`). The
+`groupBy: "project"` option and the project facet were **removed** — moot under a required
+single-project list.
+
+### Never a global, slug-only action on a project-scoped entity (the by-id invariant)
+
+A **project-scoped** entity must **never** be read, edited, or soft-deleted by a global,
+slug-only query. The Mongo/Cosmos filter for every get / edit / soft-delete must always contain
+**`_id`** *or* **`projectId`** — a human slug/business `id` is **never a key on its own**.
+`projectId` is derived from **context** when available (a parent doc or the run-request), else
+supplied by the **client** (`?projectId=`), else the request **fails 400**. There is no
+`{ _id: slug }` / `{ id }` global fallback.
+
+| Caller holds | What the API does |
+|--------------|-------------------|
+| `projectId` + slug | Filter `{ projectId, slug }` (or `{ projectId, id }`). No widening, no global fallback. |
+| slug only, `projectId` in context (parent / run-request) | Derive `projectId` from context, then identical to row 1. |
+| slug only, no `projectId` anywhere | Issue **no query → 400**. Never fall back to `{ _id: slug }`. |
+| a real `_id` (globally-unique UUID) | Filter `{ _id }` directly — already unambiguous; `projectId` not needed. |
+
+Because post-migration the by-id CRUD routes receive a `:id` that is usually a **slug** (the route
+cannot tell a slug from a UUID), those routes **require** `?projectId=` and resolve scoped. The
+resolver signatures enforce this structurally — `findXBySlug(slug, projectId: string)` takes a
+**required** `projectId` with no global `else`, so the compiler rejects any unscoped call site. The
+only callers holding a true `_id` are internal code paths that already resolved the document.
+
+On CosmosDB this is also the RU-friendly shape: these catalog collections declare no shard key, so
+a `{ projectId, slug }` equality is served by the `{projectId, slug}` index in one logical
+partition. Cosmos degrades that index to **non-unique**, so per-project uniqueness is enforced at
+the app layer (scoped `findOrCreate` / existence checks) — which is *why* edits resolve the row
+first and then write by its real `_id`. See `db.md` for the index details. This invariant is
+recorded so future routes and entities keep obeying it; see also `criteria-provider.md`.
+
+A bounded audit brought every project-scoped catalog under this rule. Besides mcp-servers, skills,
+extensions, criteria, and prompt-features (whose resolvers now take a required `projectId`),
+**`report-templates`** by-id `GET/PUT/DELETE /:id` were switched from a global `{ id }` filter to
+the scoped `{ projectId, id }` and now require `?projectId=`; the report-generation path
+(`POST /api/v1/reports`) resolves its `templateId` within the **run's** `projectId` (context) rather
+than globally. `report-templates` keeps a globally-unique `id` (it is not part of the migration-026
+slug-reuse set), so scoping is a guardrail: a caller must know the project to touch the row, and a
+wrong-project id returns 404. Create-vs-upsert consistency across catalogs is tracked separately in
+issue #1266.
+
+### Per-project copies for deterministic-key entities
+
+`task-prompts` and `skill-revisions` are content/ref-addressed, so the same key can legitimately
+exist in multiple projects. Each keeps a **fresh-UUID `_id`** plus a stable key (`keyId` =
+`computePromptId(type,text)` for prompts; `ref` for skill-revisions) and a project-scoped index
+(`{projectId, keyId}` / `{projectId, ref}`) — **unique on real MongoDB**, and **non-unique on
+Azure Cosmos DB** (which cannot build a unique index on a populated collection), where per-project
+uniqueness is enforced by `findOrCreate` instead. `findOrCreate`/`getByRef(s)`
+lookups are all scoped by `projectId`. Because skill refs resolve **per project**, the run's
+`projectId` is threaded through the shared queue-processor into `SkillClient.resolveSkills` /
+`downloadSkillArchive` (which append `?projectId=`) and the electron worker's own `setup()`.
+Skill and extension **catalog** entries are isolated per-project too, but via a different
+mechanism — see [Per-project catalog isolation (migration 026)](#per-project-catalog-isolation-migration-026) below.
+
+### Cross-service write paths
+
+Entities the pipeline **creates** are persisted with the run's `projectId` (derived from the
+request doc, never a query param): reports (report-generator / trigger endpoint), insights
+(judge / agent-authored via `sourceReportId`), demoted retry attempts (`insertHistoricalRun`),
+codebase-revisions, and profile-versions. The DoD asserts these land in the right project.
+
+### Migration & rollout (migrate-then-enforce)
+
+Migration **`025-create-projects`** creates the `projects` collection, seeds **one ordinary
+initial project** (fresh `_id`, human name via optional `SCOPE_INITIAL_PROJECT_NAME`, **no
+`isDefault` flag**), backfills `projectId` on 100% of existing scoped docs, backfills
+`keyId`/`ref` on the special collections, and swaps the unique indexes to their
+project-scoped form (degrading to non-unique on Cosmos — see `db.md`). It is idempotent and
+RU-paced.
+
+Making `?projectId=` **required** is a breaking change for every existing caller, so rollout is
+strictly ordered **migrate-then-enforce**:
+
+1. **Deploy migration 025 first** — backfills `projectId` on all pre-existing docs, so there is
+   never an "unset" window and no read-time coalescing is needed. Any doc still missing
+   `projectId` afterward is a bug to surface, not silently bucketed.
+2. **Ship the `projectId`-aware clients** (API + CLI + Portal) together.
+3. **Then enforce.** Because all first-party callers ship in this monorepo and deploy together
+   (there are no external API consumers), enforcement is **hard-400 from day one** — a scoped
+   request without a resolvable project is rejected immediately rather than run through a
+   soft log-and-warn window. Deploying the migration before the enforcing API guarantees live
+   traffic never 400s on already-stored data.
+
+### Per-project catalog isolation (migration 026)
+
+Migration 025 tagged every catalog with `projectId`, but four **catalog families** were still
+keyed/deduped **globally** by their human slug/id, so the same slug couldn't exist in two projects
+(a second create returned 409). Migration **`026-isolate-catalogs-per-project`** finishes the job
+for these four (**MCP servers are deferred** — see below):
+
+| Family | Global key (before) | Per-project key (after) | Create semantics |
+|--------|---------------------|-------------------------|------------------|
+| `skills` | `_id = "{source}/{skillName}"` | `_id` = UUID + `slug`, unique `{projectId, slug}` | scoped **upsert** (200 existing / 201 new) |
+| `extensions` | `_id = "{publisher}.{name}"` | `_id` = UUID + `slug`, unique `{projectId, slug}` | scoped **upsert** (200 / 201) |
+| `criteria` | unique `{id}` + global `findOne({id})` | unique `{projectId, id}` | scoped **create** (real same-project 409) |
+| `prompt-features` | unique `{id}` + global `findOne({id})` | unique `{projectId, id}` | scoped **create** (real same-project 409) |
+
+Key properties:
+
+- **API-observable ids are unchanged.** Skills/extensions still return `id = slug ?? _id`, so URLs
+  and payloads stay identical. Only the internal `_id` and the dedup scope change.
+- **Slug lookups are project-scoped.** `resolveSkillBySlug` / the extension equivalent match
+  `{projectId, slug}` with a legacy `{projectId, _id}` fallback for un-backfilled rows. Per the
+  **by-id invariant** above, a by-slug get/edit/soft-delete **without** a resolvable `projectId`
+  is rejected with **400** — there is no global `findOne({_id: slug})` fallback. The Portal/CLI
+  flag these slug point-reads as hard-scoped so project-switching resolves the right copy and a
+  project-less deep-link errors clearly.
+- **criteria** additionally confines DAG `dependsOn` resolution to the criterion's own `projectId`,
+  so a dependency edge can never cross projects.
+- **Judge threading.** Because criteria are now project-scoped, the judge threads the **run's
+  `projectId`** (from the request body) into `getCriteriaProvider(projectId)`, which binds a
+  per-project `RestApiCriteriaProvider` that appends `?projectId=` to its criteria fetches; the API
+  criteria route then resolves them via `getCriteriaStore(projectId)`. This mirrors the
+  skill-resolution precedent.
+
+Migration 026 is **additive and non-destructive** (no deletes, no `_id` changes): it backfills
+`slug = _id` on skills/extensions, swaps the `{id}` unique index to `{projectId, id}` on
+criteria/prompt-features, pre-asserts no composite duplicates, and reuses 025's Cosmos-safe helpers
+(so the composite indexes degrade to non-unique on Cosmos, unique on real MongoDB). `down()` unsets
+`slug`; index changes are log-only.
+
+### Per-project entity keying (migration 027)
+
+Migration **`027-uuid-keys-mcp-profileversions`** picks up the MCP family 026 deferred and extends
+the uniform **"opaque UUID `_id` + human reference key + project-scoped resolution"** model to two
+more entities, and deletes one dead collection:
+
+| Entity | `_id` (before) | After | Reference key (unchanged) | Per-project index |
+|--------|----------------|-------|---------------------------|-------------------|
+| `mcp-servers` | slug | UUID `_id` + `slug` | `slug` (in `requests.mcpServers[]`, `profileVersion.mcpServers[]`, `mcp-secrets.mcpId`) | `{projectId, slug}` |
+| `profile-versions` | `"<profileId>@<version>"` | UUID `_id` + `ref` | `ref` (in `requests.profileVersionId`) | `{projectId, ref}` |
+| `prompt-feature-extractions` | ObjectId | **collection dropped** (dead code) | — | — |
+
+Key properties:
+
+- **Reference-key formats do not change** — only *primary keys* and *resolution filters* change, so
+  no referencing collection is rewritten. Cross-entity references keep holding the human key
+  (`requests.mcpServers[]` and `mcp-secrets.mcpId` keep the **slug**; `requests.profileVersionId`
+  keeps the composite `ref`).
+- **API-observable ids are unchanged** (governing principle: the API always surfaces the human key,
+  the UUID `_id` is internal only). `mcp-servers` still returns `id = slug`; `profile-versions`
+  surface `ref`. This **removes the cross-project 409** on `mcp-servers` (slug reusable per project)
+  and makes slug/ref resolution a cross-project isolation guardrail.
+- **Worker threading.** Run preparation resolves each MCP server by `{projectId, slug}`
+  (`McpServerClient.resolveServers(projectId, slugs)`) and hydrates its secret by
+  `{projectId, mcpId, name}` (`McpSecretClient.resolveSecrets(projectId, slug)`), threaded from
+  `requestDoc.projectId` in `queue-processor.ts`. The gateway keeps naming servers by **`config.slug`**
+  (`mapToMcpServerConfig` sets `config.slug = data.slug ?? data._id`) — see
+  [mcp-gateway.md](mcp-gateway.md) for the cross-project isolation invariant.
+- **MCP secrets** are project-scoped in the **Token Manager's own DB** (`{projectId, mcpId, name}`
+  index + startup backfill), not migration 027 — see [token-manager.md](token-manager.md).
+
+Migration 027 is **additive and non-destructive** for the surviving entities (no `_id` rewrite of
+existing rows; only new rows get a UUID `_id`): it backfills `slug`/`ref` from the legacy `_id`,
+pre-asserts no composite duplicates, reuses 025's Cosmos-safe helpers (composite indexes degrade to
+non-unique on Cosmos, unique on real MongoDB), and its `down()` unsets `slug`/`ref` (index changes
+log-only). The dead `prompt-feature-extractions` drop is guarded against a missing namespace.
+
 ## Judge Pipeline
 
 The judge evaluates coding agent output against criteria. Two strategies are supported:
@@ -312,6 +507,16 @@ Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API su
 
 The Portal desktop shell uses a persistent left navigation sidebar. It defaults to the compact icon rail, and users can expand it to show navigation labels; the choice is stored in `localStorage` under `scope:layout:sidebar-expanded`. Mobile navigation remains a sheet-based menu with labels always visible.
 
+### Project scoping (selected project, no default)
+
+The Portal mirrors the API's fail-fast model: it holds a **selected project** (never a default) and injects it as `?projectId=` on every scoped request.
+
+- **`contexts/ProjectContext.tsx`** persists the selection to `localStorage` (`scope:selectedProject`) and exposes `useProjectContext()` / `hasProject`. A module-level holder (`lib/project-scope.ts`) lets the non-hook `lib/api.ts` chokepoint read the current id; scoped methods are flagged `{ scoped: true }` and prepend `?projectId=` inside the shared `lib/api-client.ts` facade, throwing `ProjectRequiredError` when none is selected (no silent cross-project fetch).
+- **`components/ProjectSwitcher.tsx`** is the header control (beside `ThemeToggle`) that lists projects, switches the active one — invalidating all scoped queries via `hooks/useSelectProject.ts`, since query keys don't embed `projectId` — and offers inline create + a link to `/projects`. Its presentational `ProjectSwitcherView` is story/play-tested.
+- **`components/ProjectGate.tsx`** guards scoped routes: when no project is selected it renders a first-run pick/create screen (`ProjectFirstRunView`) instead of firing a scoped request that would 400. Point-read detail routes (resolve by `_id`) and unscoped areas (agents, models, secrets, admin, `/projects`) stay ungated. The index route `/` is served by **`components/HomeRoute.tsx`**, the unscoped **home**: on entry it clears any active project (`useSelectProject(undefined)`, which also resets scoped query caches) and renders the picker, then forwards to `/statistics` once the user picks a project. Reaching `/` by any means (the logo, a typed URL, the back button, a bookmark) therefore de-scopes; there is no default project.
+- **`components/Layout.tsx`** hides project-scoped sidebar entries until a project is in use: with no selection (`hasProject === false`) only the global entries render (Projects, the Platform group of Agents/Models/Secrets, and the footer), while the New Run CTA and the Activity / Library / Resources / Dev groups appear once a project is selected. This keeps the first-run sidebar from advertising links that would only hit the `ProjectGate`. Scoped-vs-global mirrors `App.tsx` (`<ProjectGate>`-wrapped routes are scoped). The **Scope logo** doubles as home: it is a plain link to `/`, so clicking it lands on `HomeRoute`, which does the de-scoping — no click-handler side effect and no open-in-new-tab special-casing.
+- **`pages/Projects.tsx`** (`/projects`, unscoped) manages projects themselves — create / rename / describe / soft-delete. Delete always succeeds (**204**), even for a non-empty project, because it is a reversible soft-delete. A **Show deleted** toggle lists soft-deleted projects (`GET /projects?includeDeleted=true`) and offers a **Restore** action per row (`POST /projects/:id/restore`); deleted projects are not selectable until restored. The same affordances exist in the CLI (`project list --include-deleted`, `project restore <id>`).
+
 ### Hover-preview + navigate badges
 
 Criteria and task prompts appear across many surfaces (Run Detail, Runs list and its
@@ -365,7 +570,7 @@ See [`ENV_VARIABLES.md`](../../scope-mt-app/ENV_VARIABLES.md) for related config
 
 ## Statistics Analysis
 
-The Statistics page (`apps/portal/src/pages/Statistics.tsx`) is backed by `GET /api/v1/analysis` (`computeAnalysis` in `apps/api/src/analysis.ts`), which aggregates pass rates, iteration distribution, and duration stats across runs. It supports two independent, composable filters via query params:
+The Statistics page (`apps/portal/src/pages/Statistics.tsx`) is backed by `GET /api/v1/analysis` (`computeAnalysis` in `apps/api/src/analysis.ts`), which aggregates pass rates, iteration distribution, and duration stats across runs. The endpoint is **project-scoped**: it requires `?projectId=` (400 if absent) and aggregates only the selected project's done runs, so Statistics is a per-project dashboard (the Portal gates it behind project selection). It supports two independent, composable filters via query params:
 
 | Param | Filter | Semantics |
 |-------|--------|-----------|

@@ -175,11 +175,6 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
     console.log(`${label('Error:')}          ${errorText(rs.error)}`);
   }
 
-  // Prompt feature extraction
-  if (run.promptFeatureExtractionId) {
-    console.log(`${label('Prompt Features:')} ${value(run.promptFeatureExtractionId)}`);
-  }
-
   // Soft-deleted
   if (run.deletedAt) {
     console.log(`${label('Deleted:')}        ${warnBanner(new Date(run.deletedAt).toLocaleString())}`);

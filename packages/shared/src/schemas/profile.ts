@@ -36,6 +36,7 @@ export const ProfileResponseSchema = z
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     deletedAt: z.coerce.date().optional(),
+    projectId: z.string(),
   })
   .openapi("ProfileResponse");
 
@@ -52,6 +53,7 @@ export const ProfileVersionResponseSchema = z
     skillRevisions: z.array(z.string()).optional(),
     extensions: z.array(z.string()).optional(),
     createdAt: z.coerce.date(),
+    projectId: z.string(),
   })
   .openapi("ProfileVersionResponse");
 
@@ -65,5 +67,6 @@ export const ProfileWithVersionResponseSchema = z
     updatedAt: z.coerce.date().optional(),
     deletedAt: z.coerce.date().optional(),
     version: ProfileVersionResponseSchema,
+    projectId: z.string(),
   })
   .openapi("ProfileWithVersionResponse");

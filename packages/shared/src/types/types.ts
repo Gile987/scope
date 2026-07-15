@@ -267,6 +267,7 @@ export interface OsInfo {
 // Request document stored in MongoDB
 export interface RequestDocument {
   _id: string;  // UUID as _id (for CosmosDB sharding compatibility)
+  projectId: string;             // FK → ProjectDocument._id (immutable scope; set at submit)
   scenario: Scenario;            // The task + criteria (source of truth)
   workerType: string;
   model?: string;              // Model selected for this run
@@ -279,7 +280,6 @@ export interface RequestDocument {
   persona?: Persona;             // Original persona object for traceability
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
   taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → TaskPromptDocument._id)
-  promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
   /**
   * FK → TaskPromptDocument._id of an AGENTS.md-typed prompt to deliver into
   * the agent's workspace for this run. When set, the worker writes the
@@ -429,6 +429,7 @@ export interface RunState {
  */
 export interface RunHistoryDocument extends RunState {
   requestId: string;                        // FK → RequestDocument._id
+  projectId: string;                        // FK → ProjectDocument._id (denormalized from request)
 }
 
 /**
@@ -462,6 +463,9 @@ export interface WorkerProcessorOptions {
   model?: string;
   /** Reasoning effort level to apply (e.g. "low", "medium", "high"). */
   reasoningEffort?: string;
+  /** Project scope of the run. Threaded through so workers that resolve
+   *  per-project skill revisions (by ref) hit the right project's copy. */
+  projectId?: string;
   mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
   skillConfigs?: SkillConfig[];          // Resolved skill configurations for prompt injection
   extensionConfigs?: ExtensionConfig[];  // Resolved VS Code extension configurations for runtime installation
@@ -632,6 +636,7 @@ export interface FeedbackConfig {
 
 // Criteria document stored in MongoDB (extends CriteriaConfig with DB metadata)
 export interface CriteriaDocument extends CriteriaConfig {
+  projectId: string;  // FK → ProjectDocument._id (immutable scope)
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;  // Soft-delete timestamp
@@ -655,6 +660,7 @@ export interface Reporter {
 export interface ReportDocument {
   _id: string;           // UUID
   requestId: string;     // FK → RequestDocument._id
+  projectId: string;     // FK → ProjectDocument._id (denormalized from request)
   templateId?: string;   // FK → ReportTemplateDocument.id (slug of template that generated this report)
   reporter?: Reporter;   // Set by the worker when it picks up the job
   content?: string;      // Generated markdown report
@@ -713,6 +719,7 @@ export interface ReportTemplateSystemPrompt {
 /** Report template document stored in MongoDB */
 export interface ReportTemplateDocument {
   _id: string;                           // Auto-generated UUID
+  projectId: string;                     // FK → ProjectDocument._id (immutable scope)
   id: string;                            // Human-readable slug (e.g. "default", "failure-analysis")
   name: string;                          // Display name
   description?: string;
@@ -738,6 +745,7 @@ export interface InsightReference {
 /** Insight document stored in MongoDB */
 export interface InsightDocument {
   _id: string;           // UUID
+  projectId: string;     // FK → ProjectDocument._id (from source report, or ?projectId= if user-created)
   title: string;         // Short summary (one line)
   /** Markdown-formatted detailed observation */
   description: string;
@@ -760,7 +768,16 @@ export interface InsightDocument {
 
 /** Task prompt document stored in MongoDB. Immutable — text cannot be changed after creation. */
 export interface TaskPromptDocument {
-  _id: string;                          // UUIDv5 (content-addressed; see computePromptId)
+  _id: string;                          // Fresh UUID (per-project copy)
+  projectId: string;                    // FK → ProjectDocument._id (immutable scope; per-project copy)
+  /**
+   * Content-address key: `computePromptId(type, text)`. Stable across projects
+   * for identical `(type, text)`, so the same prompt text yields the same
+   * `keyId` in every project. Uniqueness is enforced per-project via a
+   * `{ projectId, keyId }` unique index — distinct projects get distinct `_id`s
+   * for the same `keyId`.
+   */
+  keyId: string;
   /**
    * Inline prompt body. Present when the body is small enough to store in
    * Mongo (≤ PROMPT_INLINE_MAX_BYTES). Mutually exclusive with
@@ -801,6 +818,7 @@ export interface PromptFeatureConfig {
 
 /** Prompt feature document stored in MongoDB (extends PromptFeatureConfig with DB metadata) */
 export interface PromptFeatureDocument extends PromptFeatureConfig {
+  projectId: string;  // FK → ProjectDocument._id (immutable scope)
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;  // Soft-delete timestamp
@@ -818,18 +836,6 @@ export interface SuggestedPromptFeature {
   suggestedId: string;
   behavior: string;
   prompt: string;
-}
-
-/** Stored extraction result — maps a task prompt to its detected features */
-export interface PromptFeatureExtraction {
-  _id?: string;
-  taskText: string;
-  taskTextHash?: string;
-  promptFeatureResults: PromptFeatureResult[];
-  suggestedFeatures?: SuggestedPromptFeature[];
-  extractedAt: Date;
-  model?: string;
-  cached?: boolean;
 }
 
 // =============================================================================

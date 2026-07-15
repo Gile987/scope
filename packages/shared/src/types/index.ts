@@ -7,3 +7,4 @@ export * from "./skill.js";
 export * from "./codebase.js";
 export * from "./extension.js";
 export * from "./profile.js";
+export * from "./project.js";

@@ -184,7 +184,6 @@ export function createAllMockDependencies() {
   const runsCollection = createMockCollection();
   const criteriaCollection = createMockCollection();
   const promptFeatureCollection = createMockCollection();
-  const promptFeatureExtractionCollection = createMockCollection();
   const reportCollection = createMockCollection();
   const agentCollection = createMockCollection();
   const modelCollection = createMockCollection();
@@ -213,7 +212,6 @@ export function createAllMockDependencies() {
     runsCollection,
     criteriaCollection,
     promptFeatureCollection,
-    promptFeatureExtractionCollection,
     reportCollection,
     agentCollection,
     modelCollection,
@@ -239,7 +237,6 @@ export function createAllMockDependencies() {
     runsCollection: Collection;
     criteriaCollection: Collection;
     promptFeatureCollection: Collection;
-    promptFeatureExtractionCollection: Collection;
     reportCollection: Collection;
     agentCollection: Collection;
     modelCollection: Collection;

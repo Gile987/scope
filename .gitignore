@@ -24,3 +24,4 @@ test-snapshots/
 plan.md
 plan.md
 tmp/
+.backups/

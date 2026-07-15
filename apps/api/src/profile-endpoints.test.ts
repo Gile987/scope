@@ -6,6 +6,8 @@ import request from "supertest";
 import { app, _injectTestDependencies } from "./index.js";
 import { createAllMockDependencies, createMockCollection } from "./test-helpers.js";
 
+const TEST_PROJECT_ID = "test-project";
+
 // Stub checkMigrations before it can be imported by index.ts
 vi.mock("db-migrations/check-migrations", () => ({
   checkMigrations: vi.fn().mockResolvedValue({
@@ -59,7 +61,7 @@ describe("Profile API Endpoints", () => {
       versionCol.insertOne = vi.fn().mockResolvedValue({ insertedId: "pv-new" });
 
       const res = await request(app)
-        .post("/api/v1/profiles")
+        .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           name: "Test Profile",
           workerType: "coder-acp-copilot",
@@ -91,7 +93,7 @@ describe("Profile API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/profiles")
+        .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           name: "With Skills",
           workerType: "coder-acp-copilot",
@@ -122,7 +124,7 @@ describe("Profile API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/profiles")
+        .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           name: "Pinned Skills",
           workerType: "coder-acp-copilot",
@@ -132,13 +134,13 @@ describe("Profile API Endpoints", () => {
 
       expect(res.status).toBe(201);
       expect(res.body.version.skillRevisions).toEqual(["github/org/my-skill@abc1234"]);
-      expect(mocks.skillRevisionStore.getByRef).toHaveBeenCalledWith("github/org/my-skill@abc1234");
+      expect(mocks.skillRevisionStore.getByRef).toHaveBeenCalledWith(TEST_PROJECT_ID, "github/org/my-skill@abc1234");
       expect(mocks.skillResolver.resolve).not.toHaveBeenCalled();
     });
 
     it("rejects missing name", async () => {
       const res = await request(app)
-        .post("/api/v1/profiles")
+        .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           workerType: "coder-acp-copilot",
           model: "gpt-4o",
@@ -149,7 +151,7 @@ describe("Profile API Endpoints", () => {
 
     it("rejects missing model", async () => {
       const res = await request(app)
-        .post("/api/v1/profiles")
+        .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           name: "No Model",
           workerType: "coder-acp-copilot",
@@ -160,7 +162,7 @@ describe("Profile API Endpoints", () => {
 
     it("rejects extensions on non-vscode worker", async () => {
       const res = await request(app)
-        .post("/api/v1/profiles")
+        .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           name: "Bad Combo",
           workerType: "coder-acp-copilot",
@@ -218,7 +220,7 @@ describe("Profile API Endpoints", () => {
         createdAt: new Date(),
       });
 
-      const res = await request(app).get("/api/v1/profiles");
+      const res = await request(app).get(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`);
 
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
