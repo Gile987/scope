@@ -118,6 +118,9 @@ export interface RunState {
 export interface Run {
   _id: string;
   id: string;
+  /** Owning project id (immutable scope). Returned by the API for every run;
+   *  used to auto-scope the app when a run URL is opened directly. */
+  projectId?: string;
   scenario?: Scenario;
   workerType: string;
   model?: string;

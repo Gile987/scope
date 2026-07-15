@@ -44,6 +44,7 @@ import { useState, useMemo, useEffect, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { RunState, LogEvent } from "@/types";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
+import { useAutoScopeProject } from "@/hooks/useAutoScopeProject";
 import { getRetryButtonState } from "@/components/RetryButton";
 
 /** A compact labeled stat: a micro uppercase label above its value. */
@@ -203,6 +204,24 @@ function CriteriaGateTabs({
   );
 }
 
+/**
+ * Query-key roots on the Run Detail page that are **unscoped** — plain
+ * point-reads / nested lists keyed by a stable id (run id, profile id, task
+ * prompt id). Their data is identical regardless of the selected project, so we
+ * ask {@link useSelectProject} to preserve them when auto-scoping to the run's
+ * project, avoiding a needless loading flash on this page. The one scoped query
+ * here (`report-templates`) is deliberately excluded so it refetches under the
+ * newly selected project.
+ */
+const RUN_DETAIL_UNSCOPED_QUERY_ROOTS = [
+  "run",
+  "run-attempts",
+  "run-reports",
+  "profile",
+  "task-prompt",
+  "task-prompt-content",
+] as const;
+
 export function RunDetail() {
   const { id, tab } = useParams<{ id: string; tab?: string }>();
   const navigate = useNavigate();
@@ -230,6 +249,15 @@ export function RunDetail() {
       return false;
     },
   });
+
+  // Scope the whole app to this run's project when the run URL is opened
+  // directly (shared link, bookmark, typed URL). The run route is intentionally
+  // ungated, so otherwise "Back to runs", the nav, and scoped pieces of this
+  // page (e.g. report-template names) would point at the wrong project. We
+  // preserve this page's own unscoped, id-keyed queries across the switch to
+  // avoid a needless loading flash; the scoped report-templates query is left to
+  // refetch under the newly selected project.
+  useAutoScopeProject(id, run?.projectId, RUN_DETAIL_UNSCOPED_QUERY_ROOTS);
 
   const { data: profile } = useQuery({
     queryKey: ["profile", run?.profileId],
