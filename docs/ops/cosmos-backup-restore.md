@@ -4,10 +4,10 @@ Two pnpm scripts snapshot a Cosmos DB for MongoDB database to a local archive an
 restore it back. They exist so a risky deploy or data migration can be reversed:
 take a snapshot before rollout, and restore from it if the data ends up wrong.
 
-- `pnpm db:dump` -> `scripts/cosmos-dump.sh`
-- `pnpm db:restore` -> `scripts/cosmos-restore.sh`
+- `pnpm db:dump` -> `scripts/cosmos/dump.ts`
+- `pnpm db:restore` -> `scripts/cosmos/restore.ts`
 
-Both shell out to the MongoDB Database Tools (`mongodump` / `mongorestore`) and
+Both TypeScript scripts shell out to the MongoDB Database Tools (`mongodump` / `mongorestore`) and
 use the Azure CLI only for the control plane (connection string, collection
 list). The connection string is fetched into an in-memory variable and is never
 printed, written to disk, or passed on a command line.
@@ -24,7 +24,7 @@ from a laptop cannot connect and fails with:
 ```
 
 So the normal way to run these scripts against a Scope database is **in-cluster**
-with `--via-kubectl`: the script launches an ephemeral `mongo:4.2` pod in a
+with `--via-kubectl`: the restore/dump script launches an ephemeral `mongo:4.2` pod in a
 cluster whose VNet has the private endpoint, runs the tool there, and streams the
 archive back to your machine. The Azure control-plane calls (`az ...`) still run
 locally, since that API is public.
@@ -48,7 +48,7 @@ that is already allowed to reach the account (e.g. a VNet-joined host).
   the chosen namespace (default `default`).
 - For the native / Docker runners (allowed-network case): **mongodump /
   mongorestore** via `brew install mongodb-database-tools`, or Docker running (the
-  scripts fall back to the `mongo:4.2` image, which bundles the legacy tools).
+  TypeScript scripts fall back to the `mongo:4.2` image, which bundles the legacy tools).
 
 ## Environments
 
@@ -113,7 +113,7 @@ pnpm db:restore -- --env int --via-kubectl --archive path/to.archive.gz
 pnpm db:restore -- --env int --via-kubectl --execute
 pnpm db:restore -- --env int --via-kubectl --execute --to-database scope-mt-recovered
 
-# Execute in-place (write back into the source db, upsert by _id, no drop):
+# Execute in-place (write back into the source db, insert documents, no drop):
 pnpm db:restore -- --env int --via-kubectl --execute --in-place
 
 # DANGER: drop + recreate collections in place (see shard-key caveat):
@@ -126,7 +126,7 @@ Behaviour matrix:
 |-------|---------|--------|--------------------|
 | (none) | no (dry run) | new db | no |
 | `--execute` | yes | `<db>-restore-<UTC>` | no |
-| `--execute --in-place` | yes | source db | no (upsert by `_id`) |
+| `--execute --in-place` | yes | source db | no (inserts documents; existing `_id`s are skipped as duplicates) |
 | `--execute --in-place --force-drop` | yes | source db | **yes** |
 
 Writing modes prompt for a typed `yes` confirmation (skip with `-y`/`--yes`). If
@@ -134,7 +134,7 @@ the archive has a manifest, its sha256 is checked before restoring.
 
 ## Cosmos-specific caveats
 
-- **RU throttling (429 / error 16500).** Both scripts use single-collection
+- **RU throttling (429 / error 16500).** Both TypeScript scripts use single-collection
   parallelism; the dump retries up to 3 times with backoff. If you still get
   throttled, temporarily raise the collection's autoscale RU during the operation
   (see [Database Collection Scaling](../architecture/db-collection-scaling.md)).
