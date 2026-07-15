@@ -106,6 +106,13 @@ const DEFAULT_JUDGE_CLIENT_RETRIES = 2;
  * idempotent, so retrying is safe. We deliberately do NOT retry version
  * mismatches: those are a deployment/version problem that won't self-heal
  * within the retry window.
+ *
+ * For transport-level failures, undici throws `TypeError: fetch failed` where
+ * `error.message` is literally just `"fetch failed"` and the real reason (e.g.
+ * `ECONNRESET`, `socket hang up`) lives in `error.cause` (its `.message` and/or
+ * `.code`). We therefore match `"fetch failed"` explicitly and fold the cause's
+ * message and code into the searched haystack so those transient transport
+ * failures become retryable. See scope #1317.
  */
 export function isRetryableJudgeError(error: unknown): boolean {
   if (!error) return false;
@@ -113,15 +120,23 @@ export function isRetryableJudgeError(error: unknown): boolean {
     return (error.httpStatus ?? 0) >= 500 && !error.isVersionMismatch;
   }
   const msg = error instanceof Error ? error.message : String(error);
+  const cause = error instanceof Error ? error.cause : undefined;
+  const causeMsg = cause instanceof Error ? cause.message : cause ? String(cause) : "";
+  const causeCode =
+    cause && typeof cause === "object" && "code" in cause
+      ? String((cause as { code?: unknown }).code)
+      : "";
+  const haystack = `${msg} ${causeMsg} ${causeCode}`;
   return (
-    msg.includes("The operation was aborted") ||
-    msg.includes("TimeoutError") ||
-    msg.includes("abort") ||
-    msg.includes("ECONNRESET") ||
-    msg.includes("ECONNREFUSED") ||
-    msg.includes("ETIMEDOUT") ||
-    msg.includes("socket hang up") ||
-    msg.includes("network")
+    haystack.includes("fetch failed") ||
+    haystack.includes("The operation was aborted") ||
+    haystack.includes("TimeoutError") ||
+    haystack.includes("abort") ||
+    haystack.includes("ECONNRESET") ||
+    haystack.includes("ECONNREFUSED") ||
+    haystack.includes("ETIMEDOUT") ||
+    haystack.includes("socket hang up") ||
+    haystack.includes("network")
   );
 }
 
