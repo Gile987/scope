@@ -16,6 +16,7 @@
 #   pnpm db:restore -- --execute --in-place --force-drop   # DANGER: drop+recreate collections
 #   pnpm db:restore -- --env int --via-kubectl       # run inside the cluster VNet
 #                                                    # (required: Cosmos is private-only)
+#   pnpm db:restore -- --execute --batch-size 1      # pace inserts to dodge Cosmos RU 429s
 #
 # Prerequisites:
 #   - Azure CLI logged in (az login) with access to the target account
@@ -30,6 +31,12 @@
 # Cosmos caveats:
 #   - Restoring into a NEW database relies on implicit collection creation. If
 #     the account disallows it, pre-provision the target collections first.
+#   - Large collections can trip RU throttling (server error 16500 / 429) on
+#     serverless or low-RU accounts. mongorestore does not honour Cosmos'
+#     RetryAfterMs, so pass --batch-size 1 (or a small value) to pace inserts.
+#     Restore inserts documents (it does not upsert), so re-running over an
+#     already-populated target logs duplicate-key errors for existing _ids;
+#     prefer dropping the target db and restoring once with --batch-size.
 #   - --force-drop deletes and recreates collections; a Cosmos collection's
 #     shard key is defined via the control plane (deploy manifests) and can be
 #     lost. Re-apply deploy/base/mongodb-collections/*.yaml afterwards if used.
@@ -54,6 +61,7 @@ IN_PLACE=0
 FORCE_DROP=0
 ASSUME_YES=0
 OUT_DIR="${BACKUP_DIR:-}"
+BATCH_SIZE=""          # optional mongorestore --batchSize (pace inserts vs RU 429s)
 EXPECTED_SUBSCRIPTION_ID="f7de4384-8753-4910-95d7-650b9d23cb6f" # "Project Scope"
 DOCKER_IMAGE="mongo:4.2"
 
@@ -83,6 +91,7 @@ while [[ $# -gt 0 ]]; do
     --archive)         ARCHIVE="$2"; shift 2 ;;
     --subscription)    SUBSCRIPTION="$2"; shift 2 ;;
     --out)             OUT_DIR="$2"; shift 2 ;;
+    --batch-size)      BATCH_SIZE="$2"; shift 2 ;;
     --docker)          FORCE_DOCKER=1; shift ;;
     --via-kubectl)     VIA_KUBECTL=1; shift ;;
     --kube-context)    KUBE_CONTEXT="$2"; shift 2 ;;
@@ -180,7 +189,7 @@ fi
 # --- Summarize the plan -------------------------------------------------------
 MODE="DRY RUN (no writes)"
 [[ "$EXECUTE" -eq 1 ]] && MODE="EXECUTE (writes data)"
-DROP_DESC="no (documents are upserted by _id)"
+DROP_DESC="no (documents inserted; existing _ids skipped as duplicates)"
 [[ "$FORCE_DROP" -eq 1 ]] && DROP_DESC="YES - collections dropped then recreated"
 
 echo "=== Cosmos DB restore ==="
@@ -229,6 +238,7 @@ URI="$(az cosmosdb keys list -n "$ACCOUNT" -g "$RESOURCE_GROUP" \
 # --- Build mongorestore args --------------------------------------------------
 RARGS=( --gzip --numParallelCollections=1 --numInsertionWorkersPerCollection=1
         --nsInclude="${DATABASE}.*" --nsFrom="${DATABASE}.*" --nsTo="${TO_DATABASE}.*" )
+[[ -n "$BATCH_SIZE" ]] && RARGS+=( --batchSize="$BATCH_SIZE" )
 [[ "$EXECUTE" -eq 1 ]] || RARGS+=( --dryRun )
 [[ "$FORCE_DROP" -eq 1 ]] && RARGS+=( --drop )
 
@@ -260,8 +270,11 @@ run_restore() {
   elif [[ "$RUNNER" == docker ]]; then
     local dir base
     dir="$(dirname "$ARCHIVE")"; base="$(basename "$ARCHIVE")"
-    docker run --rm -e MURI="$URI" -v "$dir":/dump "$DOCKER_IMAGE" \
-      mongorestore --uri "$MURI" --archive="/dump/$base" "${RARGS[@]}" 2>&1 | tee "$RLOG"
+    # URI is passed via the container env (never on argv); it is expanded inside
+    # the container shell where MURI is defined, not by the host shell.
+    docker run --rm -e MURI="$URI" -e ARCHIVE_BASE="$base" -v "$dir":/dump "$DOCKER_IMAGE" \
+      sh -c 'exec mongorestore --uri "$MURI" --archive="/dump/$ARCHIVE_BASE" "$@"' \
+      _ "${RARGS[@]}" 2>&1 | tee "$RLOG"
     return "${PIPESTATUS[0]}"
   else
     mongorestore --uri "$URI" --archive="$ARCHIVE" "${RARGS[@]}" 2>&1 | tee "$RLOG"
