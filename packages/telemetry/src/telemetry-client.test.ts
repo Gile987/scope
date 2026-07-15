@@ -63,7 +63,7 @@ vi.mock("@opentelemetry/sdk-logs", () => ({
   BatchLogRecordProcessor: vi.fn(),
 }));
 
-const getNodeAutoInstrumentationsMock = vi.fn(() => [{ name: "mock-instrumentation" }]);
+const getNodeAutoInstrumentationsMock = vi.fn((..._args: unknown[]) => [{ name: "mock-instrumentation" }]);
 vi.mock("@opentelemetry/auto-instrumentations-node", () => ({
   getNodeAutoInstrumentations: (...args: unknown[]) => getNodeAutoInstrumentationsMock(...args),
 }));
