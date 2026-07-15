@@ -16,6 +16,15 @@ import { ArrowLeft, Copy, Check, ExternalLink, ClipboardCopy, Lightbulb } from "
 import { formatDate } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
+import { useAutoScopeProject } from "@/hooks/useAutoScopeProject";
+
+/**
+ * Unscoped, id-keyed query roots on this page. Their data is identical
+ * regardless of the selected project, so we ask {@link useSelectProject} (via
+ * {@link useAutoScopeProject}) to preserve them when auto-scoping to the
+ * report's project, avoiding a needless loading flash.
+ */
+const REPORT_DETAIL_UNSCOPED_QUERY_ROOTS = ["report", "report-insights"] as const;
 
 export function ReportDetail() {
   const { id } = useParams<{ id: string }>();
@@ -34,6 +43,13 @@ export function ReportDetail() {
       return 5_000;
     },
   });
+
+  // Scope the app to this report's project when the report URL is opened
+  // directly (shared link, bookmark, typed URL). This route is intentionally
+  // ungated; without this the shell (nav, "Back to reports") points at whatever
+  // project was previously active. Preserve this page's own unscoped, id-keyed
+  // queries across the switch to avoid a needless loading flash.
+  useAutoScopeProject(id, report?.projectId, REPORT_DETAIL_UNSCOPED_QUERY_ROOTS);
 
   const { data: reportInsights = [] } = useQuery({
     queryKey: ["report-insights", id],

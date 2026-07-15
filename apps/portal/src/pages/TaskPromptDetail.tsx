@@ -16,6 +16,14 @@ import { formatDate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
 import { Badge } from "@/components/ui/badge";
 import { promptTypeLabel } from "@/lib/gates";
+import { useAutoScopeProject } from "@/hooks/useAutoScopeProject";
+
+/**
+ * Unscoped, id-keyed query roots on this page. Their data is identical
+ * regardless of the selected project, so we preserve them when auto-scoping to
+ * the task prompt's project (see {@link useAutoScopeProject}) to avoid a flash.
+ */
+const TASK_PROMPT_DETAIL_UNSCOPED_QUERY_ROOTS = ["task-prompt"] as const;
 
 export function TaskPromptDetail() {
   const { id } = useParams<{ id: string }>();
@@ -27,6 +35,10 @@ export function TaskPromptDetail() {
     queryFn: () => api.getTaskPrompt(id!),
     enabled: !!id,
   });
+
+  // Scope the app to this task prompt's project when the URL is opened directly.
+  // Route is ungated; preserve this page's own unscoped query to avoid a flash.
+  useAutoScopeProject(id, taskPrompt?.projectId, TASK_PROMPT_DETAIL_UNSCOPED_QUERY_ROOTS);
 
   const deleteMutation = useMutation({
     mutationFn: () => api.deleteTaskPrompt(id!),

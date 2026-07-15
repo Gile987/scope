@@ -17,6 +17,14 @@ import {
 import { formatDate, formatId } from "@/lib/utils";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
+import { useAutoScopeProject } from "@/hooks/useAutoScopeProject";
+
+/**
+ * Unscoped, id-keyed query roots on this page. Their data is identical
+ * regardless of the selected project, so we preserve them when auto-scoping to
+ * the insight's project (see {@link useAutoScopeProject}) to avoid a flash.
+ */
+const INSIGHT_DETAIL_UNSCOPED_QUERY_ROOTS = ["insight", "insight-reports"] as const;
 
 export function InsightDetail() {
   const { id } = useParams<{ id: string }>();
@@ -27,6 +35,10 @@ export function InsightDetail() {
     queryFn: () => api.getInsight(id!),
     enabled: !!id,
   });
+
+  // Scope the app to this insight's project when the URL is opened directly.
+  // Route is ungated; preserve this page's own unscoped queries to avoid a flash.
+  useAutoScopeProject(id, insight?.projectId, INSIGHT_DETAIL_UNSCOPED_QUERY_ROOTS);
 
   const { data: reports = [] } = useQuery({
     queryKey: ["insight-reports", id],

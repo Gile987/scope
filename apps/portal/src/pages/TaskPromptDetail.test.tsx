@@ -3,10 +3,12 @@
 
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import type { TaskPrompt } from "@/types";
+import { ProjectProvider } from "@/contexts/ProjectContext";
+import { getSelectedProjectId } from "@/lib/project-scope";
 
 const getTaskPrompt = vi.fn(async () => ({}) as TaskPrompt);
 
@@ -28,23 +30,27 @@ import { TaskPromptDetail } from "./TaskPromptDetail";
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  localStorage.clear();
 });
 
 function renderDetail() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={["/task-prompts/abc"]}>
-        <Routes>
-          <Route path="/task-prompts/:id" element={<TaskPromptDetail />} />
-        </Routes>
-      </MemoryRouter>
+      <ProjectProvider>
+        <MemoryRouter initialEntries={["/task-prompts/abc"]}>
+          <Routes>
+            <Route path="/task-prompts/:id" element={<TaskPromptDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </ProjectProvider>
     </QueryClientProvider>,
   );
 }
 
 const basePrompt: TaskPrompt = {
   _id: "abc",
+  projectId: "proj-x",
   text: "When creating REST APIs, use Typescript.",
   createdAt: "2026-01-01T00:00:00.000Z",
 };
@@ -76,5 +82,17 @@ describe("TaskPromptDetail heading adapts to prompt type", () => {
     renderDetail();
 
     expect(await screen.findByText(/Requirements Prompt/)).toBeTruthy();
+  });
+});
+
+describe("TaskPromptDetail auto-scopes to the prompt's project", () => {
+  it("selects the prompt's project when the URL is opened directly", async () => {
+    getTaskPrompt.mockResolvedValue({ ...basePrompt, type: "select" });
+
+    renderDetail();
+
+    // Once the prompt resolves, the app scopes to its owning project so the
+    // shell (nav, "Back to task prompts") points at the right project.
+    await waitFor(() => expect(getSelectedProjectId()).toBe("proj-x"));
   });
 });

@@ -25,6 +25,18 @@ import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MAX_ARCHIVE_UPLOAD_LABEL, validateArchiveFile } from "@/lib/codebaseUpload";
+import { useAutoScopeProject } from "@/hooks/useAutoScopeProject";
+
+/**
+ * Unscoped, id-keyed query roots on this page. Their data is identical
+ * regardless of the selected project, so we preserve them when auto-scoping to
+ * the codebase's project (see {@link useAutoScopeProject}) to avoid a flash.
+ */
+const CODEBASE_DETAIL_UNSCOPED_QUERY_ROOTS = [
+  "codebase",
+  "codebase-revisions",
+  "codebase-revision",
+] as const;
 
 export function CodebaseDetail() {
   const { id, revisionId } = useParams();
@@ -39,6 +51,10 @@ export function CodebaseDetail() {
     queryFn: () => api.getCodebase(id!),
     enabled: !!id,
   });
+
+  // Scope the app to this codebase's project when the URL is opened directly.
+  // Route is ungated; preserve this page's own unscoped queries to avoid a flash.
+  useAutoScopeProject(id, codebase?.projectId, CODEBASE_DETAIL_UNSCOPED_QUERY_ROOTS);
 
   const { data: revisions = [], isLoading: loadingRevisions } = useQuery({
     queryKey: ["codebase-revisions", id],

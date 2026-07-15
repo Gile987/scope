@@ -264,6 +264,9 @@ export interface SuggestedPromptFeature {
 
 export interface TaskPrompt {
   _id: string;                          // UUIDv5 content-addressed ID
+  /** Owning project id (immutable scope). Returned by the API; used to
+   *  auto-scope the app when a task-prompt URL is opened directly. */
+  projectId?: string;
   text?: string;                        // Full task prompt text (absent when blob-backed)
   type?: PromptType;                    // Gate id or "agents.md"; absent ⇒ legacy "select"
   contentBlobUrl?: string;              // Blob reference when body exceeds the inline threshold
@@ -432,6 +435,9 @@ export interface Reporter {
 export interface Report {
   _id: string;
   id: string;
+  /** Owning project id (immutable scope). Returned by the API; used to
+   *  auto-scope the app when a report URL is opened directly. */
+  projectId?: string;
   requestId: string;
   task?: string;
   reporter?: Reporter;
@@ -771,6 +777,9 @@ export interface InsightReference {
 export interface Insight {
   _id: string;
   id: string;
+  /** Owning project id (immutable scope). Returned by the API; used to
+   *  auto-scope the app when an insight URL is opened directly. */
+  projectId?: string;
   title: string;
   /** Markdown-formatted detailed observation */
   description: string;
@@ -893,6 +902,9 @@ export type CodebaseSourceType = "git" | "archive";
 /** A first-class codebase entity (mutable pointer/metadata). */
 export interface CodebaseDocument {
   _id: string;
+  /** Owning project id (immutable scope). Returned by the API; used to
+   *  auto-scope the app when a codebase URL is opened directly. */
+  projectId?: string;
   slug: string;
   name: string;
   description?: string;
@@ -985,6 +997,9 @@ export interface FeatureFlag {
 /** Profile identity document (mutable) */
 export interface ProfileDocument {
   _id: string;
+  /** Owning project id (immutable scope). Returned by the API; used to
+   *  auto-scope the app when a profile URL is opened directly. */
+  projectId?: string;
   name: string;
   description?: string;
   latestVersion: number;

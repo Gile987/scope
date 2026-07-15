@@ -26,6 +26,18 @@ import {
 import { parseSkillSpec } from "@/components/SkillPicker";
 import { KbdBadge } from "@/components/KbdBadge";
 import { toast } from "sonner";
+import { useAutoScopeProject } from "@/hooks/useAutoScopeProject";
+
+/**
+ * Unscoped, id-keyed query roots on this page. Their data is identical
+ * regardless of the selected project, so we preserve them when auto-scoping to
+ * the profile's project (see {@link useAutoScopeProject}) to avoid a flash.
+ */
+const PROFILE_DETAIL_UNSCOPED_QUERY_ROOTS = [
+  "profile",
+  "profile-version",
+  "profile-versions",
+] as const;
 
 export function ProfileDetail() {
   const { profileId, version: versionParam } = useParams<{ profileId: string; version?: string }>();
@@ -46,6 +58,10 @@ export function ProfileDetail() {
     queryFn: () => api.getProfile(profileId!),
     enabled: !!profileId,
   });
+
+  // Scope the app to this profile's project when the URL is opened directly.
+  // Route is ungated; preserve this page's own unscoped queries to avoid a flash.
+  useAutoScopeProject(profileId, profile?.projectId, PROFILE_DETAIL_UNSCOPED_QUERY_ROOTS);
 
   // If viewing a specific version, fetch that version
   const { data: specificVersion } = useQuery({
