@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Check, ChevronsUpDown, FolderKanban, Plus, Settings2 } from "lucide-react";
@@ -134,13 +134,27 @@ export function ProjectSwitcher({ className }: { className?: string }) {
   const selectProject = useSelectProject();
   const [createOpen, setCreateOpen] = useState(false);
 
-  const { data: projects = [], isLoading } = useQuery({
+  const { data: projects = [], isLoading, isSuccess } = useQuery({
     queryKey: ["projects"],
     // Wrap rather than pass `api.listProjects` directly: its optional
     // `{ includeDeleted? }` arg is a weak type, so react-query's
     // QueryFunctionContext isn't assignable to it (TS "no common properties").
     queryFn: () => api.listProjects(),
   });
+
+  // Self-heal a stale selection. `selectedProjectId` is persisted to
+  // localStorage, so it outlives the project it points at: the project may be
+  // deleted in another tab, or the whole database reset/restored underneath us.
+  // Once the list has loaded successfully, if the selected id is absent, clear
+  // it so the UI falls back to the "Select project" first-run picker instead of
+  // stranding on "Unknown project" and firing scoped requests with a ghost
+  // projectId (which the API rejects with 400). Gated on `isSuccess` so a failed
+  // or in-flight fetch never clears a still-valid selection.
+  useEffect(() => {
+    if (!isSuccess || !selectedProjectId) return;
+    const stillExists = projects.some((p) => projectId(p) === selectedProjectId);
+    if (!stillExists) selectProject(undefined);
+  }, [isSuccess, projects, selectedProjectId, selectProject]);
 
   return (
     <>

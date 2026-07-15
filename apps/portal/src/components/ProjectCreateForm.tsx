@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 
@@ -42,6 +42,7 @@ export function ProjectCreateForm({
   autoFocus = true,
   className,
 }: ProjectCreateFormProps) {
+  const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
 
@@ -52,6 +53,19 @@ export function ProjectCreateForm({
         ...(description.trim() ? { description: description.trim() } : {}),
       }),
     onSuccess: (project) => {
+      // Merge the new project into the shared ["projects"] cache before handing
+      // off to `onCreated`. Callers that select it right away (the switcher
+      // dialog, the first-run gate) go through `useSelectProject`, which
+      // deliberately *preserves* the projects list on switch — so without this
+      // upsert the freshly-selected id isn't in the list yet and the header
+      // switcher renders "Unknown project". Invalidate afterwards to reconcile
+      // with the server (ordering, server-only fields, etc.).
+      const newId = project.id ?? project._id;
+      queryClient.setQueryData<Project[]>(["projects"], (old) => {
+        if (!old) return [project];
+        return old.some((p) => (p.id ?? p._id) === newId) ? old : [...old, project];
+      });
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
       toast.success(`Project "${project.name}" created`);
       onCreated(project);
     },
