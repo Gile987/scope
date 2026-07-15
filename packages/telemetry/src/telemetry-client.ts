@@ -12,6 +12,7 @@ import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 
 let initialized = false;
 let enabled = false;
@@ -70,6 +71,14 @@ function initWithCollector(serviceName: string | undefined, endpoint: string): v
       exportIntervalMillis: 15_000,
     }),
     logRecordProcessors: [new BatchLogRecordProcessor({ exporter: logExporter })],
+    instrumentations: [
+      getNodeAutoInstrumentations({
+        // Disable noisy/low-value instrumentations to keep span volume sane
+        "@opentelemetry/instrumentation-fs": { enabled: false },
+        "@opentelemetry/instrumentation-dns": { enabled: false },
+        "@opentelemetry/instrumentation-net": { enabled: false },
+      }),
+    ],
   });
   nodeSDK.start();
 

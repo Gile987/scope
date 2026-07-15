@@ -51,4 +51,4 @@ COPY --from=builder /app/apps/workers/post-processor/dist ./apps/workers/post-pr
 
 WORKDIR /app/apps/workers/post-processor
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "telemetry/register", "dist/index.js"]

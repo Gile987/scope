@@ -47,4 +47,4 @@ COPY --from=builder /app/apps/model-scanners/anthropic/dist ./apps/model-scanner
 
 WORKDIR /app/apps/model-scanners/anthropic
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "telemetry/register", "dist/index.js"]

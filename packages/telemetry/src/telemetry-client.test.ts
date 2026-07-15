@@ -63,6 +63,11 @@ vi.mock("@opentelemetry/sdk-logs", () => ({
   BatchLogRecordProcessor: vi.fn(),
 }));
 
+const getNodeAutoInstrumentationsMock = vi.fn(() => [{ name: "mock-instrumentation" }]);
+vi.mock("@opentelemetry/auto-instrumentations-node", () => ({
+  getNodeAutoInstrumentations: (...args: unknown[]) => getNodeAutoInstrumentationsMock(...args),
+}));
+
 import {
   initTelemetry,
   isTelemetryEnabled,
@@ -83,6 +88,7 @@ describe("telemetry-client", () => {
     NodeSDKMock.mockClear();
     sdkStartMock.mockClear();
     sdkShutdownMock.mockClear();
+    getNodeAutoInstrumentationsMock.mockClear();
     delete process.env.APPLICATIONINSIGHTS_CONNECTION_STRING;
     delete process.env.TELEMETRY_SAMPLING_RATIO;
     delete process.env.OTEL_SERVICE_NAME;
@@ -172,6 +178,22 @@ describe("telemetry-client", () => {
       await shutdownTelemetry();
       expect(sdkShutdownMock).toHaveBeenCalledTimes(1);
       expect(shutdownAzureMonitor).not.toHaveBeenCalled();
+    });
+
+    it("configures auto-instrumentations with noisy modules disabled", () => {
+      process.env.OTEL_COLLECTOR_ENDPOINT = "http://otel-collector:4318";
+      initTelemetry("svc");
+      expect(getNodeAutoInstrumentationsMock).toHaveBeenCalledTimes(1);
+      const config = getNodeAutoInstrumentationsMock.mock.calls[0][0] as Record<string, unknown>;
+      expect(config["@opentelemetry/instrumentation-fs"]).toEqual({ enabled: false });
+      expect(config["@opentelemetry/instrumentation-dns"]).toEqual({ enabled: false });
+      expect(config["@opentelemetry/instrumentation-net"]).toEqual({ enabled: false });
+      // Verify instrumentations array was passed to NodeSDK
+      expect(NodeSDKMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          instrumentations: [[{ name: "mock-instrumentation" }]],
+        }),
+      );
     });
   });
 

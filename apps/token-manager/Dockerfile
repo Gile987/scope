@@ -56,4 +56,4 @@ EXPOSE 80
 ENV PORT=80
 ENV VALIDATION_INTERVAL_MS=300000
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "telemetry/register", "dist/index.js"]

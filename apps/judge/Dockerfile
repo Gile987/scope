@@ -72,4 +72,4 @@ ENV JUDGE_MAX_PARALLELISM=3
 ENV FEEDBACK_MAX_CRITERIA=1
 ENV FEEDBACK_DESCENDANT_GUARD=true
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "telemetry/register", "dist/index.js"]

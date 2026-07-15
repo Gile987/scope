@@ -47,4 +47,4 @@ COPY --from=builder /app/apps/model-scanners/copilot/dist ./apps/model-scanners/
 
 WORKDIR /app/apps/model-scanners/copilot
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "telemetry/register", "dist/index.js"]

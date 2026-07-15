@@ -158,4 +158,4 @@ ENV BUILD_TIME=$BUILD_TIME
 ENV WORKER_NAME=coder-acp-claude-code
 
 USER node
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "telemetry/register", "dist/index.js"]

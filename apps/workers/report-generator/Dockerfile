@@ -57,4 +57,4 @@ COPY --from=builder /app/apps/workers/report-generator/dist ./apps/workers/repor
 
 WORKDIR /app/apps/workers/report-generator
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "telemetry/register", "dist/index.js"]

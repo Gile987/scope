@@ -57,4 +57,4 @@ WORKDIR /app/apps/scheduler
 EXPOSE 8080
 ENV PORT=8080
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "telemetry/register", "dist/index.js"]
