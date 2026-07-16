@@ -668,7 +668,6 @@ jobs:
       gateway: ${{ steps.changes.outputs.gateway }}
       coder-acp-copilot-windows: ${{ steps.changes.outputs.coder-acp-copilot-windows }}
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
-      otel-collector: ${{ steps.changes.outputs.otel-collector }}
       typescript: ${{ steps.changes.outputs.typescript }}
       evals: ${{ steps.changes.outputs.evals }}
     steps:
@@ -714,8 +713,6 @@ jobs:
               - 'packages/db-migrations/**'
             gateway:
               - 'apps/gateway/**'
-            otel-collector:
-              - 'deploy/components/otel-collector/**'
             coder-acp-copilot-windows:
               - 'apps/workers/coder-acp-copilot-windows/**'
               - 'apps/workers/coder-acp-copilot/versions.env'
@@ -765,7 +762,6 @@ jobs:
           needs.detect-changes.outputs.scheduler == 'true' ||
           needs.detect-changes.outputs.db-migrations == 'true' ||
           needs.detect-changes.outputs.gateway == 'true' ||
-          needs.detect-changes.outputs.otel-collector == 'true' ||
           needs.detect-changes.outputs.shared == 'true' ||
           needs.detect-changes.outputs.model-scanning == 'true'
         ))
@@ -818,10 +814,6 @@ jobs:
             context: apps/gateway
             target: runtime
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.gateway == 'true') && 'true' || 'false' }}
-          - name: otel-collector
-            dockerfile: deploy/components/otel-collector/Dockerfile
-            context: deploy/components/otel-collector
-            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.otel-collector == 'true') && 'true' || 'false' }}
         exclude:
           - image:
               changed: "false"
