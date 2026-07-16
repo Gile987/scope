@@ -4,8 +4,9 @@
 /**
  * HAR file parser and tool call extractor.
  *
- * Parses HAR (HTTP Archive) files produced by DevProxy and extracts
- * structured tool call data from Copilot API request/response bodies.
+ * Parses HAR (HTTP Archive) files produced by DevProxy (HTTP-only) and the
+ * gateway (which additionally captures WebSocket frames) and extracts structured
+ * tool call data from Copilot API request/response payloads.
  *
  * Three wire formats are supported:
  * - OpenAI chat-completions (`/chat/completions`): assistant `tool_calls`
@@ -19,6 +20,14 @@
  *   `function_call_output` / `custom_tool_call_output` items in `input[]`,
  *   all keyed by `call_id`. (Extractors live in `responses-api-parser.ts`.)
  *
+ * Across two transports:
+ * - HTTP bodies (`entry.request.postData.text` / `entry.response.content.text`),
+ *   as produced by DevProxy.
+ * - WebSocket frames (`entry._webSocketMessages`), when the Copilot CLI carries
+ *   the Responses API over a WebSocket (gateway-captured). The frames are
+ *   unwrapped and fed to the same Responses-API extractors — see
+ *   `extractResponsesApiFromWebSocketMessages` in `responses-api-parser.ts`.
+ *
  * Calls and results are matched by id to produce an array of ToolCall objects.
  */
 
@@ -28,6 +37,7 @@ import type { TokenUsage } from "../types/types.js";
 import {
   extractResponsesApiToolCallsFromBody,
   extractResponsesApiFromRequestBody,
+  extractResponsesApiFromWebSocketMessages,
 } from "./responses-api-parser.js";
 import { parseBody, tryParseJson, type ParsedBody } from "./parsed-body.js";
 
@@ -104,11 +114,13 @@ export async function parseHarFile(filePath: string): Promise<HarFile> {
 /**
  * Extract tool calls from a parsed HAR file.
  *
- * Scans HTTP request/response bodies for tool calls in:
+ * Scans both HTTP request/response bodies and captured WebSocket frames for
+ * tool calls in:
  * - OpenAI chat completions (choices[].message.tool_calls)
  * - Anthropic Messages API (content[].type === "tool_use")
  * - OpenAI Responses API (function_call / custom_tool_call items, in both
- *   response `output_item.done` events and the request `input[]` transcript)
+ *   response `output_item.done` events and the request `input[]` transcript) —
+ *   over HTTP bodies *and* over WebSocket `_webSocketMessages` frames.
  */
 export function extractToolCalls(har: HarFile): ToolCall[] {
   const toolCalls: Map<string, ToolCall> = new Map();
@@ -134,6 +146,17 @@ export function extractToolCalls(har: HarFile): ToolCall[] {
       extractToolResponsesFromBody(requestJson, toolResponses);
       extractResponsesApiFromRequestBody(requestJson, entry.startedDateTime, toolCalls, toolResponses);
     }
+
+    // WebSocket transport: when the Responses API is carried over a WebSocket
+    // (gateway-captured), the tool-call payloads live in `_webSocketMessages`
+    // frames rather than HTTP bodies. No-op for HTTP-only HARs (DevProxy),
+    // which have no `_webSocketMessages`.
+    extractResponsesApiFromWebSocketMessages(
+      entry._webSocketMessages,
+      entry.startedDateTime,
+      toolCalls,
+      toolResponses,
+    );
   }
 
   // Match tool responses to their originating tool calls

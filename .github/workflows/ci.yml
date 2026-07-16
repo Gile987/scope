@@ -342,8 +342,10 @@ jobs:
         run: |
           ${{ matrix.worker.images }}
           # Rotate cache to avoid unbounded growth
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          if [ -d /tmp/.buildx-cache-new ]; then
+            rm -rf /tmp/.buildx-cache
+            mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          fi
 
       - name: Run integration tests
         run: npx vitest run --config vitest.integration.config.ts --silent=false ${{ matrix.worker.test_pattern }}
@@ -926,7 +928,7 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           build-args: ${{ steps.versions.outputs.build_args }}
-          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-from: type=gha,scope=${{ matrix.image.name }},ignore-error=true
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
 
   # ---------------------------------------------------------------------------

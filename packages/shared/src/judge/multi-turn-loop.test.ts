@@ -683,6 +683,35 @@ describe("runMultiTurnLoop — optional criteria (issue #605)", () => {
     );
   });
 
+  // Issue #1255: the judge assembles the whole run's tool calls and labels the
+  // current iteration by number, so the loop must forward the iteration index on
+  // every evaluate call.
+  it("forwards the current iteration number to the judge", async () => {
+    const judgeEvaluate = vi
+      .fn()
+      .mockResolvedValueOnce({ passed: false, feedback: "keep going" })
+      .mockResolvedValueOnce({ passed: true, feedback: "OK" });
+    const config = makeConfig({
+      criteria: ["has_button"],
+      maxIterations: 2,
+      processor: {
+        workerName: "test-worker",
+        processMessage: vi.fn().mockResolvedValue({ response: "did work" } satisfies WorkerResult),
+      },
+      judgeClient: { evaluate: judgeEvaluate },
+    });
+
+    await runMultiTurnLoop(config as any);
+
+    expect(judgeEvaluate).toHaveBeenCalledTimes(2);
+    expect(judgeEvaluate.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ iteration: 1 }),
+    );
+    expect(judgeEvaluate.mock.calls[1][0]).toEqual(
+      expect.objectContaining({ iteration: 2 }),
+    );
+  });
+
   it("omits currentAgentResponse when the worker produced no response text", async () => {
     const judgeEvaluate = vi.fn().mockResolvedValue({ passed: true, feedback: "OK" });
     const config = makeConfig({

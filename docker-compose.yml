@@ -545,7 +545,7 @@ services:
     build:
       context: ./apps/gateway
       dockerfile: Dockerfile
-    profiles: [gateway, vscode-electron-driver-ext]
+    profiles: [gateway, vscode-electron-driver-ext, copilot]
     environment:
       RUST_LOG: debug,gateway::internal=info,azure_core::policies::transport=info
       COPILOT_TOKEN_REFRESH_BUFFER_SECS: 120
@@ -592,6 +592,8 @@ services:
       args:
         CLAUDE_CODE_ACP_VERSION: ${CLAUDE_CODE_ACP_VERSION:-}
     profiles: [claude-code]
+    group_add:
+      - "${DOCKER_GID:-0}"  # Docker socket GID (0 for macOS/Docker Desktop, set DOCKER_GID for Linux)
     environment:
       <<: *worker-env
       WORKER_NAME: coder-acp-claude-code
@@ -604,9 +606,11 @@ services:
       DEV_PROXY_HAR_DIR: /har-output
       NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
       MCP_GATEWAY_URL: http://mcp-gateway-claude-code:8080
+      DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
       - claude_har_output:/har-output
       - claude_workspace:/workspace
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
     depends_on:
       <<: *worker-deps
       devproxy-claude-code:
@@ -692,73 +696,35 @@ services:
       args:
         COPILOT_CLI_VERSION: ${COPILOT_CLI_VERSION:-}
     profiles: [copilot]
+    group_add:
+      - "${DOCKER_GID:-0}"  # Docker socket GID (0 for macOS/Docker Desktop, set DOCKER_GID for Linux)
     environment:
       <<: *worker-env
       WORKER_NAME: coder-acp-copilot
       QUEUE_NAME: queue-coder-acp-copilot
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-      # DevProxy integration (enabled by default when using copilot profile)
+      # Gateway: replaces DevProxy — records HTTP + WebSocket (/responses) frames
+      # into the HAR. Token plugin disabled (the Copilot CLI manages its own tokens).
+      PROXY_BACKEND: gateway
       DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
-      DEV_PROXY_API_URL: http://devproxy-copilot:18897
-      DEV_PROXY_URL: http://devproxy-copilot:18000
-      DEV_PROXY_HAR_DIR: /har-output
-      NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
+      DEV_PROXY_API_URL: http://gateway:18000
+      GATEWAY_TOKEN_PLUGIN_ENABLED: "false"
       MCP_GATEWAY_URL: http://mcp-gateway-copilot:8080
+      DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
-      - copilot_har_output:/har-output
       - copilot_workspace:/workspace
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
     depends_on:
       <<: *worker-deps
       mcp-gateway-copilot:
         condition: service_healthy
-      devproxy-copilot:
+      gateway:
         condition: service_healthy
-      devproxy-copilot-init:
-        condition: service_completed_successfully
 
-  # DevProxy sidecar for Copilot worker (HAR capture)
-  devproxy-copilot:
-    # Resource limits mirror prod K8s devproxy sidecar (deploy/base/workers/coder-acp-copilot.yaml)
-    cpus: "0.5"
-    mem_limit: 512m
-    build:
-      context: ./apps/workers/coder-acp-copilot
-      dockerfile: devproxy.Dockerfile
-    profiles: [copilot]
-    user: "1000:1000"
-    working_dir: /har-output
-    command: ["--config-file", "/etc/devproxy/devproxyrc.json", "--record"]
-    volumes:
-      - copilot_har_output:/har-output
-      - copilot_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
-    ports:
-      - "${DEVPROXY_COPILOT_API_PORT:-18800}:18897"
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:18897/proxy"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      # First run generates the root CA into the cert volume, which can
-      # take 1-2 minutes before the API listener accepts requests.
-      start_period: 180s
-    depends_on:
-      devproxy-copilot-init:
-        condition: service_completed_successfully
-
-  # Init service: fix ownership on shared volumes so UID 1000 containers can
-  # read/write. Equivalent of the K8s initContainer in coder-acp-copilot.yaml.
-  devproxy-copilot-init:
-    image: busybox:1.37
-    profiles: [copilot]
-    command:
-      [
-        "sh",
-        "-c",
-        "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs && chmod -v 775 /har-output /certs && echo 'Done'",
-      ]
-    volumes:
-      - copilot_har_output:/har-output
-      - copilot_devproxy_cert:/certs
+  # DevProxy sidecars for the Copilot worker were REPLACED by the shared `gateway`
+  # service (records HTTP + WebSocket frames; HAR is retrieved via the gateway
+  # session API, so no shared har-output/cert volumes are needed). See AI Gateway
+  # Phase 3 (#723).
 
   # MCPJungle sidecar for Copilot worker (stdio + remote HTTP MCP aggregation)
   mcp-gateway-copilot:
@@ -857,8 +823,6 @@ volumes:
   entra_local_data:
   entra_local_certs:
   gateway_cert:
-  copilot_har_output:
-  copilot_devproxy_cert:
   copilot_workspace:
   claude_har_output:
   claude_devproxy_cert:

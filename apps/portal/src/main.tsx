@@ -11,6 +11,7 @@ import { App } from "./App";
 import { FeatureFlagProvider } from "@/contexts/FeatureFlagContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ProjectProvider } from "@/contexts/ProjectContext";
 import { Toaster } from "@/components/ui/sonner";
 import { msalInstance, initializeAuth } from "@/lib/auth/msalInstance";
 import { wireApiAuth } from "@/lib/auth/wireApiAuth";
@@ -36,10 +37,12 @@ initializeAuth().finally(() => {
         <AuthProvider>
           <ThemeProvider>
             <FeatureFlagProvider>
-              <BrowserRouter>
-                <App />
-                <Toaster />
-              </BrowserRouter>
+              <ProjectProvider>
+                <BrowserRouter>
+                  <App />
+                  <Toaster />
+                </BrowserRouter>
+              </ProjectProvider>
             </FeatureFlagProvider>
           </ThemeProvider>
         </AuthProvider>

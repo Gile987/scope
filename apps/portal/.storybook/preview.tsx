@@ -11,6 +11,7 @@ import { mswHandlers } from "./msw-handlers";
 import { FeatureFlagProvider } from "../src/contexts/FeatureFlagContext";
 import { ThemeProvider } from "../src/contexts/ThemeContext";
 import { AuthProvider } from "../src/contexts/AuthContext";
+import { ProjectProvider } from "../src/contexts/ProjectContext";
 import "../src/index.css";
 
 initialize({ onUnhandledRequest: "bypass" });
@@ -37,9 +38,11 @@ const preview: Preview = {
             <AuthProvider>
               <FeatureFlagProvider>
                 <ThemeProvider>
-                  <MemoryRouter>
-                    <Story />
-                  </MemoryRouter>
+                  <ProjectProvider>
+                    <MemoryRouter>
+                      <Story />
+                    </MemoryRouter>
+                  </ProjectProvider>
                 </ThemeProvider>
               </FeatureFlagProvider>
             </AuthProvider>

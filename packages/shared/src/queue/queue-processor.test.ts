@@ -146,6 +146,7 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     const runId = "run-1";
     const requestDoc = {
       _id: requestId,
+      projectId: "proj-1",
       workerType: "coder-acp-copilot",
       scenario: { criteria: [], task: "x" },
       run: { _id: runId, status: runStatus, attemptNumber: 1, ...runOverrides },

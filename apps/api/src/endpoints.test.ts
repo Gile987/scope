@@ -7,6 +7,8 @@ import { app, _injectTestDependencies } from "./index.js";
 import { _resetRunFacetsCacheForTests } from "./routes/requests/index.js";
 import { createAllMockDependencies, createMockCollection } from "./test-helpers.js";
 
+const TEST_PROJECT_ID = "test-project";
+
 // Stub checkMigrations before it can be imported by index.ts
 vi.mock("db-migrations/check-migrations", () => ({
   checkMigrations: vi.fn().mockResolvedValue({
@@ -110,6 +112,57 @@ describe("API Endpoints", () => {
   });
 
   // ===================================================================
+  // Project scoping enforcement (Data Organization: Projects)
+  // A scoped list / root create with no ?projectId= must fail fast with
+  // 400 — there is no default project. Point reads by :id stay unscoped.
+  // ===================================================================
+
+  describe("project scoping enforcement", () => {
+    it("400s a top-level runs list with no projectId", async () => {
+      const res = await request(app).get("/api/v1/requests");
+      expect(res.status).toBe(400);
+    });
+
+    it("400s the runs facets endpoint with no projectId", async () => {
+      const res = await request(app).get("/api/v1/requests/facets");
+      expect(res.status).toBe(400);
+    });
+
+    it("400s a top-level criteria list with no projectId", async () => {
+      const res = await request(app).get("/api/v1/criteria");
+      expect(res.status).toBe(400);
+    });
+
+    it("400s a root criteria create with no projectId", async () => {
+      // findOne → null means this would 201 if scoping were not enforced.
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
+      const res = await request(app)
+        .post("/api/v1/criteria")
+        .send({ id: "unscoped_crit", prompt: "No project?", dependsOn: [] });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects a by-id point read with no projectId (400 — never a global slug-only resolve)", async () => {
+      const doc = { id: "c1", prompt: "Check it", dependsOn: [], createdAt: new Date() };
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue(doc);
+      const res = await request(app).get("/api/v1/criteria/c1");
+      expect(res.status).toBe(400);
+    });
+
+    it("allows a scoped list once projectId is supplied", async () => {
+      const cursor = {
+        toArray: vi.fn().mockResolvedValue([]),
+        sort: vi.fn().mockReturnThis(),
+        skip: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+      };
+      (mocks.criteriaCollection.find as any).mockReturnValue(cursor);
+      const res = await request(app).get(`/api/v1/criteria?projectId=${TEST_PROJECT_ID}`);
+      expect(res.status).toBe(200);
+    });
+  });
+
+  // ===================================================================
   // Criteria endpoints
   // ===================================================================
 
@@ -125,7 +178,7 @@ describe("API Endpoints", () => {
       };
       (mocks.criteriaCollection.find as any).mockReturnValue(cursor);
 
-      const res = await request(app).get("/api/v1/criteria");
+      const res = await request(app).get(`/api/v1/criteria?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
     });
@@ -137,7 +190,7 @@ describe("API Endpoints", () => {
       (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
 
       const res = await request(app)
-        .post("/api/v1/criteria")
+        .post(`/api/v1/criteria?projectId=${TEST_PROJECT_ID}`)
         .send({ id: "new_crit", prompt: "Does it work?", dependsOn: [] });
 
       expect(res.status).toBe(201);
@@ -152,7 +205,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/criteria")
+        .post(`/api/v1/criteria?projectId=${TEST_PROJECT_ID}`)
         .send({ id: "existing", prompt: "Duplicate", dependsOn: [] });
 
       expect(res.status).toBe(409);
@@ -171,7 +224,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/criteria")
+        .post(`/api/v1/criteria?projectId=${TEST_PROJECT_ID}`)
         .send({ id: "b", prompt: "B", dependsOn: ["a"] });
 
       expect(res.status).toBe(400);
@@ -190,7 +243,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/criteria")
+        .post(`/api/v1/criteria?projectId=${TEST_PROJECT_ID}`)
         .send({ id: "child", prompt: "C", dependsOn: ["parent"], gates: ["select", "build"] });
 
       expect(res.status).toBe(400);
@@ -205,7 +258,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/criteria/seed")
+        .post(`/api/v1/criteria/seed?projectId=${TEST_PROJECT_ID}`)
         .send({
           criteria: [
             { id: "a", prompt: "A", dependsOn: ["b"] },
@@ -224,7 +277,7 @@ describe("API Endpoints", () => {
       const depCursor = { toArray: vi.fn().mockResolvedValue([]) };
       (mocks.criteriaCollection.find as any).mockReturnValue(depCursor);
 
-      const res = await request(app).get("/api/v1/criteria/c1");
+      const res = await request(app).get(`/api/v1/criteria/c1?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(res.body.id).toBe("c1");
     });
@@ -232,7 +285,7 @@ describe("API Endpoints", () => {
     it("returns 404 when criterion not found", async () => {
       (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
 
-      const res = await request(app).get("/api/v1/criteria/nonexistent");
+      const res = await request(app).get(`/api/v1/criteria/nonexistent?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(404);
     });
   });
@@ -245,7 +298,7 @@ describe("API Endpoints", () => {
         .mockResolvedValueOnce({ ...existing, prompt: "Updated" }); // after update
 
       const res = await request(app)
-        .put("/api/v1/criteria/c1")
+        .put(`/api/v1/criteria/c1?projectId=${TEST_PROJECT_ID}`)
         .send({ prompt: "Updated" });
 
       expect(res.status).toBe(200);
@@ -255,7 +308,7 @@ describe("API Endpoints", () => {
       (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
 
       const res = await request(app)
-        .put("/api/v1/criteria/missing")
+        .put(`/api/v1/criteria/missing?projectId=${TEST_PROJECT_ID}`)
         .send({ prompt: "Nope" });
 
       expect(res.status).toBe(404);
@@ -274,7 +327,7 @@ describe("API Endpoints", () => {
         toArray: vi.fn().mockResolvedValue([]),
       });
 
-      const res = await request(app).delete("/api/v1/criteria/c1");
+      const res = await request(app).delete(`/api/v1/criteria/c1?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("deleted", true);
     });
@@ -282,7 +335,7 @@ describe("API Endpoints", () => {
     it("returns 404 when criterion not found", async () => {
       (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
 
-      const res = await request(app).delete("/api/v1/criteria/missing");
+      const res = await request(app).delete(`/api/v1/criteria/missing?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(404);
     });
 
@@ -297,7 +350,7 @@ describe("API Endpoints", () => {
         toArray: vi.fn().mockResolvedValue([{ id: "child" }]),
       });
 
-      const res = await request(app).delete("/api/v1/criteria/c1");
+      const res = await request(app).delete(`/api/v1/criteria/c1?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(409);
     });
   });
@@ -372,7 +425,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/profiles")
+        .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           name: "test profile",
           description: "",
@@ -393,7 +446,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/profiles")
+        .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           name: "test profile",
           description: "",
@@ -411,7 +464,7 @@ describe("API Endpoints", () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue(null);
 
       const res = await request(app)
-        .post("/api/v1/profiles")
+        .post(`/api/v1/profiles?projectId=${TEST_PROJECT_ID}`)
         .send({
           name: "test profile",
           description: "",
@@ -457,7 +510,7 @@ describe("API Endpoints", () => {
         }),
       });
 
-      const res = await request(app).get("/api/v1/insights");
+      const res = await request(app).get(`/api/v1/insights?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
       expect(res.body[0]).toHaveProperty("id", "i1");
@@ -467,7 +520,7 @@ describe("API Endpoints", () => {
   describe("POST /api/v1/insights", () => {
     it("returns 201 when creating an insight", async () => {
       const res = await request(app)
-        .post("/api/v1/insights")
+        .post(`/api/v1/insights?projectId=${TEST_PROJECT_ID}`)
         .send({ title: "New Insight", description: "Something learned" });
 
       expect(res.status).toBe(201);
@@ -477,7 +530,7 @@ describe("API Endpoints", () => {
 
     it("returns 400 when title missing", async () => {
       const res = await request(app)
-        .post("/api/v1/insights")
+        .post(`/api/v1/insights?projectId=${TEST_PROJECT_ID}`)
         .send({ description: "No title" });
 
       expect(res.status).toBe(400);
@@ -517,7 +570,7 @@ describe("API Endpoints", () => {
         }),
       });
 
-      const res = await request(app).get("/api/v1/requests");
+      const res = await request(app).get(`/api/v1/requests?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("data");
       expect(res.body).toHaveProperty("limit");
@@ -538,7 +591,7 @@ describe("API Endpoints", () => {
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }) // hasMoreAfter
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }); // hasMoreBefore
 
-      const res = await request(app).get("/api/v1/requests?groupBy=task");
+      const res = await request(app).get(`/api/v1/requests?groupBy=task&projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("data");
       expect(Array.isArray(res.body.data)).toBe(true);
@@ -558,7 +611,7 @@ describe("API Endpoints", () => {
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) })
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) });
 
-      const res = await request(app).get("/api/v1/requests?groupBy=submissionId");
+      const res = await request(app).get(`/api/v1/requests?groupBy=submissionId&projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(res.body.data[0]).toHaveProperty("key", "sub-1");
     });
@@ -567,7 +620,7 @@ describe("API Endpoints", () => {
       (mocks.collection.aggregate as any)
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }); // keys (empty)
 
-      await request(app).get("/api/v1/requests?groupBy=task");
+      await request(app).get(`/api/v1/requests?groupBy=task&projectId=${TEST_PROJECT_ID}`);
       expect(mocks.collection.aggregate).toHaveBeenCalled();
       // Phase 1 key pipeline: $match, $group, $sort, $limit
       const pipeline = (mocks.collection.aggregate as any).mock.calls[0][0];
@@ -584,7 +637,7 @@ describe("API Endpoints", () => {
         }),
       });
 
-      await request(app).get("/api/v1/requests");
+      await request(app).get(`/api/v1/requests?projectId=${TEST_PROJECT_ID}`);
       expect(mocks.collection.aggregate).not.toHaveBeenCalled();
     });
 
@@ -597,7 +650,7 @@ describe("API Endpoints", () => {
         }),
       });
 
-      await request(app).get("/api/v1/requests?status=done");
+      await request(app).get(`/api/v1/requests?status=done&projectId=${TEST_PROJECT_ID}`);
       expect(mocks.collection.find).toHaveBeenCalledWith(
         expect.objectContaining({ "run.status": "done" }),
       );
@@ -612,7 +665,7 @@ describe("API Endpoints", () => {
         }),
       });
 
-      await request(app).get("/api/v1/requests?outcome=succeeded");
+      await request(app).get(`/api/v1/requests?outcome=succeeded&projectId=${TEST_PROJECT_ID}`);
       expect(mocks.collection.find).toHaveBeenCalledWith(
         expect.objectContaining({ "run.outcome": "succeeded" }),
       );
@@ -623,7 +676,7 @@ describe("API Endpoints", () => {
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) })
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ count: 0 }]) });
 
-      await request(app).get("/api/v1/requests?groupBy=task&status=done&outcome=failed");
+      await request(app).get(`/api/v1/requests?groupBy=task&status=done&outcome=failed&projectId=${TEST_PROJECT_ID}`);
       const pipeline = (mocks.collection.aggregate as any).mock.calls[0][0];
       expect(pipeline[0]).toEqual(
         expect.objectContaining({
@@ -641,7 +694,7 @@ describe("API Endpoints", () => {
         }),
       });
 
-      await request(app).get("/api/v1/requests?status=processing&outcome=succeeded&worker=coder-acp-copilot");
+      await request(app).get(`/api/v1/requests?status=processing&outcome=succeeded&worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`);
       expect(mocks.collection.find).toHaveBeenCalledWith(
         expect.objectContaining({
           "run.status": "processing",
@@ -664,7 +717,7 @@ describe("API Endpoints", () => {
 
     it("turns a multi-value status into an $in clause", async () => {
       mockFindChain();
-      await request(app).get("/api/v1/requests?status=done&status=pending");
+      await request(app).get(`/api/v1/requests?status=done&status=pending&projectId=${TEST_PROJECT_ID}`);
       expect(mocks.collection.find).toHaveBeenCalledWith(
         expect.objectContaining({ "run.status": { $in: ["done", "pending"] } }),
       );
@@ -672,7 +725,7 @@ describe("API Endpoints", () => {
 
     it("accepts comma-separated multi-value selections", async () => {
       mockFindChain();
-      await request(app).get("/api/v1/requests?outcome=succeeded,failed");
+      await request(app).get(`/api/v1/requests?outcome=succeeded,failed&projectId=${TEST_PROJECT_ID}`);
       expect(mocks.collection.find).toHaveBeenCalledWith(
         expect.objectContaining({ "run.outcome": { $in: ["succeeded", "failed"] } }),
       );
@@ -680,7 +733,7 @@ describe("API Endpoints", () => {
 
     it("maps the (Unknown) sentinel to a missing-or-null $and clause", async () => {
       mockFindChain();
-      await request(app).get("/api/v1/requests?outcome=__empty__");
+      await request(app).get(`/api/v1/requests?outcome=__empty__&projectId=${TEST_PROJECT_ID}`);
       const filter = (mocks.collection.find as any).mock.calls.at(-1)[0];
       expect(filter.$and).toEqual(
         expect.arrayContaining([
@@ -691,7 +744,7 @@ describe("API Endpoints", () => {
 
     it("adds a case-insensitive regex $or for free-text search", async () => {
       mockFindChain();
-      await request(app).get("/api/v1/requests?search=gpt-5");
+      await request(app).get(`/api/v1/requests?search=gpt-5&projectId=${TEST_PROJECT_ID}`);
       const filter = (mocks.collection.find as any).mock.calls.at(-1)[0];
       const searchClause = (filter.$and as any[]).find((c) => Array.isArray(c.$or) && c.$or.some((o: any) => o.model));
       expect(searchClause).toBeDefined();
@@ -703,7 +756,7 @@ describe("API Endpoints", () => {
     it("filters by model, os, and agentVersion", async () => {
       mockFindChain();
       await request(app).get(
-        "/api/v1/requests?model=gpt-5&os=linux&agentVersion=copilot-0.0.415",
+        `/api/v1/requests?model=gpt-5&os=linux&agentVersion=copilot-0.0.415&projectId=${TEST_PROJECT_ID}`,
       );
       expect(mocks.collection.find).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -716,7 +769,7 @@ describe("API Endpoints", () => {
 
     it("coerces a priority filter to a number", async () => {
       mockFindChain();
-      await request(app).get("/api/v1/requests?priority=3");
+      await request(app).get(`/api/v1/requests?priority=3&projectId=${TEST_PROJECT_ID}`);
       expect(mocks.collection.find).toHaveBeenCalledWith(
         expect.objectContaining({ priority: 3 }),
       );
@@ -725,7 +778,7 @@ describe("API Endpoints", () => {
     it("applies a createdAt range for createdAfter/createdBefore", async () => {
       mockFindChain();
       await request(app).get(
-        "/api/v1/requests?createdAfter=2026-01-01T00:00:00Z&createdBefore=2026-12-31T00:00:00Z",
+        `/api/v1/requests?createdAfter=2026-01-01T00:00:00Z&createdBefore=2026-12-31T00:00:00Z&projectId=${TEST_PROJECT_ID}`,
       );
       const filter = (mocks.collection.find as any).mock.calls.at(-1)[0];
       expect(filter.createdAt.$gte).toBeInstanceOf(Date);
@@ -735,26 +788,26 @@ describe("API Endpoints", () => {
     it("rejects an inverted createdAt range with 400", async () => {
       mockFindChain();
       const res = await request(app).get(
-        "/api/v1/requests?createdAfter=2026-12-31T00:00:00Z&createdBefore=2026-01-01T00:00:00Z",
+        `/api/v1/requests?createdAfter=2026-12-31T00:00:00Z&createdBefore=2026-01-01T00:00:00Z&projectId=${TEST_PROJECT_ID}`,
       );
       expect(res.status).toBe(400);
     });
 
     it("rejects an invalid createdAfter datetime with 400", async () => {
       mockFindChain();
-      const res = await request(app).get("/api/v1/requests?createdAfter=not-a-date");
+      const res = await request(app).get(`/api/v1/requests?createdAfter=not-a-date&projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(400);
     });
 
     it("sorts by an allowlisted field and direction over { field, _id }", async () => {
       const sortSpy = mockFindChain();
-      await request(app).get("/api/v1/requests?sortBy=priority&sortDir=asc");
+      await request(app).get(`/api/v1/requests?sortBy=priority&sortDir=asc&projectId=${TEST_PROJECT_ID}`);
       expect(sortSpy).toHaveBeenCalledWith({ priority: 1, _id: 1 });
     });
 
     it("defaults to createdAt desc when no sortBy is given", async () => {
       const sortSpy = mockFindChain();
-      await request(app).get("/api/v1/requests");
+      await request(app).get(`/api/v1/requests?projectId=${TEST_PROJECT_ID}`);
       expect(sortSpy).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
     });
 
@@ -762,7 +815,7 @@ describe("API Endpoints", () => {
       mockFindChain();
       (mocks.collection.countDocuments as any).mockResolvedValue(7);
       (mocks.collection.estimatedDocumentCount as any).mockResolvedValue(99);
-      const res = await request(app).get("/api/v1/requests?status=done");
+      const res = await request(app).get(`/api/v1/requests?status=done&projectId=${TEST_PROJECT_ID}`);
       expect(res.body.estimatedTotal).toBe(7);
       expect(mocks.collection.countDocuments).toHaveBeenCalled();
     });
@@ -771,9 +824,9 @@ describe("API Endpoints", () => {
       mockFindChain();
       (mocks.collection.countDocuments as any).mockResolvedValue(7);
       (mocks.collection.estimatedDocumentCount as any).mockResolvedValue(99);
-      const res = await request(app).get("/api/v1/requests");
-      expect(res.body.estimatedTotal).toBe(99);
-      expect(mocks.collection.countDocuments).not.toHaveBeenCalled();
+      const res = await request(app).get(`/api/v1/requests?projectId=${TEST_PROJECT_ID}`);
+      expect(res.body.estimatedTotal).toBe(7);
+      expect(mocks.collection.countDocuments).toHaveBeenCalled();
     });
 
     it("omits estimatedTotal and skips run-count queries in grouped mode", async () => {
@@ -787,7 +840,7 @@ describe("API Endpoints", () => {
       (mocks.collection.countDocuments as any).mockResolvedValue(7);
       (mocks.collection.estimatedDocumentCount as any).mockResolvedValue(99);
 
-      const res = await request(app).get("/api/v1/requests?groupBy=task");
+      const res = await request(app).get(`/api/v1/requests?groupBy=task&projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(res.body).not.toHaveProperty("estimatedTotal");
       expect(mocks.collection.countDocuments).not.toHaveBeenCalled();
@@ -804,7 +857,7 @@ describe("API Endpoints", () => {
         ]),
       });
 
-      const res = await request(app).get("/api/v1/requests/facets");
+      const res = await request(app).get(`/api/v1/requests/facets?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       // total is derived by summing a single dimension's buckets (8 + 4), not a
       // separate count query.
@@ -831,7 +884,7 @@ describe("API Endpoints", () => {
         toArray: vi.fn().mockResolvedValue([]),
       });
 
-      await request(app).get("/api/v1/requests/facets");
+      await request(app).get(`/api/v1/requests/facets?projectId=${TEST_PROJECT_ID}`);
       // 8 categorical dimensions → 8 parallel aggregations (no $facet).
       expect((mocks.collection.aggregate as any).mock.calls.length).toBe(8);
     });
@@ -842,14 +895,16 @@ describe("API Endpoints", () => {
       });
 
       await request(app).get(
-        "/api/v1/requests/facets?search=foo&status=done&model=gpt-4&createdAfter=2024-01-01T00:00:00Z&turns=3&turnsOp=gte",
+        `/api/v1/requests/facets?search=foo&status=done&model=gpt-4&createdAfter=2024-01-01T00:00:00Z&turns=3&turnsOp=gte&projectId=${TEST_PROJECT_ID}`,
       );
       // Every aggregation matches only the constant non-deleted predicate; no
       // search regex / date / numeric / categorical clause leaks into $match.
       const calls = (mocks.collection.aggregate as any).mock.calls;
       expect(calls.length).toBe(8);
       for (const [pipeline] of calls) {
-        expect(pipeline[0]).toEqual({ $match: { deletedAt: { $exists: false } } });
+        expect(pipeline[0]).toEqual({
+          $match: { deletedAt: { $exists: false }, projectId: TEST_PROJECT_ID },
+        });
       }
     });
 
@@ -858,8 +913,8 @@ describe("API Endpoints", () => {
         toArray: vi.fn().mockResolvedValue([{ _id: "x", count: 1 }]),
       });
 
-      const first = await request(app).get("/api/v1/requests/facets");
-      const second = await request(app).get("/api/v1/requests/facets");
+      const first = await request(app).get(`/api/v1/requests/facets?projectId=${TEST_PROJECT_ID}`);
+      const second = await request(app).get(`/api/v1/requests/facets?projectId=${TEST_PROJECT_ID}`);
       expect(first.status).toBe(200);
       expect(second.body).toEqual(first.body);
       // Second call hits the in-memory cache → no additional aggregations.
@@ -928,7 +983,7 @@ describe("API Endpoints", () => {
         toArray: vi.fn().mockResolvedValue([]),
       });
 
-      const res = await request(app).get("/api/v1/reports");
+      const res = await request(app).get(`/api/v1/reports?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
     });
@@ -981,9 +1036,75 @@ describe("API Endpoints", () => {
         toArray: vi.fn().mockResolvedValue(templates),
       });
 
-      const res = await request(app).get("/api/v1/report-templates");
+      const res = await request(app).get(`/api/v1/report-templates?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
+    });
+  });
+
+  // §16: report-templates is project-scoped; by-id GET/PUT/DELETE must never
+  // resolve a business `id` globally — they require ?projectId= and scope the
+  // Mongo filter to { projectId, id } (never a global slug-only { id }).
+  describe("Report templates by-id scoping (§16)", () => {
+    const TID = "rt-scope";
+    const seededTemplate = {
+      projectId: TEST_PROJECT_ID,
+      id: TID,
+      name: "Seed",
+      userPrompt: "Analyze",
+      createdAt: new Date(),
+    };
+
+    it("GET /:id without projectId → 400 (no global slug-only resolve)", async () => {
+      const res = await request(app).get(`/api/v1/report-templates/${TID}`);
+      expect(res.status).toBe(400);
+      expect(mocks.reportTemplateCollection.findOne).not.toHaveBeenCalled();
+    });
+
+    it("GET /:id?projectId scopes the read to { projectId, id }", async () => {
+      (mocks.reportTemplateCollection.findOne as any).mockResolvedValue(seededTemplate);
+      const res = await request(app).get(`/api/v1/report-templates/${TID}?projectId=${TEST_PROJECT_ID}`);
+      expect(res.status).toBe(200);
+      expect(mocks.reportTemplateCollection.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: TEST_PROJECT_ID, id: TID })
+      );
+    });
+
+    it("PUT /:id without projectId → 400 (never a global slug-only update)", async () => {
+      const res = await request(app).put(`/api/v1/report-templates/${TID}`).send({ name: "x" });
+      expect(res.status).toBe(400);
+      expect(mocks.reportTemplateCollection.updateOne).not.toHaveBeenCalled();
+    });
+
+    it("PUT /:id?projectId scopes both the existence check and the update to { projectId, id }", async () => {
+      (mocks.reportTemplateCollection.findOne as any).mockResolvedValue(seededTemplate);
+      const res = await request(app)
+        .put(`/api/v1/report-templates/${TID}?projectId=${TEST_PROJECT_ID}`)
+        .send({ name: "Renamed" });
+      expect(res.status).toBe(200);
+      expect(mocks.reportTemplateCollection.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: TEST_PROJECT_ID, id: TID })
+      );
+      expect(mocks.reportTemplateCollection.updateOne).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: TEST_PROJECT_ID, id: TID }),
+        expect.anything()
+      );
+    });
+
+    it("DELETE /:id without projectId → 400 (never a global slug-only soft-delete)", async () => {
+      const res = await request(app).delete(`/api/v1/report-templates/${TID}`);
+      expect(res.status).toBe(400);
+      expect(mocks.reportTemplateCollection.updateOne).not.toHaveBeenCalled();
+    });
+
+    it("DELETE /:id?projectId soft-deletes scoped to { projectId, id }", async () => {
+      (mocks.reportTemplateCollection.findOne as any).mockResolvedValue(seededTemplate);
+      const res = await request(app).delete(`/api/v1/report-templates/${TID}?projectId=${TEST_PROJECT_ID}`);
+      expect(res.status).toBe(204);
+      expect(mocks.reportTemplateCollection.updateOne).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: TEST_PROJECT_ID, id: TID }),
+        expect.objectContaining({ $set: expect.objectContaining({ deletedAt: expect.anything() }) })
+      );
     });
   });
 
@@ -1015,7 +1136,7 @@ describe("API Endpoints", () => {
         toArray: vi.fn().mockResolvedValue(skills),
       });
 
-      const res = await request(app).get("/api/v1/skills");
+      const res = await request(app).get(`/api/v1/skills?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
       expect(res.body[0]).toHaveProperty("id", "org/repo/skill");
@@ -1029,13 +1150,14 @@ describe("API Endpoints", () => {
       (mocks.skillResolver.resolve as any).mockResolvedValue({ ref: "mock-ref" });
 
       const res = await request(app)
-        .post("/api/v1/skills")
+        .post(`/api/v1/skills?projectId=${TEST_PROJECT_ID}`)
         .send({ source: "org/repo", skillName: "my-skill", name: "My Skill", origin: "manual" });
 
       expect(res.status).toBe(201);
       expect(res.body).toHaveProperty("id", "org/repo/my-skill");
       expect(mocks.skillResolver.resolve).toHaveBeenCalledOnce();
       expect(mocks.skillResolver.resolve).toHaveBeenCalledWith(
+        TEST_PROJECT_ID,
         "org/repo",
         "my-skill",
         mocks.skillRevisionStore,
@@ -1050,7 +1172,7 @@ describe("API Endpoints", () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const res = await request(app)
-        .post("/api/v1/skills")
+        .post(`/api/v1/skills?projectId=${TEST_PROJECT_ID}`)
         .send({ source: "org/repo", skillName: "missing-skill", name: "Missing", origin: "manual" });
 
       expect(res.status).toBe(201);
@@ -1078,7 +1200,7 @@ describe("API Endpoints", () => {
       (mocks.skillResolver.resolve as any).mockResolvedValue({ ref: "mock-ref" });
 
       const res = await request(app)
-        .post("/api/v1/skills")
+        .post(`/api/v1/skills?projectId=${TEST_PROJECT_ID}`)
         .send({ source: "org/repo", skillName: "my-skill", name: "New Name", origin: "manual" });
 
       expect(res.status).toBe(200);
@@ -1088,12 +1210,12 @@ describe("API Endpoints", () => {
 
   describe("GET /api/v1/skills/discover", () => {
     it("returns 400 when source query parameter is missing", async () => {
-      const res = await request(app).get("/api/v1/skills/discover");
+      const res = await request(app).get(`/api/v1/skills/discover?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(400);
     });
 
     it("returns 400 when source is malformed", async () => {
-      const res = await request(app).get("/api/v1/skills/discover?source=not-a-repo");
+      const res = await request(app).get(`/api/v1/skills/discover?source=not-a-repo&projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(400);
     });
 
@@ -1104,7 +1226,7 @@ describe("API Endpoints", () => {
       ];
       mocks.skillResolver.discoverSkills = vi.fn().mockResolvedValue(discovered);
 
-      const res = await request(app).get("/api/v1/skills/discover?source=Azure/documentdb-agent-kit");
+      const res = await request(app).get(`/api/v1/skills/discover?source=Azure/documentdb-agent-kit&projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       // Route enriches each result with library state. With an empty skill
       // collection, every discovered skill is reported as new.
@@ -1115,14 +1237,14 @@ describe("API Endpoints", () => {
     it("returns 404 when the repository is not found", async () => {
       mocks.skillResolver.discoverSkills = vi.fn().mockRejectedValue(new Error('Repository "owner/missing" not found'));
 
-      const res = await request(app).get("/api/v1/skills/discover?source=owner/missing");
+      const res = await request(app).get(`/api/v1/skills/discover?source=owner/missing&projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(404);
     });
 
     it("returns 502 on other GitHub errors", async () => {
       mocks.skillResolver.discoverSkills = vi.fn().mockRejectedValue(new Error("rate limit exceeded"));
 
-      const res = await request(app).get("/api/v1/skills/discover?source=owner/repo");
+      const res = await request(app).get(`/api/v1/skills/discover?source=owner/repo&projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(502);
     });
   });
@@ -1138,7 +1260,7 @@ describe("API Endpoints", () => {
         toArray: vi.fn().mockResolvedValue(features),
       });
 
-      const res = await request(app).get("/api/v1/prompt-features");
+      const res = await request(app).get(`/api/v1/prompt-features?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
     });
@@ -1149,7 +1271,7 @@ describe("API Endpoints", () => {
       (mocks.promptFeatureCollection.findOne as any).mockResolvedValue(null);
 
       const res = await request(app)
-        .post("/api/v1/prompt-features")
+        .post(`/api/v1/prompt-features?projectId=${TEST_PROJECT_ID}`)
         .send({ id: "new_feature", prompt: "Does it have X?" });
 
       expect(res.status).toBe(201);
@@ -1158,7 +1280,7 @@ describe("API Endpoints", () => {
 
     it("returns 400 when id has invalid format", async () => {
       const res = await request(app)
-        .post("/api/v1/prompt-features")
+        .post(`/api/v1/prompt-features?projectId=${TEST_PROJECT_ID}`)
         .send({ id: "Invalid-ID", prompt: "Bad id" });
 
       expect(res.status).toBe(400);
@@ -1168,7 +1290,7 @@ describe("API Endpoints", () => {
       (mocks.promptFeatureCollection.findOne as any).mockResolvedValue(null);
 
       const res = await request(app)
-        .post("/api/v1/prompt-features")
+        .post(`/api/v1/prompt-features?projectId=${TEST_PROJECT_ID}`)
         .send({ id: "agents_feat", prompt: "Does AGENTS.md mention tests?", type: "agents.md" });
 
       expect(res.status).toBe(201);
@@ -1184,7 +1306,7 @@ describe("API Endpoints", () => {
         toArray: vi.fn().mockResolvedValue([]),
       });
 
-      const res = await request(app).get("/api/v1/prompt-features?type=agents.md");
+      const res = await request(app).get(`/api/v1/prompt-features?type=agents.md&projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       const filter = (mocks.promptFeatureCollection.find as any).mock.calls[0][0];
       expect(JSON.stringify(filter)).toContain("agents.md");
@@ -1195,7 +1317,7 @@ describe("API Endpoints", () => {
         toArray: vi.fn().mockResolvedValue([]),
       });
 
-      await request(app).get("/api/v1/prompt-features?type=select");
+      await request(app).get(`/api/v1/prompt-features?type=select&projectId=${TEST_PROJECT_ID}`);
       const filter = (mocks.promptFeatureCollection.find as any).mock.calls[0][0];
       const json = JSON.stringify(filter);
       expect(json).toContain("$exists");
@@ -1211,7 +1333,7 @@ describe("API Endpoints", () => {
         createdAt: new Date(),
       });
 
-      const res = await request(app).get("/api/v1/prompt-features/pf1");
+      const res = await request(app).get(`/api/v1/prompt-features/pf1?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("id", "pf1");
     });
@@ -1219,7 +1341,7 @@ describe("API Endpoints", () => {
     it("returns 404 when prompt feature not found", async () => {
       (mocks.promptFeatureCollection.findOne as any).mockResolvedValue(null);
 
-      const res = await request(app).get("/api/v1/prompt-features/missing");
+      const res = await request(app).get(`/api/v1/prompt-features/missing?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(404);
     });
   });
@@ -1235,7 +1357,7 @@ describe("API Endpoints", () => {
         total: 1,
       });
 
-      const res = await request(app).get("/api/v1/task-prompts");
+      const res = await request(app).get(`/api/v1/task-prompts?projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("items");
       expect(res.body).toHaveProperty("total", 1);
@@ -1272,7 +1394,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/task-prompts")
+        .post(`/api/v1/task-prompts?projectId=${TEST_PROJECT_ID}`)
         .send({ text: "New task" });
 
       expect(res.status).toBe(201);
@@ -1281,7 +1403,7 @@ describe("API Endpoints", () => {
 
     it("returns 400 when text is missing", async () => {
       const res = await request(app)
-        .post("/api/v1/task-prompts")
+        .post(`/api/v1/task-prompts?projectId=${TEST_PROJECT_ID}`)
         .send({});
 
       expect(res.status).toBe(400);
@@ -1296,7 +1418,7 @@ describe("API Endpoints", () => {
     it("passes ?type=agents.md through to the store getAll filter", async () => {
       (mocks.taskPromptStore as any).getAll.mockResolvedValue({ items: [], total: 0 });
 
-      const res = await request(app).get("/api/v1/task-prompts?type=agents.md");
+      const res = await request(app).get(`/api/v1/task-prompts?type=agents.md&projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
       const arg = (mocks.taskPromptStore.getAll as any).mock.calls[0][0];
       expect(arg).toHaveProperty("type", "agents.md");
@@ -1311,14 +1433,15 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/task-prompts")
+        .post(`/api/v1/task-prompts?projectId=${TEST_PROJECT_ID}`)
         .send({ text: "# AGENTS\nBe concise.", type: "agents.md" });
 
       expect(res.status).toBe(201);
       expect(res.body).toHaveProperty("type", "agents.md");
       const arg = (mocks.taskPromptStore.findOrCreate as any).mock.calls[0];
-      expect(arg[0]).toBe("# AGENTS\nBe concise.");
-      expect(arg[1]).toBe("agents.md");
+      expect(arg[0]).toBe(TEST_PROJECT_ID);
+      expect(arg[1]).toBe("# AGENTS\nBe concise.");
+      expect(arg[2]).toBe("agents.md");
     });
 
     it("GET /:id/content resolves the prompt body via resolvePromptText", async () => {
@@ -1385,7 +1508,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           profileId: "profile-1",
@@ -1419,7 +1542,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           profileId: "profile-1",
@@ -1432,11 +1555,47 @@ describe("API Endpoints", () => {
         expect.arrayContaining([expect.stringContaining("model")])
       );
     });
-  });
 
-  // ===================================================================
-  // Reasoning effort validation
-  // ===================================================================
+    it("rejects an MCP slug that belongs to another project (project-scoped validation)", async () => {
+      (mocks.profileCollection.findOne as any).mockResolvedValue({
+        _id: "profile-1",
+        name: "My Profile",
+        latestVersion: 1,
+      });
+      (mocks.profileVersionCollection.findOne as any).mockResolvedValue({
+        _id: "pv-1",
+        profileId: "profile-1",
+        version: 1,
+        workerType: "coder-acp-copilot",
+        model: "claude-sonnet-4",
+        mcpServers: ["ms-learn"], // slug exists, but only in a different project
+        skillRevisions: [],
+        extensions: [],
+      });
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [{ agentVersion: "v1", status: "active", createdAt: new Date() }],
+        supportedModels: ["claude-sonnet-4"],
+      });
+      // The project-scoped lookup finds nothing — the slug lives in another project.
+      const findSpy = vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) });
+      (mocks.mcpServerCollection.find as any) = findSpy;
+
+      const res = await request(app)
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          profileId: "profile-1",
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("MCP server(s) not found");
+      expect(res.body.error).toContain("ms-learn");
+      // Validation query must be scoped to the request's project.
+      const filter = findSpy.mock.calls[0][0];
+      expect(filter).toHaveProperty("projectId", TEST_PROJECT_ID);
+    });
+  });
 
   describe("POST /api/v1/requests?worker=... (reasoning effort)", () => {
     it("rejects when effort is incompatible with model capabilities", async () => {
@@ -1451,7 +1610,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           model: "claude-opus-4.6",
@@ -1475,7 +1634,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           model: "claude-opus-4.6",
@@ -1515,7 +1674,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           profileId: "profile-1",
@@ -1539,7 +1698,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           model: "claude-haiku",
@@ -1574,7 +1733,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           model: "claude-haiku-4.5",
@@ -1583,10 +1742,11 @@ describe("API Endpoints", () => {
 
       expect(res.status).toBe(201);
       const foc = (mocks.taskPromptStore.findOrCreate as any).mock.calls.find(
-        (c: any[]) => c[1] === "agents.md"
+        (c: any[]) => c[2] === "agents.md"
       );
       expect(foc).toBeDefined();
-      expect(foc[0]).toBe("# AGENTS\nBe terse.");
+      expect(foc[0]).toBe(TEST_PROJECT_ID);
+      expect(foc[1]).toBe("# AGENTS\nBe terse.");
       const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
       expect(doc).toHaveProperty("agentsMdPromptId", "agents-xyz");
     });
@@ -1601,7 +1761,7 @@ describe("API Endpoints", () => {
       });
 
       const res = await request(app)
-        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           model: "claude-haiku-4.5",
@@ -1618,7 +1778,7 @@ describe("API Endpoints", () => {
       setupCopilotAgent();
 
       const res = await request(app)
-        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           model: "claude-haiku-4.5",
@@ -1652,7 +1812,7 @@ describe("API Endpoints", () => {
       });
       // findOrCreate: select task (1 arg) vs typed gate prompt (text, gate).
       (mocks.taskPromptStore.findOrCreate as any).mockImplementation(
-        async (text: string, type?: string) => ({ _id: type ? `tp-${type}` : "tp-select", text, type }),
+        async (_projectId: string, text: string, type?: string) => ({ _id: type ? `tp-${type}` : "tp-select", text, type }),
       );
       // The resolved gate prompt id resolves to a prompt whose type === gate.
       (mocks.taskPromptCollection.findOne as any).mockImplementation(
@@ -1662,7 +1822,7 @@ describe("API Endpoints", () => {
 
     it("materializes a free-text gate prompt into a typed prompt and persists the resolved id", async () => {
       const res = await request(app)
-        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           gates: [
@@ -1672,7 +1832,7 @@ describe("API Endpoints", () => {
         });
 
       expect(res.status).toBe(201);
-      expect(mocks.taskPromptStore.findOrCreate).toHaveBeenCalledWith("Build the project and fix errors.", "build");
+      expect(mocks.taskPromptStore.findOrCreate).toHaveBeenCalledWith(TEST_PROJECT_ID, "Build the project and fix errors.", "build");
       const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
       const buildGate = doc.gates.find((g: { gate: string }) => g.gate === "build");
       expect(buildGate.promptId).toBe("tp-build");
@@ -1681,7 +1841,7 @@ describe("API Endpoints", () => {
 
     it("lets promptText supersede a provided promptId", async () => {
       const res = await request(app)
-        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           gates: [
@@ -1691,7 +1851,7 @@ describe("API Endpoints", () => {
         });
 
       expect(res.status).toBe(201);
-      expect(mocks.taskPromptStore.findOrCreate).toHaveBeenCalledWith("Fresh build prompt.", "build");
+      expect(mocks.taskPromptStore.findOrCreate).toHaveBeenCalledWith(TEST_PROJECT_ID, "Fresh build prompt.", "build");
       const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
       const buildGate = doc.gates.find((g: { gate: string }) => g.gate === "build");
       expect(buildGate.promptId).toBe("tp-build");
@@ -1699,7 +1859,7 @@ describe("API Endpoints", () => {
 
     it("returns 400 when a non-select gate has neither promptId nor promptText", async () => {
       const res = await request(app)
-        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           gates: [
@@ -1752,7 +1912,7 @@ describe("API Endpoints", () => {
         ]),
       });
       (mocks.taskPromptStore.findOrCreate as any).mockImplementation(
-        async (text: string, type?: string) => ({ _id: type ? `tp-${type}` : "tp-select", text, type }),
+        async (_projectId: string, text: string, type?: string) => ({ _id: type ? `tp-${type}` : "tp-select", text, type }),
       );
       (mocks.taskPromptCollection.findOne as any).mockImplementation(
         async (q: { _id: string }) => ({ _id: q._id, type: q._id.replace("tp-", "") }),
@@ -1761,7 +1921,7 @@ describe("API Endpoints", () => {
 
     it("persists the same resolved gates on every variation request doc", async () => {
       const res = await request(app)
-        .post("/api/v1/requests")
+        .post(`/api/v1/requests?projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           profileId: "base-profile",
@@ -1774,7 +1934,7 @@ describe("API Endpoints", () => {
 
       expect(res.status).toBe(201);
       // Free-text gate prompt is materialized into a typed prompt.
-      expect(mocks.taskPromptStore.findOrCreate).toHaveBeenCalledWith("Build the project and fix errors.", "build");
+      expect(mocks.taskPromptStore.findOrCreate).toHaveBeenCalledWith(TEST_PROJECT_ID, "Build the project and fix errors.", "build");
 
       const docs = (mocks.collection.insertMany as any).mock.calls[0][0];
       // base + 1 variation = 2 request docs, each carrying the gates.
@@ -1799,7 +1959,7 @@ describe("API Endpoints", () => {
 
     it("fails the whole submit (400) without inserting when a gate is invalid", async () => {
       const res = await request(app)
-        .post("/api/v1/requests")
+        .post(`/api/v1/requests?projectId=${TEST_PROJECT_ID}`)
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           profileId: "base-profile",

@@ -41,6 +41,12 @@ For package architecture and data models, see [docs/architecture/app-design.md](
 
 Express.js REST server. Orchestrates runs, streams logs via SSE, manages criteria CRUD, routes tasks to workers through Azure Storage Queues. Connects to MongoDB (CosmosDB-compatible), Redis, Azure Storage Queues, and Blob Storage.
 
+> **Project-scoping invariant:** never perform a global, slug-only get/edit/soft-delete on a
+> project-scoped entity. Every such query must filter by `_id` **or** `projectId` — a human
+> slug/business id is never a key on its own. Derive `projectId` from context (a parent doc or the
+> run-request) when available, else require it from the client (`?projectId=`), else fail **400**.
+> See the by-id invariant in [docs/architecture/app-design.md](docs/architecture/app-design.md#never-a-global-slug-only-action-on-a-project-scoped-entity-the-by-id-invariant).
+
 - Data models and API design: [docs/architecture/app-design.md](docs/architecture/app-design.md)
 - SSE + Change Streams pattern: [docs/research/realtime-data-flow.md](docs/research/realtime-data-flow.md)
 - Environment variables: [ENV_VARIABLES.md](ENV_VARIABLES.md)
@@ -203,6 +209,7 @@ pnpm test:integration             # Integration tests (requires .env + Docker)
 |----------|-------------|
 | [docs/architecture/overview.md](docs/architecture/overview.md) | System architecture, component interactions, data flow |
 | [docs/architecture/app-design.md](docs/architecture/app-design.md) | Data models, API design, package dependency graph |
+| [docs/architecture/data-organization-projects.md](docs/architecture/data-organization-projects.md) | Projects (a single container) to isolate/group data within a cluster; composes with data-tags and auth-rbac |
 | [docs/architecture/vscode-web-worker.md](docs/architecture/vscode-web-worker.md) | XState chat machine, GitHub auth flow, ARIA snapshots |
 | [docs/architecture/token-manager.md](docs/architecture/token-manager.md) | Token storage, validation, round-robin distribution |
 | [docs/architecture/criteria-provider.md](docs/architecture/criteria-provider.md) | CriteriaProvider abstraction, filesystem vs REST backends |
@@ -213,6 +220,7 @@ pnpm test:integration             # Integration tests (requires .env + Docker)
 | [docs/architecture/cli-distribution.md](docs/architecture/cli-distribution.md) | CLI bundling, publishing, installation, update check |
 | [docs/architecture/retry.md](docs/architecture/retry.md) | Retry utilities: `withRetry` function and `@Retry` decorator |
 | [docs/architecture/post-processing.md](docs/architecture/post-processing.md) | Post-processing pipeline, ATIF generation, handler extensibility |
+| [docs/architecture/kubedock.md](docs/architecture/kubedock.md) | Kubedock sidecar, container access for agents, Kustomize Component toggle |
 | [docs/research/realtime-data-flow.md](docs/research/realtime-data-flow.md) | SSE + Change Streams, Redis pub/sub, polling patterns |
 | [docs/research/delta-storage.md](docs/research/delta-storage.md) | Space-efficient storage of iteration snapshots |
 | [docs/shared-dev-infra.md](docs/shared-dev-infra.md) | Shared dev infrastructure (CosmosDB) setup and worktree isolation |

@@ -132,8 +132,6 @@ export interface Run {
   updatedAt?: string;
   deletedAt?: string;
   taskPromptId?: string;
-  /** @deprecated — use taskPromptId instead */
-  promptFeatureExtractionId?: string;
   mcpServers?: string[];
   skills?: string[];
   skillRevisions?: string[];
@@ -261,18 +259,6 @@ export interface SuggestedPromptFeature {
   prompt: string;
 }
 
-export interface PromptFeatureExtraction {
-  _id?: string;
-  taskText: string;
-  taskTextHash?: string;
-  promptFeatureResults: PromptFeatureResult[];
-  suggestedFeatures?: SuggestedPromptFeature[];
-  extractedAt: string;
-  model?: string;
-  cached?: boolean;
-}
-
-// Task Prompt types (first-class entity for benchmark task texts)
 export interface TaskPrompt {
   _id: string;                          // UUIDv5 content-addressed ID
   text?: string;                        // Full task prompt text (absent when blob-backed)
@@ -1105,3 +1091,36 @@ export type RunSortField =
   | "id"
   | "duration";
 export type RunSortDir = "asc" | "desc";
+
+// --- Projects ---
+
+/**
+ * A project as returned by the API (`GET /projects`). A project is the
+ * top-level, unscoped container that every scoped entity carries a `projectId`
+ * for. There is no "default" project. Dates arrive as ISO strings over JSON;
+ * `id` mirrors `_id`.
+ */
+export interface Project {
+  _id: string;
+  /** Mirror of `_id` added by the API response. */
+  id?: string;
+  name: string;
+  description?: string;
+  creator?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+/** Body for creating a project (`POST /projects`). */
+export interface CreateProjectRequest {
+  name: string;
+  description?: string;
+  creator?: string;
+}
+
+/** Body for updating a project (`PATCH /projects/:id`). */
+export interface UpdateProjectRequest {
+  name?: string;
+  description?: string;
+}

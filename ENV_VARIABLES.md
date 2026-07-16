@@ -150,6 +150,38 @@ references it via `contentBlobUrl` with no inline `text`. The decision is purely
 size-based — independent of the prompt's `type`. Small task prompts stay inline
 (today's behavior); large AGENTS.md bodies go to blob automatically.
 
+## Project Scoping Configuration
+
+Data Organization: Projects introduces a first-class **Project** container and an
+immutable `projectId` on every user-scoped entity. See
+[db.md § Project scoping (migration 025)](docs/architecture/db.md#project-scoping-migration-025)
+and [app-design.md § Data Organization: Projects](docs/architecture/app-design.md#data-organization-projects).
+
+### SCOPE_PROJECT
+**Default:** _none_
+**Type:** string (project ID)
+**Used by:** CLI (`apps/cli`)
+
+Project ID the CLI uses to scope commands when `--project` is omitted.
+Resolution precedence is `--project <id>` → `SCOPE_PROJECT` → the saved selection
+from `scope project use <id>` (persisted in `~/.config/scope/config.json`). There
+is **no default project**: if none of these resolves, scoped lists and creates
+**fail fast** with an error asking you to pick a project
+(`scope project use <id>`). Point reads by `_id` (e.g. `run get -i <id>`) are
+globally unique and do not require a project.
+
+### SCOPE_INITIAL_PROJECT_NAME
+**Default:** `Initial Project`
+**Type:** string
+**Used by:** DB migration `025-create-projects` (`packages/db-migrations`)
+
+Human-readable name given to the single **initial project** that migration 025
+seeds and files all pre-existing data into. Read once, only when the migration
+first creates the project (a fresh UUID `_id`, **no `isDefault` flag**). On a
+re-run the migration reuses the oldest existing project, so changing this value
+after the initial run has no effect. It is an ordinary, re-nameable project — not
+a fallback or default.
+
 ## Judge Strategy Configuration
 
 ### JUDGE_MODEL
@@ -211,6 +243,12 @@ Maximum number of retry attempts when the judge client encounters a timeout or t
 **Type:** boolean (`true` to enable)
 
 At startup the judge service runs a self-check that spawns the bundled Copilot CLI and asserts its ACP protocol version matches the installed `@github/copilot-sdk`. On a mismatch (e.g. the `@github/copilot` override in `package.json` drifted ahead of the SDK) the judge logs a clear fatal message and exits instead of serving opaque per-evaluation HTTP 500s. Set to `true` to bypass the check (not recommended).
+
+### JUDGE_MAX_TOOL_CALLS
+**Default:** `300`
+**Type:** integer
+
+Caps how many tool calls the judge's `list_tool_calls` tool returns in a single browse page. The judge assembles the coding agent's tool calls **cumulatively across every iteration of the run** (issue #1255), deduplicating byte-identical calls, so this bound keeps a long run's history from overflowing the judge's context. It applies **only** to the `list_tool_calls` browse page — `search_tool_outputs` (pattern search) and `get_tool_output` (fetch one call by global index) always reach the full deduped history, so a one-time action from an early iteration stays discoverable regardless of this cap.
 
 ## Feedback Configuration
 
@@ -510,6 +548,14 @@ The reaper reuses `SCOPE_RUN_HEARTBEAT_STALE_MS` (Worker Configuration, below) a
 
 Maximum time the `coder-acp-copilot` worker waits for a Copilot CLI ACP session to complete before terminating it. If the agent takes longer than this to produce a response, the session is killed and the iteration fails with a timeout error. Increase for complex tasks that require extended processing. Set to `0` to disable the timeout entirely (not recommended in production).
 
+### COPILOT_AUTO_UPDATE
+**Default:** `false` (set by the `coder-acp-copilot` and `coder-acp-copilot-windows` workers on the spawned CLI subprocess)
+**Type:** boolean-ish (`"false"` to disable auto-update)
+
+Disables the GitHub Copilot CLI's in-session auto-updater for the copilot workers. In headless `--acp --yolo` stdio mode the CLI otherwise downloads a newer binary mid-run, logs `restart to update`, and then **never restarts** — nothing relaunches it under ACP, so the process freezes after creating the ACP session but before its first model completion. The run records 0 turns / 0 AI calls / 0 tokens and rides the full `ACP_SESSION_TIMEOUT_MS` (60-min) timeout. See [issue #1179](https://github.com/growth-ecosystems/scope-core/issues/1179).
+
+The workers set this env var in `buildSubprocessEnv` **and** pass `--no-auto-update` on the CLI args (belt-and-suspenders). This pins each run to the image's baked CLI version, making benchmarks deterministic and removing a per-cold-start binary download from the hot path. This is the actual fix for the hang — pinning the worker image version alone does **not** help, because the running binary still tries to update to "latest".
+
 ### CLAUDE_CODE_DISABLE_POLICY_SKILLS
 **Default:** `1` (set in the `coder-acp-claude-code` Dockerfile)
 **Type:** boolean-ish (`1` to disable, unset/`0` to allow)
@@ -575,7 +621,59 @@ How often the Token Manager's scheduler validates all active tokens against thei
 
 Host port mapping for the token-manager service in Docker Compose.
 
-## DevProxy Configuration (HAR Capture)
+## Kubedock Configuration (Container Access)
+
+### DOCKER_HOST
+**Default:** (none)
+**Type:** URI string
+
+Points to the Docker-compatible socket. When set, workers can create containers during Build/Test gates. The value is passed through to agent subprocesses so they can use standard Docker commands.
+
+- **Kubernetes:** Set in deployment manifest to `unix:///var/run/kubedock/kubedock.sock` (auto-configured when kubedock sidecar is present)
+- **Docker Compose:** Set to `unix:///var/run/docker.sock` (direct host socket mount)
+- **Used by:** `coder-acp-copilot`, `coder-acp-claude-code` (subprocess passthrough)
+
+### KUBEDOCK_ENABLED
+**Default:** (none)
+**Type:** boolean string (`true`)
+
+Enables kubedock-specific container cleanup (purge on setup, remove on teardown). **Must only be set when kubedock is the Docker backend** — if set with a direct Docker socket, the cleanup will force-remove ALL containers on the host.
+
+- **Kubernetes:** Set to `true` in deployment manifest (where kubedock manages container lifecycle)
+- **Docker Compose:** Do NOT set (direct socket — no cleanup needed)
+- **Used by:** `coder-acp-copilot`, `coder-acp-claude-code` (via `KubedockClient.isEnabled()`)
+
+## Proxy & HAR Capture Configuration (Gateway / DevProxy)
+
+Workers capture agent↔provider traffic as HAR via one of two interchangeable backends,
+selected by `PROXY_BACKEND`. Both converge on the same `extractHarMetadata()` pipeline, so
+HAR output is identical regardless of backend.
+
+### PROXY_BACKEND
+**Default:** `devproxy` (worker adapter default; deployment manifests set `gateway`)
+**Type:** enum (`gateway` | `devproxy`)
+
+Selects the proxy backend returned by `createProxyClient()` (`packages/shared/src/devproxy/index.ts`):
+
+- `gateway` — the shared Rust [AI Gateway](docs/architecture/ai-gateway.md). Records both
+  HTTP and **WebSocket** frames — required for Copilot CLI ≥ 1.0.65, whose `/responses`
+  traffic is carried over a WebSocket that DevProxy's HTTP-only HAR generator cannot see.
+  HAR is downloaded via the gateway session API, so no shared `har-output` volume is
+  needed. Used by the VS Code Electron worker and both Copilot ACP workers (Linux + Windows).
+- `devproxy` — the legacy per-worker [Microsoft DevProxy](https://github.com/dotnet/dev-proxy)
+  sidecar. Records HTTP only; HAR is read from a shared filesystem volume. Still used by the
+  ACP Claude Code worker.
+
+### GATEWAY_TOKEN_PLUGIN_ENABLED
+**Default:** `true` (effective only when `TOKEN_MANAGER_URL` is also set)
+**Type:** boolean (`true` | `false`)
+
+Only relevant when `PROXY_BACKEND=gateway`. When `true` (and `TOKEN_MANAGER_URL` is set) the
+worker asks the gateway to enable the `copilot_token` plugin, which mints and refreshes
+Copilot session tokens for that session. Set to `false` for workers whose agent manages its
+own token lifecycle: both Copilot ACP workers set `false` because the Copilot CLI handles
+token minting/refresh itself (enabling the plugin caused upstream 502s — #1058). The VS Code
+Electron worker leaves it enabled.
 
 ### DEV_PROXY_ENABLED
 **Default:** `false`
@@ -590,20 +688,14 @@ Enables DevProxy integration for capturing HTTP traffic as HAR files. When `true
 **Default:** `http://localhost:18000`
 **Type:** URL string
 
-URL of the gateway/DevProxy REST API. Used to start/stop recording, check status, and download the CA certificate.
+URL of the gateway/DevProxy REST API. Used to start/stop recording, check status, and download the CA certificate. Points at the gateway control API when `PROXY_BACKEND=gateway`, or the DevProxy management port when `PROXY_BACKEND=devproxy`.
 
-- **Docker Compose (gateway):** `http://gateway:18000` (shared service)
-- **Docker Compose (devproxy-copilot):** `http://devproxy-copilot:18897` (separate legacy service)
-- **Kubernetes:** `http://gateway-service:18000` (shared service)
+- **Docker Compose (gateway):** `http://gateway:18000` (shared service — Copilot + VS Code Electron)
+- **Docker Compose (devproxy, Claude Code):** `http://devproxy-claude-code:18897` (per-worker sidecar)
+- **Kubernetes (gateway):** `http://gateway-service.scoped.svc.cluster.local:18000` (shared service)
 
 ### DEV_PROXY_HAR_DIR
 **Default:** `/har-output`
 **Type:** path
 
-Directory where DevProxy writes HAR files. Shared between the DevProxy process and the worker via a volume mount.
-
-### DEVPROXY_COPILOT_API_PORT
-**Default:** `18800`
-**Type:** integer (Docker Compose only)
-
-Host port mapping for the Copilot DevProxy REST API in Docker Compose.
+**`PROXY_BACKEND=devproxy` only.** Directory where DevProxy writes HAR files, shared between the DevProxy process and the worker via a volume mount. Unused by the gateway backend, which downloads HAR over HTTP instead of via a shared volume.

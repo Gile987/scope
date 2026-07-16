@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, KubedockClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -16,6 +16,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
   workspacePath: string | undefined = undefined;
   private gateway: McpGatewayClient | null = null;
   private mcpConfigs: McpServerConfig[] = [];
+  private kubedock: KubedockClient | null = null;
 
   getAgentVersion(): string {
     return AGENT_VERSION;
@@ -32,6 +33,17 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     this.workspacePath = createFreshWorkspace();
     await log("info", "Fresh workspace created", { workspacePath: this.workspacePath });
 
+    // Purge orphan containers from previous runs (crash recovery)
+    if (KubedockClient.isEnabled()) {
+      this.kubedock = new KubedockClient();
+      try {
+        const purged = await this.kubedock.purgeContainers();
+        if (purged > 0) await log("info", "Purged orphan containers from previous run", { count: purged });
+      } catch (err) {
+        await log("warn", `Failed to purge orphan containers — continuing anyway`, { error: String(err) });
+      }
+    }
+
     this.mcpConfigs = options?.mcpServerConfigs ?? [];
     if (this.mcpConfigs.length > 0) {
       if (!McpGatewayClient.isEnabled()) {
@@ -45,6 +57,17 @@ class ClaudeCodeProcessor implements WorkerProcessor {
   }
 
   async teardown(log: WorkerLogFn): Promise<void> {
+    // Clean up containers spawned during this run
+    if (this.kubedock) {
+      try {
+        const removed = await this.kubedock.purgeContainers();
+        if (removed > 0) await log("info", "Cleaned up containers from run", { count: removed });
+      } catch (err) {
+        await log("warn", `Failed to clean up containers — will be purged on next run`, { error: String(err) });
+      }
+      this.kubedock = null;
+    }
+
     if (this.gateway && this.mcpConfigs.length > 0) {
       await Promise.all(this.mcpConfigs.map((c) =>
         this.gateway!.deregisterServer(c.slug).catch((err) => {
@@ -113,6 +136,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       // Run ACP session with Claude Code
       const env: Record<string, string> = {
         [envVarName]: tokenResponse.value,
+        ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}),
       };
       if (options?.model) {
         env.ANTHROPIC_MODEL = options.model;
