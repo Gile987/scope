@@ -19,7 +19,7 @@ import { InteractionStatus } from "@azure/msal-browser";
 import { useMsal, useIsAuthenticated } from "@azure/msal-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
-import { isAuthConfigured } from "@/lib/auth/msalInstance";
+import { isAuthConfigured, isAuthEnabled } from "@/lib/auth/msalInstance";
 
 function AuthPending({ label }: { label: string }) {
   return (
@@ -69,6 +69,11 @@ function NotConfigured() {
 export function RequireAuth({ children }: { children: ReactNode }) {
   const isAuthenticated = useIsAuthenticated();
   const { inProgress } = useMsal();
+
+  // Auth feature disabled → no gate at all; render the app as-is.
+  if (!isAuthEnabled) {
+    return <>{children}</>;
+  }
 
   if (!isAuthConfigured) {
     return <NotConfigured />;

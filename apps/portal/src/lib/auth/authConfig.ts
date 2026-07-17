@@ -46,6 +46,23 @@ export interface PortalAuthConfig {
   /** Where MSAL persists its token cache. */
   cacheLocation: "localStorage" | "sessionStorage";
   /**
+   * Primary switch: `true` when the auth feature is turned on for this build.
+   *
+   * Auth is **on by default (secure by default)** and only turns off when an
+   * environment explicitly opts out. There are three independent per-environment
+   * controls (see {@link resolveAuthEnabled}):
+   *  - **local dev** — `VITE_AUTH_ENABLED_LOCAL` (build-time).
+   *  - **integration** — `SCOPE_AUTH_ENABLED` on the integration overlay
+   *    (runtime, via `/config.js` → `window.__SCOPE_CONFIG__.authEnabled`).
+   *  - **production** — `SCOPE_AUTH_ENABLED` on the prod overlay (same runtime
+   *    mechanism). int/prod must be runtime because the image is promoted.
+   *
+   * When `false`, the Portal renders exactly as it did before auth existed: no
+   * sign-in gate, no account menu, and no `Authorization` header on API calls.
+   * This is the toggle to use until an environment's API ships token verification.
+   */
+  enabled: boolean;
+  /**
    * `true` when a usable configuration was resolved. In production this requires
    * the `VITE_AUTH_*` env vars to be present at build time.
    */
@@ -84,9 +101,67 @@ function envList(value: string | undefined): string[] | undefined {
   return items.length ? items : undefined;
 }
 
+/**
+ * Parse a boolean-ish env var. Accepts `true/1/yes/on` and `false/0/no/off`
+ * (case-insensitive); anything else (including undefined/empty) yields
+ * `fallback`, so a mis-set value fails safe to the default rather than silently
+ * disabling auth.
+ */
+function envBool(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  const v = value.trim().toLowerCase();
+  if (v === "true" || v === "1" || v === "yes" || v === "on") return true;
+  if (v === "false" || v === "0" || v === "no" || v === "off") return false;
+  return fallback;
+}
+
+/**
+ * Resolve whether the auth feature is enabled for the current environment.
+ *
+ * There are **three independent, per-environment controls** (local, integration,
+ * production). Auth is **on by default** (secure by default); a control must
+ * explicitly opt out. Because the production Portal image is **built once and
+ * promoted** int→prod (see the overlay `images.yaml` files + `promote.yml`), a
+ * build-time `VITE_` flag cannot differ between integration and production — so
+ * int/prod are governed at **runtime** while local uses a build-time flag:
+ *
+ *  1. **integration / production** — `window.__SCOPE_CONFIG__.authEnabled`,
+ *     written into `/config.js` at container start by
+ *     `apps/portal/docker-entrypoint.sh` from the `SCOPE_AUTH_ENABLED` env var
+ *     (set per environment via the portal's container env).
+ *     This runtime value wins whenever present, so the single promoted bundle
+ *     obeys each environment's own setting.
+ *  2. **local dev** — `VITE_AUTH_ENABLED_LOCAL` (build-time, read by `vite dev`).
+ *     Local `/config.js` ships no `authEnabled`, so resolution falls through to
+ *     this flag. `false` disables auth for local iteration without standing up
+ *     `entra-local`.
+ *  3. **fallback** — a built bundle served without the entrypoint (no runtime
+ *     `authEnabled`) defaults to enabled, so a misconfigured deploy fails safe
+ *     to secured rather than open.
+ */
+export function resolveAuthEnabled(
+  runtime: ScopeRuntimeConfig | undefined,
+  env: ImportMetaEnv,
+  isDev: boolean,
+): boolean {
+  // 1) Per-environment runtime override (integration/production).
+  const runtimeValue = runtime?.authEnabled;
+  if (typeof runtimeValue === "boolean") return runtimeValue;
+  if (typeof runtimeValue === "string") return envBool(runtimeValue, true);
+  // 2) Local dev build-time flag.
+  if (isDev) {
+    return envBool(env.VITE_AUTH_ENABLED_LOCAL as string | undefined, true);
+  }
+  // 3) Built bundle, no runtime config → secure default.
+  return true;
+}
+
 function resolveConfig(): PortalAuthConfig {
   const env = import.meta.env;
   const isDev = Boolean(env.DEV);
+  const runtime =
+    typeof window !== "undefined" ? window.__SCOPE_CONFIG__ : undefined;
+  const enabled = resolveAuthEnabled(runtime, env, isDev);
 
   const clientId =
     (env.VITE_AUTH_CLIENT_ID as string | undefined) ??
@@ -125,12 +200,21 @@ function resolveConfig(): PortalAuthConfig {
     postLogoutRedirectUri,
     protocolMode,
     cacheLocation,
+    enabled,
     isConfigured: Boolean(clientId && authority),
   };
 }
 
 /** The resolved Portal auth configuration (evaluated once at module load). */
 export const authConfig: PortalAuthConfig = resolveConfig();
+
+/**
+ * Whether the auth feature is turned on for this build (the two-flag opt-out
+ * resolution — see {@link resolveAuthEnabled}). When `false` the Portal skips
+ * MSAL entirely: no sign-in gate, no account menu, no bearer token on API
+ * calls. **On by default.**
+ */
+export const isAuthEnabled: boolean = authConfig.enabled;
 
 /** Scopes requested when acquiring an API access token. */
 export const apiTokenRequestScopes: string[] = authConfig.scopes;

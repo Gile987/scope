@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/contexts/AuthContext";
+import { isAuthEnabled } from "@/lib/auth/msalInstance";
 import { cn } from "@/lib/utils";
 
 /** Derive up to two uppercase initials from a display name or username. */
@@ -29,6 +30,11 @@ function initialsOf(name: string): string {
  */
 export function UserMenu({ className }: { className?: string }) {
   const { user, isAuthenticated, login, logout } = useAuth();
+
+  // Auth feature disabled → no account control in the header.
+  if (!isAuthEnabled) {
+    return null;
+  }
 
   if (!isAuthenticated || !user) {
     return (

@@ -10,7 +10,7 @@
  * after {@link initializeAuth} has run.
  */
 import { setApiTokenProvider, setReauthHandler } from "../api-client";
-import { acquireApiToken, acquireApiTokenRedirect } from "./msalInstance";
+import { acquireApiToken, acquireApiTokenRedirect, isAuthEnabled } from "./msalInstance";
 
 let wired = false;
 
@@ -21,10 +21,15 @@ let wired = false;
  *  - the re-auth handler triggers an interactive redirect when a `401` survives
  *    the forced-refresh retry.
  *
+ * No-op when the auth feature is disabled ({@link isAuthEnabled} is `false`) so
+ * requests go out without an `Authorization` header and a `401` never triggers
+ * an interactive redirect — matching an API that does not verify tokens yet.
+ *
  * Idempotent.
  */
 export function wireApiAuth(): void {
   if (wired) return;
+  if (!isAuthEnabled) return;
   wired = true;
 
   setApiTokenProvider((options) =>

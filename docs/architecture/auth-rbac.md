@@ -723,7 +723,12 @@ downstream service applies the same ownership scoping). When that's required:
   `hasPermission("scope/user:admin")`), not hardcoded role names. (UI gating is
   convenience only; the API is the enforcement boundary.)
 - **No dev role switcher.** Dev mode is removed (§1); the Portal always authenticates
-  against a real IdP. There is no `enabled: false` state and no `X-Dev-User` toggle.
+  against a real IdP. There is no `X-Dev-User` toggle and no synthetic-principal
+  bypass. The per-environment `SCOPE_AUTH_ENABLED` (integration/production, runtime)
+  and `VITE_AUTH_ENABLED_LOCAL` (local dev, build-time) controls (subtask 10) are
+  **not** such a bypass: they turn the auth **feature** off wholesale (no gate, no
+  token, **no fabricated principal**) as a rollout gate while the API lacks token
+  verification — they never authenticate a request as a user.
 
 ### 9. SSE / log streaming
 
@@ -888,6 +893,27 @@ local dev exercises the same verification path as production. New env vars are d
     > `setApiTokenProvider`/`setReauthHandler` seams). IdP config is build-time
     > (`VITE_AUTH_*`, see [ENV_VARIABLES.md](../../ENV_VARIABLES.md)) defaulting to
     > the `entra-local` emulator for local dev.
+    >
+    > **Feature toggle (important).** Portal auth is **on by default (secure by
+    > default)** but can be turned off per environment via **three independent
+    > controls** — one each for local dev, integration, and production:
+    > `VITE_AUTH_ENABLED_LOCAL` (local `vite dev` only, build-time) and
+    > `SCOPE_AUTH_ENABLED` (integration and production, **runtime** container env).
+    > Int/prod are runtime because the Portal image is **built once and promoted**
+    > int→prod, so a build-time flag can't differ between them; the runtime value is
+    > written into `/config.js` by `apps/portal/docker-entrypoint.sh` (same
+    > mechanism as `SCOPE_DOCS_BASE_URL`). When off, the Portal skips MSAL entirely
+    > — no sign-in gate, no account menu, no `Authorization` header. This is a
+    > **rollout gate**, used to keep auth off in an environment **until its API
+    > verifies tokens** (the API does not yet). It is **not** a dev auth-bypass: it
+    > disables the feature wholesale and fabricates **no** principal (contrast the
+    > forbidden `X-Dev-User`/synthetic-user bypass in §8 and the security matrix).
+    > Since the API is the enforcement boundary, disabling a control once the API
+    > verifies tokens simply means the Portal sends no token and the API rejects the
+    > request — it cannot grant access. Resolution precedence: runtime
+    > `authEnabled` (int/prod) wins; else `VITE_AUTH_ENABLED_LOCAL` (local dev); else
+    > default enabled. See [ENV_VARIABLES.md](../../ENV_VARIABLES.md) "Feature
+    > toggle".
     >
     > **One-command local dev.** Any `pnpm docker:dev:*` script that starts the
     > Portal brings up the `entra-local` emulator (compose `auth` profile) over

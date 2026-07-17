@@ -320,6 +320,62 @@ renders a "not configured" screen instead of silently pointing at `localhost`.
 > and the app is gated client-side; identity shown in the UI is derived from the
 > MSAL account token claims.
 
+### ⚠️ IMPORTANT — Feature toggle (3 per-environment controls)
+
+Portal auth is a **feature-flagged capability** with **three independent,
+per-environment controls** — one each for **local dev**, **integration**, and
+**production**. It is **ON by default (secure by default)** in every environment;
+a control must **explicitly** opt out.
+
+> **Turn auth OFF until the API ships token verification.** The API does not yet
+> validate bearer tokens. Until it does, any environment that runs the auth-gated
+> Portal against that API should disable auth **for that environment only** (see
+> the table). Flip it back on (or remove the override) once the auth-enabled API
+> is deployed there. Because the three controls are independent, you can, for
+> example, keep auth on locally while it stays off in integration and production.
+
+When auth is disabled the Portal behaves **exactly as it did before auth
+existed**: no sign-in gate, no account menu, and no `Authorization` header on API
+calls. MSAL is never initialized.
+
+**Why local is build-time but int/prod are runtime.** The production Portal image
+is **built once and promoted** integration→production (the overlay `images.yaml`
+files pin the same tag; see `.github/workflows/promote.yml`). A build-time
+`VITE_*` flag is baked into that single image and therefore **cannot differ**
+between integration and production. So int/prod are governed at **runtime** (an
+env var read at container start), while local dev — which runs `vite dev`, not the
+promoted image — uses a build-time flag.
+
+| Environment | Control | Kind | Where to set | Default |
+| --- | --- | --- | --- | --- |
+| **Local dev** | `VITE_AUTH_ENABLED_LOCAL` | build-time (`import.meta.env.DEV`) | `docker-compose.dev.yml` or your shell | `true` |
+| **Integration** | `SCOPE_AUTH_ENABLED` | runtime (container env) | `deploy/overlays/integration` portal patch | `true` (base); currently `false` |
+| **Production** | `SCOPE_AUTH_ENABLED` | runtime (container env) | `deploy/overlays/prod` portal patch | `true` (base); currently `false` |
+
+**Type:** boolean-ish string. `true`/`1`/`yes`/`on` enable; `false`/`0`/`no`/`off`
+disable (case-insensitive). Any other/unset value falls back to the secure
+default (**enabled**).
+
+**How it works at runtime (int/prod).** `SCOPE_AUTH_ENABLED` is read by
+`apps/portal/docker-entrypoint.sh`, which writes `authEnabled` into `/config.js`
+(→ `window.__SCOPE_CONFIG__.authEnabled`) when the container starts. The app reads
+that value at load. This is the same mechanism already used for
+`SCOPE_DOCS_BASE_URL`.
+
+**Resolution precedence** (in `apps/portal/src/lib/auth/authConfig.ts`): the
+runtime `window.__SCOPE_CONFIG__.authEnabled` (int/prod) wins whenever present;
+otherwise, in local dev, `VITE_AUTH_ENABLED_LOCAL` applies; otherwise it defaults
+to **enabled**. The dev `public/config.js` intentionally ships **no** `authEnabled`
+so local always falls through to the Vite flag.
+
+- **Local dev:** set `VITE_AUTH_ENABLED_LOCAL=false` in `docker-compose.dev.yml`
+  (or your shell) to skip sign-in while iterating on UI, without standing up
+  `entra-local`.
+- **Integration / production:** set `SCOPE_AUTH_ENABLED=false` on the portal
+  Deployment in that environment's overlay (currently `false` in both until the
+  API verifies tokens). No image rebuild is needed — it takes effect on the next
+  pod start.
+
 ### Local dev setup (entra-local)
 
 Sign-in works from a **single command** — no manual profile flag, no manual cert

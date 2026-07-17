@@ -19,6 +19,7 @@ import {
 } from "@azure/msal-browser";
 import {
   authConfig,
+  isAuthEnabled,
   apiTokenRequestScopes,
   buildMsalConfiguration,
   loginRequestScopes,
@@ -48,6 +49,9 @@ function ensureActiveAccount(): AccountInfo | null {
  * work runs at most once.
  */
 export async function initializeAuth(): Promise<void> {
+  // Auth feature disabled → never touch MSAL. Keeps the bootstrap path inert so
+  // the Portal behaves exactly as it did pre-auth.
+  if (!isAuthEnabled) return;
   if (initialized) return;
   if (initPromise) return initPromise;
 
@@ -155,3 +159,10 @@ export async function acquireApiTokenRedirect(): Promise<void> {
 
 /** Whether a Portal auth config was resolved (see {@link authConfig}). */
 export const isAuthConfigured = authConfig.isConfigured;
+
+/**
+ * Whether the auth feature is turned on for this build. Re-exported from
+ * {@link authConfig} so auth consumers (route guard, API wiring, header UI) have
+ * a single import surface. See `isAuthEnabled` in `authConfig.ts`.
+ */
+export { isAuthEnabled };
