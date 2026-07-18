@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/tooltip";
 import { VersionFooter } from "./VersionFooter";
 import { ThemeToggle } from "./ThemeToggle";
+import { UserMenu } from "./UserMenu";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 import { useProjectContext } from "@/contexts/ProjectContext";
@@ -316,6 +317,7 @@ export function Layout() {
           <div className="flex items-center gap-1">
             <ProjectSwitcher />
             <ThemeToggle />
+            <UserMenu />
           </div>
         </header>
 

@@ -5,11 +5,21 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { PublicClientApplication } from "@azure/msal-browser";
+import { MsalProvider } from "@azure/msal-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { AuthProvider } from "@/contexts/AuthContext";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { PROJECT_STORAGE_KEY } from "@/lib/project-scope";
 import { Layout } from "./Layout";
+
+// The header renders <UserMenu />, which reads auth state via useAuth ->
+// MsalProvider. Provide a minimal, un-authenticated MSAL instance so Layout can
+// render in isolation without a live IdP.
+const msalInstance = new PublicClientApplication({
+  auth: { clientId: "test-client-id" },
+});
 
 // The portal defines these build-time constants via Vite `define`; the root
 // Vitest run doesn't apply that config, so stub them for the routes (e.g. "/")
@@ -34,25 +44,30 @@ function renderLayout(
   // Layout gates project-scoped nav on a selected project, so seed one by
   // default; pass { projectId: null } to exercise the no-project state.
   if (projectId) localStorage.setItem(PROJECT_STORAGE_KEY, projectId);
-  // Layout now hosts <ProjectSwitcher />, which reads react-query + ProjectContext,
-  // so the harness provides both (mirroring main.tsx).
+  // Layout now hosts <ProjectSwitcher /> (react-query + ProjectContext) and
+  // <UserMenu /> (MSAL + AuthContext), so the harness provides all of them
+  // (mirroring main.tsx).
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider defaultTheme="light">
-        <ProjectProvider>
-          <MemoryRouter initialEntries={[path]}>
-            <Routes>
-              <Route element={<Layout />}>
-                <Route path="/" element={<div>Home page</div>} />
-                <Route path="/runs" element={<div>Runs page</div>} />
-              </Route>
-            </Routes>
-          </MemoryRouter>
-        </ProjectProvider>
-      </ThemeProvider>
+      <MsalProvider instance={msalInstance}>
+        <AuthProvider>
+          <ThemeProvider defaultTheme="light">
+            <ProjectProvider>
+              <MemoryRouter initialEntries={[path]}>
+                <Routes>
+                  <Route element={<Layout />}>
+                    <Route path="/" element={<div>Home page</div>} />
+                    <Route path="/runs" element={<div>Runs page</div>} />
+                  </Route>
+                </Routes>
+              </MemoryRouter>
+            </ProjectProvider>
+          </ThemeProvider>
+        </AuthProvider>
+      </MsalProvider>
     </QueryClientProvider>,
   );
 }

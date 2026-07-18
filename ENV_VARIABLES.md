@@ -301,6 +301,178 @@ Maximum number of completed runs loaded into memory for a single Statistics / `G
 
 When set to `"true"`, displays the Pass@k metrics table on the Insights page. By default, this table is hidden. This is a Vite env var and must be prefixed with `VITE_` to be exposed to the frontend.
 
+## Portal Authentication (Microsoft Entra ID / MSAL)
+
+Build-time (`VITE_*`) configuration for Portal sign-in via MSAL. These are
+inlined into the bundle at build time (retargeting the IdP is a rebuild, not a
+runtime change), matching the auth spec's "hardcoded per build" intent
+(`docs/architecture/auth-rbac.md` §8, subtask 10).
+
+In **dev** builds (`import.meta.env.DEV`) every value defaults to the seeded
+[entra-local](https://github.com/cmaneu/entra-local) emulator (Docker tag
+`0.0.3`), so sign-in works out of the box once the one-time local setup below is
+done. In **production** builds the config is only considered valid when
+`VITE_AUTH_CLIENT_ID` and `VITE_AUTH_AUTHORITY` are present; otherwise the Portal
+renders a "not configured" screen instead of silently pointing at `localhost`.
+
+> Authentication only — there is no authorization (roles/permissions) yet, and
+> the API does not verify the token yet. The token is attached to API requests
+> and the app is gated client-side; identity shown in the UI is derived from the
+> MSAL account token claims.
+
+### ⚠️ IMPORTANT — Feature toggle (3 per-environment controls)
+
+Portal auth is a **feature-flagged capability** with **three independent,
+per-environment controls** — one each for **local dev**, **integration**, and
+**production**. It is **ON by default (secure by default)** in every environment;
+a control must **explicitly** opt out.
+
+> **Turn auth OFF until the API ships token verification.** The API does not yet
+> validate bearer tokens. Until it does, any environment that runs the auth-gated
+> Portal against that API should disable auth **for that environment only** (see
+> the table). Flip it back on (or remove the override) once the auth-enabled API
+> is deployed there. Because the three controls are independent, you can, for
+> example, keep auth on locally while it stays off in integration and production.
+
+When auth is disabled the Portal behaves **exactly as it did before auth
+existed**: no sign-in gate, no account menu, and no `Authorization` header on API
+calls. MSAL is never initialized.
+
+**Why local is build-time but int/prod are runtime.** The production Portal image
+is **built once and promoted** integration→production (the overlay `images.yaml`
+files pin the same tag; see `.github/workflows/promote.yml`). A build-time
+`VITE_*` flag is baked into that single image and therefore **cannot differ**
+between integration and production. So int/prod are governed at **runtime** (an
+env var read at container start), while local dev — which runs `vite dev`, not the
+promoted image — uses a build-time flag.
+
+| Environment | Control | Kind | Where to set | Default |
+| --- | --- | --- | --- | --- |
+| **Local dev** | `VITE_AUTH_ENABLED_LOCAL` | build-time (`import.meta.env.DEV`) | `docker-compose.dev.yml` or your shell | `true` |
+| **Integration** | `SCOPE_AUTH_ENABLED` | runtime (container env) | `deploy/overlays/integration` portal patch | `true` (base); currently `false` |
+| **Production** | `SCOPE_AUTH_ENABLED` | runtime (container env) | `deploy/overlays/prod` portal patch | `true` (base); currently `false` |
+
+**Type:** boolean-ish string. `true`/`1`/`yes`/`on` enable; `false`/`0`/`no`/`off`
+disable (case-insensitive). Any other/unset value falls back to the secure
+default (**enabled**).
+
+**How it works at runtime (int/prod).** `SCOPE_AUTH_ENABLED` is read by
+`apps/portal/docker-entrypoint.sh`, which writes `authEnabled` into `/config.js`
+(→ `window.__SCOPE_CONFIG__.authEnabled`) when the container starts. The app reads
+that value at load. This is the same mechanism already used for
+`SCOPE_DOCS_BASE_URL`.
+
+**Resolution precedence** (in `apps/portal/src/lib/auth/authConfig.ts`): the
+runtime `window.__SCOPE_CONFIG__.authEnabled` (int/prod) wins whenever present;
+otherwise, in local dev, `VITE_AUTH_ENABLED_LOCAL` applies; otherwise it defaults
+to **enabled**. The dev `public/config.js` intentionally ships **no** `authEnabled`
+so local always falls through to the Vite flag.
+
+- **Local dev:** set `VITE_AUTH_ENABLED_LOCAL=false` in `docker-compose.dev.yml`
+  (or your shell) to skip sign-in while iterating on UI, without standing up
+  `entra-local`.
+- **Integration / production:** set `SCOPE_AUTH_ENABLED=false` on the portal
+  Deployment in that environment's overlay (currently `false` in both until the
+  API verifies tokens). No image rebuild is needed — it takes effect on the next
+  pod start.
+
+### Local dev setup (entra-local)
+
+Sign-in works from a **single command** — no manual profile flag, no manual cert
+trust, and no manual redirect-URI registration. Any `pnpm docker:dev:*` script
+that starts the Portal (e.g. `pnpm docker:dev:copilot`, `pnpm docker:dev:portal`,
+`pnpm docker:dev:all`) automatically:
+
+1. Ensures a locally-trusted TLS cert exists via **mkcert** (`scripts/ensure-dev-certs.sh`,
+   invoked by `scripts/dev-compose.sh`). mkcert installs a local root CA into the
+   OS/browser trust store and mints `.certs/entra-local.pem` for `localhost`, so
+   `https://localhost:<ENTRA_LOCAL_PORT>` is trusted with no cert warning. MSAL
+   requires the authority to be served over HTTPS, which is why the emulator uses
+   TLS rather than plain HTTP.
+2. Starts the `entra-local` emulator (compose `auth` profile, added automatically
+   by the dev scripts). `PUBLIC_ORIGIN`/`ISSUER` are pinned to
+   `https://localhost:${ENTRA_LOCAL_PORT}` so the OIDC discovery document's
+   `issuer`/endpoints use the host-facing port (the container binds `8443`
+   internally; per-worktree port offsets would otherwise leak into the issuer and
+   fail MSAL's authority match).
+3. Runs the one-shot `entra-local-init` service, which waits for the emulator to
+   become healthy and idempotently registers `http://localhost:${PORTAL_PORT}` as
+   a `spa` redirect URI on the seeded Sample SPA app (the seed ships only
+   `https://localhost:3000`, and each worktree gets its own `PORTAL_PORT`).
+
+**Prerequisite:** [mkcert](https://github.com/FiloSottile/mkcert) must be
+installed (`brew install mkcert nss`). The first run triggers `mkcert -install`,
+which asks for your password once to add the local CA to the system trust store.
+This is the only interactive step.
+
+Then open the Portal at `http://localhost:${PORTAL_PORT}`, click **Log in**, and
+sign in with a seeded user (`alice@entralocal.dev` / `bob@entralocal.dev`).
+
+> `ENTRA_LOCAL_PORT` and `PORTAL_PORT` are derived per-worktree by
+> `scripts/worktree-env.sh` from the `*_PORT` base values in `.env.base`
+> (`ENTRA_LOCAL_PORT` base is `8500`). The compose files inject the resolved
+> `VITE_AUTH_AUTHORITY`/`VITE_AUTH_KNOWN_AUTHORITIES` into the Portal dev
+> container so the browser always targets the correct per-worktree emulator.
+
+### VITE_AUTH_CLIENT_ID
+**Default (dev):** `cccccccc-0000-0000-0000-000000000001` (entra-local seeded "Sample SPA" app)
+**Type:** GUID string
+
+Client ID of the SPA app registration. entra-local uses the app's object id as
+its client id, so this is the value the emulator seeds and exposes at
+`/admin/api/apps`. Required in production.
+
+### VITE_AUTH_AUTHORITY
+**Default (dev):** `https://localhost:8443/11111111-1111-1111-1111-111111111111/v2.0`
+**Type:** URL string
+
+OIDC authority (issuer) URL. Required in production (e.g.
+`https://login.microsoftonline.com/<tenant-id>`).
+
+### VITE_AUTH_KNOWN_AUTHORITIES
+**Default (dev):** `localhost:8443`
+**Type:** comma-separated host list
+
+Hosts MSAL is allowed to talk to for non-Microsoft (custom OIDC) authorities.
+Required for entra-local; typically unset for production Entra.
+
+### VITE_AUTH_SCOPES
+**Default (dev):** `api://cccccccc-0000-0000-0000-000000000001/access_as_user`
+**Type:** comma-separated scope list
+
+Scopes requested for the API access token (in addition to `openid`/`profile`,
+which are always requested at login). Must be the API's exposed scope in
+resource-qualified form so MSAL can resolve the access token's audience, e.g.
+`api://<api-client-id>/access_as_user`.
+
+### VITE_AUTH_PROTOCOL_MODE
+**Default (dev):** `OIDC` — **Default (prod):** `AAD`
+**Type:** `AAD` | `OIDC`
+
+MSAL protocol mode. entra-local speaks generic `OIDC`; production Microsoft
+Entra uses `AAD`.
+
+### VITE_AUTH_REDIRECT_URI
+**Default:** `window.location.origin`
+**Type:** URL string
+
+Redirect URI for the auth-code + PKCE flow. Must exactly match a redirect URI
+registered on the app. In local dev this defaults to `window.location.origin`
+(`http://localhost:${PORTAL_PORT}`), which the `entra-local-init` service
+registers automatically — no manual step needed.
+
+### VITE_AUTH_POST_LOGOUT_REDIRECT_URI
+**Default:** `window.location.origin`
+**Type:** URL string
+
+Where MSAL navigates after sign-out.
+
+### VITE_AUTH_CACHE_LOCATION
+**Default:** `localStorage`
+**Type:** `localStorage` | `sessionStorage`
+
+Where MSAL persists its token cache.
+
 ## Portal Runtime Configuration
 
 ### SCOPE_DOCS_BASE_URL

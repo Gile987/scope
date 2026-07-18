@@ -25,3 +25,6 @@ plan.md
 plan.md
 tmp/
 .backups/
+
+# Local dev TLS certs (mkcert) for the entra-local auth emulator
+.certs/

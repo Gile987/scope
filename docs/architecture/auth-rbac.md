@@ -723,7 +723,12 @@ downstream service applies the same ownership scoping). When that's required:
   `hasPermission("scope/user:admin")`), not hardcoded role names. (UI gating is
   convenience only; the API is the enforcement boundary.)
 - **No dev role switcher.** Dev mode is removed (§1); the Portal always authenticates
-  against a real IdP. There is no `enabled: false` state and no `X-Dev-User` toggle.
+  against a real IdP. There is no `X-Dev-User` toggle and no synthetic-principal
+  bypass. The per-environment `SCOPE_AUTH_ENABLED` (integration/production, runtime)
+  and `VITE_AUTH_ENABLED_LOCAL` (local dev, build-time) controls (subtask 10) are
+  **not** such a bypass: they turn the auth **feature** off wholesale (no gate, no
+  token, **no fabricated principal**) as a rollout gate while the API lacks token
+  verification — they never authenticate a request as a user.
 
 ### 9. SSE / log streaming
 
@@ -874,11 +879,57 @@ local dev exercises the same verification path as production. New env vars are d
    `--debug-zip` produces a zip, and a redaction test asserts no token/refresh-token/
    service key ever appears in the output. Depends on 7.
 
-10. ⬜ **Portal auth** — `@azure/msal-react`; `MsalProvider`; route guard; token
+10. 🟡 **Portal auth** — `@azure/msal-react`; `MsalProvider`; route guard; token
     injection in `api.ts`; `AuthContext` with `useMe()`; permission-aware nav/pages;
     **hardcoded IdP config** (no `/auth/config`). **No dev role switcher.** **Done when**
     unauthenticated users are redirected to login, runs list is self-scoped, and admin UI
     is hidden for `user`. Depends on 6.
+
+    > **MVP shipped (authentication only).** Delivered so far: MSAL sign-in
+    > (auth-code + PKCE redirect), `MsalProvider` + `AuthProvider`, a `RequireAuth`
+    > route guard, a header sign-in/sign-out `UserMenu`, and centralized token
+    > acquisition + silent refresh + `401`→re-auth handled entirely inside the
+    > `api-client` interceptor (`apps/portal/src/lib/api-client.ts`, via the
+    > `setApiTokenProvider`/`setReauthHandler` seams). IdP config is build-time
+    > (`VITE_AUTH_*`, see [ENV_VARIABLES.md](../../ENV_VARIABLES.md)) defaulting to
+    > the `entra-local` emulator for local dev.
+    >
+    > **Feature toggle (important).** Portal auth is **on by default (secure by
+    > default)** but can be turned off per environment via **three independent
+    > controls** — one each for local dev, integration, and production:
+    > `VITE_AUTH_ENABLED_LOCAL` (local `vite dev` only, build-time) and
+    > `SCOPE_AUTH_ENABLED` (integration and production, **runtime** container env).
+    > Int/prod are runtime because the Portal image is **built once and promoted**
+    > int→prod, so a build-time flag can't differ between them; the runtime value is
+    > written into `/config.js` by `apps/portal/docker-entrypoint.sh` (same
+    > mechanism as `SCOPE_DOCS_BASE_URL`). When off, the Portal skips MSAL entirely
+    > — no sign-in gate, no account menu, no `Authorization` header. This is a
+    > **rollout gate**, used to keep auth off in an environment **until its API
+    > verifies tokens** (the API does not yet). It is **not** a dev auth-bypass: it
+    > disables the feature wholesale and fabricates **no** principal (contrast the
+    > forbidden `X-Dev-User`/synthetic-user bypass in §8 and the security matrix).
+    > Since the API is the enforcement boundary, disabling a control once the API
+    > verifies tokens simply means the Portal sends no token and the API rejects the
+    > request — it cannot grant access. Resolution precedence: runtime
+    > `authEnabled` (int/prod) wins; else `VITE_AUTH_ENABLED_LOCAL` (local dev); else
+    > default enabled. See [ENV_VARIABLES.md](../../ENV_VARIABLES.md) "Feature
+    > toggle".
+    >
+    > **One-command local dev.** Any `pnpm docker:dev:*` script that starts the
+    > Portal brings up the `entra-local` emulator (compose `auth` profile) over
+    > HTTPS with an mkcert-issued, locally-trusted `localhost` cert
+    > (`scripts/ensure-dev-certs.sh`), and auto-registers the per-worktree Portal
+    > redirect URI via a one-shot `entra-local-init` service. MSAL requires the
+    > authority to be served over HTTPS (it rejects non-HTTPS authorities with
+    > `authority_uri_insecure`), hence the mkcert TLS setup rather than plain HTTP.
+    > The only interactive step is a one-time `mkcert -install` password prompt.
+    > See [ENV_VARIABLES.md](../../ENV_VARIABLES.md) "Local dev setup (entra-local)".
+    >
+    > **Deferred (needs subtask 6 + API-side authn):** because the API does not
+    > verify tokens yet, enforcement is **client-side only** and identity shown in
+    > the UI comes from **MSAL account token claims**, not `GET /api/v1/users/me`
+    > (no `useMe()` yet). Self-scoped runs lists and permission-aware nav / admin-UI
+    > hiding are authorization concerns and are **out of scope for this MVP**.
 
 11. ⬜ **Service-to-service auth** *(co-requisite of subtask 5)* — **Per-service** principal
     recognition: per-service JWT (verified with the Scope public key) **or**
