@@ -254,7 +254,7 @@ Caps how many tool calls the judge's `list_tool_calls` tool returns in a single 
 **Default:** `900000` (15 minutes)
 **Type:** integer (milliseconds)
 
-Upper bound on how long a single evaluation is assumed to run, used by the in-flight concurrency tracker that backs the KEDA `metrics-api` autoscaler. Each `POST /api/v1/evaluate` adds a marker to a Redis sorted set (`judge:inflight`) on entry and removes it on completion; `GET /scaler/load` returns `{ "inFlight": n }` after pruning markers older than this age. Pruning makes the count leak-safe if a request crashes without clearing its marker — set it comfortably above the longest expected evaluation (see `JUDGE_CLIENT_TIMEOUT`). Requires `REDIS_HOST`; when Redis is unset or unreachable the tracker no-ops and `/scaler/load` reports `0`, so the scaler holds at its minimum replica count.
+Upper bound on how long a single evaluation is assumed to run, used by the in-flight concurrency tracker that backs the KEDA `metrics-api` autoscaler. Each `POST /api/v1/evaluate` adds a marker to a Redis sorted set (`judge:inflight`) on entry and removes it on completion; `GET /scaler/load` returns `{ "inFlight": n }` after pruning markers older than this age. Pruning makes the count leak-safe if a request crashes without clearing its marker — set it comfortably above the longest expected evaluation (see `JUDGE_CLIENT_TIMEOUT`). Requires `REDIS_HOST`; when Redis is unset or unreachable the tracker no-ops and `/scaler/load` reports `0`, so the scaler holds at its minimum replica count. See [docs/architecture/judge.md](docs/architecture/judge.md) for the tracker design and rationale.
 
 ## Feedback Configuration
 

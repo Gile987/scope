@@ -71,6 +71,7 @@ Workers consume tasks from Azure Storage Queues (named `queue-<worker-name>`) an
 Evaluation engine that scores agent output against a criteria DAG (directed acyclic graph). Uses the GitHub Copilot SDK for LLM-based evaluation. Two strategies: `bundled` (all criteria in one session) or `independent` (topological order, skips descendants of failures).
 
 - CriteriaProvider abstraction: [docs/architecture/criteria-provider.md](docs/architecture/criteria-provider.md)
+- Judge service, autoscaling & in-flight tracker: [docs/architecture/judge.md](docs/architecture/judge.md)
 - Judge configuration variables: [ENV_VARIABLES.md](ENV_VARIABLES.md)
 
 ### Portal (`apps/portal/`)
@@ -213,6 +214,7 @@ pnpm test:integration             # Integration tests (requires .env + Docker)
 | [docs/architecture/vscode-web-worker.md](docs/architecture/vscode-web-worker.md) | XState chat machine, GitHub auth flow, ARIA snapshots |
 | [docs/architecture/token-manager.md](docs/architecture/token-manager.md) | Token storage, validation, round-robin distribution |
 | [docs/architecture/criteria-provider.md](docs/architecture/criteria-provider.md) | CriteriaProvider abstraction, filesystem vs REST backends |
+| [docs/architecture/judge.md](docs/architecture/judge.md) | Judge service HTTP surface, KEDA autoscaling, in-flight concurrency tracker (sorted-set design), deployment hardening |
 | [docs/architecture/skills.md](docs/architecture/skills.md) | Agent Skills spec, registration, resolution, delivery |
 | [docs/architecture/codebases.md](docs/architecture/codebases.md) | Codebase entity, immutable revisions, source types, worker seeding |
 | [docs/architecture/db-migrations.md](docs/architecture/db-migrations.md) | MongoDB migration framework |
