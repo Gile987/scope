@@ -639,9 +639,10 @@ How far the queue-processor pushes out a duplicate message's visibility when the
 
 ### SCOPE_RUN_HEARTBEAT_REDIS_TTL_MS
 **Default:** `300000` (5 × `HEARTBEAT_VISIBILITY_SECONDS`)
+**In-cluster:** `750000` (set in `worker-config`; keeps the 2.5× margin over the 300000 in-cluster stale threshold)
 **Type:** integer (milliseconds)
 
-TTL applied to per-run liveness heartbeat keys in Redis (`run-heartbeat:<runId>`). The TTL is refreshed on every beat (every 15s), so the key only expires when the worker stops beating. Set comfortably above `SCOPE_RUN_HEARTBEAT_STALE_MS` so a brief beat delay never causes premature TTL expiry; the default gives 2.5× the staleness threshold.
+TTL applied to per-run liveness heartbeat keys in Redis (`run-heartbeat:<runId>`). The TTL is refreshed on every beat (every 15s), so the key only expires when the worker stops beating. Set comfortably above `SCOPE_RUN_HEARTBEAT_STALE_MS` so a brief beat delay never causes premature TTL expiry; the default gives 2.5× the staleness threshold. Only the worker that writes heartbeats (`base-queue-processor`) reads this, so it lives in `worker-config` alone — the scheduler reaper only reads beats and never applies this TTL.
 
 ## Token Manager Configuration
 
