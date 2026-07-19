@@ -10,15 +10,17 @@
     "lint": "eslint src/"
   },
   "dependencies": {
-    "shared": "workspace:*",
     "@github/copilot-sdk": "1.0.1",
-    "express": "^4.21.0",
     "dotenv": "^16.4.5",
-    "ioredis": "^5.4.1"
+    "express": "^4.21.0",
+    "ioredis": "^5.4.1",
+    "shared": "workspace:*"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
+    "@types/ioredis-mock": "^8.2.7",
     "@types/node": "^22.7.0",
+    "ioredis-mock": "^8.13.1",
     "tsx": "^4.19.0",
     "typescript": "^5.6.2"
   }

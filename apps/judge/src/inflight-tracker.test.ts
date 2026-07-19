@@ -2,92 +2,55 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import RedisMock from "ioredis-mock";
 import { InflightTracker, type InflightRedis } from "./inflight-tracker.js";
 
 /**
- * In-memory fake of the {@link InflightRedis} surface, modelling the sorted-set
- * semantics the tracker relies on (scores are epoch-ms, members are UUIDs).
- * Records every key it is asked to touch so tests can assert the tracker only
- * ever hits the single `judge:inflight` key (cluster-safety).
+ * The pattern to reuse for Redis-backed unit tests: get authentic command
+ * semantics from **ioredis-mock** and layer only the bespoke bits a given test
+ * needs on top — here a per-test record of which keys were touched (to assert the
+ * tracker's single-key cluster-safety) and optional per-method `overrides` to
+ * inject failures. We deliberately do *not* hand-roll a full in-memory Redis.
+ *
+ * ioredis-mock keeps a single process-global data store (and pins a listener onto
+ * its shared emitter per instance), so we use one shared instance and reset it in
+ * `beforeEach` rather than constructing a fresh mock per test.
  */
-class FakeRedis implements InflightRedis {
-  /** member -> score */
-  readonly zset = new Map<string, number>();
-  readonly keysSeen = new Set<string>();
-  errorHandler: ((err: Error) => void) | undefined;
+const INFLIGHT_KEY = "judge:inflight";
 
-  async zadd(key: string, score: number, member: string): Promise<number> {
-    this.keysSeen.add(key);
-    const isNew = !this.zset.has(member);
-    this.zset.set(member, score);
-    return isNew ? 1 : 0;
-  }
+const mock = new RedisMock();
 
-  async zrem(key: string, member: string): Promise<number> {
-    this.keysSeen.add(key);
-    return this.zset.delete(member) ? 1 : 0;
-  }
-
-  async zremrangebyscore(key: string, min: number, max: number): Promise<number> {
-    this.keysSeen.add(key);
-    let removed = 0;
-    for (const [member, score] of [...this.zset]) {
-      if (score >= min && score <= max) {
-        this.zset.delete(member);
-        removed++;
-      }
-    }
-    return removed;
-  }
-
-  async zcard(key: string): Promise<number> {
-    this.keysSeen.add(key);
-    return this.zset.size;
-  }
-
-  async quit(): Promise<"OK"> {
-    return "OK";
-  }
-
-  on(event: "error", listener: (err: Error) => void): this {
-    if (event === "error") this.errorHandler = listener;
-    return this;
-  }
+/** Wrap the shared mock with a fresh key-spy (and optional failure overrides). */
+function makeClient(overrides: Partial<InflightRedis> = {}) {
+  const keysSeen = new Set<string>();
+  const base: InflightRedis = {
+    zadd: (k, s, m) => (keysSeen.add(k), mock.zadd(k, s, m)),
+    zrem: (k, m) => (keysSeen.add(k), mock.zrem(k, m)),
+    zremrangebyscore: (k, min, max) => (keysSeen.add(k), mock.zremrangebyscore(k, min, max)),
+    zcard: (k) => (keysSeen.add(k), mock.zcard(k)),
+    quit: () => mock.quit(),
+    on: (event, listener) => mock.on(event, listener),
+  };
+  return { redis: { ...base, ...overrides }, keysSeen, mock };
 }
 
-/** Fake whose every command rejects — exercises the tracker's fail-safe paths. */
-class FailingRedis implements InflightRedis {
-  quitCalled = false;
-  async zadd(): Promise<never> {
-    throw new Error("boom");
-  }
-  async zrem(): Promise<never> {
-    throw new Error("boom");
-  }
-  async zremrangebyscore(): Promise<never> {
-    throw new Error("boom");
-  }
-  async zcard(): Promise<number> {
-    throw new Error("boom");
-  }
-  async quit(): Promise<"OK"> {
-    this.quitCalled = true;
-    throw new Error("boom");
-  }
-  on(): this {
-    return this;
-  }
-}
+/** Reject with a fixed error — used to build the fail-safe overrides. */
+const boom = () => Promise.reject(new Error("boom"));
 
 describe("InflightTracker", () => {
+  beforeEach(async () => {
+    await mock.flushall();
+    // Drop error listeners registered by trackers from prior tests.
+    mock.removeAllListeners("error");
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
-    vi.useRealTimers();
   });
 
   describe("begin / end / load counting", () => {
     it("begin() records a marker and load() reflects the count", async () => {
-      const redis = new FakeRedis();
+      const { redis } = makeClient();
       const tracker = new InflightTracker(redis);
 
       expect(await tracker.load()).toBe(0);
@@ -98,7 +61,8 @@ describe("InflightTracker", () => {
     });
 
     it("counts multiple concurrent evaluations and returns distinct ids", async () => {
-      const tracker = new InflightTracker(new FakeRedis());
+      const { redis } = makeClient();
+      const tracker = new InflightTracker(redis);
 
       const id1 = await tracker.begin();
       const id2 = await tracker.begin();
@@ -109,7 +73,8 @@ describe("InflightTracker", () => {
     });
 
     it("end() clears only the marker it is given", async () => {
-      const tracker = new InflightTracker(new FakeRedis());
+      const { redis } = makeClient();
+      const tracker = new InflightTracker(redis);
 
       const id1 = await tracker.begin();
       await tracker.begin();
@@ -120,7 +85,7 @@ describe("InflightTracker", () => {
     });
 
     it("end(null) is a no-op and does not change the count", async () => {
-      const redis = new FakeRedis();
+      const { redis, mock } = makeClient();
       const tracker = new InflightTracker(redis);
 
       await tracker.begin();
@@ -128,73 +93,73 @@ describe("InflightTracker", () => {
 
       expect(await tracker.load()).toBe(1);
       // A null id must never reach Redis as a ZREM.
-      expect(redis.zset.size).toBe(1);
+      expect(await mock.zcard(INFLIGHT_KEY)).toBe(1);
     });
   });
 
   describe("stale-marker pruning (leak-safety)", () => {
     it("prunes markers older than the default 15-minute window on load()", async () => {
-      const redis = new FakeRedis();
+      const { redis, mock } = makeClient();
       const now = Date.now();
-      redis.zset.set("ancient", 1); // ~1970, far older than 15 minutes
-      redis.zset.set("fresh", now - 1000);
+      await mock.zadd(INFLIGHT_KEY, 1, "ancient"); // ~1970, far older than 15 minutes
+      await mock.zadd(INFLIGHT_KEY, now - 1000, "fresh");
 
       const tracker = new InflightTracker(redis);
 
       expect(await tracker.load()).toBe(1);
-      expect(redis.zset.has("ancient")).toBe(false);
-      expect(redis.zset.has("fresh")).toBe(true);
+      expect(await mock.zscore(INFLIGHT_KEY, "ancient")).toBeNull();
+      expect(await mock.zscore(INFLIGHT_KEY, "fresh")).not.toBeNull();
     });
 
     it("honors a maxEvalAgeMs override from options", async () => {
-      const redis = new FakeRedis();
+      const { redis, mock } = makeClient();
       const now = Date.now();
-      redis.zset.set("old", now - 5000);
-      redis.zset.set("recent", now - 100);
+      await mock.zadd(INFLIGHT_KEY, now - 5000, "old");
+      await mock.zadd(INFLIGHT_KEY, now - 100, "recent");
 
       const tracker = new InflightTracker(redis, { maxEvalAgeMs: 1000 });
 
       expect(await tracker.load()).toBe(1);
-      expect(redis.zset.has("old")).toBe(false);
-      expect(redis.zset.has("recent")).toBe(true);
+      expect(await mock.zscore(INFLIGHT_KEY, "old")).toBeNull();
+      expect(await mock.zscore(INFLIGHT_KEY, "recent")).not.toBeNull();
     });
 
     it("reads the prune window from JUDGE_MAX_EVAL_AGE_MS when no override is given", async () => {
       vi.stubEnv("JUDGE_MAX_EVAL_AGE_MS", "1000");
-      const redis = new FakeRedis();
+      const { redis, mock } = makeClient();
       const now = Date.now();
-      redis.zset.set("old", now - 5000);
-      redis.zset.set("recent", now - 100);
+      await mock.zadd(INFLIGHT_KEY, now - 5000, "old");
+      await mock.zadd(INFLIGHT_KEY, now - 100, "recent");
 
       const tracker = new InflightTracker(redis);
 
       expect(await tracker.load()).toBe(1);
-      expect(redis.zset.has("old")).toBe(false);
+      expect(await mock.zscore(INFLIGHT_KEY, "old")).toBeNull();
     });
 
     it("falls back to the default window for a non-positive/invalid env value", async () => {
       vi.stubEnv("JUDGE_MAX_EVAL_AGE_MS", "0");
-      const redis = new FakeRedis();
+      const { redis, mock } = makeClient();
       const now = Date.now();
-      redis.zset.set("recent", now - 1000); // 1s old — kept under the 15-min default
+      await mock.zadd(INFLIGHT_KEY, now - 1000, "recent"); // 1s old — kept under the 15-min default
 
       const tracker = new InflightTracker(redis);
 
       expect(await tracker.load()).toBe(1);
-      expect(redis.zset.has("recent")).toBe(true);
+      expect(await mock.zscore(INFLIGHT_KEY, "recent")).not.toBeNull();
     });
   });
 
   describe("cluster-safety", () => {
     it("only ever touches the single judge:inflight key (never a multi-key op)", async () => {
-      const redis = new FakeRedis();
+      const { redis, keysSeen } = makeClient();
       const tracker = new InflightTracker(redis);
 
       const id = await tracker.begin();
       await tracker.load();
       await tracker.end(id);
 
-      expect([...redis.keysSeen]).toEqual(["judge:inflight"]);
+      expect([...keysSeen]).toEqual([INFLIGHT_KEY]);
     });
   });
 
@@ -212,7 +177,13 @@ describe("InflightTracker", () => {
 
   describe("fail-safe behaviour when Redis errors", () => {
     it("begin() returns null, end() swallows, load() reports 0", async () => {
-      const tracker = new InflightTracker(new FailingRedis());
+      const { redis } = makeClient({
+        zadd: boom,
+        zrem: boom,
+        zremrangebyscore: boom,
+        zcard: boom,
+      });
+      const tracker = new InflightTracker(redis);
 
       expect(await tracker.begin()).toBeNull();
       await expect(tracker.end("some-id")).resolves.toBeUndefined();
@@ -220,23 +191,26 @@ describe("InflightTracker", () => {
     });
 
     it("close() swallows a failing quit()", async () => {
-      const redis = new FailingRedis();
+      const quit = vi.fn(boom);
+      const { redis } = makeClient({ quit });
       const tracker = new InflightTracker(redis);
 
       await expect(tracker.close()).resolves.toBeUndefined();
-      expect(redis.quitCalled).toBe(true);
+      expect(quit).toHaveBeenCalledOnce();
     });
 
     it("registers an error handler so ioredis error events never go unhandled", () => {
-      const redis = new FakeRedis();
+      const { redis, mock } = makeClient();
       new InflightTracker(redis);
 
-      expect(redis.errorHandler).toBeTypeOf("function");
-      // Firing it must not throw (and only logs once).
+      // The tracker attached a listener to the underlying client's "error" event.
+      expect(mock.listenerCount("error")).toBeGreaterThan(0);
+
+      // Firing it must not throw, and it logs only once.
       const spy = vi.spyOn(console, "error").mockImplementation(() => {});
       expect(() => {
-        redis.errorHandler?.(new Error("conn reset"));
-        redis.errorHandler?.(new Error("conn reset again"));
+        mock.emit("error", new Error("conn reset"));
+        mock.emit("error", new Error("conn reset again"));
       }).not.toThrow();
       expect(spy).toHaveBeenCalledTimes(1);
       spy.mockRestore();
