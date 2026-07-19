@@ -44,7 +44,7 @@ if (redisHost) {
 
 // Tracks true, cluster-wide in-flight evaluation concurrency in Redis so the
 // KEDA metrics-api scaler (GET /scaler/load) can scale the judge on real load.
-const inflightTracker = new InflightTracker();
+const inflightTracker = InflightTracker.fromEnv();
 
 // Health check
 app.get("/health", (_req: Request, res: Response) => {

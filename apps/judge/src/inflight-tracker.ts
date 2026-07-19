@@ -14,6 +14,47 @@ const INFLIGHT_KEY = "judge:inflight";
 const DEFAULT_MAX_EVAL_AGE_MS = 15 * 60 * 1000;
 
 /**
+ * Minimal ioredis surface the tracker needs. Declaring it explicitly (rather
+ * than depending on the whole ioredis type) keeps the tracker easy to unit-test
+ * with an injected fake.
+ *
+ * **Cluster-safety:** every operation targets the single key {@link INFLIGHT_KEY}.
+ * Single-key commands always route to their owning hash slot, so the tracker
+ * never issues a cross-slot (`CROSSSLOT`) command and is correct on a clustered
+ * Redis (Azure Cache for Redis Enterprise clustering policy) as well as a
+ * standalone one — exactly like every other Redis client in this repo, none of
+ * which use a cluster-mode client. Cross-slot hazards only arise with multi-key
+ * commands (e.g. `MGET`), which we do not use here (cf. `clusterSafeMget`,
+ * issue #1064).
+ */
+export interface InflightRedis {
+  zadd(key: string, score: number, member: string): Promise<unknown>;
+  zrem(key: string, member: string): Promise<unknown>;
+  zremrangebyscore(key: string, min: number, max: number): Promise<unknown>;
+  zcard(key: string): Promise<number>;
+  quit(): Promise<unknown>;
+  on(event: "error", listener: (err: Error) => void): unknown;
+}
+
+export interface InflightTrackerOptions {
+  /**
+   * Overrides `JUDGE_MAX_EVAL_AGE_MS`. Markers older than this are pruned on
+   * read, so a request that crashed before {@link InflightTracker.end} can't
+   * leak an in-flight count forever.
+   */
+  maxEvalAgeMs?: number;
+}
+
+/** Resolve the prune window from an explicit override, then env, then the default. */
+function resolveMaxEvalAgeMs(explicit?: number): number {
+  if (typeof explicit === "number" && Number.isFinite(explicit) && explicit > 0) {
+    return explicit;
+  }
+  const parsed = parseInt(process.env.JUDGE_MAX_EVAL_AGE_MS || "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_EVAL_AGE_MS;
+}
+
+/**
  * Tracks in-flight judge evaluations in Redis so the KEDA `metrics-api` scaler
  * can scale the judge on TRUE, cluster-wide concurrency. The judge is called
  * mid-run by every coder worker AND by the post-processor — both hit
@@ -22,56 +63,82 @@ const DEFAULT_MAX_EVAL_AGE_MS = 15 * 60 * 1000;
  *
  * Every Redis call is best-effort: failures never propagate to the evaluation
  * path, and {@link InflightTracker.load} fails safe to `0` so the scaler holds
- * at its minimum replica count. If `REDIS_HOST` is unset the tracker no-ops.
- * Stale markers (a request that crashed before {@link InflightTracker.end}) are
- * pruned on read, so the count is leak-safe.
+ * at its minimum replica count. When constructed without a client (Redis not
+ * configured) the tracker no-ops. Stale markers (a request that crashed before
+ * {@link InflightTracker.end}) are pruned on read, so the count is leak-safe.
+ *
+ * Use {@link InflightTracker.fromEnv} in production; inject a client directly in
+ * tests.
  */
 export class InflightTracker {
-  private readonly redis: InstanceType<typeof Redis> | null;
+  private readonly redis: InflightRedis | null;
   private readonly maxEvalAgeMs: number;
   private errorLogged = false;
 
-  constructor() {
-    const redisHost = process.env.REDIS_HOST || "";
-    const redisPort = parseInt(process.env.REDIS_PORT || "6300", 10);
-    const redisPassword = process.env.REDIS_PASSWORD || "";
-    this.maxEvalAgeMs = parseInt(
-      process.env.JUDGE_MAX_EVAL_AGE_MS || String(DEFAULT_MAX_EVAL_AGE_MS),
-      10,
-    );
+  /**
+   * @param redis   A connected/connecting Redis client, or `null` to disable
+   *   tracking (every method then no-ops / fails safe).
+   * @param options Optional overrides (e.g. the prune window).
+   */
+  constructor(redis: InflightRedis | null, options: InflightTrackerOptions = {}) {
+    this.redis = redis;
+    this.maxEvalAgeMs = resolveMaxEvalAgeMs(options.maxEvalAgeMs);
 
+    if (this.redis) {
+      // Swallow connection errors so ioredis doesn't emit "Unhandled error event".
+      this.redis.on("error", (err: Error) => {
+        if (!this.errorLogged) {
+          console.error(`[judge] in-flight tracker Redis error: ${err.message}`);
+          this.errorLogged = true;
+        }
+      });
+    }
+  }
+
+  /**
+   * Build a tracker from the standard `REDIS_*` environment, using the same
+   * standalone-client connection config (including TLS inference) as the repo's
+   * other Redis clients (see {@link ../logging/log-publisher}). No-ops when
+   * `REDIS_HOST` is unset.
+   */
+  static fromEnv(options: InflightTrackerOptions = {}): InflightTracker {
+    const redisHost = process.env.REDIS_HOST || "";
     if (!redisHost) {
       // Redis not configured — tracker no-ops and /scaler/load reports 0.
-      this.redis = null;
       console.log("[judge] Redis not configured — in-flight scaler load will report 0");
-      return;
+      return new InflightTracker(null, options);
     }
 
-    // Azure Redis uses TLS on a non-6379 port; local Redis (6379) does not.
-    const useTls = Boolean(redisPassword) && redisPort !== 6379;
-    this.redis = new Redis({
+    const redisPort = parseInt(process.env.REDIS_PORT || "6300", 10);
+    const redisPassword = process.env.REDIS_PASSWORD || "";
+    // Canonical TLS inference shared across the repo's Redis clients: an explicit
+    // REDIS_TLS wins, else infer from a password on a non-local host (Azure Cache
+    // for Redis requires TLS; local/dev Redis does not).
+    const useTls =
+      process.env.REDIS_TLS === "true" ||
+      Boolean(
+        redisPassword &&
+          redisHost !== "localhost" &&
+          redisHost !== "127.0.0.1" &&
+          redisHost !== "redis",
+      );
+
+    const client = new Redis({
       host: redisHost,
       port: redisPort,
       password: redisPassword || undefined,
       ...(useTls ? { tls: { rejectUnauthorized: false } } : {}),
       // Fail commands fast rather than queueing them while disconnected — this
-      // sits on the evaluation hot path and must never add latency when Redis
-      // is unavailable. A missed marker only slightly undercounts; pruning and
-      // the fail-safe load() keep the scaler correct.
+      // sits on the evaluation hot path and must never add latency when Redis is
+      // unavailable. A missed marker only slightly undercounts; pruning and the
+      // fail-safe load() keep the scaler correct.
       enableOfflineQueue: false,
       maxRetriesPerRequest: 3,
       retryStrategy: (times: number) => (times > 3 ? null : Math.min(times * 1000, 3000)),
     });
 
-    // Swallow connection errors so ioredis doesn't emit "Unhandled error event".
-    this.redis.on("error", (err: Error) => {
-      if (!this.errorLogged) {
-        console.error(`[judge] in-flight tracker Redis error: ${err.message}`);
-        this.errorLogged = true;
-      }
-    });
-
     console.log(`[judge] in-flight tracker connected to Redis ${redisHost}:${redisPort}`);
+    return new InflightTracker(client, options);
   }
 
   /**
@@ -102,7 +169,7 @@ export class InflightTracker {
 
   /**
    * Current global in-flight evaluation count, after pruning markers older than
-   * `JUDGE_MAX_EVAL_AGE_MS`. Fails safe to `0` when Redis is unavailable.
+   * `maxEvalAgeMs`. Fails safe to `0` when Redis is unavailable.
    */
   async load(): Promise<number> {
     if (!this.redis) return 0;
