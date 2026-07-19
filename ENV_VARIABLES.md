@@ -620,6 +620,7 @@ Disables Claude Code "policy skills" — auto-loaded, Anthropic-managed Agent Sk
 
 ### SCOPE_RUN_HEARTBEAT_STALE_MS
 **Default:** `120000` (2 × `HEARTBEAT_VISIBILITY_SECONDS`)
+**In-cluster:** `300000` (set in both `worker-config` and `infra-config` ConfigMaps)
 **Type:** integer (milliseconds)
 
 Threshold used by the queue-processor redelivery handler to decide whether an in-flight `processing` run is still alive. When a worker dequeues a duplicate message for a run already in `processing`, it reads the per-run liveness heartbeat from Redis (`run-heartbeat:<runId>`) and compares `Date.now() - lastBeat`:
