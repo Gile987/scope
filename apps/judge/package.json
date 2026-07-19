@@ -13,7 +13,8 @@
     "shared": "workspace:*",
     "@github/copilot-sdk": "1.0.1",
     "express": "^4.21.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.4.1"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

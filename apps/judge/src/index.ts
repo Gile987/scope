@@ -7,6 +7,7 @@ import { evaluateWorkspace } from "./judge-agent.js";
 import { verifyCopilotProtocol } from "./protocol-check.js";
 import { resolveCurrentIteration, mapIterationToolCallUrls } from "./tool-call-history.js";
 import { BlobStorage, RedisLogPublisher } from "shared";
+import { InflightTracker } from "./inflight-tracker.js";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -41,9 +42,22 @@ if (redisHost) {
   console.log("[judge] Redis not configured — criterion progress will not be streamed");
 }
 
+// Tracks true, cluster-wide in-flight evaluation concurrency in Redis so the
+// KEDA metrics-api scaler (GET /scaler/load) can scale the judge on real load.
+const inflightTracker = new InflightTracker();
+
 // Health check
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "healthy", service: "judge", version: "1.0.0" });
+});
+
+// In-flight load endpoint — polled by the KEDA metrics-api scaler. Reports the
+// global number of evaluations currently in flight across all judge replicas.
+// Fails safe to { inFlight: 0 } when Redis is unavailable so the scaler holds
+// at its minimum replica count.
+app.get("/scaler/load", async (_req: Request, res: Response) => {
+  const inFlight = await inflightTracker.load();
+  res.json({ inFlight });
 });
 
 // Evaluate endpoint — called by coding workers after each iteration
@@ -51,6 +65,10 @@ app.post(
   "/api/v1/evaluate",
   async (req: Request, res: Response, next: NextFunction) => {
     const startTime = Date.now();
+    // Mark this evaluation in-flight for the KEDA scaler; cleared in `finally`
+    // below (covers both the success and error paths). Best-effort — a null id
+    // (Redis disabled/unreachable) simply makes end() a no-op.
+    const inflightId = await inflightTracker.begin();
 
     try {
       const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, iteration, projectId, currentAgentResponse } = req.body;
@@ -173,6 +191,8 @@ app.post(
     } catch (error) {
       console.error("[judge] Evaluation error:", error);
       next(error);
+    } finally {
+      await inflightTracker.end(inflightId);
     }
   }
 );

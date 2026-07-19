@@ -250,6 +250,12 @@ At startup the judge service runs a self-check that spawns the bundled Copilot C
 
 Caps how many tool calls the judge's `list_tool_calls` tool returns in a single browse page. The judge assembles the coding agent's tool calls **cumulatively across every iteration of the run** (issue #1255), deduplicating byte-identical calls, so this bound keeps a long run's history from overflowing the judge's context. It applies **only** to the `list_tool_calls` browse page — `search_tool_outputs` (pattern search) and `get_tool_output` (fetch one call by global index) always reach the full deduped history, so a one-time action from an early iteration stays discoverable regardless of this cap.
 
+### JUDGE_MAX_EVAL_AGE_MS
+**Default:** `900000` (15 minutes)
+**Type:** integer (milliseconds)
+
+Upper bound on how long a single evaluation is assumed to run, used by the in-flight concurrency tracker that backs the KEDA `metrics-api` autoscaler. Each `POST /api/v1/evaluate` adds a marker to a Redis sorted set (`judge:inflight`) on entry and removes it on completion; `GET /scaler/load` returns `{ "inFlight": n }` after pruning markers older than this age. Pruning makes the count leak-safe if a request crashes without clearing its marker — set it comfortably above the longest expected evaluation (see `JUDGE_CLIENT_TIMEOUT`). Requires `REDIS_HOST`; when Redis is unset or unreachable the tracker no-ops and `/scaler/load` reports `0`, so the scaler holds at its minimum replica count.
+
 ## Feedback Configuration
 
 ### FEEDBACK_MAX_CRITERIA
