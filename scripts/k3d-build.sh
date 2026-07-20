@@ -3,16 +3,22 @@
 # k3d-build.sh — Build and push Docker images to local k3d registry
 # =============================================================================
 # Usage:
-#   ./scripts/k3d-build.sh              # Build all services in parallel
-#   ./scripts/k3d-build.sh api          # Build only the api
-#   ./scripts/k3d-build.sh api portal   # Build api and portal
-#   ./scripts/k3d-build.sh --no-cache   # Full rebuild without cache
+#   ./scripts/k3d-build.sh                    # Build core + copilot worker (default)
+#   ./scripts/k3d-build.sh --worker=claude    # Build core + claude worker
+#   ./scripts/k3d-build.sh --worker=all       # Build core + all workers
+#   ./scripts/k3d-build.sh --worker=none      # Build core services only (no workers)
+#   ./scripts/k3d-build.sh api                # Build only the api
+#   ./scripts/k3d-build.sh api portal         # Build api and portal
+#   ./scripts/k3d-build.sh --no-cache         # Full rebuild without cache
 # =============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
+
+# Ensure Docker Desktop CLI tools are on PATH (OrbStack symlinks may be broken)
+export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
 
 # Read port offset for registry port (env var takes precedence over file)
 if [ -z "${PORT_OFFSET:-}" ]; then
@@ -31,26 +37,41 @@ export no_proxy="$NO_PROXY"
 
 # Parse flags
 NO_CACHE=""
+WORKER="copilot"
 BUILD_TARGETS=""
 for arg in "$@"; do
   case "$arg" in
     --no-cache) NO_CACHE="--no-cache" ;;
+    --worker=*) WORKER="${arg#--worker=}" ;;
     *) BUILD_TARGETS="${BUILD_TARGETS:+$BUILD_TARGETS }$arg" ;;
   esac
 done
 
-# All known services (must match targets in docker-bake.hcl)
-ALL_SERVICES="api judge portal token-manager scheduler gateway coder-acp-copilot coder-acp-claude-code"
+# Core services (always built unless specific targets given)
+CORE_SERVICES="api judge portal token-manager scheduler gateway"
 
-# Validate requested targets
+# Resolve worker list based on --worker flag
+case "$WORKER" in
+  copilot) WORKER_SERVICES="coder-acp-copilot" ;;
+  claude)  WORKER_SERVICES="coder-acp-claude-code" ;;
+  all)     WORKER_SERVICES="coder-acp-copilot coder-acp-claude-code" ;;
+  none)    WORKER_SERVICES="" ;;
+  *) echo "Error: Unknown worker '$WORKER'. Use: copilot, claude, all, none"; exit 1 ;;
+esac
+
+# All known services (must match targets in docker-bake.hcl)
+ALL_SERVICES="$CORE_SERVICES $WORKER_SERVICES"
+
+# Validate requested targets (check against all possible services)
+VALID_SERVICES="api judge portal token-manager scheduler gateway coder-acp-copilot coder-acp-claude-code"
 for svc in $BUILD_TARGETS; do
   valid=false
-  for known in $ALL_SERVICES; do
+  for known in $VALID_SERVICES; do
     if [ "$svc" = "$known" ]; then valid=true; break; fi
   done
   if [ "$valid" = "false" ]; then
     echo "Error: Unknown service '$svc'"
-    echo "Available services: $ALL_SERVICES"
+    echo "Available services: $VALID_SERVICES"
     exit 1
   fi
 done
@@ -91,31 +112,22 @@ if docker buildx bake --help &>/dev/null; then
     PUSH_LIST="$BUILD_TARGETS"
   fi
 
-  # Push images to local registry
+  # Push images to local registry with timeout; fall back to k3d image import
+  CLUSTER_NAME="scope-${PORT_OFFSET:-0}"
   echo ""
-  echo ">>> Pushing images to $REGISTRY..."
-  push_failed=0
+  echo ">>> Loading images into cluster '$CLUSTER_NAME'..."
   for svc in $PUSH_LIST; do
-    pushed=false
-    for attempt in 1 2 3; do
-      if docker push "${REGISTRY}/scoped/${svc}:latest" --quiet 2>/dev/null; then
-        pushed=true
-        break
-      fi
-      echo "  Retry $attempt/3 for $svc..."
-      sleep 3
-    done
-    if [ "$pushed" = "false" ]; then
-      echo "  ⚠ Failed to push $svc after 3 attempts"
-      push_failed=1
+    image="${REGISTRY}/scoped/${svc}:latest"
+    # Try push with 30s timeout first (fast when Docker Desktop cooperates)
+    if timeout 60 docker push "$image" --quiet 2>/dev/null; then
+      echo "  ✓ $svc (pushed)"
+    else
+      # Fall back to k3d image import (reliable, no registry needed)
+      k3d image import "$image" --cluster "$CLUSTER_NAME" 2>/dev/null \
+        && echo "  ✓ $svc (imported)" \
+        || echo "  ⚠ $svc FAILED"
     fi
   done
-  if [ "$push_failed" -eq 0 ]; then
-    echo "  ✓ All images pushed"
-  else
-    echo "  ⚠ Some pushes failed — check registry with: curl http://$REGISTRY/v2/_catalog"
-    exit 1
-  fi
 
   exit 0
 fi
@@ -170,9 +182,6 @@ build_and_push() {
     echo "  ⚠ Build failed for $name — skipping"
     return 0
   fi
-
-  echo "  Pushing $name..."
-  docker push "$image" --quiet
 }
 
 if [ -z "$BUILD_TARGETS" ]; then
@@ -188,5 +197,11 @@ for svc in $BUILD_LIST; do
   build_and_push "$svc"
 done
 
+# Push all built images to registry
 echo ""
-echo ">>> All images pushed to $REGISTRY"
+echo ">>> Pushing images to $REGISTRY..."
+for svc in $BUILD_LIST; do
+  echo "  Pushing $svc..."
+  docker push "${REGISTRY}/scoped/${svc}:latest" --quiet
+done
+echo "  ✓ All images pushed"
