@@ -18,7 +18,26 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 # Ensure Docker Desktop CLI tools are on PATH (OrbStack symlinks may be broken)
-export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
+[ -d "/Applications/Docker.app/Contents/Resources/bin" ] \
+  && export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
+
+# ── Detect container runtime ────────────────────────────────────────────────
+# Podman lacks `docker buildx` and its docker-compat push endpoint is unreliable,
+# so podman builds/pushes with the native `podman` CLI instead. Override with
+# CONTAINER_RUNTIME=podman|docker. (Capture `docker version` via command
+# substitution — piping into `grep -q` trips SIGPIPE under `set -o pipefail`.)
+if [ -z "${CONTAINER_RUNTIME:-}" ]; then
+  if command -v docker &>/dev/null; then
+    case "$(docker version 2>/dev/null || true)" in
+      *[Pp]odman*) CONTAINER_RUNTIME="podman" ;;
+      *)           CONTAINER_RUNTIME="docker" ;;
+    esac
+  elif command -v podman &>/dev/null; then
+    CONTAINER_RUNTIME="podman"
+  else
+    CONTAINER_RUNTIME="docker"
+  fi
+fi
 
 # Read port offset for registry port (env var takes precedence over file)
 if [ -z "${PORT_OFFSET:-}" ]; then
@@ -86,6 +105,71 @@ for versions_file in apps/workers/*/versions.env apps/*/versions.env; do
     set +a
   fi
 done
+
+# ── Podman: build + push with the native podman CLI ───────────────────────
+# Podman has no `docker buildx bake`, and pushing to the k3d HTTP registry via
+# the docker-compat socket returns HTTP 500. Instead build each image with
+# `podman build` and push to the registry over localhost (which podman treats
+# as insecure by default). Images land in repo path `scoped/<svc>`, which the
+# in-cluster `k3d-<registry>:5000` mirror resolves for pod pulls.
+if [ "$CONTAINER_RUNTIME" = "podman" ]; then
+  if [ -z "$BUILD_TARGETS" ]; then
+    PODMAN_BUILD_LIST="$ALL_SERVICES"
+  else
+    PODMAN_BUILD_LIST="$BUILD_TARGETS"
+  fi
+
+  echo "    Runtime: podman — sequential build + push → localhost:${REGISTRY_PORT}"
+  echo ""
+
+  podman_build_push() {
+    local svc=$1
+    local dockerfile context image
+    local target_args=() build_args=()
+
+    case "$svc" in
+      gateway)     dockerfile="apps/gateway/Dockerfile"; context="apps/gateway"; target_args=(--target runtime) ;;
+      coder-acp-*) dockerfile="apps/workers/${svc}/Dockerfile"; context="." ;;
+      *)           dockerfile="apps/${svc}/Dockerfile"; context="." ;;
+    esac
+
+    if [ ! -f "$dockerfile" ]; then
+      echo "  ⚠ $svc: $dockerfile not found — skipping"
+      return 0
+    fi
+
+    case "$svc" in
+      coder-acp-copilot)
+        build_args=(--build-arg "COPILOT_CLI_VERSION=${COPILOT_CLI_VERSION:-}") ;;
+      coder-acp-claude-code)
+        build_args=(--build-arg "CLAUDE_CODE_ACP_VERSION=${CLAUDE_CODE_ACP_VERSION:-}"
+                    --build-arg "CLAUDE_AGENT_SDK_VERSION=${CLAUDE_AGENT_SDK_VERSION:-}") ;;
+    esac
+
+    # Push over localhost (insecure) but keep the repo path pods expect.
+    image="localhost:${REGISTRY_PORT}/scoped/${svc}:latest"
+
+    echo "  Building $svc..."
+    if ! podman build ${NO_CACHE} "${target_args[@]}" "${build_args[@]}" \
+        -t "$image" -f "$dockerfile" "$context"; then
+      echo "  ✗ $svc build FAILED"
+      return 1
+    fi
+    if ! podman push --tls-verify=false "$image"; then
+      echo "  ✗ $svc push FAILED"
+      return 1
+    fi
+    echo "  ✓ $svc (pushed)"
+  }
+
+  BUILD_FAILED=0
+  for svc in $PODMAN_BUILD_LIST; do
+    podman_build_push "$svc" || BUILD_FAILED=1
+  done
+
+  [ "$BUILD_FAILED" -eq 0 ] || { echo ""; echo "  ⚠ One or more images failed to build/push."; exit 1; }
+  exit 0
+fi
 
 # ── Try parallel build with docker buildx bake ────────────────────────────
 # Uses the default "docker" driver so builds share the host network and can

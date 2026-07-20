@@ -27,10 +27,14 @@ fi
 echo ">>> Deleting k3d cluster '$CLUSTER_NAME'..."
 k3d cluster delete "$CLUSTER_NAME"
 
-# Clean up the per-offset registry container
+# Clean up the per-offset registry container. On podman the registry is created
+# separately and persists after cluster deletion, so remove it explicitly. k3d
+# lists/creates it with a 'k3d-' prefix; try the prefixed name first.
 if k3d registry list 2>/dev/null | grep -q "$REGISTRY_NAME"; then
-  echo ">>> Deleting registry '$REGISTRY_NAME'..."
-  k3d registry delete "$REGISTRY_NAME"
+  echo ">>> Deleting registry 'k3d-${REGISTRY_NAME}'..."
+  k3d registry delete "k3d-${REGISTRY_NAME}" 2>/dev/null \
+    || k3d registry delete "$REGISTRY_NAME" 2>/dev/null \
+    || echo "  ⚠ Could not delete registry (may already be gone)."
 fi
 
 echo ">>> Cluster '$CLUSTER_NAME' deleted."
