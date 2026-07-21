@@ -5,8 +5,8 @@
  * Checks the telemetry feature flag via the Scope API.
  *
  * Returns `true` if telemetry should be enabled, `false` if explicitly disabled.
- * Defaults to `true` on any failure (network error, timeout, API down) —
- * telemetry should never block service startup.
+ * Defaults to `false` (disabled) on any failure (network error, timeout, API down,
+ * flag not found) — telemetry is opt-in and must be explicitly enabled via the flag.
  *
  * @param apiUrl - Base URL of the Scope API (e.g. "http://api.scoped.svc.cluster.local:80")
  * @param timeoutMs - Maximum time to wait for the flag check (default: 2000ms)
@@ -15,7 +15,7 @@ export async function checkTelemetryFlag(
   apiUrl: string | undefined,
   timeoutMs = 2000,
 ): Promise<boolean> {
-  if (!apiUrl) return true;
+  if (!apiUrl) return false;
 
   try {
     const controller = new AbortController();
@@ -26,15 +26,15 @@ export async function checkTelemetryFlag(
     });
     clearTimeout(timeout);
 
-    if (!response.ok) return true;
+    if (!response.ok) return false;
 
     const flags = (await response.json()) as Array<{ key: string; enabled: boolean }>;
     const telemetryFlag = flags.find((f) => f.key === "telemetry");
 
-    // If flag doesn't exist yet (first deploy), default to enabled
-    return telemetryFlag?.enabled ?? true;
+    // If flag doesn't exist yet, default to disabled (opt-in)
+    return telemetryFlag?.enabled ?? false;
   } catch {
-    // Network error, timeout, API not ready — default to enabled
-    return true;
+    // Network error, timeout, API not ready — default to disabled
+    return false;
   }
 }
