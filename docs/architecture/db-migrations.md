@@ -73,6 +73,13 @@ Defaults match the `docker-compose.yml` local dev environment, so no configurati
 
 4. Test locally with `pnpm migrate:up` and `pnpm migrate:status`.
 
+### Common patterns
+
+- **RU-paced backfill** — use `batchUpdate(col, filter, update, label)` from `../batch-update.js` (collects `_id`s, then `updateMany({_id:{$in:batch}}, update)` in small batches with 429 retry). Static update only.
+- **Per-document backfill referencing `_id`** — when the new value derives from each doc's own `_id` (e.g. `keyId = _id`), `batchUpdate` can't express it. Use a paced `bulkWrite` loop of `updateOne` ops instead (mirror `025-create-projects`), reusing `BATCH_SIZE`/`sleep`/`getRetryAfterMs` for pacing and 429 handling.
+- **Idempotent index create** — wrap `createIndex` in try/catch and tolerate "already exists" codes (`85`/`86`/`68`); rethrow real failures so validation surfaces them.
+- **Unique-index swap** — before creating a composite **unique** index on a non-empty collection, `$group`/`$match` to assert no duplicate keys exist first (a pre-existing collision fails index creation on Cosmos). Drop the old index tolerating "not found" (`26`/`27`). `down()` for index ops is log-only by convention.
+
 ## How It Works
 
 The CLI entry point (`packages/db-migrations/src/migrate.ts`) configures `mongo-migrate-ts` with:
@@ -102,6 +109,10 @@ When you run a command:
 | `007-rename-exhausted-to-finished` | Renames outcome `exhausted` → `finished` |
 | `008-backfill-ai-call-count` | Downloads HARs from blob storage to count AI completion calls per turn |
 | `009-add-requests-filter-indexes` | Adds indexes on `taskPromptId`, `status`, `outcome`, `workerType`, `deletedAt` for server-side filtering/grouping |
+| `025-create-projects` | Data Organization: Projects — seeds one initial project and backfills immutable `projectId` on all 16 scoped collections; backfills `task-prompts.keyId = _id`; swaps deterministic-key unique indexes to `{projectId,keyId}` / `{projectId,ref}` and adds `{projectId}` scoping indexes (see [db.md](db.md#project-scoping-migration-025)) |
+| `026-isolate-catalogs-per-project` | Per-project catalog isolation for `skills`, `extensions`, `criteria`, `prompt-features` — backfills `slug = _id`, swaps global-unique `{id}`/slug indexes to `{projectId,slug}` / `{projectId,id}` (see [db.md](db.md#per-project-catalog-isolation-migration-026)) |
+| `027-uuid-keys-mcp-profileversions` | Opaque UUID `_id` + reference key for `mcp-servers` (`slug`) and `profile-versions` (`ref`) with `{projectId,slug}` / `{projectId,ref}` indexes; drops dead `prompt-feature-extractions` (see [db.md](db.md#per-project-entity-keying-migration-027)) |
+| `028-isolate-mcp-secrets-per-project` | Reconciles the token-manager `mcp-secrets` unique index — drops the legacy global-unique `{mcpId,name}` and (re)creates the per-project `{projectId,mcpId,name}` (see [token-manager.md](token-manager.md#mcp-secrets)) |
 
 ## CI/CD
 

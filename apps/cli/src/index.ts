@@ -22,8 +22,10 @@ import { registerExtensionCommands } from "./commands/extension.js";
 import { registerInsightCommands } from "./commands/insight.js";
 import { registerTaskPromptCommands } from "./commands/task-prompt.js";
 import { registerProfileCommands } from "./commands/profile.js";
+import { registerProjectCommands } from "./commands/project.js";
 import { registerUpdateCommand } from "./commands/update.js";
 import { checkForUpdates } from "./utils/update-check.js";
+import { errorText } from "./utils/style.js";
 
 // Version is injected at build time by esbuild; falls back for dev mode
 const CLI_VERSION = process.env.SCOPE_CLI_VERSION ?? "0.1.0-dev";
@@ -70,6 +72,7 @@ program
 configureHelp(program);
 
 // Register all command groups
+registerProjectCommands(program);
 registerRunCommands(program);
 registerCriteriaCommands(program);
 registerPromptFeatureCommands(program);
@@ -99,6 +102,12 @@ function isMainModule(): boolean {
 
 if (isMainModule()) {
   const flushUpdateCheck = checkForUpdates(CLI_VERSION);
-  await program.parseAsync();
+  try {
+    await program.parseAsync();
+  } catch (error) {
+    console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+    await flushUpdateCheck();
+    process.exit(1);
+  }
   await flushUpdateCheck();
 }

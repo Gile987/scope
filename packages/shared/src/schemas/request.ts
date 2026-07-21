@@ -172,6 +172,7 @@ export const RequestResponseSchema = z
     run: z
       .lazy(() => RunStateSchema)
       .optional(),
+    projectId: z.string(),
   })
   .openapi("RequestResponse");
 
@@ -235,6 +236,7 @@ export const RunStateSchema = z
  */
 export const RunHistoryDocumentSchema = RunStateSchema.extend({
   requestId: z.string(),
+  projectId: z.string(),
 }).openapi("RunHistoryDocument");
 
 /**

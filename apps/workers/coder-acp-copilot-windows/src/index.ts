@@ -60,6 +60,12 @@ export function buildSubprocessEnv(
 
   return {
     GITHUB_TOKEN: githubToken,
+    // Disable the Copilot CLI in-session auto-updater. In headless --acp --yolo
+    // mode it downloads a newer binary mid-run, logs "restart to update", and then
+    // never restarts under ACP — wedging the process before the first model
+    // completion until the 60-min ACP timeout (0 turns / 0 AI calls / 0 tokens).
+    // See issue #1179.
+    COPILOT_AUTO_UPDATE: "false",
     ...(proxyEnabled ? {
       // Node.js 22.21+ supports --use-env-proxy in NODE_OPTIONS, which makes
       // undici/fetch route through HTTP_PROXY env vars.
@@ -184,7 +190,8 @@ class CopilotWindowsProcessor implements WorkerProcessor {
         preview: `${githubToken.substring(0, 7)}...(${githubToken.length} chars)`,
       });
 
-      const args = ["--acp", "--yolo"];
+      // --no-auto-update prevents the CLI from self-updating mid-session (see #1179).
+      const args = ["--acp", "--yolo", "--no-auto-update"];
       if (options?.model) {
         args.push("--model", options.model);
       }

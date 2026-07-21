@@ -64,6 +64,9 @@ export const ENV_VARS = {
   SCOPE_MT_DOWNLOAD_OUTPUT_DIR: {
     description: 'Default download directory for `run get` / `run watch` when --download-output-dir is omitted',
   },
+  SCOPE_PROJECT: {
+    description: 'Project ID used to scope commands when --project is omitted. Overridden by --project; overrides the saved `project use` selection. Required (via one of these) for scoped lists and creates — there is no default project.',
+  },
 } as const;
 
 /**
@@ -101,4 +104,23 @@ export const OUTPUT_FORMATS = {
 export function withOutputOption(cmd: Command, extra?: string[]): Command {
   const formats = ['table', 'tsv', 'json', 'yaml', ...(extra ?? [])];
   return cmd.option("-o, --output <format>", `Output format: ${formats.join(', ')}`, "table");
+}
+
+/**
+ * Add the standard `--project <id>` option to a scoped command. No short flag is
+ * assigned to avoid colliding with per-command shorthands (e.g. `-p`).
+ *
+ * The option only *carries* an override — commands resolve the effective project
+ * via {@link file://./config.ts resolveProjectId}/`requireProjectId`, which falls
+ * back to `SCOPE_PROJECT` then the saved `project use` selection. There is no
+ * default project, so scoped lists/creates error when none resolves.
+ *
+ * @param cmd - The Commander command to add the option to.
+ * @returns The command (for chaining).
+ */
+export function withProjectOption(cmd: Command): Command {
+  return cmd.option(
+    "--project <id>",
+    "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)",
+  );
 }

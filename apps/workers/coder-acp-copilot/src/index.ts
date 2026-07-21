@@ -78,6 +78,12 @@ export function buildSubprocessEnv(
   ].join(",");
   return {
     GITHUB_TOKEN: githubToken,
+    // Disable the Copilot CLI in-session auto-updater. In headless --acp --yolo
+    // mode it downloads a newer binary mid-run, logs "restart to update", and then
+    // never restarts under ACP — wedging the process before the first model
+    // completion until the 60-min ACP timeout (0 turns / 0 AI calls / 0 tokens).
+    // See issue #1179.
+    COPILOT_AUTO_UPDATE: "false",
     ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}),
     ...(devProxyEnabled ? {
       NODE_OPTIONS: [currentNodeOptions, "--use-env-proxy"].filter(Boolean).join(" "),
@@ -257,7 +263,8 @@ class CopilotProcessor implements WorkerProcessor {
       });
 
       // Run ACP session with GitHub Copilot
-      const args = ["--acp", "--yolo"];
+      // --no-auto-update prevents the CLI from self-updating mid-session (see #1179).
+      const args = ["--acp", "--yolo", "--no-auto-update"];
       if (options?.model) {
         args.push("--model", options.model);
       }

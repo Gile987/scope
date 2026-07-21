@@ -202,6 +202,28 @@ pnpm dev:coder-acp-copilot
 pnpm dev:coder-acp-claude-code
 ```
 
+### Secret scanning
+
+CI scans every pull request and push for committed secrets with
+[gitleaks](https://github.com/gitleaks/gitleaks) (see
+[`.github/workflows/gitleaks.yml`](.github/workflows/gitleaks.yml)). Known-benign false
+positives — public dev/emulator keys, container image tags and test fixtures — are
+allowlisted in [`.gitleaks.toml`](.gitleaks.toml). To reproduce the scan locally before
+pushing (install the [gitleaks CLI](https://github.com/gitleaks/gitleaks#installing) first):
+
+```bash
+# Full history — matches the push / scheduled CI job
+gitleaks git . --log-opts="--all" --config .gitleaks.toml --redact
+
+# Only your branch's new commits — approximates the pull_request CI job
+gitleaks git . --log-opts="main..HEAD" --config .gitleaks.toml --redact
+```
+
+> The CI `pull_request` job scans the exact PR range (`base.sha..head.sha`). Locally,
+> `main..HEAD` is a close approximation — run `git fetch origin main` first, and note it can
+> differ if `main` has advanced since you branched (use `origin/main...HEAD` to compare against
+> the merge base).
+
 ### VS Code Shortcuts
 
 The repo includes `.vscode/launch.json` and `.vscode/tasks.json` for common dev workflows:
@@ -354,6 +376,7 @@ The [`docs/`](docs/README.md) directory contains architecture and research docum
 | Path | Contents |
 |------|----------|
 | `docs/architecture/` | System design — app design, criteria provider, DB migrations, token manager, skills |
+| `docs/ops/` | Operational runbooks — Cosmos DB backup & restore (`pnpm db:dump` / `pnpm db:restore`) |
 | `docs/research/` | Research spikes — delta storage, real-time data flow |
 
 ## Deployment

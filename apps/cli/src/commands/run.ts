@@ -15,7 +15,8 @@ import { colorLevel, dimTimestamp, errorText, successText, label, value, banner,
 import { formatData, isMachineReadable, formatDate } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { runGetAction } from "../run-get-action.js";
-import { normalizeUrl, printFollowUpCommands, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { normalizeUrl, printFollowUpCommands, withOutputOption, withProjectOption, getDefaultApiUrl } from "../utils/shared.js";
+import { requireProjectId } from "../utils/config.js";
 import { apiFetch, getApiBasePath } from "../utils/api-client.js";
 import { parseGatesOption } from "../utils/gates.js";
 
@@ -64,12 +65,15 @@ run
   .option("--agents-md <text|@file>", "AGENTS.md content delivered to the workspace (prefix with @ to read from a file)")
   .option("--gates <jsonOrFile>", "GateConfig[] JSON or path/@path to a JSON file for gated runs")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options, command) => {
     const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, codebase: codebaseRef, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile, gates: gatesOption, agentsMd: agentsMdInput } = options;
     // `--profile` is the documented flag; `--base-profile` is kept as a hidden
     // back-compat alias. Both resolve to the same request `profileId`.
     const profileId = profile ?? baseProfile;
+    // Fail fast: submitting a run is a root create and requires an explicit project.
+    const projectId = requireProjectId(options.project);
 
     try {
       // Resolve scenario + persona YAML if provided
@@ -182,6 +186,7 @@ run
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        projectId,
       });
 
       if (!response.ok) {
@@ -410,7 +415,7 @@ run
     });
   });
 
-withOutputOption(
+withProjectOption(withOutputOption(
 run
   .command("list")
   .description("List all requests")
@@ -434,9 +439,10 @@ run
   .option("--sort-by <field>", "Sort field: created, updated, priority, worker, status, id, duration")
   .option("--sort-dir <dir>", "Sort direction: asc or desc")
   .option("--include-deleted", "Include soft-deleted runs")
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
       let path = `/requests`;
       const params = new URLSearchParams();
@@ -502,7 +508,7 @@ run
       const qs = params.toString();
       if (qs) path += `?${qs}`;
 
-      const response = await apiFetch(options.url, path);
+      const response = await apiFetch(options.url, path, { projectId });
 
       if (!response.ok) {
         const error = await response.json();
@@ -715,6 +721,7 @@ run
   .option("-e, --extract", "Extract the archive after downloading")
   .option("-d, --dir <path>", "Extraction directory (implies --extract)")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (required with --submission-id)")
   .action(async (options) => {
     const { url } = options;
     const shouldExtract = options.extract || !!options.dir;
@@ -725,7 +732,8 @@ run
 
       if (options.submissionId) {
         console.log(`${label('Fetching runs for submission')} ${value(options.submissionId)}...`);
-        const listResp = await apiFetch(url, `/requests?submissionId=${encodeURIComponent(options.submissionId)}&limit=1000`);
+        const projectId = requireProjectId(options.project);
+        const listResp = await apiFetch(url, `/requests?submissionId=${encodeURIComponent(options.submissionId)}&limit=1000`, { projectId });
         if (!listResp.ok) {
           const error = await listResp.json();
           console.error(errorText("Error fetching runs:"), error);
@@ -812,6 +820,7 @@ run
   .argument("<path>", "Path to .tar.gz archive or extracted directory")
   .option("--dry-run", "Preview what would be uploaded without sending")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (inputPath: string, options) => {
     const { url, dryRun } = options;
 
@@ -879,6 +888,7 @@ run
       const response = await apiFetch(url, `/runs/upload`, {
         method: "POST",
         body: formData,
+        projectId: requireProjectId(options.project),
       });
 
       // Cleanup temp dir if created
@@ -918,6 +928,7 @@ run
   .argument("<path>", "Path to batch .tar.gz archive")
   .option("--dry-run", "Preview what would be uploaded without sending")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (inputPath: string, options) => {
     const { url, dryRun } = options;
 
@@ -955,6 +966,7 @@ run
       const response = await apiFetch(url, `/runs/upload-batch`, {
         method: "POST",
         body: formData,
+        projectId: requireProjectId(options.project),
       });
 
       // 201 = all imported, 207 = partial, 400 = none / bad input

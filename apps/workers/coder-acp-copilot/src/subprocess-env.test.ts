@@ -84,4 +84,9 @@ describe("buildSubprocessEnv", () => {
     expect(buildSubprocessEnv(token, true).GITHUB_TOKEN).toBe(token);
     expect(buildSubprocessEnv(token, false).GITHUB_TOKEN).toBe(token);
   });
+
+  it("always disables the CLI auto-updater (issue #1179)", () => {
+    expect(buildSubprocessEnv(token, true).COPILOT_AUTO_UPDATE).toBe("false");
+    expect(buildSubprocessEnv(token, false).COPILOT_AUTO_UPDATE).toBe("false");
+  });
 });

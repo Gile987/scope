@@ -56,6 +56,7 @@ describe('extractSkillsToWorkspace', () => {
       refs: [],
       skillConfigs: [],
       skillClient: mockClient,
+      projectId: 'proj-1',
       workspacePath,
     });
     expect(result).toEqual([]);
@@ -76,6 +77,7 @@ describe('extractSkillsToWorkspace', () => {
       refs: ['owner/repo/my-skill@abc1234'],
       skillConfigs: configs,
       skillClient: mockClient,
+      projectId: 'proj-1',
       workspacePath,
     });
 
@@ -99,6 +101,7 @@ describe('extractSkillsToWorkspace', () => {
       refs: ['ref@abc'],
       skillConfigs: configs,
       skillClient: mockClient,
+      projectId: 'proj-1',
       workspacePath,
       agentType: 'copilot',
     });
@@ -123,6 +126,7 @@ describe('extractSkillsToWorkspace', () => {
       refs: ['ref@abc'],
       skillConfigs: configs,
       skillClient: mockClient,
+      projectId: 'proj-1',
       workspacePath,
       agentType: 'claude-code',
     });
@@ -151,6 +155,7 @@ describe('extractSkillsToWorkspace', () => {
       refs: ['ref-bad@abc', 'ref-good@abc'],
       skillConfigs: configs,
       skillClient: mockClient,
+      projectId: 'proj-1',
       workspacePath,
       log: (msg) => { logMessages.push(msg); },
     });
@@ -177,6 +182,7 @@ describe('extractSkillsToWorkspace', () => {
       refs: ['ref@abc'],
       skillConfigs: configs,
       skillClient: mockClient,
+      projectId: 'proj-1',
       workspacePath,
     });
 

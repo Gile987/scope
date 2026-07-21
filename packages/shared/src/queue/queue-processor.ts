@@ -284,6 +284,19 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
+    // Fail fast on a missing project scope. Every downstream resolver below
+    // (MCP servers, skills, secrets, and the report-generator) builds
+    // `?projectId=${encodeURIComponent(projectId)}` URLs, so an absent value
+    // would `encodeURIComponent(undefined)` into the literal string
+    // "undefined" and silently query a project named "undefined" — a confusing
+    // 404 instead of a clear error. A run should never reach here without a
+    // projectId (the API sets it on submit and migration 026 backfills legacy
+    // docs), so treat its absence as a hard, explicit failure.
+    if (!requestDoc.projectId) {
+      throw new Error(
+        `Request ${requestDoc._id} has no projectId — cannot resolve project-scoped resources (MCP servers, skills, secrets)`,
+      );
+    }
     // Resolve MCP server slugs to configs via API
     let mcpServerConfigs: McpServerConfig[] | undefined;
     if (requestDoc.mcpServers && requestDoc.mcpServers.length > 0) {
@@ -293,7 +306,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       }
       const mcpClient = new McpServerClient(apiBaseUrl);
       await log("info", `Resolving ${requestDoc.mcpServers.length} MCP server(s)`, { mcpServers: requestDoc.mcpServers });
-      mcpServerConfigs = await mcpClient.resolveServers(requestDoc.mcpServers);
+      mcpServerConfigs = await mcpClient.resolveServers(requestDoc.projectId, requestDoc.mcpServers);
       await log("info", `Resolved MCP servers: ${mcpServerConfigs.map(s => s.name).join(", ")}`);
 
       // Hydrate configs with real plaintext secrets from Token Manager
@@ -304,7 +317,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         mcpServerConfigs = await Promise.all(
           mcpServerConfigs.map(async (config) => {
             try {
-              const resolved = await secretClient.resolveSecrets(config.slug);
+              const resolved = await secretClient.resolveSecrets(requestDoc.projectId, config.slug);
               if ('env' in resolved && resolved.env && Object.keys(resolved.env).length > 0) {
                 hydratedNames.push(config.name);
                 return { ...config, env: resolved.env };
@@ -339,7 +352,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       }
       const skillClient = new SkillClient(apiBaseUrl);
       await log("info", `Resolving ${requestDoc.skillRevisions.length} skill revision(s)`, { skillRevisions: requestDoc.skillRevisions });
-      skillConfigs = await skillClient.resolveSkills(requestDoc.skillRevisions);
+      skillConfigs = await skillClient.resolveSkills(requestDoc.projectId, requestDoc.skillRevisions);
       await log("info", `Resolved skills: ${skillConfigs.map(s => s.name).join(", ")}`);
     }
 
@@ -409,6 +422,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       refs: requestDoc.skillRevisions,
       skillConfigs,
       skillClient,
+      projectId: requestDoc.projectId,
       workspacePath,
       agentType,
       log: async (msg) => { await log("info", msg); },
@@ -584,7 +598,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     // Setup: create workspace, extract skills, upload setup videos
     if (this.processor.setup) {
-      const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs, extensionConfigs });
+      const setupResult = await this.processor.setup(log, { model: requestDoc.model, projectId: requestDoc.projectId, mcpServerConfigs, skillConfigs, extensionConfigs });
 
       if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
         try {
@@ -678,6 +692,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         requestId,
         runId,
         log,
+        projectId: requestDoc.projectId,
         personaInstructions: requestDoc.personaInstructions,
         model: requestDoc.model,
         reasoningEffort: requestDoc.reasoningEffort,
