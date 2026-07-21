@@ -12,15 +12,15 @@
  * The service name is resolved from env vars in priority order:
  *   OTEL_SERVICE_NAME > WORKER_NAME > "unknown"
  *
- * Checks the "telemetry" feature flag via the Scope API before initializing.
- * If the flag is disabled, telemetry is skipped entirely (no-op mode).
- * Defaults to enabled on any failure (API down, timeout, first deploy).
+ * OTel is always initialized (hooks must register before app code loads), but
+ * span export is gated by the "telemetry" feature flag via a GatingSpanProcessor.
+ * The flag is polled every 60 seconds — toggling it takes effect within one minute
+ * without requiring a pod restart.
  *
  * For local development (without --import), the in-app initTelemetry("name") call
  * still works — the register module is not required, just preferred for production.
  */
 import { initTelemetry } from "./telemetry-client.js";
-import { checkTelemetryFlag } from "./feature-flag.js";
 
 const serviceName =
   process.env.OTEL_SERVICE_NAME ||
@@ -33,13 +33,7 @@ const apiUrl =
   process.env.API_URL ||
   process.env.CRITERIA_API_URL;
 
-const enabled = await checkTelemetryFlag(apiUrl);
-
-if (enabled) {
-  initTelemetry(serviceName);
-} else {
-  // Feature flag disabled — telemetry stays in no-op mode
-  if (process.env.NODE_ENV !== "test") {
-    process.stderr.write(`[telemetry] Disabled via feature flag (service: ${serviceName})\n`);
-  }
-}
+// Always initialize — OTel hooks must register before app modules load.
+// The GatingSpanProcessor inside initTelemetry controls whether spans
+// are actually exported, based on the feature flag polled at runtime.
+initTelemetry(serviceName, { apiUrl });

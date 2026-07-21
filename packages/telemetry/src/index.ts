@@ -3,5 +3,6 @@
 
 export { initTelemetry, getMeter, isTelemetryEnabled, getExportMode, resetTelemetry, shutdownTelemetry } from "./telemetry-client.js";
 export { trackMetric, trackTrace, trackEvent, trackDependency } from "./helpers.js";
-export { checkTelemetryFlag } from "./feature-flag.js";
+export { checkTelemetryFlag, TelemetryFlagPoller } from "./feature-flag.js";
+export { GatingSpanProcessor } from "./gating-span-processor.js";
 export type { TelemetryMetric, TelemetryTrace, TelemetryEvent, TelemetryDependency } from "./types.js";

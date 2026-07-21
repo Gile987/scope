@@ -38,3 +38,53 @@ export async function checkTelemetryFlag(
     return false;
   }
 }
+
+/**
+ * Polls the telemetry feature flag at a configurable interval.
+ * Exposes a synchronous `isEnabled` getter for use by the GatingSpanProcessor.
+ */
+export class TelemetryFlagPoller {
+  private _enabled: boolean;
+  private _timer: ReturnType<typeof setInterval> | null = null;
+  private readonly _apiUrl: string | undefined;
+  private readonly _intervalMs: number;
+  private readonly _timeoutMs: number;
+
+  constructor(
+    apiUrl: string | undefined,
+    options?: { initialValue?: boolean; intervalMs?: number; timeoutMs?: number },
+  ) {
+    this._apiUrl = apiUrl;
+    this._enabled = options?.initialValue ?? false;
+    this._intervalMs = options?.intervalMs ?? 60_000;
+    this._timeoutMs = options?.timeoutMs ?? 2_000;
+  }
+
+  get enabled(): boolean {
+    return this._enabled;
+  }
+
+  /** Start periodic polling. Safe to call multiple times. */
+  start(): void {
+    if (this._timer) return;
+    this._timer = setInterval(() => {
+      void this.poll();
+    }, this._intervalMs);
+    // Don't keep the process alive just for flag polling
+    this._timer.unref();
+  }
+
+  /** Stop polling. */
+  stop(): void {
+    if (this._timer) {
+      clearInterval(this._timer);
+      this._timer = null;
+    }
+  }
+
+  /** Poll once and update the enabled state. */
+  async poll(): Promise<boolean> {
+    this._enabled = await checkTelemetryFlag(this._apiUrl, this._timeoutMs);
+    return this._enabled;
+  }
+}
