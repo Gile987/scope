@@ -13,14 +13,11 @@ import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
-import { GatingSpanProcessor } from "./gating-span-processor.js";
-import { TelemetryFlagPoller } from "./feature-flag.js";
 
 let initialized = false;
 let enabled = false;
 let exportMode: "collector" | "direct" | "none" = "none";
 let nodeSDK: NodeSDK | null = null;
-let flagPoller: TelemetryFlagPoller | null = null;
 
 /**
  * Initialize OpenTelemetry telemetry.
@@ -41,9 +38,8 @@ let flagPoller: TelemetryFlagPoller | null = null;
  * - `TELEMETRY_SAMPLING_RATIO` — fraction of telemetry to sample (0.0–1.0, default 1.0)
  *
  * @param serviceName - Logical name for this service (e.g., "coder-acp-copilot", "api").
- * @param options - Optional configuration for feature flag polling.
  */
-export function initTelemetry(serviceName?: string, options?: { apiUrl?: string }): void {
+export function initTelemetry(serviceName?: string): void {
   if (initialized) return;
   initialized = true;
 
@@ -51,14 +47,14 @@ export function initTelemetry(serviceName?: string, options?: { apiUrl?: string 
   const connectionString = process.env.APPLICATIONINSIGHTS_CONNECTION_STRING;
 
   if (collectorEndpoint) {
-    initWithCollector(serviceName, collectorEndpoint, options?.apiUrl);
+    initWithCollector(serviceName, collectorEndpoint);
   } else if (connectionString) {
     initWithAzureMonitor(serviceName, connectionString);
   }
   // else: no-op — telemetry disabled
 }
 
-function initWithCollector(serviceName: string | undefined, endpoint: string, apiUrl?: string): void {
+function initWithCollector(serviceName: string | undefined, endpoint: string): void {
   const resource = resourceFromAttributes({
     [ATTR_SERVICE_NAME]: serviceName ?? "unknown",
   });
@@ -67,18 +63,9 @@ function initWithCollector(serviceName: string | undefined, endpoint: string, ap
   const metricExporter = new OTLPMetricExporter({ url: `${endpoint}/v1/metrics` });
   const logExporter = new OTLPLogExporter({ url: `${endpoint}/v1/logs` });
 
-  // Create a gating processor that respects the telemetry feature flag.
-  // When the flag is disabled, spans are silently dropped — no restart needed.
-  const batchProcessor = new BatchSpanProcessor(traceExporter);
-  flagPoller = new TelemetryFlagPoller(apiUrl, { initialValue: false });
-  const gatingProcessor = new GatingSpanProcessor(batchProcessor, flagPoller);
-
-  // Do the initial poll, then start periodic polling (every 60s)
-  void flagPoller.poll().then(() => flagPoller!.start());
-
   nodeSDK = new NodeSDK({
     resource,
-    spanProcessors: [gatingProcessor],
+    spanProcessors: [new BatchSpanProcessor(traceExporter)],
     metricReader: new PeriodicExportingMetricReader({
       exporter: metricExporter,
       exportIntervalMillis: 15_000,
@@ -155,10 +142,6 @@ export function resetTelemetry(): void {
   enabled = false;
   exportMode = "none";
   nodeSDK = null;
-  if (flagPoller) {
-    flagPoller.stop();
-    flagPoller = null;
-  }
 }
 
 /**

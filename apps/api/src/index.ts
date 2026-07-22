@@ -172,7 +172,6 @@ async function initializeClients(): Promise<void> {
     { key: "tokens", label: "Tokens" },
     { key: "extensions", label: "VS Code Extensions" },
     { key: "statistics-graph", label: "Statistics Graph" },
-    { key: "telemetry", label: "Telemetry" },
     // Gate pipeline: Run and Deploy are not ready for users yet — hidden in the
     // portal by default. Backend/CLI stay permissive; flip these on in Admin
     // when ready. See apps/portal/src/lib/gates.ts (GATE_FEATURE_FLAGS).
