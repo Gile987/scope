@@ -449,6 +449,26 @@ This project has adopted the [Microsoft Open Source Code of Conduct](https://ope
 For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
 contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
 
+## Third-party notices
+
+This project is licensed under the [MIT License](LICENSE). It redistributes third-party
+open-source components (npm production dependencies shipped in the service images and the
+Rust crates linked into the `gateway` binary). Their attributions and license texts are
+collected in the root [`NOTICE`](NOTICE) file.
+
+`NOTICE` is generated — do not edit it by hand. Regenerate it after changing dependencies:
+
+```bash
+pnpm notice          # regenerate NOTICE (and NOTICE-REVIEW.txt)
+pnpm notice:check    # CI check: fail if NOTICE is out of date
+```
+
+The generator (`scripts/generate-notice.ts`) enumerates production dependencies only
+(`pnpm licenses list --prod` + `cargo license --avoid-dev-deps`), reads each package's own
+license text from disk, and excludes first-party code. Any dependency whose license cannot be
+resolved as standard OSS is excluded from `NOTICE` and written to `NOTICE-REVIEW.txt` for
+manual / legal review. Regenerating the Rust portion requires `cargo install cargo-license`.
+
 ## Trademarks
 
 This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
