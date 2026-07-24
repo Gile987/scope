@@ -7,6 +7,7 @@
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
+    "generate:openapi": "pnpm --dir ../.. --filter shared --filter db-migrations build && tsx src/openapi/generate.ts",
     "lint": "eslint src/"
   },
   "dependencies": {
