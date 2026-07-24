@@ -6,9 +6,8 @@ End-user documentation site for **Scope**, built with
 [Astro](https://astro.build) + [Starlight](https://starlight.astro.build)
 and published to GitHub Pages.
 
-The product itself lives in
-[scope-core](https://github.com/growth-ecosystems/scope-core). This
-repo contains only the documentation.
+The product and this documentation site live in
+[scope-core](https://github.com/growth-ecosystems/scope-core).
 
 ## Project structure
 
@@ -23,7 +22,7 @@ repo contains only the documentation.
 │   │   ├── guides/
 │   │   ├── reference/
 │   │   └── resources/
-│   ├── openapi/scope-openapi.json   # snapshot of the live OpenAPI spec
+│   ├── openapi/scope-openapi.json   # artifact generated from the API registry
 │   ├── plugins/
 │   │   └── remark-http-snippets.mjs # turns ```http blocks into multi-language tabs
 │   └── content.config.ts
@@ -43,7 +42,7 @@ Sidebar order is defined in `astro.config.mjs`, not by directory order.
 | `pnpm dev`             | Start local dev server at `localhost:4321`                 |
 | `pnpm build`           | Build the production site to `./dist/`                     |
 | `pnpm preview`         | Preview the production build locally                       |
-| `SCOPE_OPENAPI_URL=<url> pnpm refresh:openapi` | Re-snapshot the live OpenAPI spec |
+| `pnpm refresh:openapi` | Generate the OpenAPI snapshot from `scope-core` |
 
 ## Authoring docs
 
@@ -58,6 +57,10 @@ Sidebar order is defined in `astro.config.mjs`, not by directory order.
   are auto-generated from `src/openapi/scope-openapi.json` by
   [`starlight-openapi`](https://starlight-openapi.vercel.app/) — do
   not edit them by hand.
+- Run `pnpm refresh:openapi` from this directory after changing API
+  routes or schemas. It runs `apps/api`'s generator from the same
+  `scope-core` checkout, so root workspace dependencies must be
+  installed first.
 
 See [AGENTS.md](AGENTS.md) for conventions, the source-of-truth
 policy (everything factual must be grounded in scope-core), and

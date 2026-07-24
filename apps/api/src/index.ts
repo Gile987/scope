@@ -6,6 +6,8 @@ import cors from "cors";
 import { MongoClient, Db, Collection } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
 import { TaskPromptStore, SkillRevisionStore, SkillResolver, CodebaseStore, CodebaseRevisionStore, CodebaseResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore, ProjectStore } from "shared";
@@ -414,9 +416,13 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.blobStorage) blobStorage = deps.blobStorage;
 }
 
-// ─── Start server (skipped in test environment) ──────────────────────────────
+// ─── Start server when executed directly ─────────────────────────────────────
 
-if (!process.env.VITEST) {
+const isEntrypoint =
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isEntrypoint) {
   main().catch((error) => {
     console.error("Failed to start server:", error);
     process.exit(1);

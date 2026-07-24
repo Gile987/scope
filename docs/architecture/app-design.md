@@ -612,3 +612,9 @@ The REST API exposes an auto-generated **OpenAPI 3.1** spec built with [Zod](htt
 Zod schemas live in `packages/shared/src/schemas/` (16 files, ~78 schemas) so they can be reused by the API, CLI, and workers. Each entity has separate **input** (what the client sends) and **response** (what the API returns) schemas.
 
 OpenAPI route registrations live in `apps/api/src/openapi/routes/` — one file per resource group. The registry and generator are in `apps/api/src/openapi/registry.ts`.
+
+The static documentation site consumes the committed artifact at
+`website/src/openapi/scope-openapi.json`. Generate it from the API
+registry with `pnpm --filter api generate:openapi` rather than fetching
+the spec from a deployed environment. The API snapshot test verifies
+that the artifact remains current.
