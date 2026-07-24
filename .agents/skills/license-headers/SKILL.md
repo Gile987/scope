@@ -36,7 +36,8 @@ The header tooling is the only authority:
 
 - **Fixer:** `pnpm headers` — inserts any missing headers in place (idempotent).
 - **Verifier:** `pnpm headers:check` — fails if any in-scope file is missing it.
-- Implemented by `scripts/license-headers.ts`; enforced by the `license-headers`
+- Their implementation lives behind those `package.json` entries (discover it
+  there — do not assume a specific script file). Enforced by the `license-headers`
   job in `.github/workflows/ci.yml`.
 
 **Discover the exact current invocation before running.** Confirm the script
@@ -54,6 +55,7 @@ the entry-point names are the stable contract, but verify them against the repo.
 
 If `pnpm headers:check` (or the CI job) reports missing headers, run the fixer
 `pnpm headers` and re-run the check. If a file legitimately must NOT carry the
-header (e.g. generated or third-party vendored output), that belongs in the
-script's exclusion logic in `scripts/license-headers.ts` — update the script;
-never bypass or silence the check ad hoc.
+header (e.g. generated or third-party vendored output), that belongs in the header
+tooling's own configuration — discover it via the `headers` script in
+`package.json` — and update that configuration; never bypass or silence the check
+ad hoc.

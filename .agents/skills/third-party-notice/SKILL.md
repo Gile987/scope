@@ -37,8 +37,8 @@ The NOTICE tooling is the only authority:
 
 - **Regenerate:** `pnpm notice` — rebuilds `NOTICE` (and the review report).
 - **Verify:** `pnpm notice:check` — fails if `NOTICE` is stale vs. the lockfile.
-- Implemented by `scripts/generate-notice.sh`; produces `NOTICE` and
-  `NOTICE-REVIEW.txt`.
+- The current implementation behind them (e.g. `scripts/generate-notice.sh`)
+  should be confirmed via `package.json`. Produces `NOTICE` and `NOTICE-REVIEW.txt`.
 
 **Discover the exact current invocation before running.** Confirm the script names
 in `package.json` (`scripts`) and the enforcing job in
