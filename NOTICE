@@ -2498,7 +2498,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 The following npm package may be included in this product:
 
- - js-yaml@3.14.2
+ - js-yaml@3.15.0
 
 This package contains the following license:
 
@@ -5114,7 +5114,7 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 The following npm package may be included in this product:
 
- - multer@2.1.1
+ - multer@2.2.0
 
 This package contains the following license:
 
@@ -8260,12 +8260,11 @@ THE SOFTWARE.
 
 -----------
 
-The following npm packages may be included in this product:
+The following npm package may be included in this product:
 
- - uuid@10.0.0
- - uuid@8.3.2
+ - uuid@11.1.1
 
-These packages each contain the following license:
+This package contains the following license:
 
 The MIT License (MIT)
 
