@@ -114,6 +114,8 @@ MongoDB is CosmosDB-compatible — avoid MongoDB features that CosmosDB's MongoD
 ## Coding conventions
 
 - **TypeScript**: strict mode, ES2022, NodeNext modules.
+- **License headers**: every first-party source file must start with the Microsoft MIT header. Run
+  `pnpm headers` to add it; CI enforces it via `pnpm headers:check`.
 - **Tests**: co-locate them next to the source as `<filename>.test.ts` (Vitest).
 - **CLI ↔ Portal parity**: every feature available in the Portal must also be available in the CLI —
   the CLI must never lag behind the Portal.
