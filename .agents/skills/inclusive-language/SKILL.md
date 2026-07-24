@@ -1,16 +1,11 @@
 ---
 name: inclusive-language
 description: >
-  Keeps identifiers, user-facing strings, and docs free of non-inclusive
-  terminology. Use this skill when:
-  (1) naming variables, functions, files, branches, or other identifiers,
-  (2) writing user-facing strings, UI copy, or error messages,
-  (3) writing or editing documentation, comments, or commit messages,
-  (4) reviewing terminology (e.g. replacing allowlist/blacklist with
-  allowlist/blocklist).
-  Routes to Microsoft PoliCheck (the authoritative scan in the ADO/1ES release
-  pipeline, aka.ms/policheckinfo) plus any committed pre-scan tooling — never
-  maintain a word list in this skill.
+  Routes naming and user-facing text to Microsoft PoliCheck
+  (aka.ms/policheckinfo) — never keep a word list in this skill.
+  Trigger: naming identifiers, or writing user-facing strings, docs, or comments
+  (e.g. allowlist->allowlist).
+  Not for: logic-only changes that introduce no new names or text.
 metadata:
   version: "1.0.0"
 ---

@@ -1,15 +1,12 @@
 ---
 name: responsible-ai
 description: >
-  Ensures new AI/ML and generative-AI features clear Microsoft's Responsible AI
-  process. Use this skill when:
-  (1) adding or modifying an AI/ML or generative-AI feature,
-  (2) integrating a new model, provider, prompt, or agent,
-  (3) adding functionality that generates, classifies, evaluates, or transforms
-  content with a model.
-  Routes to the Microsoft Responsible AI Standard and the OneRAI intake
-  (onerai.microsoft.com) / the team's RAI Champ. This is a process/attestation
-  gate with no local automation — do not self-certify.
+  Routes new AI/ML or generative-AI features to Microsoft's Responsible AI
+  Standard and the OneRAI intake (onerai.microsoft.com) / RAI Champ — a process
+  gate, not local automation; do not self-certify.
+  Trigger: adding/modifying an AI feature, or integrating a model, provider,
+  prompt, or agent.
+  Not for: non-AI changes, or using AI dev tools that aren't shipped features.
 metadata:
   version: "1.0.0"
 ---

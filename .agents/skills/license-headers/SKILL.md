@@ -1,14 +1,11 @@
 ---
 name: license-headers
 description: >
-  Ensures every first-party source file carries the required Microsoft MIT
-  copyright header. Use this skill when:
-  (1) creating or adding a new .ts/.tsx/.js/.mjs/.rs/.bicep/.css source file,
-  (2) adding any first-party file that needs the MIT copyright header,
-  (3) the `license-headers` CI check fails on a PR,
-  (4) before committing newly created source files.
-  Routes to the repo's header tooling (`pnpm headers` / `pnpm headers:check`) —
-  never hand-write or copy the header text.
+  Routes new source files to the repo's MIT copyright-header tooling
+  (`pnpm headers` / `pnpm headers:check`) — never hand-write the header.
+  Trigger: creating/adding a first-party .ts/.tsx/.js/.mjs/.rs/.bicep/.css
+  source file, or a failing `license-headers` CI check.
+  Not for: editing existing files, or generated/vendored/config/doc files.
 metadata:
   version: "1.0.0"
 ---

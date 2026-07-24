@@ -1,15 +1,11 @@
 ---
 name: third-party-notice
 description: >
-  Keeps the third-party NOTICE attribution file accurate and flags redistributables
-  that need legal sign-off. Use this skill when:
-  (1) adding, removing, or upgrading a dependency (changes to package.json or
-  pnpm-lock.yaml),
-  (2) bundling or vendoring a third-party binary or redistributable,
-  (3) the NOTICE check fails in CI.
-  Routes to the repo's NOTICE tooling (`pnpm notice` / `pnpm notice:check`,
-  producing NOTICE and NOTICE-REVIEW.txt) and escalates proprietary / non-OSS
-  packages (e.g. @github/copilot) to CELA for legal review before redistribution.
+  Routes dependency changes to the repo's NOTICE tooling (`pnpm notice` /
+  `pnpm notice:check`) and escalates proprietary/non-OSS redistributables to
+  CELA before redistribution.
+  Trigger: adding/removing/upgrading a dependency, or bundling a third-party binary.
+  Not for: code changes that don't touch dependencies or bundled binaries.
 metadata:
   version: "1.0.0"
 ---
