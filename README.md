@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./docs/assets/ms-scope-logo.svg" alt="Scope logo" width="112" />
+  <img src="./apps/portal/public/favicon.svg" alt="Scope logo" width="72" />
 
   <h1>Scope</h1>
 
