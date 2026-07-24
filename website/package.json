@@ -2,14 +2,14 @@
   "name": "scope-doc",
   "type": "module",
   "version": "0.0.1",
-  "packageManager": "pnpm@11.1.1",
+  "packageManager": "pnpm@10.29.1",
   "scripts": {
     "dev": "worktree-env && astro dev",
     "start": "worktree-env && astro dev",
     "build": "astro build",
     "preview": "worktree-env && astro preview",
     "astro": "astro",
-    "refresh:openapi": "test -n \"$SCOPE_OPENAPI_URL\" || { echo 'Set SCOPE_OPENAPI_URL to the URL of the OpenAPI document.' >&2; exit 1; }; curl -fsSL -o src/openapi/scope-openapi.json \"$SCOPE_OPENAPI_URL\" && echo 'Refreshed src/openapi/scope-openapi.json'"
+    "refresh:openapi": "cd .. && pnpm --filter api generate:openapi"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.39.2",

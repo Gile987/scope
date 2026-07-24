@@ -23,8 +23,9 @@ A static documentation site published to GitHub Pages.
 - `src/content/docs/` — all user-facing pages (`.md` and `.mdx`)
   - `introduction/`, `getting-started/`, `guides/`, `reference/`, `resources/`
   - Sidebar order is defined in `astro.config.mjs`, not by directory order
-- `src/openapi/scope-openapi.json` — committed snapshot of the live
-  Scope OpenAPI spec; drives the auto-generated REST API reference
+- `src/openapi/scope-openapi.json` — committed artifact generated from
+  the Scope API's OpenAPI registry; drives the auto-generated REST
+  API reference
 - `src/plugins/remark-http-snippets.mjs` — custom remark plugin that
   expands fenced ` ```http ` blocks into multi-language Starlight
   `<Tabs>` (curl, JS fetch, Python, Go, Java, C#)
@@ -63,7 +64,7 @@ for opening the file.
 | Criterion schema, DAG rules | `packages/shared/src/schemas/criteria.ts` |
 | Route handlers, validation, error codes | `apps/api/src/routes/*.ts` |
 | VS Code worker behavior | `docs/architecture/vscode-electron-worker.md`, `vscode-web-worker.md`, `worker-requirements.md` |
-| Live OpenAPI spec | `http://scope.eastus2.cloudapp.azure.com/openapi.json` (VPN); snapshot at `src/openapi/scope-openapi.json` in this repo |
+| OpenAPI source | `apps/api/src/openapi/registry.ts`; generated snapshot at `src/openapi/scope-openapi.json` |
 | Swagger UI | served by the API; check `apps/api/src/index.ts` for the route |
 
 When in doubt, `grep` scope-core for the symbol or string before
@@ -155,7 +156,7 @@ groups are spread via `...openAPISidebarGroups`.
 pnpm install
 pnpm run build           # writes dist/
 pnpm run dev             # local preview at http://localhost:4321
-pnpm run refresh:openapi # re-snapshot the OpenAPI spec (VPN required)
+pnpm run refresh:openapi # generate the OpenAPI snapshot from scope-core
 ```
 
 A green `pnpm run build` is the gate. As of the last edit it produces
@@ -173,8 +174,8 @@ file failed to parse.
 
 1. Read the relevant file in scope-core (schemas first, then route
    handlers).
-2. Check the live OpenAPI spec snapshot at
-   `src/openapi/scope-openapi.json`.
+2. Generate the OpenAPI snapshot with `pnpm run refresh:openapi` and
+   inspect `src/openapi/scope-openapi.json`.
 3. If the answer is still ambiguous, ask the user. The user is the
    product owner and will know intent.
 4. Never invent endpoints, statuses, or field names to fill a gap —

@@ -104,16 +104,17 @@ Worker types accepted by the API:
 
 ## Refreshing this reference
 
-The per-endpoint reference is built from a snapshot of the OpenAPI
-spec committed at `src/openapi/scope-openapi.json`. To refresh:
+The per-endpoint reference is built from a committed artifact at
+`src/openapi/scope-openapi.json`, generated from scope-core's API
+registry. To refresh it after changing API routes or schemas:
 
 ```sh
 pnpm run refresh:openapi
 ```
 
-Set `SCOPE_OPENAPI_URL` to the URL of an OpenAPI document before
-running the script. It overwrites the snapshot. Commit the result to
-update the published reference.
+The command does not contact a deployed environment. It overwrites the
+snapshot from the checked-out source. Commit the result to update the
+published reference.
 
 ## See also
 
