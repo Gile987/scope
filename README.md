@@ -463,11 +463,19 @@ pnpm notice          # regenerate NOTICE (and NOTICE-REVIEW.txt)
 pnpm notice:check    # CI check: fail if NOTICE is out of date
 ```
 
-The generator (`scripts/generate-notice.ts`) enumerates production dependencies only
-(`pnpm licenses list --prod` + `cargo license --avoid-dev-deps`), reads each package's own
-license text from disk, and excludes first-party code. Any dependency whose license cannot be
-resolved as standard OSS is excluded from `NOTICE` and written to `NOTICE-REVIEW.txt` for
-manual / legal review. Regenerating the Rust portion requires `cargo install cargo-license`.
+The generator (`scripts/generate-notice.sh`) only orchestrates purpose-built license tooling
+and concatenates its verbatim output — it never authors or edits license text. It uses
+[`generate-license-file`](https://generate-license-file.js.org) for the npm production
+dependencies (config: `scripts/glf.config.cjs`) and
+[`cargo-about`](https://github.com/EmbarkStudios/cargo-about) for the crates compiled into the
+`gateway` binary (config: `apps/gateway/about.toml`, template: `apps/gateway/about.hbs`). Only
+the header (`scripts/notice-header.txt`) is written by hand. Any production package whose
+license cannot be resolved as standard OSS is excluded from `NOTICE` and listed in
+`NOTICE-REVIEW.txt` for manual / legal (CELA) review.
+
+`generate-license-file` runs via `npx` (no install needed). Regenerating the Rust portion
+requires `cargo install cargo-about --features cli`. Set `SKIP_CARGO=1` to reuse the cached
+Rust section and skip the (slower) cargo step.
 
 ## Trademarks
 
