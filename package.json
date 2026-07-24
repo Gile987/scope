@@ -37,6 +37,8 @@
     "get-copilot-token": "tsx scripts/get-copilot-token.ts",
     "validate-skill": "tsx scripts/validate-skill.ts",
     "lint": "pnpm -r lint",
+    "headers": "tsx scripts/license-headers.ts",
+    "headers:check": "tsx scripts/license-headers.ts --check",
     "test:copilot:concurrent": "concurrently -n req1,req2 -c blue,green \"pnpm cli submit -m 'Request 1: Say hello' -w coder-acp-copilot -u $API_ENDPOINT\" \"pnpm cli submit -m 'Request 2: Say goodbye' -w coder-acp-copilot -u $API_ENDPOINT\"",
     "test:all-coders": "concurrently -n copilot,claude -c blue,magenta \"pnpm cli submit -m 'Hello from Copilot test' -w coder-acp-copilot -u $API_ENDPOINT\" \"pnpm cli submit -m 'Hello from Claude test' -w coder-acp-claude-code -u $API_ENDPOINT\"",
     "test": "vitest run",
