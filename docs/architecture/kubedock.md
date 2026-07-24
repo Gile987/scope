@@ -47,7 +47,7 @@ deploy/
   components/
     kubedock/
       kustomization.yaml           # kind: Component declaration
-      kubedock-sidecar-patch.yaml  # Strategic merge patch for both ACP workers
+      kubedock-sidecar-patch.yaml  # Strategic merge patch for ACP + Electron workers
       kubedock-rbac.yaml           # ServiceAccount, Role, RoleBinding
       kubedock-config.yaml         # Pod template ConfigMap
   base/
@@ -124,12 +124,13 @@ This prevents accidental container cleanup against a real Docker daemon (e.g., i
 
 ### Subprocess Environment
 
-Workers pass `DOCKER_HOST` to agent subprocesses via `buildSubprocessEnv()`:
+ACP workers pass `DOCKER_HOST` to agent subprocesses via `buildSubprocessEnv()`:
 
 ```typescript
 // In buildSubprocessEnv() — conditional passthrough
 ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {})
 ```
+
 
 ## Kubedock Configuration
 

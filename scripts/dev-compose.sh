@@ -25,6 +25,15 @@ fi
 
 EXTRA_ARGS=()
 
+# When the `auth` profile is active, ensure the entra-local HTTPS cert exists and
+# the local CA is trusted (MSAL requires an https authority). Idempotent.
+for arg in "$@"; do
+  if [ "$arg" = "auth" ]; then
+    "$(dirname "$0")/ensure-dev-certs.sh"
+    break
+  fi
+done
+
 # Always pass .env.local for compose variable interpolation (if it exists)
 if [ -f .env.local ]; then
   EXTRA_ARGS+=(--env-file .env.local)

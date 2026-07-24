@@ -73,6 +73,7 @@ async function runScope(...args: string[]): Promise<{ stdout: string; stderr: st
       ...process.env,
       SCOPE_NO_UPDATE_CHECK: "1",
       SCOPE_API_URL: `http://127.0.0.1:${port}`,
+      SCOPE_PROJECT: "test-project",
     },
     timeout: 10000,
   });

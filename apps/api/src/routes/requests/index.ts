@@ -64,11 +64,13 @@ import {
   sortValueOf,
 } from "./run-query.js";
 import { resolveSkillSpecs } from "../../utils/skill-helpers.js";
+import { findMissingExtensionSlugs } from "../../utils/extension-helpers.js";
 import { resolveCodebaseSpec, createCodebaseArchiveUploader } from "../../utils/codebase-helpers.js";
 import {
   packRunIntoTar,
 } from "../../archive-har.js";
 import { insertHistoricalRun, listHistoricalRuns, getHistoricalRun } from "../../runs-repo.js";
+import { ProjectIdQuerySchema, getQueryProjectId } from "../../utils/project-scope.js";
 import type { RunState } from "shared";
 
 type RequestCollection = RouteContext["requestCollection"];
@@ -103,8 +105,8 @@ const RUN_FACET_DIMS = [
  * inconsistent, half-reactive number. Being input-independent also makes the
  * whole response trivially cacheable process-wide (see {@link getRunFacets}).
  */
-async function computeRunFacets(col: RequestCollection): Promise<RunFacetsResponse> {
-  const match = { deletedAt: { $exists: false } };
+async function computeRunFacets(col: RequestCollection, projectId: string): Promise<RunFacetsResponse> {
+  const match = { deletedAt: { $exists: false }, projectId };
   const dimResults = await Promise.all(
     RUN_FACET_DIMS.map((d) =>
       col
@@ -136,33 +138,35 @@ async function computeRunFacets(col: RequestCollection): Promise<RunFacetsRespon
 }
 
 /**
- * Short TTL for the process-wide facets cache. The facets are an absolute,
- * input-independent distribution, so one entry serves every caller (all tabs,
- * the periodic client refetch, rapid filter toggling) and Cosmos recomputes the
- * 8-way $group fan-out at most once per window per API replica.
+ * Short TTL for the per-project facets cache. The facets are an absolute,
+ * input-independent distribution **within a project**, so one entry per project
+ * serves every caller (all tabs, the periodic client refetch, rapid filter
+ * toggling) and Cosmos recomputes the 8-way $group fan-out at most once per
+ * window per project per API replica.
  */
 const RUN_FACETS_CACHE_TTL_MS = 60_000;
-let runFacetsCache: { expiresAt: number; promise: Promise<RunFacetsResponse> } | null = null;
+const runFacetsCache = new Map<string, { expiresAt: number; promise: Promise<RunFacetsResponse> }>();
 
-function getRunFacets(col: RequestCollection): Promise<RunFacetsResponse> {
+function getRunFacets(col: RequestCollection, projectId: string): Promise<RunFacetsResponse> {
   const now = Date.now();
-  if (runFacetsCache && runFacetsCache.expiresAt > now) {
-    return runFacetsCache.promise;
+  const cached = runFacetsCache.get(projectId);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise;
   }
   // Cache the in-flight promise so concurrent callers on a cold/expired entry
   // share a single computation rather than stampeding Cosmos.
-  const promise = computeRunFacets(col);
-  runFacetsCache = { expiresAt: now + RUN_FACETS_CACHE_TTL_MS, promise };
+  const promise = computeRunFacets(col, projectId);
+  runFacetsCache.set(projectId, { expiresAt: now + RUN_FACETS_CACHE_TTL_MS, promise });
   promise.catch(() => {
     // Drop a rejected entry so the next request retries instead of serving the error.
-    if (runFacetsCache?.promise === promise) runFacetsCache = null;
+    if (runFacetsCache.get(projectId)?.promise === promise) runFacetsCache.delete(projectId);
   });
   return promise;
 }
 
-/** Test-only: reset the process-wide facets cache so each test computes fresh. */
+/** Test-only: reset the per-project facets cache so each test computes fresh. */
 export function _resetRunFacetsCacheForTests(): void {
-  runFacetsCache = null;
+  runFacetsCache.clear();
 }
 
 export function registerRequestsRoutes(ctx: RouteContext): void {
@@ -187,14 +191,16 @@ async function validateGatesForSubmit(
   ctx: RouteContext,
   gates: GateConfig[],
   defaultMaxIterations: number | undefined,
+  projectId: string,
 ): Promise<string | null> {
   const shapeErrors = validateGateConfigs(gates, defaultMaxIterations);
   if (shapeErrors.length > 0) return shapeErrors.join(" ");
 
-  // Collect all referenced criterion ids and resolve them in one query.
+  // Collect all referenced criterion ids and resolve them in one query, scoped
+  // to the run's project so a gate can only reference criteria in its project.
   const allCriterionIds = [...new Set(gates.flatMap((g) => g.criteria ?? []))];
   const criteriaDocs = allCriterionIds.length
-    ? await ctx.criteriaCollection.find({ id: { $in: allCriterionIds } }).toArray()
+    ? await ctx.criteriaCollection.find({ id: { $in: allCriterionIds }, projectId }).toArray()
     : [];
   const criteriaById = new Map(criteriaDocs.map((c) => [c.id, c]));
 
@@ -216,7 +222,7 @@ async function validateGatesForSubmit(
     if (!gc.promptId) {
       return `Gate '${gc.gate}' is missing a prompt.`;
     }
-    const prompt = await ctx.taskPromptCollection.findOne({ _id: gc.promptId });
+    const prompt = await ctx.taskPromptCollection.findOne({ _id: gc.promptId, projectId });
     if (!prompt) {
       return `Gate '${gc.gate}' references unknown prompt '${gc.promptId}'.`;
     }
@@ -245,6 +251,7 @@ async function validateGatesForSubmit(
 async function resolveGatePromptText(
   ctx: RouteContext,
   gates: GateConfig[],
+  projectId: string,
 ): Promise<GateConfig[]> {
   return Promise.all(
     gates.map(async (gc) => {
@@ -254,7 +261,7 @@ async function resolveGatePromptText(
         const { promptText: _ignored, ...rest } = gc;
         return rest;
       }
-      const prompt = await ctx.taskPromptStore.findOrCreate(text, gc.gate);
+      const prompt = await ctx.taskPromptStore.findOrCreate(projectId, text, gc.gate);
       const { promptText: _ignored, ...rest } = gc;
       return { ...rest, promptId: prompt._id };
     }),
@@ -269,15 +276,16 @@ apiRoute(ctx.app, ctx.registry, {
   summary: "Submit request(s)",
   body: CreateRequestInputSchema.extend({
     count: z.number().min(1).max(10).default(1),
-    promptFeatureExtractionId: z.string().optional(),
     skills: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
     codebase: z.string().optional(),
   }),
+  query: ProjectIdQuerySchema,
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, agentsMd: requestedAgentsMd, agentsMdParentIds: requestedAgentsMdParentIds, gates: requestedGates, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId } = req.body;
+    const projectId = getQueryProjectId(req);
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, agentsMd: requestedAgentsMd, agentsMdParentIds: requestedAgentsMdParentIds, gates: requestedGates, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId } = req.body;
     let worker = req.query.worker as string | undefined;
 
     // AGENTS.md body + lineage (for any caller that wants to attach an
@@ -294,7 +302,7 @@ apiRoute(ctx.app, ctx.registry, {
     // content-addressed; large bodies are offloaded to blob by the store).
     const resolveAgentsMdPromptId = async (): Promise<string | undefined> => {
       if (!agentsMdText) return undefined;
-      const p = await ctx.taskPromptStore.findOrCreate(agentsMdText, "agents.md");
+      const p = await ctx.taskPromptStore.findOrCreate(projectId, agentsMdText, "agents.md");
       return p._id;
     };
 
@@ -421,7 +429,7 @@ apiRoute(ctx.app, ctx.registry, {
       };
 
       const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";
-      const taskPrompt = await ctx.taskPromptStore.findOrCreate(scenario.task);
+      const taskPrompt = await ctx.taskPromptStore.findOrCreate(projectId, scenario.task);
       const taskPromptId = taskPrompt._id;
 
       // Gates are the shared evaluation harness for the whole comparative
@@ -433,8 +441,8 @@ apiRoute(ctx.app, ctx.registry, {
       const variationGatesProvided = Array.isArray(requestedGates) && requestedGates.length > 0;
       let persistedVariationGates: GateConfig[] | undefined;
       if (variationGatesProvided) {
-        const resolvedGates = await resolveGatePromptText(ctx, requestedGates as GateConfig[]);
-        const gateError = await validateGatesForSubmit(ctx, resolvedGates, maxIterations);
+        const resolvedGates = await resolveGatePromptText(ctx, requestedGates as GateConfig[], projectId);
+        const gateError = await validateGatesForSubmit(ctx, resolvedGates, maxIterations, projectId);
         if (gateError) {
           res.status(400).json({ error: gateError });
           return;
@@ -536,9 +544,13 @@ apiRoute(ctx.app, ctx.registry, {
         let validatedMcpServers: string[] | undefined;
         if (effectiveMcpServers !== undefined && effectiveMcpServers.length > 0) {
           const existingServers = await ctx.mcpServerCollection
-            .find({ _id: { $in: effectiveMcpServers }, deletedAt: { $exists: false } })
+            .find({
+              projectId,
+              $or: [{ slug: { $in: effectiveMcpServers } }, { _id: { $in: effectiveMcpServers } }],
+              deletedAt: { $exists: false },
+            })
             .toArray();
-          const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s._id));
+          const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s.slug ?? s._id));
           const missingSlugs = effectiveMcpServers.filter((slug: string) => !existingSlugs.has(slug));
           if (missingSlugs.length > 0) {
             res.status(400).json({
@@ -552,7 +564,7 @@ apiRoute(ctx.app, ctx.registry, {
 
         let resolvedSkillRevisions: string[] | undefined;
         if (effectiveSkills !== undefined && effectiveSkills.length > 0) {
-          const result = await resolveSkillSpecs(effectiveSkills, ctx);
+          const result = await resolveSkillSpecs(effectiveSkills, ctx, projectId);
           if (result.error) {
             const status = result.error.startsWith("Failed to resolve") ? 422 : 400;
             res.status(status).json({ error: result.error, variationProfileId: variationEntry.profileId });
@@ -565,11 +577,7 @@ apiRoute(ctx.app, ctx.registry, {
         if (effectiveExtensions !== undefined && effectiveExtensions.length > 0) {
           const parsedSpecs = effectiveExtensions.map((spec: string) => parseExtensionSpec(spec));
           const bareIds = parsedSpecs.map((s) => s.id);
-          const existingExtensions = await ctx.extensionCollection
-            .find({ _id: { $in: bareIds }, deletedAt: { $exists: false } })
-            .toArray();
-          const existingIds = new Set(existingExtensions.map((e: ExtensionDocument) => e._id));
-          const missingIds = bareIds.filter((id: string) => !existingIds.has(id));
+          const missingIds = await findMissingExtensionSlugs(bareIds, ctx.extensionCollection, projectId);
           if (missingIds.length > 0) {
             res.status(400).json({
               error: `Extension(s) not found: ${missingIds.join(", ")}`,
@@ -631,6 +639,7 @@ apiRoute(ctx.app, ctx.registry, {
 
           const requestDoc: RequestDocument = {
             _id: requestId,
+            projectId,
             scenario,
             workerType: r.workerType,
             taskPromptId,
@@ -643,14 +652,13 @@ apiRoute(ctx.app, ctx.registry, {
             ...(maxIterations ? { maxIterations } : {}),
             ...(personaInstructions ? { personaInstructions } : {}),
             ...(personaObj ? { persona: personaObj } : {}),
-            ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
             ...(r.mcpServers ? { mcpServers: r.mcpServers } : {}),
             ...(r.skillRevisions ? { skillRevisions: r.skillRevisions } : {}),
             ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
             ...(r.extensions ? { extensions: r.extensions } : {}),
             ...(r.agentVersion ? { agentVersion: r.agentVersion } : {}),
             profileId: r.profile._id,
-            profileVersionId: r.profileVersion._id,
+            profileVersionId: r.profileVersion.ref ?? r.profileVersion._id,
             ...(persistedVariationGates ? { gates: persistedVariationGates } : {}),
             submissionId,
             ...agentsMdFields,
@@ -718,7 +726,7 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
       profileId = profile._id;
-      profileVersionId = profileVersion._id;
+      profileVersionId = profileVersion.ref ?? profileVersion._id;
 
       // Reject requests where client-supplied fields conflict with profile values.
       // Clients should either omit these fields or send values that match the profile.
@@ -829,8 +837,8 @@ apiRoute(ctx.app, ctx.registry, {
     const gatesProvided = Array.isArray(requestedGates) && requestedGates.length > 0;
     let resolvedGates: GateConfig[] = gatesProvided ? (requestedGates as GateConfig[]) : [];
     if (gatesProvided) {
-      resolvedGates = await resolveGatePromptText(ctx, resolvedGates);
-      const gateError = await validateGatesForSubmit(ctx, resolvedGates, maxIterations);
+      resolvedGates = await resolveGatePromptText(ctx, resolvedGates, projectId);
+      const gateError = await validateGatesForSubmit(ctx, resolvedGates, maxIterations, projectId);
       if (gateError) {
         res.status(400).json({ error: gateError });
         return;
@@ -954,9 +962,13 @@ apiRoute(ctx.app, ctx.registry, {
       }
       if (effectiveMcpServers.length > 0) {
         const existingServers = await ctx.mcpServerCollection
-          .find({ _id: { $in: effectiveMcpServers }, deletedAt: { $exists: false } })
+          .find({
+            projectId,
+            $or: [{ slug: { $in: effectiveMcpServers } }, { _id: { $in: effectiveMcpServers } }],
+            deletedAt: { $exists: false },
+          })
           .toArray();
-        const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s._id));
+        const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s.slug ?? s._id));
         const missingSlugs = effectiveMcpServers.filter((slug: string) => !existingSlugs.has(slug));
         if (missingSlugs.length > 0) {
           res.status(400).json({ error: `MCP server(s) not found: ${missingSlugs.join(", ")}` });
@@ -974,7 +986,7 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
       if (effectiveSkills.length > 0) {
-        const result = await resolveSkillSpecs(effectiveSkills, ctx);
+        const result = await resolveSkillSpecs(effectiveSkills, ctx, projectId);
         if (result.error) {
           const status = result.error.startsWith("Failed to resolve") ? 422 : 400;
           res.status(status).json({ error: result.error });
@@ -995,11 +1007,7 @@ apiRoute(ctx.app, ctx.registry, {
         // Parse specs to extract bare IDs for DB validation
         const parsedSpecs = effectiveExtensions.map((spec: string) => parseExtensionSpec(spec));
         const bareIds = parsedSpecs.map((s) => s.id);
-        const existingExtensions = await ctx.extensionCollection
-          .find({ _id: { $in: bareIds }, deletedAt: { $exists: false } })
-          .toArray();
-        const existingIds = new Set(existingExtensions.map((e: ExtensionDocument) => e._id));
-        const missingIds = bareIds.filter((id: string) => !existingIds.has(id));
+        const missingIds = await findMissingExtensionSlugs(bareIds, ctx.extensionCollection, projectId);
         if (missingIds.length > 0) {
           res.status(400).json({ error: `Extension(s) not found: ${missingIds.join(", ")}` });
           return;
@@ -1036,7 +1044,7 @@ apiRoute(ctx.app, ctx.registry, {
     const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";
 
     // Ensure a TaskPrompt entity exists for this task text (idempotent)
-    const taskPrompt = await ctx.taskPromptStore.findOrCreate(scenario.task);
+    const taskPrompt = await ctx.taskPromptStore.findOrCreate(projectId, scenario.task);
     const taskPromptId = taskPrompt._id;
 
     // Resolve AGENTS.md lineage once for this submission (shared across count>1).
@@ -1066,6 +1074,7 @@ apiRoute(ctx.app, ctx.registry, {
 
         const requestDoc: RequestDocument = {
           _id: requestId,
+          projectId,
           scenario,
           workerType,
           taskPromptId,
@@ -1076,7 +1085,6 @@ apiRoute(ctx.app, ctx.registry, {
           ...(maxIterations ? { maxIterations } : {}),
           ...(personaInstructions ? { personaInstructions } : {}),
           ...(personaObj ? { persona: personaObj } : {}),
-          ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
           ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
           ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
@@ -1127,6 +1135,7 @@ apiRoute(ctx.app, ctx.registry, {
     // Create request document
     const requestDoc: RequestDocument = {
       _id: requestId,
+      projectId,
       scenario,
       workerType,
       taskPromptId,
@@ -1137,7 +1146,6 @@ apiRoute(ctx.app, ctx.registry, {
       ...(maxIterations ? { maxIterations } : {}),
       ...(personaInstructions ? { personaInstructions } : {}),
       ...(personaObj ? { persona: personaObj } : {}),
-      ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
       ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
       ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
       ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
@@ -1186,13 +1194,15 @@ apiRoute(ctx.app, ctx.registry, {
   description:
     "Returns every distinct value and its full-dataset count per categorical " +
     "filter dimension for the Runs list rail. Counts are absolute over all " +
-    "non-deleted runs: they intentionally ignore the active search, date range, " +
-    "iteration, and categorical selections so every selectable value stays visible " +
-    "with a stable count. Computed with parallel $group aggregations (Cosmos has " +
-    "no $facet) and cached process-wide for a short TTL.",
+    "non-deleted runs **in the given project**: they intentionally ignore the " +
+    "active search, date range, iteration, and categorical selections so every " +
+    "selectable value stays visible with a stable count. Requires ?projectId=. " +
+    "Computed with parallel $group aggregations (Cosmos has no $facet) and cached " +
+    "per-project for a short TTL.",
+  query: ProjectIdQuerySchema,
   response: RunFacetsResponseSchema,
-  handler: async (_req, res) => {
-    res.json(await getRunFacets(ctx.requestCollection));
+  handler: async (req, res) => {
+    res.json(await getRunFacets(ctx.requestCollection, getQueryProjectId(req)));
   },
 });
 
@@ -1236,9 +1246,10 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/requests",
   tags: ["Requests"],
   summary: "List requests",
-  query: ListRequestsQuerySchema,
+  query: ListRequestsQuerySchema.merge(ProjectIdQuerySchema),
   response: z.union([PaginatedRunsResponseSchema, PaginatedRunGroupsResponseSchema]),
   handler: async (req, res) => {
+    const projectId = getQueryProjectId(req);
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
     const submissionIdFilter = req.query.submissionId as string;
@@ -1293,6 +1304,9 @@ apiRoute(ctx.app, ctx.registry, {
     // or the cursor seek (issue #1138).
     const flat: Record<string, unknown> = {};
     const and: Record<string, unknown>[] = [];
+    // Required project scope: the top-level runs list only ever returns rows
+    // from the selected project (no cross-project reads, no groupBy:project).
+    flat.projectId = projectId;
     const pushClause = (clause: Record<string, unknown> | null) => {
       if (!clause) return;
       const keys = Object.keys(clause);
@@ -1639,6 +1653,8 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/analysis",
   tags: ["Requests"],
   summary: "Compute pass@k / success@T metrics",
+  description:
+    "Aggregates pass@k / success@T metrics over a single project's done runs. Requires ?projectId=.",
   query: z.object({
     worker: z.string().optional(),
     taskPromptId: z.string().optional(),
@@ -1646,9 +1662,13 @@ apiRoute(ctx.app, ctx.registry, {
     features: z.string().optional(),
     submissionId: z.string().optional(),
     k: z.string().optional(),
-  }),
+  }).merge(ProjectIdQuerySchema),
   response: z.object({}).passthrough().describe("Analysis metrics"),
   handler: async (req, res) => {
+    // Scope every metric to the selected project — no cross-project aggregation
+    // (400 when ?projectId= is absent, mirroring the runs list / facets routes).
+    const projectId = getQueryProjectId(req);
+
     // Parse k values from query string (default: 1,2,5)
     const kParam = (req.query.k as string) || "1,2,5";
     const kValues = kParam.split(",").map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v) && v > 0);
@@ -1675,6 +1695,7 @@ apiRoute(ctx.app, ctx.registry, {
     // Fetch one extra (limit + 1) so we can detect "more exist" without a count.
     const runDocs = await ctx.requestCollection
       .find({
+        projectId,
         "run.status": "done",
         deletedAt: { $exists: false },
       })
@@ -1790,7 +1811,7 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(404).json({ error: `Profile version not found for profile: ${overrideProfileId}` });
         return;
       }
-      overrideProfileVersionId = overrideProfileVersion._id;
+      overrideProfileVersionId = overrideProfileVersion.ref ?? overrideProfileVersion._id;
 
       // Reject individual overrides that conflict with the profile's controlled fields
       const conflicts: string[] = [];
@@ -1865,7 +1886,10 @@ apiRoute(ctx.app, ctx.registry, {
           effectiveProfileVersionId = original.profileVersionId;
           // If the original had a profile, resolve its version for field overrides
           if (original.profileId && original.profileVersionId) {
-            activeProfileVersion = await ctx.profileVersionCollection.findOne({ _id: original.profileVersionId });
+            activeProfileVersion = await ctx.profileVersionCollection.findOne({
+              projectId: original.projectId,
+              $or: [{ ref: original.profileVersionId }, { _id: original.profileVersionId }],
+            });
           }
         }
 
@@ -1890,7 +1914,7 @@ apiRoute(ctx.app, ctx.registry, {
         // Resolve skill specs to pinned refs (handles both bare slugs and already-pinned refs)
         let resolvedSkillRevisions: string[] | null = null;
         if (effectiveSkillRevisions && effectiveSkillRevisions.length > 0) {
-          const result = await resolveSkillSpecs(effectiveSkillRevisions, ctx);
+          const result = await resolveSkillSpecs(effectiveSkillRevisions, ctx, original.projectId);
           if (result.error) {
             res.status(422).json({ error: `Skill resolution failed during resubmit: ${result.error}` });
             return;
@@ -1915,6 +1939,7 @@ apiRoute(ctx.app, ctx.registry, {
 
         const newDoc: RequestDocument = {
           _id: requestId,
+          projectId: original.projectId,
           scenario: original.scenario,
           workerType: effectiveWorkerType,
           createdAt: new Date(),
@@ -2239,6 +2264,7 @@ async function finalizePendingRun(
   prefix: string,
   run: PendingRun,
   blobServiceClient: BlobServiceClient,
+  projectId: string,
 ): Promise<ImportSuccess> {
   if (run.uploadErrors.length > 0) {
     throw new ImportError(500, `Blob upload failures: ${run.uploadErrors.join("; ")}`);
@@ -2358,7 +2384,7 @@ async function finalizePendingRun(
   // trimmed task text) — when the imported `taskPromptId` is correct it
   // simply matches the returned `_id`; when it is missing or stale we
   // overwrite it with the canonical id.
-  const taskPrompt = await ctx.taskPromptStore.findOrCreate(runDoc.scenario.task);
+  const taskPrompt = await ctx.taskPromptStore.findOrCreate(projectId, runDoc.scenario.task);
   const resolvedTaskPromptId = taskPrompt._id;
 
   // Build the document by spreading the validated yaml — zod has already
@@ -2370,6 +2396,10 @@ async function finalizePendingRun(
   // dropped all of these on round-trip.
   const docToInsert: RequestDocument = {
     ...(runDoc as unknown as RequestDocument),
+    // Import always files the run into the caller-selected project, remapping
+    // any projectId carried in the archive so imports stay portable across
+    // environments (a serialized projectId won't exist in the target).
+    projectId,
     workerType: runDoc.workerType as WorkerType,
     createdAt: runDoc.createdAt ?? new Date(),
     priority: runDoc.priority ?? 0,
@@ -2409,6 +2439,7 @@ async function finalizePendingRun(
 async function streamArchiveImport(
   archiveStream: NodeJS.ReadableStream,
   blobServiceClient: BlobServiceClient,
+  projectId: string,
 ): Promise<{ imported: ImportSuccess[]; failed: ImportFailure[] }> {
   const snapshotsContainer = blobServiceClient.getContainerClient("snapshots");
   await snapshotsContainer.createIfNotExists();
@@ -2542,7 +2573,7 @@ async function streamArchiveImport(
   try {
     for (const [prefix, run] of pending) {
       try {
-        imported.push(await finalizePendingRun(prefix, run, blobServiceClient));
+        imported.push(await finalizePendingRun(prefix, run, blobServiceClient, projectId));
       } catch (err) {
         // Per-run failure — delete this run's blobs so a bad run.yaml or a
         // duplicate _id never leaves orphans behind. Other runs in the batch
@@ -2599,10 +2630,12 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Requests"],
   summary: "Import run archive",
   middleware: [upload.single("archive")],
+  query: ProjectIdQuerySchema,
   response: RequestResponseSchema,
   rawResponse: true,
   successStatus: 201,
   handler: async (req, res) => {
+    const projectId = getQueryProjectId(req);
     // Reject obviously empty requests up front so the streaming pipeline
     // doesn't blow up trying to gunzip nothing. multer leaves req.file
     // undefined when the multipart body has no "archive" field; raw POSTs
@@ -2621,7 +2654,7 @@ apiRoute(ctx.app, ctx.registry, {
     try {
       let result: { imported: ImportSuccess[]; failed: ImportFailure[] };
       try {
-        result = await streamArchiveImport(stream, buildBlobServiceClient());
+        result = await streamArchiveImport(stream, buildBlobServiceClient(), projectId);
       } catch (err) {
         if (err instanceof ImportError) {
           res.status(err.statusCode).json({ error: err.message, ...(err.details ?? {}) });
@@ -2691,7 +2724,9 @@ apiRoute(ctx.app, ctx.registry, {
   errorResponses: {
     400: { description: "No archive uploaded, empty archive, or all runs failed" },
   },
+  query: ProjectIdQuerySchema,
   handler: async (req, res) => {
+    const projectId = getQueryProjectId(req);
     const typed = req as Parameters<typeof getArchiveStream>[0];
     const isMultipart = req.is("multipart/form-data");
     const isRawGzip = req.is("application/gzip") || req.is("application/octet-stream");
@@ -2706,7 +2741,7 @@ apiRoute(ctx.app, ctx.registry, {
     try {
       let result: { imported: ImportSuccess[]; failed: ImportFailure[] };
       try {
-        result = await streamArchiveImport(stream, buildBlobServiceClient());
+        result = await streamArchiveImport(stream, buildBlobServiceClient(), projectId);
       } catch (err) {
         if (err instanceof ImportError) {
           res.status(err.statusCode).json({ error: err.message, ...(err.details ?? {}) });
@@ -2886,7 +2921,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       // 1. Demote current run to history
       try {
-        await insertHistoricalRun({ runsCollection: ctx.runsCollection }, id, runToDemote);
+        await insertHistoricalRun({ runsCollection: ctx.runsCollection }, id, runToDemote, request.projectId);
       } catch (err: any) {
         if (err?.code !== 11000) {
           results.push({ requestId: id, error: "Failed to demote run to history" });
@@ -2981,7 +3016,7 @@ apiRoute(ctx.app, ctx.registry, {
     //    request update fails afterwards we have a duplicate-history-entry
     //    risk on retry, but never history loss. Insert is idempotent on _id.
     try {
-      await insertHistoricalRun({ runsCollection: ctx.runsCollection }, id, runToDemote);
+      await insertHistoricalRun({ runsCollection: ctx.runsCollection }, id, runToDemote, request.projectId);
     } catch (err: any) {
       // Duplicate key (already in history) is fine — proceed.
       if (err?.code !== 11000) throw err;

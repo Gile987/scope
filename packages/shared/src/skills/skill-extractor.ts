@@ -43,6 +43,8 @@ export interface ExtractSkillsOptions {
   skillConfigs: SkillConfig[];
   /** SkillClient instance (pre-configured with API URL) */
   skillClient: SkillClient;
+  /** Project scope of the run — scopes the per-project skill-revision lookup */
+  projectId: string;
   /** Workspace root directory (e.g. "/workspace") */
   workspacePath: string;
   /** Optional: agent type key for agent-specific directories */
@@ -62,7 +64,7 @@ export interface ExtractSkillsOptions {
  * @returns Array of installed skill directory paths (relative to workspace)
  */
 export async function extractSkillsToWorkspace(options: ExtractSkillsOptions): Promise<string[]> {
-  const { refs, skillConfigs, skillClient, workspacePath, agentType, log } = options;
+  const { refs, skillConfigs, skillClient, projectId, workspacePath, agentType, log } = options;
 
   if (refs.length === 0 || skillConfigs.length === 0) {
     return [];
@@ -83,7 +85,7 @@ export async function extractSkillsToWorkspace(options: ExtractSkillsOptions): P
 
     try {
       await log?.(`Downloading archive for skill "${config.name}" (ref: ${ref})`);
-      const archiveBuffer = await skillClient.downloadSkillArchive(ref);
+      const archiveBuffer = await skillClient.downloadSkillArchive(projectId, ref);
 
       // Extract to each target directory
       for (const dir of targetDirs) {

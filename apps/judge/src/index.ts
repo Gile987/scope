@@ -53,7 +53,7 @@ app.post(
     const startTime = Date.now();
 
     try {
-      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, iteration, currentAgentResponse } = req.body;
+      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, iteration, projectId, currentAgentResponse } = req.body;
 
       // Validate required fields
       if (!snapshotUrl || typeof snapshotUrl !== "string") {
@@ -156,6 +156,7 @@ app.post(
           onProgress,
           gate,
           iterationToolCalls,
+          projectId,
           currentAgentResponse,
         });
 

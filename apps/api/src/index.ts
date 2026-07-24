@@ -8,8 +8,8 @@ import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
-import { TaskPromptStore, SkillRevisionStore, SkillResolver, CodebaseStore, CodebaseRevisionStore, CodebaseResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore } from "shared";
-import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, ProfileDocument, ProfileVersionDocument, HeartbeatStore } from "shared";
+import { TaskPromptStore, SkillRevisionStore, SkillResolver, CodebaseStore, CodebaseRevisionStore, CodebaseResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore, ProjectStore } from "shared";
+import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, ProfileDocument, ProfileVersionDocument, ProjectDocument, HeartbeatStore } from "shared";
 import { acquireGitHubPublicApiToken } from "./github-api-token.js";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
@@ -38,12 +38,13 @@ import { registerExtensionsRoutes } from "./routes/extensions.js";
 import { registerInsightsRoutes } from "./routes/insights.js";
 import { registerSecretsRoutes } from "./routes/secrets.js";
 import { registerProfilesRoutes } from "./routes/profiles.js";
+import { registerProjectsRoutes } from "./routes/projects.js";
+import { ProjectScopeError } from "./utils/project-scope.js";
 import { VALID_WORKERS } from "./route-context.js";
 import type { RouteContext } from "./route-context.js";
 import type {
   CriteriaDocument,
   PromptFeatureDocument,
-  PromptFeatureExtractionDocument,
   ReportDocument,
   ReportTemplateDocument,
   InsightDocument,
@@ -85,9 +86,10 @@ let mongoClient: MongoClient;
 let db: Db;
 let collection: Collection<RequestDocument>;
 let runsCol: Collection<RunHistoryDocument>;
+let projectCollection: Collection<ProjectDocument>;
+let projectStore: ProjectStore;
 let criteriaCollection: Collection<CriteriaDocument>;
 let promptFeatureCollection: Collection<PromptFeatureDocument>;
-let promptFeatureExtractionCollection: Collection<PromptFeatureExtractionDocument>;
 let reportCollection: Collection<ReportDocument>;
 let agentCollection: Collection<CodingAgentDocument>;
 let modelCollection: Collection<ModelDocument>;
@@ -121,9 +123,10 @@ async function initializeClients(): Promise<void> {
   db = mongoClient.db(mongoDatabase);
   collection = db.collection<RequestDocument>(mongoCollection);
   runsCol = db.collection<RunHistoryDocument>("runs");
+  projectCollection = db.collection<ProjectDocument>("projects");
+  projectStore = new ProjectStore(projectCollection);
   criteriaCollection = db.collection<CriteriaDocument>("criteria");
   promptFeatureCollection = db.collection<PromptFeatureDocument>("prompt-features");
-  promptFeatureExtractionCollection = db.collection<PromptFeatureExtractionDocument>("prompt-feature-extractions");
   reportCollection = db.collection<ReportDocument>("reports");
   agentCollection = db.collection<CodingAgentDocument>("agents");
   modelCollection = db.collection<ModelDocument>("models");
@@ -249,9 +252,9 @@ const routeCtx: RouteContext = {
   get db() { return db; },
   get requestCollection() { return collection; },
   get runsCollection() { return runsCol; },
+  get projectCollection() { return projectCollection; },
   get criteriaCollection() { return criteriaCollection; },
   get promptFeatureCollection() { return promptFeatureCollection; },
-  get promptFeatureExtractionCollection() { return promptFeatureExtractionCollection; },
   get reportCollection() { return reportCollection; },
   get reportTemplateCollection() { return reportTemplateCollection; },
   get agentCollection() { return agentCollection; },
@@ -274,6 +277,7 @@ const routeCtx: RouteContext = {
   get codebaseStore() { return codebaseStore; },
   get codebaseRevisionStore() { return codebaseRevisionStore; },
   get codebaseResolver() { return codebaseResolver; },
+  get projectStore() { return projectStore; },
   get queueClients() { return queueClients; },
   get reportQueueClient() { return reportQueueClient; },
   get blobStorage() { return blobStorage; },
@@ -288,6 +292,7 @@ const routeCtx: RouteContext = {
 // Secrets/proxy routes must be registered first (before :id param routes)
 registerSecretsRoutes(routeCtx);
 registerSystemRoutes(routeCtx);
+registerProjectsRoutes(routeCtx);
 registerRequestsRoutes(routeCtx);
 registerRequestsCancelRoutes(routeCtx);
 registerRequestsLogsRoutes(routeCtx);
@@ -314,6 +319,10 @@ registerFeatureFlagRoutes(routeCtx);
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof ProjectScopeError) {
+    res.status(err.status).json({ error: err.message });
+    return;
+  }
   if (err instanceof McpSecretUnavailableError) {
     res.status(503).json({ error: err.message });
     return;
@@ -348,7 +357,6 @@ export interface TestDependencies {
   runsCollection?: Collection<RunHistoryDocument>;
   criteriaCollection?: Collection<CriteriaDocument>;
   promptFeatureCollection?: Collection<PromptFeatureDocument>;
-  promptFeatureExtractionCollection?: Collection<PromptFeatureExtractionDocument>;
   reportCollection?: Collection<ReportDocument>;
   agentCollection?: Collection<CodingAgentDocument>;
   modelCollection?: Collection<ModelDocument>;
@@ -381,7 +389,6 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.runsCollection) runsCol = deps.runsCollection;
   if (deps.criteriaCollection) criteriaCollection = deps.criteriaCollection;
   if (deps.promptFeatureCollection) promptFeatureCollection = deps.promptFeatureCollection;
-  if (deps.promptFeatureExtractionCollection) promptFeatureExtractionCollection = deps.promptFeatureExtractionCollection;
   if (deps.reportCollection) reportCollection = deps.reportCollection;
   if (deps.agentCollection) agentCollection = deps.agentCollection;
   if (deps.modelCollection) modelCollection = deps.modelCollection;
