@@ -23,3 +23,11 @@
 !service-deployment/**
 !vscode-electron-worker/
 !vscode-electron-worker/**
+!license-headers/
+!license-headers/**
+!third-party-notice/
+!third-party-notice/**
+!inclusive-language/
+!inclusive-language/**
+!responsible-ai/
+!responsible-ai/**
