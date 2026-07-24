@@ -142,6 +142,6 @@ MongoDB is CosmosDB-compatible — avoid MongoDB features that CosmosDB's MongoD
 
 - Start with the [architecture overview](./docs/architecture/overview.md) and the
   [app design](./docs/architecture/app-design.md) docs for the big picture.
-- The [README](./README.md) documents each component and links a full documentation index.
+- The [README](./README.md) introduces the platform, provides a local quick start, and links the full documentation index.
 - Planned work (e.g. test variations and experiment-level analysis) is flagged as *Upcoming* in the
   README's Key Features — good starting points if you're looking for larger areas to help with.
