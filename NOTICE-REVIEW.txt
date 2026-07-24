@@ -7,6 +7,10 @@ NOTICE and must be reviewed manually before the open source release. Read the
 bundled license file referenced for each package to determine the real terms;
 this file intentionally does not reproduce or summarize those terms.
 
+Each package's per-platform native binaries are listed from its own
+optionalDependencies (identical on every OS/arch) instead of by whichever
+binary is installed on this machine, so this listing is reproducible in CI.
+
 ===============================================================================
 
 - @github/copilot@1.0.63
@@ -16,11 +20,14 @@ this file intentionally does not reproduce or summarize those terms.
     Declared "license" (package.json): Unknown
     Install path:             node_modules/.pnpm/@github+copilot@1.0.63_typescript@5.9.3/node_modules/@github/copilot
     Bundled license file(s):  LICENSE.md
-
-- @github/copilot-darwin-arm64@1.0.63
-    Homepage:    https://github.com/github/copilot-cli/#readme
-    Description: GitHub Copilot CLI executable for darwin-arm64
-    Declared "license" (package.json): Unknown
-    Install path:             node_modules/.pnpm/@github+copilot-darwin-arm64@1.0.63/node_modules/@github/copilot-darwin-arm64
-    Bundled license file(s):  LICENSE.md
+    Per-platform native binaries (optionalDependencies; each ships
+    the same proprietary license — review it too):
+      - @github/copilot-darwin-arm64@1.0.63
+      - @github/copilot-darwin-x64@1.0.63
+      - @github/copilot-linux-arm64@1.0.63
+      - @github/copilot-linux-x64@1.0.63
+      - @github/copilot-linuxmusl-arm64@1.0.63
+      - @github/copilot-linuxmusl-x64@1.0.63
+      - @github/copilot-win32-arm64@1.0.63
+      - @github/copilot-win32-x64@1.0.63
 

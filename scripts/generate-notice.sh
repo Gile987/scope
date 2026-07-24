@@ -55,7 +55,9 @@ else
 fi
 
 echo "==> [1/4] npm: extracting production license texts with generate-license-file" >&2
-npx --yes generate-license-file@4 \
+# Pinned exactly for reproducibility: a different generate-license-file version can
+# regroup packages or change formatting, which would make `--check` (CI) drift.
+npx --yes generate-license-file@4.2.1 \
   --config scripts/glf.config.cjs \
   --output "$JS_OUT" \
   --overwrite \

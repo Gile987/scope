@@ -27,8 +27,17 @@ try {
   process.exit(1);
 }
 
-const unknown = data["Unknown"] || [];
 const rel = (p) => path.relative(repoRoot, p) || p;
+
+// pnpm reports whichever per-platform native binary is installed on THIS machine
+// (e.g. @github/copilot-darwin-arm64 on macOS, @github/copilot-linux-x64 on the
+// Linux CI runner, @github/copilot-linuxmusl-x64 in the Alpine images). Listing
+// that machine-specific package here would make this file differ per platform and
+// break `pnpm notice:check`. We therefore drop the per-platform binaries from the
+// listing and instead enumerate them from their parent package's
+// `optionalDependencies`, which is identical on every platform.
+const PLATFORM_BINARY = /-(linux|linuxmusl|darwin|win32)-(x64|arm64)$/;
+const unknown = (data["Unknown"] || []).filter((p) => !PLATFORM_BINARY.test(p.name));
 
 function licenseFiles(dir) {
   try {
@@ -36,6 +45,21 @@ function licenseFiles(dir) {
       .readdirSync(dir)
       .filter((f) => /^(LICEN[CS]E|COPYING|NOTICE|UNLICENSE|PATENTS)/i.test(f))
       .sort();
+  } catch {
+    return [];
+  }
+}
+
+// Enumerate a package's own per-platform binary optionalDependencies (name@range),
+// read verbatim from its package.json — reproducible regardless of host platform.
+function platformBinaries(dir) {
+  try {
+    const pj = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+    const od = pj.optionalDependencies || {};
+    return Object.keys(od)
+      .filter((n) => PLATFORM_BINARY.test(n))
+      .sort()
+      .map((n) => `${n}@${od[n]}`);
   } catch {
     return [];
   }
@@ -61,6 +85,16 @@ out.push(
 );
 out.push("this file intentionally does not reproduce or summarize those terms.");
 out.push("");
+out.push(
+  "Each package's per-platform native binaries are listed from its own",
+);
+out.push(
+  "optionalDependencies (identical on every OS/arch) instead of by whichever",
+);
+out.push(
+  "binary is installed on this machine, so this listing is reproducible in CI.",
+);
+out.push("");
 out.push("=".repeat(79));
 out.push("");
 
@@ -82,6 +116,16 @@ if (unknown.length === 0) {
         } else {
           out.push("    Bundled license file(s):  (none found)");
         }
+      }
+      const bins = (pkg.paths || []).flatMap(platformBinaries);
+      if (bins.length) {
+        out.push(
+          "    Per-platform native binaries (optionalDependencies; each ships",
+        );
+        out.push(
+          "    the same proprietary license — review it too):",
+        );
+        for (const b of [...new Set(bins)].sort()) out.push(`      - ${b}`);
       }
       out.push("");
     }

@@ -477,6 +477,15 @@ license cannot be resolved as standard OSS is excluded from `NOTICE` and listed 
 requires `cargo install cargo-about --features cli`. Set `SKIP_CARGO=1` to reuse the cached
 Rust section and skip the (slower) cargo step.
 
+`NOTICE` and `NOTICE-REVIEW.txt` are platform-independent: per-platform native binaries
+(`@os-theme/*` and the `@github/copilot-<os>-<arch>` variants) and macOS-only packages
+(`fsevents`, absent from the shipped Linux images) are excluded so the tools produce
+byte-identical output on macOS and the Linux CI runner — the verbatim license text of any
+excluded native binary is carried by its platform-independent parent package (e.g. `os-theme`,
+MIT), which remains in `NOTICE`. The `notice-check` job in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `pnpm notice:check` on every pull
+request and fails if the committed files drift from the installed dependencies.
+
 ## Trademarks
 
 This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft

@@ -25,14 +25,32 @@ const inputs = [path.join(repoRoot, "package.json")];
 
 // Packages deliberately kept OUT of the auto-generated OSS NOTICE body.
 //
-// @github/copilot and its per-platform binaries (@github/copilot-<os>-<arch>,
-// e.g. -darwin-arm64, -linux-x64) are the GitHub Copilot CLI, which is
-// PROPRIETARY (the "GitHub Copilot CLI License", not an OSS license). They are
-// enumerated separately in NOTICE-REVIEW.txt for manual/CELA determination.
+// (1) @github/copilot and its per-platform binaries are the GitHub Copilot CLI,
+//     which is PROPRIETARY (the "GitHub Copilot CLI License", not an OSS license).
+//     The regex matches the main package AND all eight per-platform binaries it
+//     publishes as optionalDependencies — @github/copilot-<os>-<arch> for
+//     os ∈ {linux, linuxmusl, darwin, win32} and arch ∈ {x64, arm64} (the
+//     `linuxmusl-*` variants ship in the Alpine-based worker images). They are
+//     enumerated separately in NOTICE-REVIEW.txt for manual / CELA determination.
+//     NOTE: @github/copilot-sdk is a genuine MIT package and is intentionally NOT
+//     matched by this pattern, so it stays in the OSS NOTICE.
 //
-// NOTE: @github/copilot-sdk is a genuine MIT package and is intentionally NOT
-// matched by this pattern, so it stays in the OSS NOTICE.
-const exclude = ["/^@github\\/copilot(-(darwin|linux|win32)-(arm64|x64))?(@.*)?$/"];
+// (2) Platform-gated native binaries are excluded so the generated NOTICE is
+//     byte-identical on every OS/arch. pnpm only installs the one optional binary
+//     matching the current platform, so without this the output — and therefore
+//     the deterministic `pnpm notice:check` CI gate — would differ per machine.
+//       * @os-theme/<platform> — per-platform native addon of `os-theme`. It ships
+//         NO license file of its own; the parent `os-theme` package (MIT) is kept
+//         in NOTICE and carries the verbatim license text. `os-theme` is pulled in
+//         only by the proprietary @github/copilot bundle (itself under CELA review).
+//       * fsevents — macOS-only (package.json `os: ["darwin"]`); it is NOT present
+//         in the shipped Linux container images, so it is not redistributed there
+//         and needs no attribution. Excluding it keeps the NOTICE OS-independent.
+const exclude = [
+  "/^@github\\/copilot(-(linux|linuxmusl|darwin|win32)-(x64|arm64))?(@.*)?$/",
+  "/^@os-theme\\/[^/]+(@.*)?$/",
+  "/^fsevents(@.*)?$/",
+];
 
 // Disambiguate packages that ship MORE THAN ONE license file. generate-license-file
 // refuses to guess (and, under --ci, fails) so it does not silently pick the wrong
