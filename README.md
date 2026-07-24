@@ -1,7 +1,6 @@
 <div align="center">
-  <img src="./apps/portal/public/favicon.svg" alt="Scope logo" width="72" />
 
-  <h1>Scope</h1>
+  <h1><img src="./apps/portal/public/favicon.svg" alt="Scope logo" width="72" />&nbsp;Scope</h1>
 
   <p><strong>Benchmark AI coding agents with repeatable, evidence-backed runs.</strong></p>
 
