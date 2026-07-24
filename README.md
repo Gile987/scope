@@ -463,10 +463,11 @@ pnpm notice          # regenerate NOTICE (and NOTICE-REVIEW.txt)
 pnpm notice:check    # CI check: fail if NOTICE is out of date
 ```
 
-The generator (`scripts/generate-notice.sh`) only orchestrates purpose-built license tooling
+The generator (`scripts/generate-notice.ts`) only orchestrates purpose-built license tooling
 and concatenates its verbatim output — it never authors or edits license text. It uses
 [`generate-license-file`](https://generate-license-file.js.org) for the npm production
-dependencies (config: `scripts/glf.config.cjs`) and
+dependencies (exclusions and multi-license disambiguation are configured in
+`scripts/generate-notice.ts`, which emits the tool's config as JSON) and
 [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) for the crates compiled into the
 `gateway` binary (config: `apps/gateway/about.toml`, template: `apps/gateway/about.hbs`). Only
 the header (`scripts/notice-header.txt`) is written by hand. Any production package whose

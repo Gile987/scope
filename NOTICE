@@ -23,7 +23,7 @@ Microsoft code in this repository is likewise not listed.
 Every per-component license text below is reproduced verbatim, exactly as it
 ships inside the corresponding package, and was extracted mechanically by
 license tooling - `generate-license-file` for npm and `cargo-about` for cargo.
-This file is generated; see scripts/generate-notice.sh. Regenerate it with
+This file is generated; see scripts/generate-notice.ts. Regenerate it with
 `pnpm notice`. Do not edit it by hand.
 
 Packages that are not open source, and are therefore excluded from the
