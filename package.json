@@ -36,6 +36,8 @@
     "portal:url": "tsx scripts/portal-url.ts",
     "get-copilot-token": "tsx scripts/get-copilot-token.ts",
     "validate-skill": "tsx scripts/validate-skill.ts",
+    "notice": "tsx scripts/generate-notice.ts",
+    "notice:check": "tsx scripts/generate-notice.ts --check",
     "lint": "pnpm -r lint",
     "headers": "tsx scripts/license-headers.ts",
     "headers:check": "tsx scripts/license-headers.ts --check",

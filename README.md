@@ -217,3 +217,40 @@ Scope is available under the [MIT License](./LICENSE).
   must not cause confusion or imply Microsoft sponsorship. Any use of
   third-party trademarks or logos is subject to those parties' policies.
 </details>
+
+## Third-party notices
+
+Scope redistributes third-party open-source components (npm production dependencies shipped in
+the service images and the Rust crates linked into the `gateway` binary). Their attributions and
+license texts are collected in the root [`NOTICE`](NOTICE) file.
+
+`NOTICE` is generated — do not edit it by hand. Regenerate it after changing dependencies:
+
+```bash
+pnpm notice          # regenerate NOTICE (and NOTICE-REVIEW.txt)
+pnpm notice:check    # CI check: fail if NOTICE is out of date
+```
+
+The generator (`scripts/generate-notice.ts`) only orchestrates purpose-built license tooling
+and concatenates its verbatim output — it never authors or edits license text. It uses
+[`generate-license-file`](https://generate-license-file.js.org) for the npm production
+dependencies (exclusions and multi-license disambiguation are configured in
+`scripts/generate-notice.ts`, which emits the tool's config as JSON) and
+[`cargo-about`](https://github.com/EmbarkStudios/cargo-about) for the crates compiled into the
+`gateway` binary (config: `apps/gateway/about.toml`, template: `apps/gateway/about.hbs`). Only
+the header (`scripts/notice-header.txt`) is written by hand. Any production package whose
+license cannot be resolved as standard OSS is excluded from `NOTICE` and listed in
+`NOTICE-REVIEW.txt` for manual / legal (CELA) review.
+
+`generate-license-file` runs via `npx` (no install needed). Regenerating the Rust portion
+requires `cargo install cargo-about --features cli`. Set `SKIP_CARGO=1` to reuse the cached
+Rust section and skip the (slower) cargo step.
+
+`NOTICE` and `NOTICE-REVIEW.txt` are platform-independent: per-platform native binaries
+(`@os-theme/*` and the `@github/copilot-<os>-<arch>` variants) and macOS-only packages
+(`fsevents`, absent from the shipped Linux images) are excluded so the tools produce
+byte-identical output on macOS and the Linux CI runner — the verbatim license text of any
+excluded native binary is carried by its platform-independent parent package (e.g. `os-theme`,
+MIT), which remains in `NOTICE`. The `notice-check` job in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `pnpm notice:check` on every pull
+request and fails if the committed files drift from the installed dependencies.
