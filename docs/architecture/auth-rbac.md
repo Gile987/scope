@@ -627,7 +627,7 @@ downstream service applies the same ownership scoping). When that's required:
   - **Default backend: [`cross-keychain`](https://www.npmjs.com/package/cross-keychain)**
     (`magarcia/cross-keychain`) — cross-platform native storage (macOS Keychain via
     Security.framework, Windows Credential Manager, Linux Secret Service) with a
-    `setPassword`/`getPassword`/`deletePassword` API. Used under service `ms-scope-cli`,
+    `setPassword`/`getPassword`/`deletePassword` API. Used under service `scope-cli`,
     account = the API origin. Wired into MSAL as the `ICachePlugin`
     (`beforeCacheAccess`/`afterCacheAccess`). **Silent refresh** before each request; falls
     back to device-code when the refresh token is expired.
@@ -751,7 +751,7 @@ the existing External Secrets pipeline.**
 | **IdP JWKS** (signing public keys) | No | **Fetched at runtime** from the IdP's `jwks_uri`, cached in-memory in the API with TTL + `kid` rotation | Public keys; never persisted to disk or DB. |
 | **OIDC discovery / authority / clientId / scopes / audience** | No | Plain env / ConfigMap ([deploy/base/configmap.yaml](../../deploy/base/configmap.yaml)) for the API; **hardcoded into the CLI and Portal builds** (no `/auth/config` endpoint) | Non-secret configuration. |
 | **`INTERNAL_API_KEY_<NAME>`** (per-service key, service-to-service) | **Yes** | **Azure Key Vault** \u2192 synced to a K8s Secret by **External Secrets Operator** (same pattern as `mongo-secrets`/`redis-secrets`); each service gets its **own** key mounted as env | Constant-time compared; **no single global key**; rotate per-service in Key Vault. || **`INTERNAL_JWT_SECRET` / internal signing key** (mints on-behalf-of user tokens) | **Yes** | **Azure Key Vault** → External Secret. **Asymmetric (chosen)**: API holds the **private** key; downstream verifiers hold only the **public** key. HMAC secret is a single-deployment alternative. | Scope-owned, **independent of the IdP**; rotate via Key Vault. || **Entra API client secret** (only if the optional confidential-client/client-credentials path in \u00a76 is used) | **Yes** | **Azure Key Vault** \u2192 External Secret | The public CLI/Portal clients are **public** clients (PKCE / device-code) and have **no** secret. |
-| **CLI user tokens** (access/refresh) | **Yes** | User's machine via the Scope **`SecretStore`** abstraction (default backend **`cross-keychain`** → OS keychain, service `ms-scope-cli`); `0600` file backend only where no keyring exists | MSAL token cache; never logged; silent refresh. **No `keytar`.** |
+| **CLI user tokens** (access/refresh) | **Yes** | User's machine via the Scope **`SecretStore`** abstraction (default backend **`cross-keychain`** → OS keychain, service `scope-cli`); `0600` file backend only where no keyring exists | MSAL token cache; never logged; silent refresh. **No `keytar`.** |
 | **Portal tokens** | **Yes** | Browser memory via MSAL (session/`localStorage` per MSAL cache config) | No tokens in app code or repo. |
 | **App user records / roles / permissions** | No (PII) | MongoDB `users` collection | Identity + authorization data, not credentials. |
 
@@ -1096,7 +1096,7 @@ Auth & RBAC rollout
 | 14 | Token refresh | Let CLI access token expire, run any command | Silent refresh succeeds; no re-login prompt |
 | 15 | Expired/tampered token | Send a malformed/expired JWT | `401` |
 | 16 | Permission override | As `admin`, add `permissionsRemove: ["scope/run:delete"]` to a user | That user can no longer delete runs (`403`) without a role change; the override change is audited |
-| 17 | Keychain storage | After `scope auth login`, inspect the OS keychain; no plaintext token file when a keyring exists | Token present via `SecretStore`/`cross-keychain` (service `ms-scope-cli`); `--no-browser` skips auto-open |
+| 17 | Keychain storage | After `scope auth login`, inspect the OS keychain; no plaintext token file when a keyring exists | Token present via `SecretStore`/`cross-keychain` (service `scope-cli`); `--no-browser` skips auto-open |
 | 18 | Debug-zip redaction | `scope run get -i <id> --debug-zip /tmp/report.zip`; unzip and grep for token/key strings | Zip contains request log + env info; **no** token/refresh-token/service key present |
 | 19 | Audit log written | Onboard a new user, logout, regenerate a service key, mint an on-behalf-of token | `security_audit` has `user_onboarded`, `login`, `logout`, `key_regenerated`, `token_minted` rows; no secrets in `detail` |
 | 20 | Audit metrics exposed | `curl /metrics` after the above | `scope_auth_logins_total`, `scope_auth_onboarded_total`, `scope_auth_key_regenerations_total` counters incremented |
