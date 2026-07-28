@@ -30,7 +30,6 @@ packages/
   version-checking/             # Version comparison utilities
   llm-eval/                     # LLM-graded eval harness (grader, sampling, rate-limit retry)
 config/                         # Benchmark definitions (YAML)
-deploy/                         # Kubernetes manifests (Kustomize + FluxCD)
 ```
 
 For package architecture and data models, see [docs/architecture/app-design.md](docs/architecture/app-design.md).
@@ -141,23 +140,6 @@ Personas, scenarios (tasks), criteria, and prompt features are stored in **Mongo
 - `criteria/` — Evaluation criteria forming a DAG with parent-child dependencies, consumed by the judge
 - `prompt-features/` — Feature flags tracking what capabilities agents request
 
-## Deployment (`deploy/`)
-
-Kubernetes manifests using Kustomize overlays and FluxCD image automation. All infrastructure changes go through manifests — never `kubectl apply` directly.
-
-```
-deploy/base/                    # Base K8s resources (services + workers)
-deploy/base/workers/            # Worker Deployments, KEDA ScaledObjects, registration Jobs
-deploy/overlays/integration/    # Int environment (image tags auto-updated by FluxCD)
-deploy/overlays/prod/           # Prod environment (updated via promotion workflow)
-deploy/overlays/preview/        # Preview environment for PR deployments
-deploy/image-automation/        # FluxCD ImageUpdateAutomation + ImagePolicy
-```
-
-Image tags follow `<timestamp>-<sha>` format. KEDA ScaledObjects autoscale workers based on queue depth. CI in `.github/workflows/ci.yml`, promotion via `.github/workflows/promote.yml`.
-
-- Deployment model: [docs/architecture/deployment.md](docs/architecture/deployment.md)
-
 ## Database Migrations (`packages/db-migrations/`)
 
 Built on `mongo-migrate-ts`. Migrations are TypeScript files with `up()` and `down()` methods. MongoDB is CosmosDB-compatible — avoid features not supported by CosmosDB's MongoDB API.
@@ -216,7 +198,6 @@ pnpm test:integration             # Integration tests (requires .env + Docker)
 | [docs/architecture/skills.md](docs/architecture/skills.md) | Agent Skills spec, registration, resolution, delivery |
 | [docs/architecture/codebases.md](docs/architecture/codebases.md) | Codebase entity, immutable revisions, source types, worker seeding |
 | [docs/architecture/db-migrations.md](docs/architecture/db-migrations.md) | MongoDB migration framework |
-| [docs/architecture/deployment.md](docs/architecture/deployment.md) | Single-branch deployment, int→prod promotion |
 | [docs/architecture/cli-distribution.md](docs/architecture/cli-distribution.md) | CLI bundling, publishing, installation, update check |
 | [docs/architecture/retry.md](docs/architecture/retry.md) | Retry utilities: `withRetry` function and `@Retry` decorator |
 | [docs/architecture/post-processing.md](docs/architecture/post-processing.md) | Post-processing pipeline, ATIF generation, handler extensibility |

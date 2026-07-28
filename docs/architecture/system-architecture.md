@@ -7,7 +7,7 @@ components from local development services and from in-progress migrations.
 
 For component-level details, see [app design](./app-design.md),
 [queue scheduling](./queue-scheduler.md), [AI gateway](./ai-gateway.md),
-[post-processing](./post-processing.md), and [deployment](./deployment.md).
+and [post-processing](./post-processing.md).
 
 ## Runtime topology
 
@@ -152,8 +152,8 @@ the status model and recovery rules.
 
 KEDA watches the matching Azure queue for each coder and post-run worker.
 Current manifest limits range from two Claude Code replicas to ten ACP Copilot
-replicas. The exact limits, polling intervals, and cooldowns are defined next
-to each worker in `deploy/base/workers/`.
+replicas. The exact limits, polling intervals, and cooldowns are defined per
+worker in the deployment manifests.
 
 ## Worker connectivity and capture status
 
@@ -199,9 +199,6 @@ The repository contains both application code and Kustomize manifests:
 ```text
 apps/                  API, UI, scheduler, judge, gateway, token manager, and workers
 packages/              Shared libraries, database migrations, auth, evaluations, and tooling
-deploy/base/           Shared Kubernetes resources and workload definitions
-deploy/overlays/       Environment-specific Kustomize overlays
-deploy/image-automation/ Flux image policies and image updates
 config/                Portable YAML examples for benchmark configuration
 ```
 

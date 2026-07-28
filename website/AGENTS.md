@@ -55,7 +55,7 @@ for opening the file.
 | Topic | File(s) in scope-core |
 | --- | --- |
 | Workers (allowed IDs, validation) | `packages/shared/src/schemas/request.ts` (`VALID_WORKERS`) |
-| Worker display names / labels | `deploy/base/workers/register-version-*.yaml` — the `"name"` field in the agent upsert payload (e.g. "GitHub Copilot CLI", "Claude Code CLI", "VS Code Copilot") |
+| Worker display names / labels | the `"name"` field in each worker's agent registration (upsert) payload (e.g. "GitHub Copilot CLI", "Claude Code CLI", "VS Code Copilot") |
 | Worker software stacks (pre-installed tools) | `apps/workers/*/src/test-worker.ts` — the `checkTools([...])` array lists every runtime and build tool baked into the container image |
 | Request payload, scenario shape | `packages/shared/src/schemas/request.ts` (`CreateRequestInputSchema`, `ScenarioSchema`) |
 | Request status / outcome enums | `packages/shared/src/schemas/request.ts` (`RequestStatusSchema`, `RequestOutcomeSchema`) |

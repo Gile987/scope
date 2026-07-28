@@ -56,7 +56,6 @@ Architecture Decision Records (ADRs) capture significant design choices and thei
 
 - **Sub-project READMEs** — Quick-start and setup guides:
   - [`scope-mt-app/README.md`](../scope-mt-app/README.md) — Application setup, Docker Compose, features
-  - [`scope-mt-deploy/README.md`](../scope-mt-deploy/README.md) — FluxCD manifest structure
   - [`scope-mt-infra/README.md`](../scope-mt-infra/README.md) — Azure infrastructure overview
 - **[`scope-mt-app/ENV_VARIABLES.md`](../scope-mt-app/ENV_VARIABLES.md)** — Environment variable reference for the criteria/judge system
 - **[`scope-mt-app/config/`](../scope-mt-app/config/)** — Domain knowledge encoded as YAML (scenarios, personas, criteria, traits)

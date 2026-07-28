@@ -349,8 +349,8 @@ promoted image — uses a build-time flag.
 | Environment | Control | Kind | Where to set | Default |
 | --- | --- | --- | --- | --- |
 | **Local dev** | `VITE_AUTH_ENABLED_LOCAL` | build-time (`import.meta.env.DEV`) | `docker-compose.dev.yml` or your shell | `true` |
-| **Integration** | `SCOPE_AUTH_ENABLED` | runtime (container env) | `deploy/overlays/integration` portal patch | `true` (base); currently `false` |
-| **Production** | `SCOPE_AUTH_ENABLED` | runtime (container env) | `deploy/overlays/prod` portal patch | `true` (base); currently `false` |
+| **Integration** | `SCOPE_AUTH_ENABLED` | runtime (container env) | integration portal deployment env | `true` (default); currently `false` |
+| **Production** | `SCOPE_AUTH_ENABLED` | runtime (container env) | production portal deployment env | `true` (default); currently `false` |
 
 **Type:** boolean-ish string. `true`/`1`/`yes`/`on` enable; `false`/`0`/`no`/`off`
 disable (case-insensitive). Any other/unset value falls back to the secure
@@ -480,7 +480,7 @@ Where MSAL persists its token cache.
 **Type:** URL string
 **Scope:** Portal container (runtime)
 
-Base URL for the public Scope docs site that in-app help tooltips link to. Unlike `VITE_*` flags (which Vite inlines into the bundle at build time), this is read at **container start**: the portal's entrypoint regenerates `/config.js` from this variable and the frontend reads it via `window.__SCOPE_CONFIG__.docsBaseUrl`. This means a single built image can be promoted across environments and still point at the correct docs deployment without a rebuild — set or override it via the Kubernetes Deployment env (`deploy/base/portal.yaml` or an overlay patch). In local Vite development the static `apps/portal/public/config.js` provides the default.
+Base URL for the public Scope docs site that in-app help tooltips link to. Unlike `VITE_*` flags (which Vite inlines into the bundle at build time), this is read at **container start**: the portal's entrypoint regenerates `/config.js` from this variable and the frontend reads it via `window.__SCOPE_CONFIG__.docsBaseUrl`. This means a single built image can be promoted across environments and still point at the correct docs deployment without a rebuild — set or override it via the portal's Kubernetes Deployment env. In local Vite development the static `apps/portal/public/config.js` provides the default.
 
 ## Setting Variables
 

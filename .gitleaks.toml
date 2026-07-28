@@ -33,12 +33,12 @@ regexes = [
   # Kustomize / docker image tags of the form <name>:<UTC-timestamp>-<git-sha>,
   # e.g. acrscopev2int.azurecr.io/scoped/api:20260702T215517Z-ba2f4d8 .
   # gitleaks misreads `api:<tag>` / `token-manager:<tag>` as `key:<secret>`.
-  # Covers deploy/overlays/**/images.yaml, docker-compose.yml and scripts/**.
+  # Covers docker-compose.yml and scripts/**.
   '''\d{8}T\d{6}Z-[0-9a-f]{7,40}''',
 
   # Azurite (Azure Storage Emulator) well-known account key — publicly
   # documented by Microsoft. Appears in docker-compose.yml, .env.example,
-  # scripts/** and deploy/overlays/local/**.
+  # and scripts/**.
   '''Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==''',
 
   # Azure Cosmos DB Emulator well-known key — publicly documented by Microsoft.

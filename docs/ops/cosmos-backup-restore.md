@@ -139,7 +139,7 @@ the archive has a manifest, its sha256 is checked before restoring.
   throttled, temporarily raise the collection's autoscale RU during the operation
   (see [Database Collection Scaling](../architecture/db-collection-scaling.md)).
 - **Shard keys.** A Cosmos collection's shard key is defined via the control
-  plane (`deploy/base/mongodb-collections/*.yaml`), not the data plane.
+  plane (ASO collection manifests), not the data plane.
   `mongorestore --drop` deletes and recreates the collection and can lose that
   definition, which is why restore defaults to a new database and `--drop` is
   opt-in (`--force-drop`). If you use it, re-apply the collection manifests

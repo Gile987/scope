@@ -64,7 +64,6 @@ flowchart TB
 | Folder | Purpose | Tech Stack |
 |--------|---------|------------|
 | `scope-mt-app/` | Application code: API, CLI, portal, judge, coding agent workers | TypeScript, pnpm workspaces, Docker |
-| `scope-mt-deploy/` | FluxCD GitOps manifests for Kubernetes | Kustomize, Helm, FluxCD |
 | `scope-mt-infra/` | Azure infrastructure provisioned via `azd up` | Bicep, Azure Developer CLI |
 | `docs/` | Central documentation hub (this folder) | Markdown |
 
@@ -110,8 +109,6 @@ flowchart TB
 | Layer | Location | Managed By | What |
 |-------|----------|------------|------|
 | **Azure Resources** | `scope-mt-infra/infra/bicep/` | `azd up` | AKS, VNet, Key Vault, CosmosDB, Redis, Storage, Private Endpoints, Managed Identities |
-| **GitOps Infra** | `scope-mt-deploy/infra/` | FluxCD Phase 1 | ESO, ASO, KEDA, cert-manager (Helm releases) |
-| **GitOps Apps** | `scope-mt-deploy/apps/` | FluxCD Phase 2 | SecretStores, ExternalSecrets, ASO Queues, Deployments, KEDA ScaledObjects |
 
 All Azure services are deployed behind **Private Endpoints** within the AKS VNet.
 

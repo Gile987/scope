@@ -749,7 +749,7 @@ the existing External Secrets pipeline.**
 | Material | Secret? | Where it lives | Notes |
 |----------|---------|----------------|-------|
 | **IdP JWKS** (signing public keys) | No | **Fetched at runtime** from the IdP's `jwks_uri`, cached in-memory in the API with TTL + `kid` rotation | Public keys; never persisted to disk or DB. |
-| **OIDC discovery / authority / clientId / scopes / audience** | No | Plain env / ConfigMap ([deploy/base/configmap.yaml](../../deploy/base/configmap.yaml)) for the API; **hardcoded into the CLI and Portal builds** (no `/auth/config` endpoint) | Non-secret configuration. |
+| **OIDC discovery / authority / clientId / scopes / audience** | No | Plain env / ConfigMap for the API; **hardcoded into the CLI and Portal builds** (no `/auth/config` endpoint) | Non-secret configuration. |
 | **`INTERNAL_API_KEY_<NAME>`** (per-service key, service-to-service) | **Yes** | **Azure Key Vault** \u2192 synced to a K8s Secret by **External Secrets Operator** (same pattern as `mongo-secrets`/`redis-secrets`); each service gets its **own** key mounted as env | Constant-time compared; **no single global key**; rotate per-service in Key Vault. || **`INTERNAL_JWT_SECRET` / internal signing key** (mints on-behalf-of user tokens) | **Yes** | **Azure Key Vault** → External Secret. **Asymmetric (chosen)**: API holds the **private** key; downstream verifiers hold only the **public** key. HMAC secret is a single-deployment alternative. | Scope-owned, **independent of the IdP**; rotate via Key Vault. || **Entra API client secret** (only if the optional confidential-client/client-credentials path in \u00a76 is used) | **Yes** | **Azure Key Vault** \u2192 External Secret | The public CLI/Portal clients are **public** clients (PKCE / device-code) and have **no** secret. |
 | **CLI user tokens** (access/refresh) | **Yes** | User's machine via the Scope **`SecretStore`** abstraction (default backend **`cross-keychain`** → OS keychain, service `scope-cli`); `0600` file backend only where no keyring exists | MSAL token cache; never logged; silent refresh. **No `keytar`.** |
 | **Portal tokens** | **Yes** | Browser memory via MSAL (session/`localStorage` per MSAL cache config) | No tokens in app code or repo. |
@@ -759,9 +759,8 @@ Local dev (`docker:up:infra` + Lowkey Vault) follows the same shape: per-service
 `INTERNAL_API_KEY_<NAME>` values come from `.env`, and IdP verification points at a real
 IdP (or the future **Entra ID local emulator**, §1) — there is **no** auth-bypass mode, so
 local dev exercises the same verification path as production. New env vars are documented in
-[ENV_VARIABLES.md](../../ENV_VARIABLES.md) and wired through
-[deploy/base/external-secret.yaml](../../deploy/base/external-secret.yaml) /
-[deploy/base/secret-store.yaml](../../deploy/base/secret-store.yaml).
+[ENV_VARIABLES.md](../../ENV_VARIABLES.md) and wired through the API's
+External Secrets / SecretStore manifests.
 
 ---
 
@@ -965,11 +964,10 @@ local dev exercises the same verification path as production. New env vars are d
     and is owner/shared-scoped. Depends on 5, 8, 10.
 
 14. ⬜ **Deployment & config** — Add auth env vars to
-    [ENV_VARIABLES.md](../../ENV_VARIABLES.md), K8s manifests
-    ([deploy/base/api.yaml](../../deploy/base/api.yaml), portal, configmap), **External
+    [ENV_VARIABLES.md](../../ENV_VARIABLES.md) and the API/portal K8s manifests
+    (deployment, configmap), **External
     Secrets** for the **per-service `INTERNAL_API_KEY_<NAME>`** values + the **internal JWT
-    signing key** (private at API, public at verifiers) in
-    [deploy/base/external-secret.yaml](../../deploy/base/external-secret.yaml), and a
+    signing key** (private at API, public at verifiers), and a
     **`ServiceMonitor`** scraping the API `/metrics` for the security counters.
     App Registration setup: **multi-tenant** public clients only (CLI device-code +
     Portal SPA PKCE), exposed `access_as_user` scope, redirect URIs, **tenant filtering

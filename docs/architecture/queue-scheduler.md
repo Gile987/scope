@@ -107,7 +107,7 @@ Every 2 seconds (configurable via `SCHEDULER_POLL_INTERVAL_MS`):
 
 ### Configuration
 
-Environment variables in `deploy/base/scheduler.yaml`:
+Scheduler environment variables (set on the scheduler Deployment):
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
@@ -242,8 +242,6 @@ Each row in the runs table has inline icon buttons for Pause (pending/queued), R
 
 | Resource | File |
 |----------|------|
-| Scheduler Deployment | `deploy/base/scheduler.yaml` |
-| Azure Storage Queues (ASO) | `deploy/base/queues.yaml` |
 | Scheduler in docker-compose | `docker-compose.yml` (service: `scheduler`) |
 
 ### Queue Inventory
@@ -265,5 +263,3 @@ Each row in the runs table has inline icon buttons for Pause (pending/queued), R
 | `apps/portal/src/pages/RunsList.tsx` | Bulk actions toolbar, per-row actions |
 | `apps/portal/src/pages/RunDetail.tsx` | Detail page schedule actions |
 | `apps/api/src/grouping.ts` | Group aggregates (includes `llmCalls`) |
-| `deploy/base/scheduler.yaml` | K8s Deployment manifest |
-| `deploy/base/queues.yaml` | ASO StorageQueue resources |

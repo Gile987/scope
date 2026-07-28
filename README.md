@@ -171,14 +171,8 @@ model together.
 apps/       API, Portal, CLI, scheduler, Judge, gateway, token manager, workers
 packages/   Shared types, storage clients, migrations, auth, model scanning, evaluation
 config/     Portable examples for scenarios, personas, criteria, and prompt features
-deploy/     Kubernetes manifests, Kustomize overlays, and Flux image automation
 docs/       Architecture, operations, research, and design documentation
 ```
-
-Production deployments use Kubernetes, FluxCD, and KEDA. The `deploy/`
-directory contains the application manifests and environment overlays. Read the
-[deployment guide](./docs/architecture/deployment.md) before changing a
-production environment.
 
 ## Documentation
 
