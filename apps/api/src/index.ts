@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
 import { TaskPromptStore, SkillRevisionStore, SkillResolver, CodebaseStore, CodebaseRevisionStore, CodebaseResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore, ProjectStore } from "shared";
+import { initTelemetry } from "telemetry";
 import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, ProfileDocument, ProfileVersionDocument, ProjectDocument, HeartbeatStore } from "shared";
 import { acquireGitHubPublicApiToken } from "./github-api-token.js";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
@@ -61,6 +62,9 @@ import type {
 } from "./route-context.js";
 
 dotenv.config();
+
+// Initialize Application Insights telemetry (must be early to patch HTTP/DB libs)
+initTelemetry("scope-api");
 
 const TOKEN_MANAGER_URL = process.env.TOKEN_MANAGER_URL || "";
 const mcpSecretClient: McpSecretClient | null = TOKEN_MANAGER_URL

@@ -126,7 +126,9 @@
       "lodash": "^4.18.0",
       "tmp": "^0.2.6",
       "react-router": "^7.15.0",
-      "react-router-dom": "^7.15.0"
+      "react-router-dom": "^7.15.0",
+      "@opentelemetry/propagator-jaeger": ">=2.9.0",
+      "@opentelemetry/core": ">=2.9.0"
     }
   },
   "keywords": [

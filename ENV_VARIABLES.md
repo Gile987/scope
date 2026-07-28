@@ -755,3 +755,48 @@ URL of the gateway/DevProxy REST API. Used to start/stop recording, check status
 **Type:** path
 
 **`PROXY_BACKEND=devproxy` only.** Directory where DevProxy writes HAR files, shared between the DevProxy process and the worker via a volume mount. Unused by the gateway backend, which downloads HAR over HTTP instead of via a shared volume.
+
+### DEVPROXY_COPILOT_API_PORT
+**Default:** `18800`
+**Type:** integer (Docker Compose only)
+
+Host port mapping for the Copilot DevProxy REST API in Docker Compose.
+
+## Observability
+
+### OTEL_COLLECTOR_ENDPOINT
+**Default:** *(none — collector mode disabled)*
+**Type:** URL
+**Used by:** All services
+
+OTLP HTTP endpoint for an in-cluster OTel Collector gateway (e.g., `http://otel-collector.scoped.svc.cluster.local:4318`). When set, services export telemetry via OTLP HTTP to the collector instead of directly to App Insights. The collector handles forwarding to Azure Monitor via the `azuremonitor` exporter.
+
+Takes priority over `APPLICATIONINSIGHTS_CONNECTION_STRING` for export mode selection. Automatically injected by the `otel-collector` Kustomize Component (`deploy/components/otel-collector/`).
+
+### APPLICATIONINSIGHTS_CONNECTION_STRING
+**Default:** *(none — telemetry disabled when unset)*
+**Type:** Azure Application Insights connection string
+**Used by:** API, all workers, judge, scheduler, token-manager, post-processor, report-generator, model-scanners
+
+Connection string for Azure Application Insights. Used for direct export mode (when `OTEL_COLLECTOR_ENDPOINT` is not set). Also consumed by the OTel Collector's `azuremonitor` exporter when the collector component is deployed.
+
+When both this and `OTEL_COLLECTOR_ENDPOINT` are unset, all telemetry calls are no-ops and the service operates normally without instrumentation.
+
+The telemetry module is initialized via `initTelemetry()` from `packages/telemetry/` and must be called early in the service startup (before Express/MongoDB connections) to ensure auto-instrumentation patches are applied.
+
+- **Docker Compose:** Set in `.env` file or leave unset for local development
+- **Kubernetes:** Sourced from `appinsights-secrets` ExternalSecret (workers) or `appinsights-secrets` secretRef (API), which reads from Key Vault secret `appinsights-connection-string`
+
+### TELEMETRY_SAMPLING_RATIO
+**Default:** `1.0`
+**Type:** float (`0.0`–`1.0`)
+**Used by:** API, all workers
+
+Fraction of telemetry that is sampled and exported to Application Insights. `1.0` sends everything; `0.0` sends nothing. Passed to Azure Monitor as `samplingRatio`. Invalid or out-of-range values fall back to `1.0`.
+
+### TELEMETRY_LOG_LEVEL
+**Default:** `Warning`
+**Type:** string (`Verbose` | `Information` | `Warning` | `Error` | `Critical`)
+**Used by:** all workers
+
+Minimum severity level for forwarding subprocess/trace logs to Application Insights via `trackTrace()`. Only traces at or above this level are forwarded. Because subprocess logs are debug-level (`Verbose`), they are suppressed by default and only forwarded when set to `Verbose`.

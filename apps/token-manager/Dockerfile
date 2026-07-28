@@ -7,16 +7,19 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
 COPY apps/token-manager/package.json ./apps/token-manager/
 
 RUN pnpm install --frozen-lockfile
 
 COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
+COPY packages/telemetry/tsconfig.json ./packages/telemetry/
+COPY packages/telemetry/src ./packages/telemetry/src/
 COPY apps/token-manager/tsconfig.json ./apps/token-manager/
 COPY apps/token-manager/src ./apps/token-manager/src/
 
-RUN pnpm --filter shared build && pnpm --filter token-manager build
+RUN pnpm --filter shared build && pnpm --filter telemetry build && pnpm --filter token-manager build
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev
@@ -37,11 +40,13 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
 COPY apps/token-manager/package.json ./apps/token-manager/
 
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
+COPY --from=builder /app/packages/telemetry/dist ./packages/telemetry/dist/
 COPY --from=builder /app/apps/token-manager/dist ./apps/token-manager/dist/
 
 WORKDIR /app/apps/token-manager
@@ -51,4 +56,4 @@ EXPOSE 80
 ENV PORT=80
 ENV VALIDATION_INTERVAL_MS=300000
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "telemetry/register", "dist/index.js"]

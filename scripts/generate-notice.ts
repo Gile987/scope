@@ -113,9 +113,22 @@ function resolvePnpmLicense(
   pkgName: string,
   licenseFileName: string,
 ): { version: string; licensePath: string } | null {
+  const results = resolvePnpmLicenses(pkgName, licenseFileName);
+  return results.length > 0 ? results[0] : null;
+}
+
+/**
+ * Like resolvePnpmLicense but returns ALL installed versions of `pkgName`
+ * that ship the given `licenseFileName`.
+ */
+function resolvePnpmLicenses(
+  pkgName: string,
+  licenseFileName: string,
+): { version: string; licensePath: string }[] {
   const store = join(repoRoot, "node_modules", ".pnpm");
-  if (!existsSync(store)) return null;
+  if (!existsSync(store)) return [];
   const prefix = `${pkgName}@`;
+  const results: { version: string; licensePath: string }[] = [];
   for (const entry of readdirSync(store)) {
     // Match "<name>@<version>" exactly (avoid e.g. "qrcode@..." for "qr").
     if (!entry.startsWith(prefix) || !/^[^@]+@\d/.test(entry)) continue;
@@ -125,10 +138,10 @@ function resolvePnpmLicense(
       // Version is the store-entry segment after "<name>@", minus any pnpm
       // peer-dependency suffix in parentheses.
       const version = entry.slice(prefix.length).replace(/\(.*$/, "");
-      return { version, licensePath };
+      results.push({ version, licensePath });
     }
   }
-  return null;
+  return results;
 }
 
 // Disambiguate packages that ship MORE THAN ONE license file. generate-license-file
@@ -136,15 +149,19 @@ function resolvePnpmLicense(
 // case by pointing the tool at ONE of the package's OWN real license files —
 // never at hand-written text.
 //
-// Currently the only such package is `qr`, published under "(MIT OR Apache-2.0)",
-// which ships both LICENSE (Apache-2.0) and LICENSE-MIT. We elect the MIT arm by
-// quoting the package's own LICENSE-MIT verbatim.
+// Currently known multi-license packages:
+//  - `qr`: published under "(MIT OR Apache-2.0)", ships LICENSE (Apache-2.0) and
+//    LICENSE-MIT. We elect the MIT arm.
+//  - `import-in-the-middle`: ships LICENSE (Apache-2.0) and LICENSE-3rdparty.csv.
+//    We use the LICENSE file.
 //
 // If a future dependency introduces another multi-license package, generate-license-file
 // fails under `--ci`; add a corresponding entry here pointing at that package's own file.
 const replace: Record<string, string> = {};
 const qr = resolvePnpmLicense("qr", "LICENSE-MIT");
 if (qr) replace[`qr@${qr.version}`] = qr.licensePath;
+const iitm = resolvePnpmLicenses("import-in-the-middle", "LICENSE");
+for (const entry of iitm) replace[`import-in-the-middle@${entry.version}`] = entry.licensePath;
 
 // ---------------------------------------------------------------------------
 // NOTICE-REVIEW.txt: production packages pnpm cannot classify as a known OSS

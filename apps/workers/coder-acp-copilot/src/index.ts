@@ -2,10 +2,34 @@
 // Licensed under the MIT License.
 
 import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, KubedockClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { initTelemetry, trackMetric, trackTrace, trackEvent } from "telemetry";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
 dotenv.config();
+
+// Initialize telemetry before any other setup
+initTelemetry(process.env.WORKER_NAME || "coder-acp-copilot");
+
+/**
+ * Detect the first structured "AI turn" signal from a subprocess log line.
+ *
+ * Prefers an explicit "createTurn" marker or a JSON-parseable message carrying a
+ * `type` field, rather than a loose substring match on "turn".
+ */
+export function isFirstAiCallSignal(msg: string): boolean {
+  if (msg.includes("createTurn")) return true;
+  const trimmed = msg.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return typeof parsed === "object" && parsed !== null && typeof parsed.type === "string";
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
 
 /**
  * Build the environment variables for the copilot subprocess.
@@ -88,6 +112,7 @@ const tokenClient = new TokenManagerClient();
 const AGENT_VERSION = `copilot-${process.env.COPILOT_CLI_VERSION || "unknown"}`;
 
 class CopilotProcessor implements WorkerProcessor {
+  static coldStartTracked = false;
   readonly workerName = WORKER_NAME;
   workspacePath: string | undefined = undefined;
   private gateway: McpGatewayClient | null = null;
@@ -166,6 +191,25 @@ class CopilotProcessor implements WorkerProcessor {
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
     options?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
+    const runStartTime = Date.now();
+    const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const workerType = WORKER_NAME;
+    let firstAiCallTracked = false;
+    let lastProtocolEventTime = runStartTime;
+
+    // Periodically emit subprocess idle gaps during active runs so long stalls are
+    // observable even before the run completes.
+    const idleMonitor = setInterval(() => {
+      const gapMs = Date.now() - lastProtocolEventTime;
+      if (gapMs > 60_000) {
+        trackMetric({
+          name: "worker.subprocess_idle_s",
+          value: gapMs / 1000,
+          properties: { runId, workerType },
+        });
+      }
+    }, 30_000);
+
     const skillConfigs = options?.skillConfigs ?? [];
     await log("info", "Starting Copilot ACP processor", {
       inputLength: message.length,
@@ -175,6 +219,11 @@ class CopilotProcessor implements WorkerProcessor {
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
       skillCount: skillConfigs.length,
       skills: skillConfigs.map((s) => s.name),
+    });
+
+    trackEvent({
+      name: "worker.run_started",
+      properties: { runId, workerType, model: options?.model || "default" },
     });
 
     // Proxy integration — start recording if enabled
@@ -237,6 +286,24 @@ class CopilotProcessor implements WorkerProcessor {
         env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL, devProxy?.proxyUrl, caCertBundlePath),
         cwd: this.workspacePath!,
         onLog: async (msg) => {
+          lastProtocolEventTime = Date.now();
+          // Track first AI call timing
+          if (!firstAiCallTracked && isFirstAiCallSignal(msg)) {
+            firstAiCallTracked = true;
+            const firstAiCallMs = Date.now() - runStartTime;
+            trackMetric({
+              name: "worker.first_ai_call_ms",
+              value: firstAiCallMs,
+              properties: { runId, workerType },
+            });
+          }
+          // Forward subprocess logs to App Insights. These are debug-level, so
+          // trackTrace only forwards them when TELEMETRY_LOG_LEVEL=Verbose.
+          trackTrace({
+            message: msg,
+            severityLevel: "Verbose",
+            properties: { runId, workerType },
+          });
           await log("debug", msg);
         },
         mcpServers: [],
@@ -250,12 +317,40 @@ class CopilotProcessor implements WorkerProcessor {
         responseLength: result.response.length 
       });
 
+      // Track run duration
+      const runDurationMs = Date.now() - runStartTime;
+      trackMetric({
+        name: "worker.run_duration_ms",
+        value: runDurationMs,
+        properties: { runId, workerType, stopReason: result.stopReason },
+      });
+
+      // Track cold start (first run only — container uptime up to first completed run)
+      if (!CopilotProcessor.coldStartTracked) {
+        CopilotProcessor.coldStartTracked = true;
+        trackMetric({
+          name: "worker.cold_start_ms",
+          value: process.uptime() * 1000,
+          properties: { workerType },
+        });
+      }
+
+      // Track subprocess idle time (max gap between protocol events)
+      const subprocessIdleS = (Date.now() - lastProtocolEventTime) / 1000;
+      trackMetric({
+        name: "worker.subprocess_idle_s",
+        value: subprocessIdleS,
+        properties: { runId, workerType },
+      });
+
+      clearInterval(idleMonitor);
       const response = result.response || `[${this.workerName}] No response from Copilot`;
       const { harFilePath, tokenUsage, aiCallCount } = devProxy
         ? await devProxy.stopAndCollectHar(log)
         : { harFilePath: null, tokenUsage: undefined, aiCallCount: undefined };
       return { response, ...(harFilePath && { harFilePath }), ...(tokenUsage && { tokenUsage }), ...(aiCallCount !== undefined && { aiCallCount }) };
     } catch (error) {
+      clearInterval(idleMonitor);
       if (devProxy) {
         const { harFilePath, aiCallCount } = await devProxy.stopAndCollectHar(log);
         if (harFilePath) {

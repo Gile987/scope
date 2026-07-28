@@ -2,12 +2,36 @@
 // Licensed under the MIT License.
 
 import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { initTelemetry, trackMetric, trackTrace, trackEvent } from "telemetry";
 import { runACPSession } from "./acp-client.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import dotenv from "dotenv";
 
 dotenv.config();
+
+// Initialize telemetry before any other setup
+initTelemetry(process.env.WORKER_NAME || "coder-acp-copilot-windows");
+
+/**
+ * Detect the first structured "AI turn" signal from a subprocess log line.
+ *
+ * Prefers an explicit "createTurn" marker or a JSON-parseable message carrying a
+ * `type` field, rather than a loose substring match on "turn".
+ */
+export function isFirstAiCallSignal(msg: string): boolean {
+  if (msg.includes("createTurn")) return true;
+  const trimmed = msg.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return typeof parsed === "object" && parsed !== null && typeof parsed.type === "string";
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
 
 /**
  * Build the environment variables for the copilot subprocess on Windows.
@@ -71,6 +95,7 @@ const tokenClient = new TokenManagerClient();
 const AGENT_VERSION = `copilot-${process.env.COPILOT_CLI_VERSION || "unknown"}`;
 
 class CopilotWindowsProcessor implements WorkerProcessor {
+  static coldStartTracked = false;
   readonly workerName = WORKER_NAME;
   workspacePath: string | undefined = undefined;
 
@@ -104,9 +129,33 @@ class CopilotWindowsProcessor implements WorkerProcessor {
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
     options?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
+    const runStartTime = Date.now();
+    const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const workerType = WORKER_NAME;
+    let firstAiCallTracked = false;
+    let lastProtocolEventTime = runStartTime;
+
+    // Periodically emit subprocess idle gaps during active runs so long stalls are
+    // observable even before the run completes.
+    const idleMonitor = setInterval(() => {
+      const gapMs = Date.now() - lastProtocolEventTime;
+      if (gapMs > 60_000) {
+        trackMetric({
+          name: "worker.subprocess_idle_s",
+          value: gapMs / 1000,
+          properties: { runId, workerType },
+        });
+      }
+    }, 30_000);
+
     await log("info", "Starting Copilot ACP processor (Windows)", {
       inputLength: message.length,
       model: options?.model,
+    });
+
+    trackEvent({
+      name: "worker.run_started",
+      properties: { runId, workerType, model: options?.model || "default" },
     });
 
     // Proxy integration — start recording if enabled (gateway backend only)
@@ -162,6 +211,23 @@ class CopilotWindowsProcessor implements WorkerProcessor {
         // Use shell: true on Windows so spawn resolves .cmd shims (e.g. copilot.cmd)
         shell: true,
         onLog: async (msg: string) => {
+          lastProtocolEventTime = Date.now();
+          if (!firstAiCallTracked && isFirstAiCallSignal(msg)) {
+            firstAiCallTracked = true;
+            const firstAiCallMs = Date.now() - runStartTime;
+            trackMetric({
+              name: "worker.first_ai_call_ms",
+              value: firstAiCallMs,
+              properties: { runId, workerType },
+            });
+          }
+          // Forward subprocess logs to App Insights. These are debug-level, so
+          // trackTrace only forwards them when TELEMETRY_LOG_LEVEL=Verbose.
+          trackTrace({
+            message: msg,
+            severityLevel: "Verbose",
+            properties: { runId, workerType },
+          });
           await log("debug", msg);
         },
         mcpServers: [],
@@ -173,12 +239,40 @@ class CopilotWindowsProcessor implements WorkerProcessor {
         responseLength: result.response.length,
       });
 
+      // Track run duration
+      const runDurationMs = Date.now() - runStartTime;
+      trackMetric({
+        name: "worker.run_duration_ms",
+        value: runDurationMs,
+        properties: { runId, workerType, stopReason: result.stopReason },
+      });
+
+      // Track cold start (first run only — container uptime up to first completed run)
+      if (!CopilotWindowsProcessor.coldStartTracked) {
+        CopilotWindowsProcessor.coldStartTracked = true;
+        trackMetric({
+          name: "worker.cold_start_ms",
+          value: process.uptime() * 1000,
+          properties: { workerType },
+        });
+      }
+
+      // Track subprocess idle time
+      const subprocessIdleS = (Date.now() - lastProtocolEventTime) / 1000;
+      trackMetric({
+        name: "worker.subprocess_idle_s",
+        value: subprocessIdleS,
+        properties: { runId, workerType },
+      });
+
+      clearInterval(idleMonitor);
       const response = result.response || `[${this.workerName}] No response from Copilot`;
       const { harFilePath, tokenUsage, aiCallCount } = devProxy
         ? await devProxy.stopAndCollectHar(log)
         : { harFilePath: null, tokenUsage: undefined, aiCallCount: undefined };
       return { response, ...(harFilePath && { harFilePath }), ...(tokenUsage && { tokenUsage }), ...(aiCallCount !== undefined && { aiCallCount }) };
     } catch (error) {
+      clearInterval(idleMonitor);
       if (devProxy) {
         const { harFilePath, aiCallCount } = await devProxy.stopAndCollectHar(log);
         if (harFilePath) {

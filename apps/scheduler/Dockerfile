@@ -7,6 +7,7 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
 COPY apps/scheduler/package.json ./apps/scheduler/
 
 RUN pnpm install --frozen-lockfile
@@ -14,6 +15,10 @@ RUN pnpm install --frozen-lockfile
 COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
 RUN pnpm --filter shared build
+
+COPY packages/telemetry/tsconfig.json ./packages/telemetry/
+COPY packages/telemetry/src ./packages/telemetry/src/
+RUN pnpm --filter telemetry build
 
 COPY apps/scheduler/tsconfig.json ./apps/scheduler/
 COPY apps/scheduler/src ./apps/scheduler/src/
@@ -38,11 +43,13 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
 COPY apps/scheduler/package.json ./apps/scheduler/
 
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
+COPY --from=builder /app/packages/telemetry/dist ./packages/telemetry/dist/
 COPY --from=builder /app/apps/scheduler/dist ./apps/scheduler/dist/
 
 WORKDIR /app/apps/scheduler
@@ -50,4 +57,4 @@ WORKDIR /app/apps/scheduler
 EXPOSE 8080
 ENV PORT=8080
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "telemetry/register", "dist/index.js"]
