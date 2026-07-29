@@ -169,7 +169,7 @@ export function McpServerForm({
                 placeholder="e.g., my-search-server"
                 value={slug}
                 onChange={(e) => handleSlugChange(e.target.value)}
-                pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
+                pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?"
                 className="font-mono"
               />
               <p className="text-xs text-muted-foreground">
