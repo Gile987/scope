@@ -63,7 +63,7 @@ Tags add **one** optional field to existing documents — no new collection:
 ```mermaid
 erDiagram
     ENTITY {
-        string   projectId "filed under (see data-organization-projects.md)"
+        string   projectId "filed under (see data-organization-projects.md — PR #1210)"
         array    tags "cross-cutting labels (this doc)"
     }
 ```
@@ -83,8 +83,8 @@ Tags apply to the **durable, single-copy, user-authored** entities — the same 
   `skill-revisions` (derived reference key) are immutable
   [per-project copies](https://github.com/cedricvidal/scope-oss-test-6/pull/1210)
   identified by a deterministic key, not hand-applied labels; a run that references them can itself be
-  tagged. `codebase-revisions` and `prompt-feature` extractions are immutable children — tag their
-  parent (`codebase` / `task-prompt`) instead.
+  tagged. `codebase-revisions` and `prompt-feature-extractions` are immutable children — tag their
+  parent `codebase` instead.
 - **Not taggable — global platform catalog.** `agents` and `models` are global infrastructure with
   no per-user organizing state.
 
@@ -103,7 +103,7 @@ rather than needing a compound index for every combination.
 ## Semantics
 
 Tags are an **organizational**, not access-control, construct — they decide how data is *found*,
-never *who may see it* (that is [auth-rbac's](https://github.com/cedricvidal/scope-oss-test-6/pull/1210)).
+never *who may see it* (that is [auth-rbac's](auth-rbac.md)).
 
 - **Tags are cross-cutting filters.** `tags` label an entity along axes that cut across projects
   (e.g. `regression`, `q3-eval`, `flaky`). A tag filter adds an `AND tags ∋ "regression"` clause.
@@ -178,7 +178,7 @@ Tags are a **single additive phase** that follows the [projects rollout](https:/
 
 ```mermaid
 flowchart LR
-    subgraph proj["data-organization-projects.md"]
+    subgraph proj["Projects (PR #1210)"]
         P1["P1 Projects"]
     end
     P1 -.optional, after or independent.-> T["Tags: field + index +<br/>filter across Portal/API/CLI"]
