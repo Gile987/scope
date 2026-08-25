@@ -39,7 +39,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { isUnexpected } from "@azure-rest/ai-inference";
-import type { GateId } from "shared";
+import { buildChatCompletionRequestBody, type GateId } from "shared";
 import {
   collectSampledGrades,
   majority,
@@ -135,12 +135,12 @@ async function inferenceClient() {
 const complete: ChatComplete = async ({ messages, model, temperature, maxTokens }) => {
   const { client, model: handleModel } = await inferenceClient();
   const response = await client.path("/chat/completions").post({
-    body: {
+    body: buildChatCompletionRequestBody({
       messages,
       model: model ?? handleModel ?? DEFAULT_MODEL,
       temperature,
-      max_tokens: maxTokens,
-    },
+      maxTokens,
+    }),
   });
 
   if (isUnexpected(response)) {

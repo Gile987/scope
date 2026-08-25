@@ -2,7 +2,11 @@
 // Licensed under the MIT License.
 
 import { isUnexpected } from "@azure-rest/ai-inference";
-import { gatesSatisfyInvariant, type GateId } from "shared";
+import {
+  buildChatCompletionRequestBody,
+  gatesSatisfyInvariant,
+  type GateId,
+} from "shared";
 import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
 
 export type SuggestDirection = "parents" | "children";
@@ -195,15 +199,15 @@ async function chat(
   userMessage: string,
 ): Promise<string> {
   const response = await llm.path("/chat/completions").post({
-    body: {
+    body: buildChatCompletionRequestBody({
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ],
       model,
       temperature: 0.3,
-      max_tokens: 512,
-    },
+      maxTokens: 512,
+    }),
   });
 
   if (isUnexpected(response)) {

@@ -167,6 +167,26 @@ describe("validateToken", () => {
       );
     });
 
+    it("uses reasoning-model parameters when probing a GPT-5 deployment", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+      } as Response);
+
+      await validateToken("azure-ai-foundry", JSON.stringify({
+        endpoint: "https://example.services.ai.azure.com/models",
+        apiKey: "foundry-key",
+        model: "gpt-5.4-mini",
+      }));
+
+      const init = fetchSpy.mock.calls[0][1] as RequestInit;
+      expect(JSON.parse(init.body as string)).toEqual({
+        messages: [{ role: "user", content: "ping" }],
+        model: "gpt-5.4-mini",
+        max_completion_tokens: 1,
+      });
+    });
+
     it("rejects non-azure endpoint without making a network call", async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch");
 

@@ -2,7 +2,12 @@
 // Licensed under the MIT License.
 
 import { isUnexpected } from "@azure-rest/ai-inference";
-import { PromptFeatureConfig, PromptFeatureResult, SuggestedPromptFeature } from "shared";
+import {
+  buildChatCompletionRequestBody,
+  PromptFeatureConfig,
+  PromptFeatureResult,
+  SuggestedPromptFeature,
+} from "shared";
 import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
 
 // ---------------------------------------------------------------------------
@@ -77,15 +82,15 @@ export async function generatePromptFeaturePrompt(
   const userMessage = buildGenerateUserMessage(behavior, existingFeatures);
 
   const response = await llm.path("/chat/completions").post({
-    body: {
+    body: buildChatCompletionRequestBody({
       messages: [
         { role: "system", content: GENERATE_SYSTEM_PROMPT },
         { role: "user", content: userMessage },
       ],
       model: modelName,
       temperature: 0.3,
-      max_tokens: 512,
-    },
+      maxTokens: 512,
+    }),
   });
 
   if (isUnexpected(response)) {
@@ -187,15 +192,15 @@ export async function extractPromptFeatures(
   const userMessage = buildExtractUserMessage(taskText, features);
 
   const response = await llm.path("/chat/completions").post({
-    body: {
+    body: buildChatCompletionRequestBody({
       messages: [
         { role: "system", content: EXTRACT_SYSTEM_PROMPT },
         { role: "user", content: userMessage },
       ],
       model: modelName,
       temperature: 0.1,  // Lower temperature for more deterministic detection
-      max_tokens: 2048,
-    },
+      maxTokens: 2048,
+    }),
   });
 
   if (isUnexpected(response)) {

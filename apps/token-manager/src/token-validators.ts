@@ -1,7 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { KeyType, KeyValidationResult, deriveCapabilities, parseAzureAiFoundrySecret, trimTrailingSlashes } from "shared";
+import {
+  buildChatCompletionRequestBody,
+  KeyType,
+  KeyValidationResult,
+  deriveCapabilities,
+  parseAzureAiFoundrySecret,
+  trimTrailingSlashes,
+} from "shared";
 
 /**
  * Validate a key by calling the provider's API and derive its capabilities.
@@ -189,8 +196,9 @@ async function validateGitHubOAuthCookieState(
  *
  * The secret is a JSON blob with `endpoint` + `apiKey` (+ optional `model`).
  * We probe the inference endpoint with a minimal `chat/completions` POST
- * (max_tokens=1) — this matches exactly how the portal actually uses the
- * endpoint, so any 404/401 here also means production calls will fail.
+ * using the model-compatible token limit parameter — this matches exactly how
+ * the portal actually uses the endpoint, so any 404/401 here also means
+ * production calls will fail.
  *
  * Foundry endpoints typically end in `/models` (e.g.
  * `https://<resource>.services.ai.azure.com/models`); we detect a missing
@@ -215,11 +223,11 @@ async function validateAzureAiFoundry(
   // Validate with the same model name production will use so a missing
   // deployment surfaces as an invalid key instead of a runtime 404.
   const probeModel = parsed.model || "gpt-4.1";
-  const body = JSON.stringify({
+  const body = JSON.stringify(buildChatCompletionRequestBody({
     messages: [{ role: "user", content: "ping" }],
-    max_tokens: 1,
     model: probeModel,
-  });
+    maxTokens: 1,
+  }));
 
   try {
     const response = await fetch(url, {

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { isUnexpected } from "@azure-rest/ai-inference";
+import { buildChatCompletionRequestBody } from "shared";
 import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
 
 // ---------------------------------------------------------------------------
@@ -95,15 +96,15 @@ export async function generateTaskPrompt(
     : buildGenerateUserMessage(description, existingPrompts);
 
   const response = await llm.path("/chat/completions").post({
-    body: {
+    body: buildChatCompletionRequestBody({
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ],
       model: modelName,
       temperature: 0.7,
-      max_tokens: 1024,
-    },
+      maxTokens: 1024,
+    }),
   });
 
   if (isUnexpected(response)) {
