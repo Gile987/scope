@@ -135,9 +135,9 @@ the api service's `env_file`.
 Model name / deployment name used by both backends. For Foundry, this must
 match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
 `gpt-4o`, `gpt-4.1-mini`, `gpt-5.4-mini`. Put in `.env.local` (see note above).
-Portal AI requests use the current `max_completion_tokens` parameter for every
-deployment. For GPT-5 and o-series reasoning model names they also omit
-unsupported sampling parameters such as `temperature`.
+For GPT-5 and o-series reasoning model names, portal AI requests use
+`max_completion_tokens` and omit unsupported sampling parameters such as
+`temperature`; other models continue to use `max_tokens`.
 
 ## Prompt Storage Configuration
 

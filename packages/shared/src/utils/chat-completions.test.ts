@@ -29,7 +29,7 @@ describe("chat completion request bodies", () => {
     },
   );
 
-  it("uses max_completion_tokens while retaining sampling for non-reasoning models", () => {
+  it("uses legacy parameters for non-reasoning models", () => {
     expect(
       buildChatCompletionRequestBody({
         messages,
@@ -40,7 +40,7 @@ describe("chat completion request bodies", () => {
     ).toEqual({
       messages,
       model: "gpt-4.1",
-      max_completion_tokens: 512,
+      max_tokens: 512,
       temperature: 0.3,
     });
   });

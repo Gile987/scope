@@ -11,15 +11,19 @@ interface ChatCompletionRequestBase {
   model: string;
 }
 
-export type ChatCompletionRequestBody = ChatCompletionRequestBase & {
-  max_completion_tokens: number;
-  temperature?: number;
-};
+export type ChatCompletionRequestBody =
+  | (ChatCompletionRequestBase & {
+      max_completion_tokens: number;
+    })
+  | (ChatCompletionRequestBase & {
+      max_tokens: number;
+      temperature?: number;
+    });
 
 /**
- * Chat Completions uses max_completion_tokens across current Azure OpenAI
- * deployments. GPT-5 and o-series reasoning models additionally reject
- * sampling controls such as temperature.
+ * GPT-5 and o-series reasoning models use max_completion_tokens and reject
+ * sampling controls such as temperature. Other models retain the legacy
+ * max_tokens parameter and their configured sampling controls.
  */
 export function isReasoningChatModel(model: string): boolean {
   return /^(?:gpt-5|o[1-9])(?:[.-]|$)/i.test(model.trim());
@@ -43,7 +47,7 @@ export function buildChatCompletionRequestBody(options: {
   return {
     messages,
     model,
-    max_completion_tokens: maxTokens,
+    max_tokens: maxTokens,
     ...(temperature === undefined ? {} : { temperature }),
   };
 }
