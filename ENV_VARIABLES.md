@@ -55,8 +55,9 @@ verify which provider served a given AI call:
 [llm-token] inference provider: source=azure-ai-foundry via=azure-ai-foundry-env endpoint=https://<resource>.services.ai.azure.com/models model=gpt-4.1-mini
 ```
 
-> **Local dev with Docker Compose:** the three Foundry-related variables
-> (`AZURE_AI_INFERENCE_ENDPOINT`, `AZURE_AI_INFERENCE_API_KEY`, `LLM_MODEL`)
+> **Local dev with Docker Compose:** the Foundry-related variables
+> (`AZURE_AI_INFERENCE_ENDPOINT`, `AZURE_AI_INFERENCE_API_KEY`, `LLM_MODEL`,
+> and optional `LLM_REQUEST_PROFILE`)
 > must live in **`.env.local`** at the repo root, **not** `.env`. The `.env`
 > file is auto-generated per worktree by `worktree-env` and will overwrite
 > manual edits. `.env.local` is gitignored and is loaded into the `api`
@@ -135,9 +136,19 @@ the api service's `env_file`.
 Model name / deployment name used by both backends. For Foundry, this must
 match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
 `gpt-4o`, `gpt-4.1-mini`, `gpt-5.4-mini`. Put in `.env.local` (see note above).
-For GPT-5 and o-series reasoning model names, portal AI requests use
-`max_completion_tokens` and omit unsupported sampling parameters such as
-`temperature`; other models continue to use `max_tokens`.
+The model name supplies a suggested request profile when no explicit profile
+is configured. New Token Manager credentials persist the resolved profile, so
+custom deployment names can override the suggestion without a code change.
+
+### LLM_REQUEST_PROFILE
+**Optional**
+**Allowed values:** `legacy`, `reasoning`
+
+Explicit request compatibility for env-configured inference. `legacy` sends
+`max_tokens` and configured sampling controls such as `temperature`.
+`reasoning` sends `max_completion_tokens` and omits unsupported sampling
+controls. When unset, the API suggests a profile from `LLM_MODEL` for backward
+compatibility.
 
 ## Prompt Storage Configuration
 

@@ -5,6 +5,8 @@ import { isUnexpected } from "@azure-rest/ai-inference";
 import {
   buildChatCompletionRequestBody,
   gatesSatisfyInvariant,
+  resolveChatCompletionRequestProfile,
+  type ChatCompletionRequestProfile,
   type GateId,
 } from "shared";
 import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
@@ -195,6 +197,7 @@ function parseJson(content: string): any {
 async function chat(
   llm: ChatClient,
   model: string,
+  requestProfile: ChatCompletionRequestProfile,
   systemPrompt: string,
   userMessage: string,
 ): Promise<string> {
@@ -207,6 +210,7 @@ async function chat(
       model,
       temperature: 0.3,
       maxTokens: 512,
+      requestProfile,
     }),
   });
 
@@ -229,12 +233,14 @@ async function chat(
 async function author(
   llm: ChatClient,
   model: string,
+  requestProfile: ChatCompletionRequestProfile,
   behavior: string,
   gates?: GateId[],
 ): Promise<{ prompt: string; suggestedId: string }> {
   const content = await chat(
     llm,
     model,
+    requestProfile,
     SYSTEM_PROMPT_AUTHOR,
     `NEW CRITERION TO CREATE:\n${behavior}${authorGateHint(gates)}`,
   );
@@ -277,6 +283,7 @@ async function suggestDeps(
   direction: SuggestDirection,
   llm: ChatClient,
   model: string,
+  requestProfile: ChatCompletionRequestProfile,
   behavior: string,
   pool: ExistingCriterion[],
 ): Promise<string[]> {
@@ -286,6 +293,7 @@ async function suggestDeps(
     const content = await chat(
       llm,
       model,
+      requestProfile,
       suggestSystemPrompt(direction),
       buildSuggestMessage(direction, behavior, pool),
     );
@@ -318,10 +326,18 @@ export async function generateCriteriaPrompt(
   newGates?: GateId[],
   model?: string,
 ): Promise<GenerateResult> {
-  const { client: llm, model: foundryModel } = await acquireInferenceClient();
+  const {
+    client: llm,
+    model: foundryModel,
+    requestProfile,
+  } = await acquireInferenceClient();
 
   // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
   const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
+  const effectiveRequestProfile = resolveChatCompletionRequestProfile(
+    requestProfile,
+    modelName,
+  );
 
   const parentPool = newGates
     ? existingCriteria.filter((c) => gatesSatisfyInvariant(c.gates, newGates))
@@ -331,9 +347,23 @@ export async function generateCriteriaPrompt(
     : existingCriteria;
 
   const [authored, suggestedParents, suggestedChildrenRaw] = await Promise.all([
-    author(llm, modelName, behavior, newGates),
-    suggestDeps("parents", llm, modelName, behavior, parentPool),
-    suggestDeps("children", llm, modelName, behavior, childPool),
+    author(llm, modelName, effectiveRequestProfile, behavior, newGates),
+    suggestDeps(
+      "parents",
+      llm,
+      modelName,
+      effectiveRequestProfile,
+      behavior,
+      parentPool,
+    ),
+    suggestDeps(
+      "children",
+      llm,
+      modelName,
+      effectiveRequestProfile,
+      behavior,
+      childPool,
+    ),
   ]);
 
   // The parent and child suggestion calls are independent, so the model can return

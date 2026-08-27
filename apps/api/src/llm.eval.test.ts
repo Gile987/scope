@@ -39,7 +39,11 @@
  */
 import { describe, it, expect } from "vitest";
 import { isUnexpected } from "@azure-rest/ai-inference";
-import { buildChatCompletionRequestBody, type GateId } from "shared";
+import {
+  buildChatCompletionRequestBody,
+  resolveChatCompletionRequestProfile,
+  type GateId,
+} from "shared";
 import {
   collectSampledGrades,
   majority,
@@ -133,13 +137,22 @@ async function inferenceClient() {
  * `@azure-rest/ai-inference`, which the transport-agnostic package must not.
  */
 const complete: ChatComplete = async ({ messages, model, temperature, maxTokens }) => {
-  const { client, model: handleModel } = await inferenceClient();
+  const {
+    client,
+    model: handleModel,
+    requestProfile,
+  } = await inferenceClient();
+  const modelName = model ?? handleModel ?? DEFAULT_MODEL;
   const response = await client.path("/chat/completions").post({
     body: buildChatCompletionRequestBody({
       messages,
-      model: model ?? handleModel ?? DEFAULT_MODEL,
+      model: modelName,
       temperature,
       maxTokens,
+      requestProfile: resolveChatCompletionRequestProfile(
+        requestProfile,
+        modelName,
+      ),
     }),
   });
 

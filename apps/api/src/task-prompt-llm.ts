@@ -2,7 +2,10 @@
 // Licensed under the MIT License.
 
 import { isUnexpected } from "@azure-rest/ai-inference";
-import { buildChatCompletionRequestBody } from "shared";
+import {
+  buildChatCompletionRequestBody,
+  resolveChatCompletionRequestProfile,
+} from "shared";
 import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
 
 // ---------------------------------------------------------------------------
@@ -84,10 +87,18 @@ export async function generateTaskPrompt(
 ): Promise<GenerateTaskPromptResult> {
   const { description, existingPrompt } = opts;
 
-  const { client: llm, model: foundryModel } = await acquireInferenceClient();
+  const {
+    client: llm,
+    model: foundryModel,
+    requestProfile,
+  } = await acquireInferenceClient();
 
   // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
   const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
+  const effectiveRequestProfile = resolveChatCompletionRequestProfile(
+    requestProfile,
+    modelName,
+  );
 
   const isVariation = !!existingPrompt;
   const systemPrompt = isVariation ? VARIATION_SYSTEM_PROMPT : GENERATE_SYSTEM_PROMPT;
@@ -104,6 +115,7 @@ export async function generateTaskPrompt(
       model: modelName,
       temperature: 0.7,
       maxTokens: 1024,
+      requestProfile: effectiveRequestProfile,
     }),
   });
 

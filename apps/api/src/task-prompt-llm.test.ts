@@ -29,6 +29,7 @@ vi.mock("./llm-token.js", () => ({
     client: { path: () => ({ post: mockPost }) },
     endpoint: "https://test.example.com",
     source: "azure-ai-foundry",
+    requestProfile: "legacy",
   })),
 }));
 

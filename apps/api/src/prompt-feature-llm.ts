@@ -6,6 +6,7 @@ import {
   buildChatCompletionRequestBody,
   PromptFeatureConfig,
   PromptFeatureResult,
+  resolveChatCompletionRequestProfile,
   SuggestedPromptFeature,
 } from "shared";
 import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
@@ -75,10 +76,18 @@ export async function generatePromptFeaturePrompt(
   existingFeatures: ExistingPromptFeature[] = [],
   model?: string,
 ): Promise<GeneratePromptFeatureResult> {
-  const { client: llm, model: foundryModel } = await acquireInferenceClient();
+  const {
+    client: llm,
+    model: foundryModel,
+    requestProfile,
+  } = await acquireInferenceClient();
 
   // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
   const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
+  const effectiveRequestProfile = resolveChatCompletionRequestProfile(
+    requestProfile,
+    modelName,
+  );
   const userMessage = buildGenerateUserMessage(behavior, existingFeatures);
 
   const response = await llm.path("/chat/completions").post({
@@ -90,6 +99,7 @@ export async function generatePromptFeaturePrompt(
       model: modelName,
       temperature: 0.3,
       maxTokens: 512,
+      requestProfile: effectiveRequestProfile,
     }),
   });
 
@@ -185,10 +195,18 @@ export async function extractPromptFeatures(
   features: PromptFeatureConfig[],
   model?: string,
 ): Promise<ExtractionResult> {
-  const { client: llm, model: foundryModel } = await acquireInferenceClient();
+  const {
+    client: llm,
+    model: foundryModel,
+    requestProfile,
+  } = await acquireInferenceClient();
 
   // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
   const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
+  const effectiveRequestProfile = resolveChatCompletionRequestProfile(
+    requestProfile,
+    modelName,
+  );
   const userMessage = buildExtractUserMessage(taskText, features);
 
   const response = await llm.path("/chat/completions").post({
@@ -200,6 +218,7 @@ export async function extractPromptFeatures(
       model: modelName,
       temperature: 0.1,  // Lower temperature for more deterministic detection
       maxTokens: 2048,
+      requestProfile: effectiveRequestProfile,
     }),
   });
 

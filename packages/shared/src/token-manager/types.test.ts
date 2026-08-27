@@ -5,16 +5,18 @@ import { describe, it, expect } from "vitest";
 import { parseAzureAiFoundrySecret } from "./types.js";
 
 describe("parseAzureAiFoundrySecret", () => {
-  it("parses a well-formed blob with endpoint, apiKey, and model", () => {
+  it("parses a well-formed blob with endpoint, apiKey, model, and request profile", () => {
     const raw = JSON.stringify({
       endpoint: "https://my-resource.services.ai.azure.com/models",
       apiKey: "secret-key",
       model: "gpt-4.1",
+      requestProfile: "legacy",
     });
     expect(parseAzureAiFoundrySecret(raw)).toEqual({
       endpoint: "https://my-resource.services.ai.azure.com/models",
       apiKey: "secret-key",
       model: "gpt-4.1",
+      requestProfile: "legacy",
     });
   });
 
@@ -22,6 +24,7 @@ describe("parseAzureAiFoundrySecret", () => {
     const raw = JSON.stringify({
       endpoint: "https://x.services.ai.azure.com/models",
       apiKey: "k",
+      requestProfile: undefined,
     });
     expect(parseAzureAiFoundrySecret(raw)).toEqual({
       endpoint: "https://x.services.ai.azure.com/models",
@@ -76,5 +79,14 @@ describe("parseAzureAiFoundrySecret", () => {
       model: 42,
     });
     expect(parseAzureAiFoundrySecret(raw)?.model).toBeUndefined();
+  });
+
+  it("rejects an unsupported request profile", () => {
+    const raw = JSON.stringify({
+      endpoint: "https://x",
+      apiKey: "k",
+      requestProfile: "future",
+    });
+    expect(parseAzureAiFoundrySecret(raw)).toBeNull();
   });
 });

@@ -20,7 +20,13 @@
  */
 import ModelClient, { type ModelClient as ModelClientType } from "@azure-rest/ai-inference";
 import { AzureKeyCredential } from "@azure/core-auth";
-import { TokenManagerClient, parseAzureAiFoundrySecret } from "shared";
+import {
+  TokenManagerClient,
+  parseAzureAiFoundrySecret,
+  parseChatCompletionRequestProfile,
+  resolveChatCompletionRequestProfile,
+  type ChatCompletionRequestProfile,
+} from "shared";
 
 const GITHUB_MODELS_ENDPOINT = "https://models.inference.ai.azure.com";
 
@@ -172,13 +178,35 @@ export interface InferenceClientHandle {
    * honour this when present (and fall back to `process.env.LLM_MODEL`).
    */
   model?: string;
+  /**
+   * Explicitly configured profile. When absent, callers infer a profile from
+   * the final per-request model name.
+   */
+  requestProfile?: ChatCompletionRequestProfile;
 }
 
 function logInferenceAcquired(handle: InferenceClientHandle): void {
   const model = handle.model || process.env.LLM_MODEL || "gpt-4.1";
-  console.log(
-    `[llm-token] inference provider: source=${handle.source} via=${handle.via} endpoint=${handle.endpoint} model=${model}`,
+  const requestProfile = resolveChatCompletionRequestProfile(
+    handle.requestProfile,
+    model,
   );
+  const profileSource = handle.requestProfile ? "configured" : "inferred";
+  console.log(
+    `[llm-token] inference provider: source=${handle.source} via=${handle.via} endpoint=${handle.endpoint} model=${model} requestProfile=${requestProfile} profileSource=${profileSource}`,
+  );
+}
+
+function getEnvRequestProfile(): ChatCompletionRequestProfile | undefined {
+  const raw = process.env.LLM_REQUEST_PROFILE;
+  if (!raw) return undefined;
+  const profile = parseChatCompletionRequestProfile(raw);
+  if (!profile) {
+    throw new Error(
+      `Invalid LLM_REQUEST_PROFILE '${raw}'. Expected 'legacy' or 'reasoning'.`,
+    );
+  }
+  return profile;
 }
 
 /**
@@ -198,6 +226,7 @@ async function tryAcquireFoundryFromTokenManager(): Promise<{
   endpoint: string;
   apiKey: string;
   model?: string;
+  requestProfile?: ChatCompletionRequestProfile;
 } | null> {
   const client = getTokenManagerClient();
   if (!client) return null;
@@ -223,11 +252,14 @@ export async function acquireInferenceClient(): Promise<InferenceClientHandle> {
   if (isFoundryConfigured()) {
     const endpoint = normalizeFoundryEndpoint(process.env.AZURE_AI_INFERENCE_ENDPOINT!);
     const apiKey = process.env.AZURE_AI_INFERENCE_API_KEY!;
+    const model = process.env.LLM_MODEL || "gpt-4.1";
     const handle: InferenceClientHandle = {
       client: ModelClient(endpoint, new AzureKeyCredential(apiKey)),
       endpoint,
       source: "azure-ai-foundry",
       via: "azure-ai-foundry-env",
+      model,
+      requestProfile: getEnvRequestProfile(),
     };
     logInferenceAcquired(handle);
     return handle;
@@ -236,12 +268,14 @@ export async function acquireInferenceClient(): Promise<InferenceClientHandle> {
   // 2. Azure AI Foundry via the Token Manager — preferred in production.
   const tmFoundry = await tryAcquireFoundryFromTokenManager();
   if (tmFoundry) {
+    const model = tmFoundry.model || process.env.LLM_MODEL || "gpt-4.1";
     const handle: InferenceClientHandle = {
       client: ModelClient(tmFoundry.endpoint, new AzureKeyCredential(tmFoundry.apiKey)),
       endpoint: tmFoundry.endpoint,
       source: "azure-ai-foundry",
       via: "azure-ai-foundry-token-manager",
-      model: tmFoundry.model,
+      model,
+      requestProfile: tmFoundry.requestProfile,
     };
     logInferenceAcquired(handle);
     return handle;
@@ -261,6 +295,7 @@ export async function acquireInferenceClient(): Promise<InferenceClientHandle> {
         endpoint: GITHUB_MODELS_ENDPOINT,
         source: "github-models",
         via,
+        requestProfile: getEnvRequestProfile(),
       };
       logInferenceAcquired(handle);
       return handle;

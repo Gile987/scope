@@ -5,7 +5,12 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { KeyType, KeyValidationResult, CreateKeyRequest } from "@/types";
+import type {
+  ChatCompletionRequestProfile,
+  KeyType,
+  KeyValidationResult,
+  CreateKeyRequest,
+} from "@/types";
 import { KEY_TYPE_LABELS, KEY_CAPABILITY_LABELS, KEY_TYPE_EXPECTED_CAPABILITIES } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -163,6 +168,33 @@ function StatusIcon({ status }: { status: string }) {
   }
 }
 
+export function inferFoundryRequestProfile(
+  model: string,
+): ChatCompletionRequestProfile {
+  return /^(?:gpt-5|o[1-9])(?:[.-]|$)/i.test(model.trim())
+    ? "reasoning"
+    : "legacy";
+}
+
+export function buildFoundryCredentialValue(options: {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  requestProfile?: ChatCompletionRequestProfile;
+}): string {
+  const endpoint = options.endpoint.trim().replace(/\/+$/, "");
+  const apiKey = options.apiKey.trim();
+  const model = options.model.trim();
+  return JSON.stringify({
+    endpoint,
+    apiKey,
+    ...(model ? { model } : {}),
+    requestProfile:
+      options.requestProfile ??
+      inferFoundryRequestProfile(model || "gpt-4.1"),
+  });
+}
+
 export function CreateToken() {
   const navigate = useNavigate();
 
@@ -175,6 +207,8 @@ export function CreateToken() {
   const [foundryEndpoint, setFoundryEndpoint] = useState("");
   const [foundryApiKey, setFoundryApiKey] = useState("");
   const [foundryModel, setFoundryModel] = useState("");
+  const [foundryRequestProfile, setFoundryRequestProfile] =
+    useState<ChatCompletionRequestProfile | undefined>();
   const [expiresAt, setExpiresAt] = useState("");
   const [comment, setComment] = useState("");
   const [previewResult, setPreviewResult] = useState<KeyValidationResult | null>(null);
@@ -186,12 +220,12 @@ export function CreateToken() {
    */
   const getSubmitValue = (): string => {
     if (type === "azure-ai-foundry") {
-      const endpoint = foundryEndpoint.trim().replace(/\/+$/, "");
-      const apiKey = foundryApiKey.trim();
-      const model = foundryModel.trim();
-      const payload: Record<string, string> = { endpoint, apiKey };
-      if (model) payload.model = model;
-      return JSON.stringify(payload);
+      return buildFoundryCredentialValue({
+        endpoint: foundryEndpoint,
+        apiKey: foundryApiKey,
+        model: foundryModel,
+        requestProfile: foundryRequestProfile,
+      });
     }
     return value.trim();
   };
@@ -417,6 +451,34 @@ export function CreateToken() {
                       />
                       <p className="text-[11px] text-muted-foreground">
                         If set, overrides the API's default <code>LLM_MODEL</code> for this key.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="foundry-request-profile" className="text-xs font-medium">
+                        Request compatibility
+                      </Label>
+                      <Select
+                        value={
+                          foundryRequestProfile ??
+                          inferFoundryRequestProfile(foundryModel || "gpt-4.1")
+                        }
+                        onValueChange={(profile) =>
+                          setFoundryRequestProfile(
+                            profile as ChatCompletionRequestProfile,
+                          )
+                        }
+                      >
+                        <SelectTrigger id="foundry-request-profile">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="legacy">Legacy chat model</SelectItem>
+                          <SelectItem value="reasoning">Reasoning model</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-muted-foreground">
+                        Suggested from the deployment name. Override it when a custom
+                        deployment name uses different request parameters.
                       </p>
                     </div>
                   </div>

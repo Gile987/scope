@@ -7,6 +7,7 @@ import {
   KeyValidationResult,
   deriveCapabilities,
   parseAzureAiFoundrySecret,
+  resolveChatCompletionRequestProfile,
   trimTrailingSlashes,
 } from "shared";
 
@@ -223,10 +224,15 @@ async function validateAzureAiFoundry(
   // Validate with the same model name production will use so a missing
   // deployment surfaces as an invalid key instead of a runtime 404.
   const probeModel = parsed.model || "gpt-4.1";
+  const requestProfile = resolveChatCompletionRequestProfile(
+    parsed.requestProfile,
+    probeModel,
+  );
   const body = JSON.stringify(buildChatCompletionRequestBody({
     messages: [{ role: "user", content: "ping" }],
     model: probeModel,
     maxTokens: 1,
+    requestProfile,
   }));
 
   try {
