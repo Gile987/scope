@@ -10,9 +10,19 @@ deployment controls its data, chooses its connected services, and sets its
 retention and access policies. Contact your deployment administrator for the
 policies that apply to your organization.
 
-Scope does not send data to the Scope project maintainers by default.
+## Microsoft does not collect Scope deployment data
+
+Scope does not send prompts, source code, run results, credentials, telemetry,
+or other deployment data to Microsoft or the Scope project maintainers by
+default. Microsoft does not operate a central Scope data-collection service.
 Operational telemetry is disabled unless the deployment operator configures
 it.
+
+A deployment operator can choose to use Microsoft services, such as Azure
+Application Insights, Azure storage, Azure databases, GitHub, or Microsoft
+hosted AI models. In that case, those services process the data the operator
+sends to them under the operator's applicable agreements and configuration.
+This is not data collection by the Scope project itself.
 
 ## Data Scope handles
 
