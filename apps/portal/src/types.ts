@@ -534,8 +534,6 @@ export type KeyValidationStatus =
   | "error"
   | "unknown";
 
-export type ChatCompletionRequestProfile = "legacy" | "reasoning";
-
 export interface KeyDocument {
   _id: string;
   type: KeyType;

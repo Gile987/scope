@@ -3,12 +3,11 @@
 
 import { isUnexpected } from "@azure-rest/ai-inference";
 import {
-  buildChatCompletionRequestBody,
   PromptFeatureConfig,
   PromptFeatureResult,
-  resolveChatCompletionRequestProfile,
   SuggestedPromptFeature,
 } from "shared";
+import { postAdaptiveChatCompletion } from "./adaptive-chat-completions.js";
 import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
 
 // ---------------------------------------------------------------------------
@@ -78,29 +77,24 @@ export async function generatePromptFeaturePrompt(
 ): Promise<GeneratePromptFeatureResult> {
   const {
     client: llm,
+    endpoint,
     model: foundryModel,
-    requestProfile,
   } = await acquireInferenceClient();
 
   // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
   const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
-  const effectiveRequestProfile = resolveChatCompletionRequestProfile(
-    requestProfile,
-    modelName,
-  );
   const userMessage = buildGenerateUserMessage(behavior, existingFeatures);
 
-  const response = await llm.path("/chat/completions").post({
-    body: buildChatCompletionRequestBody({
-      messages: [
-        { role: "system", content: GENERATE_SYSTEM_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-      model: modelName,
-      temperature: 0.3,
-      maxTokens: 512,
-      requestProfile: effectiveRequestProfile,
-    }),
+  const response = await postAdaptiveChatCompletion({
+    endpoint,
+    model: modelName,
+    messages: [
+      { role: "system", content: GENERATE_SYSTEM_PROMPT },
+      { role: "user", content: userMessage },
+    ],
+    temperature: 0.3,
+    maxTokens: 512,
+    send: (body) => llm.path("/chat/completions").post({ body }),
   });
 
   if (isUnexpected(response)) {
@@ -197,29 +191,24 @@ export async function extractPromptFeatures(
 ): Promise<ExtractionResult> {
   const {
     client: llm,
+    endpoint,
     model: foundryModel,
-    requestProfile,
   } = await acquireInferenceClient();
 
   // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
   const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
-  const effectiveRequestProfile = resolveChatCompletionRequestProfile(
-    requestProfile,
-    modelName,
-  );
   const userMessage = buildExtractUserMessage(taskText, features);
 
-  const response = await llm.path("/chat/completions").post({
-    body: buildChatCompletionRequestBody({
-      messages: [
-        { role: "system", content: EXTRACT_SYSTEM_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-      model: modelName,
-      temperature: 0.1,  // Lower temperature for more deterministic detection
-      maxTokens: 2048,
-      requestProfile: effectiveRequestProfile,
-    }),
+  const response = await postAdaptiveChatCompletion({
+    endpoint,
+    model: modelName,
+    messages: [
+      { role: "system", content: EXTRACT_SYSTEM_PROMPT },
+      { role: "user", content: userMessage },
+    ],
+    temperature: 0.1,
+    maxTokens: 2048,
+    send: (body) => llm.path("/chat/completions").post({ body }),
   });
 
   if (isUnexpected(response)) {

@@ -40,10 +40,9 @@
 import { describe, it, expect } from "vitest";
 import { isUnexpected } from "@azure-rest/ai-inference";
 import {
-  buildChatCompletionRequestBody,
-  resolveChatCompletionRequestProfile,
   type GateId,
 } from "shared";
+import { postAdaptiveChatCompletion } from "./adaptive-chat-completions.js";
 import {
   collectSampledGrades,
   majority,
@@ -139,21 +138,17 @@ async function inferenceClient() {
 const complete: ChatComplete = async ({ messages, model, temperature, maxTokens }) => {
   const {
     client,
+    endpoint,
     model: handleModel,
-    requestProfile,
   } = await inferenceClient();
   const modelName = model ?? handleModel ?? DEFAULT_MODEL;
-  const response = await client.path("/chat/completions").post({
-    body: buildChatCompletionRequestBody({
-      messages,
-      model: modelName,
-      temperature,
-      maxTokens,
-      requestProfile: resolveChatCompletionRequestProfile(
-        requestProfile,
-        modelName,
-      ),
-    }),
+  const response = await postAdaptiveChatCompletion({
+    endpoint,
+    model: modelName,
+    messages,
+    temperature,
+    maxTokens,
+    send: (body) => client.path("/chat/completions").post({ body }),
   });
 
   if (isUnexpected(response)) {

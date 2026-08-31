@@ -2,10 +2,7 @@
 // Licensed under the MIT License.
 
 import { isUnexpected } from "@azure-rest/ai-inference";
-import {
-  buildChatCompletionRequestBody,
-  resolveChatCompletionRequestProfile,
-} from "shared";
+import { postAdaptiveChatCompletion } from "./adaptive-chat-completions.js";
 import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
 
 // ---------------------------------------------------------------------------
@@ -89,16 +86,12 @@ export async function generateTaskPrompt(
 
   const {
     client: llm,
+    endpoint,
     model: foundryModel,
-    requestProfile,
   } = await acquireInferenceClient();
 
   // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
   const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
-  const effectiveRequestProfile = resolveChatCompletionRequestProfile(
-    requestProfile,
-    modelName,
-  );
 
   const isVariation = !!existingPrompt;
   const systemPrompt = isVariation ? VARIATION_SYSTEM_PROMPT : GENERATE_SYSTEM_PROMPT;
@@ -106,17 +99,16 @@ export async function generateTaskPrompt(
     ? buildVariationUserMessage(existingPrompt!, description)
     : buildGenerateUserMessage(description, existingPrompts);
 
-  const response = await llm.path("/chat/completions").post({
-    body: buildChatCompletionRequestBody({
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      model: modelName,
-      temperature: 0.7,
-      maxTokens: 1024,
-      requestProfile: effectiveRequestProfile,
-    }),
+  const response = await postAdaptiveChatCompletion({
+    endpoint,
+    model: modelName,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ],
+    temperature: 0.7,
+    maxTokens: 1024,
+    send: (body) => llm.path("/chat/completions").post({ body }),
   });
 
   if (isUnexpected(response)) {

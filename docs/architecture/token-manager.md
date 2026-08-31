@@ -58,22 +58,22 @@ The Token Manager uses a **capability-based model** where tokens are associated 
 | `github-oauth` | `gho_` / `ghu_` | OAuth token from `gh auth login` |
 | `github-oauth-cookie-state` | `{` (JSON) | Browser-extracted session cookies |
 | `anthropic-api-key` | `sk-ant-` | Anthropic API key for Claude |
-| `azure-ai-foundry` | `{` (JSON) | Endpoint + API key + optional model and request profile for an Azure AI Foundry chat-completions deployment |
+| `azure-ai-foundry` | `{` (JSON) | Endpoint + API key + optional model for an Azure AI Foundry chat-completions deployment |
 
 The `azure-ai-foundry` secret stores a JSON blob:
 
 ```json
-{ "endpoint": "https://<resource>.services.ai.azure.com/models", "apiKey": "…", "model": "gpt-4.1-mini", "requestProfile": "legacy" }
+{ "endpoint": "https://<resource>.services.ai.azure.com/models", "apiKey": "…", "model": "gpt-4.1-mini" }
 ```
 
-It is registered from the Portal at `/secrets/keys/new`. The Portal suggests
-`legacy` or `reasoning` from the deployment name and lets the user override the
-selection before registration. The persisted profile controls whether requests
-use `max_tokens` with sampling controls or `max_completion_tokens` without
-them. The API validates new keys with that profile, so an incompatible
-selection, misconfigured endpoint, or wrong deployment name surfaces at
-registration time. Existing credentials without a profile retain model-name
-inference as a compatibility fallback.
+It is registered from the Portal at `/secrets/keys/new`. Credential validation
+starts with `max_completion_tokens` and configured sampling controls, then
+retries only when Foundry returns a structured unsupported-parameter error.
+The API uses the same negotiation at runtime and caches the learned shape in
+memory by endpoint and deployment. The cache has no time-based expiration:
+compatibility is relearned after an API process restart or when Azure rejects a
+cached shape. Credentials written by earlier versions may contain a
+`requestProfile` field; the parser accepts and ignores it.
 
 ### Capabilities
 

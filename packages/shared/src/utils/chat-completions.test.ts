@@ -4,82 +4,95 @@
 import { describe, expect, it } from "vitest";
 import {
   buildChatCompletionRequestBody,
-  inferChatCompletionRequestProfile,
-  parseChatCompletionRequestProfile,
-  resolveChatCompletionRequestProfile,
+  DEFAULT_CHAT_COMPLETION_COMPATIBILITY,
+  nextChatCompletionCompatibility,
 } from "./chat-completions.js";
 
 const messages = [{ role: "user" as const, content: "ping" }];
 
 describe("chat completion request bodies", () => {
-  it.each(["gpt-5", "gpt-5.4-mini", "o1", "o4-mini"])(
-    "suggests and uses the reasoning profile for %s",
-    (model) => {
-      expect(inferChatCompletionRequestProfile(model)).toBe("reasoning");
-      expect(
-        buildChatCompletionRequestBody({
-          messages,
-          model,
-          maxTokens: 512,
-          temperature: 0.3,
-          requestProfile: "reasoning",
-        }),
-      ).toEqual({
-        messages,
-        model,
-        max_completion_tokens: 512,
-      });
-    },
-  );
-
-  it("uses legacy parameters for non-reasoning models", () => {
+  it("uses modern token limits and temperature by default", () => {
     expect(
       buildChatCompletionRequestBody({
         messages,
-        model: "gpt-4.1",
+        model: "custom-deployment",
         maxTokens: 512,
         temperature: 0.3,
-        requestProfile: "legacy",
+        compatibility: DEFAULT_CHAT_COMPLETION_COMPATIBILITY,
       }),
     ).toEqual({
       messages,
-      model: "gpt-4.1",
-      max_tokens: 512,
+      model: "custom-deployment",
+      max_completion_tokens: 512,
       temperature: 0.3,
     });
   });
 
-  it("uses an explicit profile instead of the model-name suggestion", () => {
+  it("builds a learned legacy request without temperature", () => {
     expect(
       buildChatCompletionRequestBody({
         messages,
-        model: "custom-production-deployment",
+        model: "custom-deployment",
         maxTokens: 512,
         temperature: 0.3,
-        requestProfile: "reasoning",
+        compatibility: {
+          tokenLimitParameter: "max_tokens",
+          includeTemperature: false,
+        },
       }),
     ).toEqual({
       messages,
-      model: "custom-production-deployment",
-      max_completion_tokens: 512,
+      model: "custom-deployment",
+      max_tokens: 512,
     });
   });
 });
 
-describe("chat completion request profiles", () => {
-  it("suggests the legacy profile for other and custom deployment names", () => {
-    expect(inferChatCompletionRequestProfile("gpt-4.1")).toBe("legacy");
-    expect(inferChatCompletionRequestProfile("custom-production-deployment")).toBe("legacy");
+describe("chat completion compatibility transitions", () => {
+  it("switches token-limit parameters from structured Azure errors", () => {
+    expect(
+      nextChatCompletionCompatibility(
+        DEFAULT_CHAT_COMPLETION_COMPATIBILITY,
+        {
+          error: {
+            code: "unsupported_parameter",
+            param: "max_completion_tokens",
+          },
+        },
+      ),
+    ).toEqual({
+      tokenLimitParameter: "max_tokens",
+      includeTemperature: true,
+    });
   });
 
-  it("parses only supported explicit profiles", () => {
-    expect(parseChatCompletionRequestProfile("legacy")).toBe("legacy");
-    expect(parseChatCompletionRequestProfile("reasoning")).toBe("reasoning");
-    expect(parseChatCompletionRequestProfile("future")).toBeUndefined();
+  it("removes temperature from Model Inference structured errors", () => {
+    expect(
+      nextChatCompletionCompatibility(
+        DEFAULT_CHAT_COMPLETION_COMPATIBILITY,
+        {
+          code: "parameter_not_supported",
+          detail: { loc: ["body", "temperature"] },
+        },
+      ),
+    ).toEqual({
+      tokenLimitParameter: "max_completion_tokens",
+      includeTemperature: false,
+    });
   });
 
-  it("prefers explicit configuration and otherwise infers a fallback", () => {
-    expect(resolveChatCompletionRequestProfile("reasoning", "custom-name")).toBe("reasoning");
-    expect(resolveChatCompletionRequestProfile(undefined, "gpt-5.4-mini")).toBe("reasoning");
+  it("does not retry unrelated or unstructured errors", () => {
+    expect(
+      nextChatCompletionCompatibility(
+        DEFAULT_CHAT_COMPLETION_COMPATIBILITY,
+        { error: { code: "invalid_request_error", param: "messages" } },
+      ),
+    ).toBeUndefined();
+    expect(
+      nextChatCompletionCompatibility(
+        DEFAULT_CHAT_COMPLETION_COMPATIBILITY,
+        { error: { message: "max_completion_tokens is unsupported" } },
+      ),
+    ).toBeUndefined();
   });
 });

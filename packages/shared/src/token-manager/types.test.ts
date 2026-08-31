@@ -5,18 +5,16 @@ import { describe, it, expect } from "vitest";
 import { parseAzureAiFoundrySecret } from "./types.js";
 
 describe("parseAzureAiFoundrySecret", () => {
-  it("parses a well-formed blob with endpoint, apiKey, model, and request profile", () => {
+  it("parses a well-formed blob with endpoint, apiKey, and model", () => {
     const raw = JSON.stringify({
       endpoint: "https://my-resource.services.ai.azure.com/models",
       apiKey: "secret-key",
       model: "gpt-4.1",
-      requestProfile: "legacy",
     });
     expect(parseAzureAiFoundrySecret(raw)).toEqual({
       endpoint: "https://my-resource.services.ai.azure.com/models",
       apiKey: "secret-key",
       model: "gpt-4.1",
-      requestProfile: "legacy",
     });
   });
 
@@ -24,7 +22,6 @@ describe("parseAzureAiFoundrySecret", () => {
     const raw = JSON.stringify({
       endpoint: "https://x.services.ai.azure.com/models",
       apiKey: "k",
-      requestProfile: undefined,
     });
     expect(parseAzureAiFoundrySecret(raw)).toEqual({
       endpoint: "https://x.services.ai.azure.com/models",
@@ -81,12 +78,15 @@ describe("parseAzureAiFoundrySecret", () => {
     expect(parseAzureAiFoundrySecret(raw)?.model).toBeUndefined();
   });
 
-  it("rejects an unsupported request profile", () => {
+  it("ignores request profiles from credentials created by older versions", () => {
     const raw = JSON.stringify({
       endpoint: "https://x",
       apiKey: "k",
       requestProfile: "future",
     });
-    expect(parseAzureAiFoundrySecret(raw)).toBeNull();
+    expect(parseAzureAiFoundrySecret(raw)).toEqual({
+      endpoint: "https://x",
+      apiKey: "k",
+    });
   });
 });

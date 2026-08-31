@@ -7,11 +7,6 @@
  * These types are shared between the Token Manager service and its clients
  * (workers, judge, API proxy).
  */
-import {
-  parseChatCompletionRequestProfile,
-  type ChatCompletionRequestProfile,
-} from "../utils/chat-completions.js";
-
 /**
  * The kind of credential stored (key format).
  */
@@ -151,8 +146,6 @@ export interface AzureAiFoundrySecretValue {
   apiKey: string;
   /** Optional deployment / model name override (e.g. gpt-4.1-mini). */
   model?: string;
-  /** Request parameters supported by this deployment. */
-  requestProfile?: ChatCompletionRequestProfile;
 }
 
 /**
@@ -184,13 +177,6 @@ export function parseAzureAiFoundrySecret(raw: string): AzureAiFoundrySecretValu
       parsed.endpoint.trim() !== "" &&
       parsed.apiKey.trim() !== ""
     ) {
-      const requestProfile =
-        "requestProfile" in parsed
-          ? parseChatCompletionRequestProfile(parsed.requestProfile)
-          : undefined;
-      if ("requestProfile" in parsed && requestProfile === undefined) {
-        return null;
-      }
       return {
         endpoint: trimTrailingSlashes(parsed.endpoint.trim()),
         apiKey: parsed.apiKey.trim(),
@@ -198,7 +184,6 @@ export function parseAzureAiFoundrySecret(raw: string): AzureAiFoundrySecretValu
           "model" in parsed && typeof parsed.model === "string" && parsed.model.trim()
             ? parsed.model.trim()
             : undefined,
-        requestProfile,
       };
     }
     return null;
