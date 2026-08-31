@@ -711,6 +711,112 @@ How far the queue-processor pushes out a duplicate message's visibility when the
 
 TTL applied to per-run liveness heartbeat keys in Redis (`run-heartbeat:<runId>`). The TTL is refreshed on every beat (every 15s), so the key only expires when the worker stops beating. Set comfortably above `SCOPE_RUN_HEARTBEAT_STALE_MS` so a brief beat delay never causes premature TTL expiry; the default gives 2.5× the staleness threshold.
 
+## API Authentication
+
+The API verifies Microsoft Entra ID access tokens and attaches the caller's
+identity to each request (`req.user`). Authentication is **identity-only and
+non-breaking**: when all of these variables are unset the API still boots and
+treats every caller as anonymous, so existing unauthenticated clients (e.g. the
+report-generator worker) keep working. A partial configuration fails startup
+rather than silently disabling authentication. Once configured, a valid bearer
+token is required only where a route opts in — today the only such route is
+`GET /api/v1/users/me`. A malformed/expired token is always rejected with `401`;
+a *missing* token stays anonymous.
+
+Authorization (roles/permissions enforcement) is **not** part of this milestone.
+
+### AUTH_PROVIDER
+**Default:** (not set)
+**Type:** string (`entra`)
+
+Selects the identity-provider implementation. Set to `entra` to enable Microsoft
+Entra ID token verification. When unset, auth is disabled and all callers are
+anonymous.
+
+### AUTH_AUTHORITY
+**Type:** URL string — **Required when `AUTH_PROVIDER` is set**
+
+OIDC authority used to discover the JWKS (signing keys) and validate the token
+issuer. For multi-tenant Entra apps this is typically
+`https://login.microsoftonline.com/common`. Point it at the `entra-local`
+emulator for offline development
+(e.g. `https://localhost:8443/<tenant>`). The JWKS URI is derived as
+`<AUTH_AUTHORITY>/discovery/v2.0/keys` unless `AUTH_JWKS_URI` is set.
+
+### AUTH_ISSUER_TEMPLATE
+**Default:** `https://login.microsoftonline.com/{tenantid}/v2.0`
+**Type:** URL template string with a `{tenantid}` placeholder
+
+Per-tenant issuer the token's `iss` claim must match; `{tenantid}` is substituted
+from each token's `tid`. Override this for a self-hosted issuer whose URL differs
+from Entra cloud — e.g. the `entra-local` emulator uses
+`https://localhost:8443/{tenantid}/v2.0`. Verification stays multi-tenant: any
+tenant is accepted as long as its issuer matches this template.
+
+### AUTH_JWKS_URI
+**Default:** derived as `<AUTH_AUTHORITY>/discovery/v2.0/keys`
+**Type:** URL string
+
+Explicit JWKS (signing keys) endpoint. Set this only when the JWKS URL cannot be
+derived from `AUTH_AUTHORITY`. The `entra-local` emulator's default JWKS
+(`<authority>/discovery/v2.0/keys`) already matches the derivation, so this is
+usually left unset.
+
+> **Local dev TLS.** The `entra-local` emulator serves a self-signed certificate
+> over HTTPS. Because token verification fetches the JWKS over that channel,
+> either trust the emulator CA or set `NODE_TLS_REJECT_UNAUTHORIZED=0` for the
+> API in local development only — never in production.
+
+### AUTH_API_CLIENT_ID
+**Type:** string (GUID) — **Required when `AUTH_PROVIDER` is set**
+
+The API's App Registration (client) ID. Verified as the token `aud` (audience)
+so tokens minted for other applications are rejected.
+
+### AUTH_CLI_CLIENT_ID
+**Type:** string (GUID)
+
+The public client ID advertised to the CLI for interactive sign-in. Reserved for
+the client-auth milestone; not used by API verification.
+
+### AUTH_PORTAL_CLIENT_ID
+**Type:** string (GUID)
+
+The public client ID advertised to the Portal for interactive sign-in. Reserved
+for the client-auth milestone; not used by API verification.
+
+### AUTH_SCOPES
+**Default:** (empty)
+**Type:** comma/space-separated string
+
+Scopes the CLI/Portal should request when acquiring an access token for the API
+(e.g. `api://<AUTH_API_CLIENT_ID>/access`). Advertised to clients; not consumed
+by API verification.
+
+### AUTH_BOOTSTRAP_ADMINS
+**Default:** (empty)
+**Type:** comma-separated list of identity keys
+
+Identities to promote to the `admin` role on first login, formatted as
+`${idp}:${idpTenant}/${idpSubject}` (e.g.
+`entra:00000000-0000-0000-0000-000000000000/11111111-1111-1111-1111-111111111111`).
+Promotion requires `email_verified = true` and an explicit tenant match in
+`AUTH_BOOTSTRAP_TENANTS`. It is **promote-only**: an existing admin is never
+demoted, and users not listed here are never auto-promoted.
+
+### AUTH_BOOTSTRAP_TENANTS
+**Default:** (empty)
+**Type:** comma-separated list of tenant IDs
+
+Tenant allowlist that gates admin bootstrap. This setting is required when
+`AUTH_BOOTSTRAP_ADMINS` is non-empty; otherwise the API fails startup. An
+identity is promoted only when its tenant is explicitly listed here.
+
+> **Future — Graph profile enrichment.** `email`/`displayName` are read directly
+> from the verified token claims today (no Microsoft Graph call, no client
+> secret). A later On-Behalf-Of enrichment would introduce
+> `AUTH_API_CLIENT_SECRET`; it is **not** used now.
+
 ## Token Manager Configuration
 
 ### TOKEN_MANAGER_URL

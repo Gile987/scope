@@ -196,6 +196,7 @@ export function createAllMockDependencies() {
   const skillRevisionCollection = createMockCollection();
   const profileCollection = createMockCollection();
   const profileVersionCollection = createMockCollection();
+  const usersCollection = createMockCollection();
   const taskPromptStore = createMockTaskPromptStore();
   const skillRevisionStore = createMockSkillRevisionStore();
   const skillResolver = createMockSkillResolver();
@@ -220,6 +221,7 @@ export function createAllMockDependencies() {
     skillRevisionCollection,
     profileCollection,
     profileVersionCollection,
+    usersCollection,
     taskPromptStore,
     skillRevisionStore,
     skillResolver,
@@ -244,6 +246,7 @@ export function createAllMockDependencies() {
     skillRevisionCollection: Collection;
     profileCollection: Collection;
     profileVersionCollection: Collection;
+    usersCollection: Collection;
     taskPromptStore: ReturnType<typeof createMockTaskPromptStore>;
     skillRevisionStore: ReturnType<typeof createMockSkillRevisionStore>;
     skillResolver: ReturnType<typeof createMockSkillResolver>;

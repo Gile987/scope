@@ -3549,6 +3549,32 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "type": "object",
       },
+      "UserMeResponse": {
+        "properties": {
+          "displayName": {
+            "type": "string",
+          },
+          "email": {
+            "type": "string",
+          },
+          "id": {
+            "type": "string",
+          },
+          "idp": {
+            "type": "string",
+          },
+          "idpTenant": {
+            "type": "string",
+          },
+          "role": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "id",
+        ],
+        "type": "object",
+      },
       "ValidateKeyInput": {
         "properties": {
           "token": {
@@ -11041,6 +11067,32 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "summary": "Toggle feature flag on task prompt",
         "tags": [
           "Task Prompts",
+        ],
+      },
+    },
+    "/api/v1/users/me": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserMeResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "401": {
+            "description": "Not authenticated",
+          },
+          "503": {
+            "description": "Authentication service unavailable",
+          },
+        },
+        "summary": "Get the authenticated user's identity",
+        "tags": [
+          "Users",
         ],
       },
     },

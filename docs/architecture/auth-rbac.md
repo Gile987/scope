@@ -183,7 +183,8 @@ The provider is instantiated from env in API bootstrap:
 AUTH_PROVIDER=entra                # selects implementation
 AUTH_AUTHORITY=https://login.microsoftonline.com/common   # multi-tenant (or /organizations)
 AUTH_API_CLIENT_ID=<api-app-id>    # expected audience (pinned)
-AUTH_CLIENT_ID=<public-client-id>  # CLI/portal client id (hardcoded by clients too)
+AUTH_CLI_CLIENT_ID=<cli-client-id>        # public CLI client id
+AUTH_PORTAL_CLIENT_ID=<portal-client-id>  # public Portal client id
 AUTH_SCOPES=api://<api-app-id>/access_as_user
 # Bootstrap admins are matched on the *verified subject*, NOT a mutable email — see §2 / Q C:
 AUTH_BOOTSTRAP_ADMINS=entra:<tid>/<oid>,entra:<tid>/<oid>   # (idp:tenant/subject) tuples
