@@ -67,8 +67,10 @@ The `azure-ai-foundry` secret stores a JSON blob:
 ```
 
 It is registered from the Portal at `/secrets/keys/new`. Credential validation
-starts with `max_completion_tokens` and configured sampling controls, then
-retries only when Foundry returns a structured unsupported-parameter error.
+uses a 16-token completion budget, starts with `max_completion_tokens` and
+configured sampling controls, then retries only when Foundry returns a
+structured unsupported-parameter error. Output-limit and other unrelated
+client errors remain validation failures.
 The API uses the same negotiation at runtime and caches the learned shape in
 memory by endpoint and deployment. The cache has no time-based expiration:
 compatibility is relearned after an API process restart or when Azure rejects a

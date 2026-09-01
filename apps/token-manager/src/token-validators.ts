@@ -232,7 +232,7 @@ async function validateAzureAiFoundry(
       const body = JSON.stringify(buildChatCompletionRequestBody({
         messages: [{ role: "user", content: "ping" }],
         model: probeModel,
-        maxTokens: 1,
+        maxTokens: 16,
         temperature: 0.3,
         compatibility,
       }));

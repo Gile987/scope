@@ -66,6 +66,26 @@ describe("chat completion compatibility transitions", () => {
     });
   });
 
+  it("switches rejected legacy token limits back to modern token limits", () => {
+    expect(
+      nextChatCompletionCompatibility(
+        {
+          tokenLimitParameter: "max_tokens",
+          includeTemperature: true,
+        },
+        {
+          error: {
+            code: "unsupported_parameter",
+            param: "max_tokens",
+          },
+        },
+      ),
+    ).toEqual({
+      tokenLimitParameter: "max_completion_tokens",
+      includeTemperature: true,
+    });
+  });
+
   it("removes temperature from Model Inference structured errors", () => {
     expect(
       nextChatCompletionCompatibility(
