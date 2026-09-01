@@ -167,6 +167,75 @@ describe("validateToken", () => {
       );
     });
 
+    it("negotiates a compatible request shape from structured errors", async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              error: {
+                code: "unsupported_parameter",
+                param: "max_completion_tokens",
+              },
+            }),
+            { status: 400 },
+          ),
+        )
+        .mockResolvedValueOnce(new Response(null, { status: 200 }));
+
+      const result = await validateToken("azure-ai-foundry", JSON.stringify({
+        endpoint: "https://example.services.ai.azure.com/models",
+        apiKey: "foundry-key",
+        model: "custom-production-deployment",
+      }));
+
+      expect(result.status).toBe("valid");
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      const firstInit = fetchSpy.mock.calls[0][1] as RequestInit;
+      expect(JSON.parse(firstInit.body as string)).toEqual({
+        messages: [{ role: "user", content: "ping" }],
+        model: "custom-production-deployment",
+        max_completion_tokens: 1,
+        temperature: 0.3,
+      });
+
+      const secondInit = fetchSpy.mock.calls[1][1] as RequestInit;
+      expect(JSON.parse(secondInit.body as string)).toEqual({
+        messages: [{ role: "user", content: "ping" }],
+        model: "custom-production-deployment",
+        max_tokens: 1,
+        temperature: 0.3,
+      });
+    });
+
+    it("negotiates from Model Inference 422 compatibility errors", async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              code: "parameter_not_supported",
+              detail: { loc: ["body", "temperature"] },
+            }),
+            { status: 422 },
+          ),
+        )
+        .mockResolvedValueOnce(new Response(null, { status: 200 }));
+
+      const result = await validateToken("azure-ai-foundry", JSON.stringify({
+        endpoint: "https://example.services.ai.azure.com/models",
+        apiKey: "foundry-key",
+        model: "custom-production-deployment",
+      }));
+
+      expect(result.status).toBe("valid");
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      const secondInit = fetchSpy.mock.calls[1][1] as RequestInit;
+      expect(JSON.parse(secondInit.body as string)).not.toHaveProperty(
+        "temperature",
+      );
+    });
+
     it("rejects non-azure endpoint without making a network call", async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch");
 
