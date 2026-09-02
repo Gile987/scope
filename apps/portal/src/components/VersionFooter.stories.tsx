@@ -32,7 +32,9 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
   play: async ({ canvas }) => {
     await expect(canvas.getByText(/Portal:/)).toBeVisible();
-    await expect(canvas.getByText(/This is an AI system, not a human/)).toBeVisible();
+    await expect(
+      canvas.getByText(/This is an AI evaluation platform not a human/),
+    ).toBeVisible();
     await expect(
       canvas.getByRole("link", { name: "Data collection and privacy" }),
     ).toHaveAttribute(
