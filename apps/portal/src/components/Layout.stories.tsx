@@ -24,7 +24,7 @@ export const Collapsed: Story = {
     localStorage.removeItem("scope:layout:sidebar-expanded");
     await expect(canvas.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
     await expect(
-      canvas.getByText(/This is an AI evaluation platform not a human/),
+      canvas.getByText(/This is an AI evaluation platform\./),
     ).toBeVisible();
   },
 };

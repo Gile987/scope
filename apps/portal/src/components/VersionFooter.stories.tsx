@@ -33,7 +33,7 @@ export const Default: Story = {
   play: async ({ canvas }) => {
     await expect(canvas.getByText(/Portal:/)).toBeVisible();
     await expect(
-      canvas.getByText(/This is an AI evaluation platform not a human/),
+      canvas.getByText(/This is an AI evaluation platform\./),
     ).toBeVisible();
     await expect(
       canvas.getByRole("link", { name: "Data collection and privacy" }),

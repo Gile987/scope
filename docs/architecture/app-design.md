@@ -520,13 +520,12 @@ The Portal mirrors the API's fail-fast model: it holds a **selected project** (n
 ### User disclosures
 
 The shared `components/VersionFooter.tsx` tells users that Scope is an AI
-evaluation platform rather than a human and that they should not attribute
-human qualities or intent to it. The notice also warns that AI-generated
-content may be inaccurate and asks users to review and edit generated output.
-The footer links to the public data collection and privacy document so users
-can understand what Scope handles and why. `components/Layout.tsx` renders this
-footer on both standard and full-bleed routes so the disclosures remain visible
-throughout the Portal.
+evaluation platform and that they should not attribute human qualities or
+intent to it. The notice also warns that AI-generated content may be inaccurate
+and asks users to review and edit generated output. The footer links to the
+public data collection and privacy document so users can understand what Scope
+handles and why. `components/Layout.tsx` renders this footer on both standard
+and full-bleed routes so the disclosures remain visible throughout the Portal.
 
 ### Hover-preview + navigate badges
 

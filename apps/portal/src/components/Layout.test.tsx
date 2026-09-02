@@ -81,7 +81,7 @@ describe("Layout", () => {
     renderLayout("/runs");
 
     expect(
-      screen.getByText(/This is an AI evaluation platform not a human/),
+      screen.getByText(/This is an AI evaluation platform\./),
     ).toBeTruthy();
     expect(
       screen.getByRole("link", { name: "Data collection and privacy" }),

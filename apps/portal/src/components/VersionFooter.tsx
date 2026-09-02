@@ -52,9 +52,9 @@ export function VersionFooter() {
     <footer className="shrink-0 border-t bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
       <div className="flex flex-col items-center gap-1 text-center">
         <p className="text-[11px]">
-          This is an AI evaluation platform not a human. Do not attribute human
-          qualities or intent to it. AI-generated content may be inaccurate. Review and
-          edit generated output before use.
+          This is an AI evaluation platform. Do not attribute human qualities or intent
+          to it. AI-generated content may be inaccurate. Review and edit generated
+          output before use.
         </p>
         <div className="flex flex-wrap justify-center gap-x-6 gap-y-1">
           <a
