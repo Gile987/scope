@@ -52,10 +52,9 @@ export function VersionFooter() {
     <footer className="border-t bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
       <div className="flex flex-col items-center gap-1 text-center">
         <p>
-          <span className="font-medium text-foreground/80">AI notice:</span> This is
-          an AI system, not a human. Do not attribute human qualities or intent to it.
-          AI-generated content may be inaccurate. Review and edit generated output
-          before use.
+          This is an AI system, not a human. Do not attribute human qualities or intent
+          to it. AI-generated content may be inaccurate. Review and edit generated
+          output before use.
         </p>
         <div className="flex flex-wrap justify-center gap-x-6 gap-y-1">
           <a
