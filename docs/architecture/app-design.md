@@ -524,7 +524,9 @@ evaluation platform rather than a human and that they should not attribute
 human qualities or intent to it. The notice also warns that AI-generated
 content may be inaccurate and asks users to review and edit generated output.
 The footer links to the public data collection and privacy document so users
-can understand what Scope handles and why.
+can understand what Scope handles and why. `components/Layout.tsx` renders this
+footer on both standard and full-bleed routes so the disclosures remain visible
+throughout the Portal.
 
 ### Hover-preview + navigate badges
 
