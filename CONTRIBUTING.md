@@ -138,10 +138,49 @@ MongoDB is CosmosDB-compatible — avoid MongoDB features that CosmosDB's MongoD
 6. Open the PR and complete the CLA check if the bot asks you to. Address review feedback and keep the
    branch up to date with `main`.
 
+## Third-party notices
+
+Scope redistributes npm production dependencies in its service images and Rust
+crates in the gateway binary. Their attributions and license texts are collected
+in the root [`NOTICE`](./NOTICE) file.
+
+`NOTICE` is generated; don't edit it by hand. Regenerate it after changing
+dependencies:
+
+```bash
+pnpm notice          # Regenerate NOTICE and NOTICE-REVIEW.txt
+pnpm notice:check    # Check whether the committed notices are current
+```
+
+The generator ([`scripts/generate-notice.ts`](./scripts/generate-notice.ts))
+orchestrates license tooling and concatenates its verbatim output. It doesn't
+author or edit license text. It uses
+[`generate-license-file`](https://generate-license-file.js.org) for npm production
+dependencies and [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) for
+crates compiled into the gateway. npm exclusions and multi-license disambiguation
+live in the generator; Rust configuration and templates live in
+[`apps/gateway/about.toml`](./apps/gateway/about.toml) and
+[`apps/gateway/about.hbs`](./apps/gateway/about.hbs).
+Only [`scripts/notice-header.txt`](./scripts/notice-header.txt) is written by hand.
+Production packages whose licenses can't be resolved as standard open source
+are excluded from `NOTICE` and listed in `NOTICE-REVIEW.txt` for manual legal
+review.
+
+`generate-license-file` runs through `npx`. To regenerate the Rust portion,
+install its tool with `cargo install cargo-about --features cli`. Set
+`SKIP_CARGO=1` to reuse the cached Rust section when it hasn't changed.
+
+Both notice files are platform-independent. Per-platform native binaries
+(`@os-theme/*` and `@github/copilot-<os>-<arch>`) and macOS-only `fsevents` are
+excluded so macOS and Linux produce the same output. Attributions for excluded
+native binaries are carried by their platform-independent parent packages.
+The `notice-check` job in [CI](./.github/workflows/ci.yml) checks for drift from
+installed dependencies.
+
 ## Project structure and where to start
 
-- Start with the [architecture overview](./docs/architecture/overview.md) and the
+- Start with the [system architecture](./docs/architecture/system-architecture.md) and the
   [app design](./docs/architecture/app-design.md) docs for the big picture.
 - The [README](./README.md) introduces the platform, provides a local quick start, and links the full documentation index.
-- Planned work (e.g. test variations and experiment-level analysis) is flagged as *Upcoming* in the
-  README's Key Features — good starting points if you're looking for larger areas to help with.
+- Browse [open issues](https://github.com/microsoft/scope/issues) for bugs and
+  proposed improvements. Discuss larger changes in an issue before starting work.
