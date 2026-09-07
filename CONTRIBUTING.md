@@ -40,6 +40,11 @@ Scope is a pnpm workspaces monorepo (TypeScript, with a Rust component for the A
 
 - **Docker** — required to run the backing services (MongoDB, Redis, Azurite, Lowkey Vault) and to
   run integration tests.
+- **[mkcert](https://github.com/FiloSottile/mkcert#installation)**: required for
+  trusted HTTPS certificates when running the local authentication emulator.
+- **[GitHub CLI](https://cli.github.com/)**: used to obtain a token for local
+  Copilot runs. The account supplying the token must have an **active GitHub
+  Copilot entitlement**; `gh auth login` alone does not grant Copilot access.
 - **Rust / Cargo** — only needed if you work on the AI gateway (`apps/gateway/`).
 
 ## Getting started
@@ -52,6 +57,22 @@ CI installs with `pnpm install --frozen-lockfile`; commit an updated `pnpm-lock.
 dependencies.
 
 ## Local development
+
+Local authentication requires your browser to trust a development certificate.
+The Portal development scripts run `mkcert -install` to add a local certificate
+authority to the OS/browser trust store and generate the emulator's `localhost`
+certificate. On first use, you may be prompted to approve this trust-store
+change. Follow the
+[local authentication instructions](./ENV_VARIABLES.md#local-dev-setup-entra-local)
+for details.
+
+For the Copilot worker, authenticate with an account that has an active Copilot
+entitlement and make its token available to the development stack:
+
+```bash
+gh auth login
+export GITHUB_TOKEN="$(gh auth token)"
+```
 
 Start the backing services first, then run the stack or an individual service:
 

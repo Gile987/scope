@@ -103,10 +103,11 @@ and access to the selected models.
 | [mkcert](https://github.com/FiloSottile/mkcert#installation) | Create trusted HTTPS certificates for the local sign-in emulator. |
 | [GitHub CLI](https://cli.github.com/) | Obtain a token for the Copilot quick start with `gh auth login`. |
 
-You need GitHub Copilot access for the Copilot worker, plus credentials with
-access to the models used by the Judge and other AI features. Provider usage may
-incur charges or consume quotas. The local backing services don't require an
-Azure subscription.
+The Copilot worker requires an **active GitHub Copilot entitlement** on the
+account supplying its token. Authenticating with `gh auth login` alone does not
+grant Copilot access. You also need credentials with access to the models used
+by the Judge and other AI features. Provider usage may incur charges or consume
+quotas. The local backing services don't require an Azure subscription.
 
 The commands below use a Bash-compatible shell. Rust is only required on the
 host if you build or modify the gateway outside Docker.
@@ -124,7 +125,7 @@ If you cloned a fork, run the remaining commands from that checkout instead.
 
 ### 2. Configure and start the stack
 
-Authenticate with an account that has Copilot access:
+Authenticate with an account that has an active Copilot entitlement:
 
 ```bash
 gh auth login
@@ -137,8 +138,12 @@ dependencies. Database migrations and development agent registration run
 automatically. The first build downloads several images and can take some time.
 
 The startup scripts also generate `.env` from [`.env.base`](./.env.base) and
-configure local sign-in over HTTPS. On first use, `mkcert` may request permission
-to install its local certificate authority in your system trust store.
+configure local sign-in over HTTPS. Local authentication requires your browser
+to trust the development certificate. The scripts run `mkcert -install` to add
+a local certificate authority to the OS/browser trust store and generate the
+emulator's `localhost` certificate. On first use, you may be prompted to approve
+this trust-store change. See the
+[local authentication instructions](./ENV_VARIABLES.md#local-dev-setup-entra-local).
 
 For persistent overrides, copy [`.env.local.example`](./.env.local.example) to
 `.env.local` and edit it locally. Don't put credentials in `.env.base` or commit
