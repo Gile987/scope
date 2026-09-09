@@ -53,7 +53,8 @@ export type AuthErrorCode =
   | "invalid_audience"
   | "invalid_issuer"
   | "missing_claim"
-  | "not_configured";
+  | "not_configured"
+  | "service_unavailable";
 
 /** Error thrown for any authentication failure. */
 export class AuthError extends Error {

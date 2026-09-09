@@ -28,29 +28,17 @@ export class CreateUsersCollection implements MigrationInterface {
     const users = db.collection(USERS_COLLECTION);
 
     // 1. Unique identity key — one record per (idp, idpTenant, idpSubject).
-    try {
-      await users.createIndex(
-        { idp: 1, idpTenant: 1, idpSubject: 1 },
-        { unique: true, name: "uniq_identity" },
-      );
-      console.log(
-        "  Created unique index (idp, idpTenant, idpSubject) on users",
-      );
-    } catch (err: any) {
-      console.log(
-        `  Unique identity index on users already exists or couldn't be created: ${err.message ?? err}`,
-      );
-    }
+    await users.createIndex(
+      { idp: 1, idpTenant: 1, idpSubject: 1 },
+      { unique: true, name: "uniq_identity" },
+    );
+    console.log(
+      "  Created unique index (idp, idpTenant, idpSubject) on users",
+    );
 
     // 2. Sparse secondary index on email.
-    try {
-      await users.createIndex({ email: 1 }, { sparse: true, name: "email" });
-      console.log("  Created sparse index on users.email");
-    } catch (err: any) {
-      console.log(
-        `  Index on users.email already exists or couldn't be created: ${err.message ?? err}`,
-      );
-    }
+    await users.createIndex({ email: 1 }, { sparse: true, name: "email" });
+    console.log("  Created sparse index on users.email");
   }
 
   async down(db: Db): Promise<void> {

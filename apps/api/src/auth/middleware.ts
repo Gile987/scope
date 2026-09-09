@@ -58,7 +58,7 @@ export interface AuthMiddlewareDeps {
  *   existing unauthenticated callers (e.g. the report-generator worker) keep
  *   working unchanged.
  * - A bearer token that fails verification → **401** (a bad token is a client
- *   error; a *missing* token is not).
+ *   error; a *missing* token is not). JWKS retrieval failures → **503**.
  * - A configured provider without its user store → **503** (fail closed).
  * - A valid token → the user is JIT-provisioned and `req.user` is set. A
  *   disabled user → **403**; the reserved `system` id → **401**.
@@ -99,6 +99,13 @@ export function createAuthMiddleware(deps: AuthMiddlewareDeps): RequestHandler {
         identity = await provider.verifyAccessToken(token);
       } catch (err) {
         if (err instanceof AuthError) {
+          if (err.code === "service_unavailable") {
+            res.status(503).json({
+              error: "Authentication service unavailable",
+              code: err.code,
+            });
+            return;
+          }
           res
             .status(401)
             .json({ error: "Invalid or expired token", code: err.code });

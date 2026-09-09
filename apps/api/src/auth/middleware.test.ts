@@ -149,6 +149,30 @@ describe("createAuthMiddleware", () => {
     expect(req.user).toBeUndefined();
   });
 
+  it("responds 503 when token verification cannot retrieve JWKS", async () => {
+    const provider = fakeProvider(async () => {
+      throw new AuthError(
+        "service_unavailable",
+        "Authentication key service is unavailable",
+      );
+    });
+    const store = fakeStore(async () => userDoc());
+    const mw = createAuthMiddleware(
+      deps({ getProvider: () => provider, getUserStore: () => store }),
+    );
+    const { req, res, next } = makeCtx({ authorization: "bearer token" });
+
+    await mw(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toEqual({
+      error: "Authentication service unavailable",
+      code: "service_unavailable",
+    });
+    expect(store.upsertOnLogin).not.toHaveBeenCalled();
+  });
+
   it("sets req.user and JIT-upserts on a valid token", async () => {
     const provider = fakeProvider(async () => IDENTITY);
     const store = fakeStore(async () => userDoc());

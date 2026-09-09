@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { SignJWT, generateKeyPair } from "jose";
 import type { KeyLike } from "jose";
 import { EntraIdAuthProvider } from "./entra.js";
@@ -90,6 +90,65 @@ describe("EntraIdAuthProvider.verifyAccessToken", () => {
     await expect(makeProvider().verifyAccessToken(token)).rejects.toMatchObject(
       { name: "AuthError", code: "invalid_token" },
     );
+  });
+
+  it.each(["ERR_JWKS_TIMEOUT", "ECONNRESET"])(
+    "retries one transient JWKS retrieval failure (%s)",
+    async (code) => {
+      const token = await sign(basePayload());
+      const jwks = vi
+        .fn()
+        .mockRejectedValueOnce(Object.assign(new Error("JWKS unavailable"), { code }))
+        .mockResolvedValueOnce(publicKey);
+      const provider = new EntraIdAuthProvider({
+        authority: AUTHORITY,
+        audience: AUDIENCE,
+        jwks,
+      });
+
+      await expect(provider.verifyAccessToken(token)).resolves.toMatchObject({
+        idpSubject: SUBJECT,
+      });
+      expect(jwks).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("returns service_unavailable after the bounded JWKS retry is exhausted", async () => {
+    const token = await sign(basePayload());
+    const error = Object.assign(new Error("JWKS request timed out"), {
+      code: "ERR_JWKS_TIMEOUT",
+    });
+    const jwks = vi.fn().mockRejectedValue(error);
+    const provider = new EntraIdAuthProvider({
+      authority: AUTHORITY,
+      audience: AUDIENCE,
+      jwks,
+    });
+
+    await expect(provider.verifyAccessToken(token)).rejects.toMatchObject({
+      name: "AuthError",
+      code: "service_unavailable",
+    });
+    expect(jwks).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a JWKS key-selection failure", async () => {
+    const token = await sign(basePayload());
+    const error = Object.assign(new Error("no applicable key found"), {
+      code: "ERR_JWKS_NO_MATCHING_KEY",
+    });
+    const jwks = vi.fn().mockRejectedValue(error);
+    const provider = new EntraIdAuthProvider({
+      authority: AUTHORITY,
+      audience: AUDIENCE,
+      jwks,
+    });
+
+    await expect(provider.verifyAccessToken(token)).rejects.toMatchObject({
+      name: "AuthError",
+      code: "invalid_token",
+    });
+    expect(jwks).toHaveBeenCalledOnce();
   });
 
   it("rejects an expired token", async () => {

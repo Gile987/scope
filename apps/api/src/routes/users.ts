@@ -37,6 +37,7 @@ export function registerUsersRoutes(ctx: RouteContext): void {
     response: UserMeResponseSchema,
     errorResponses: {
       401: { description: "Not authenticated" },
+      403: { description: "User is disabled" },
       503: { description: "Authentication service unavailable" },
     },
     handler: async (req, res) => {

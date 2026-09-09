@@ -5,6 +5,7 @@ import {
   createRemoteJWKSet,
   jwtVerify,
   type JWTPayload,
+  type JWTVerifyGetKey,
 } from "jose";
 import { AuthError, type AuthProvider, type VerifiedIdentity } from "./types.js";
 
@@ -14,6 +15,22 @@ type VerifyKey = Parameters<typeof jwtVerify>[1];
 /** Default Entra v2.0 per-tenant issuer template. `{tenantid}` is substituted. */
 const DEFAULT_ISSUER_TEMPLATE =
   "https://login.microsoftonline.com/{tenantid}/v2.0";
+
+const TRANSIENT_NETWORK_ERROR_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+  "ERR_JWKS_TIMEOUT",
+]);
+
+const JWKS_KEY_SELECTION_ERROR_CODES = new Set([
+  "ERR_JWKS_NO_MATCHING_KEY",
+  "ERR_JWKS_MULTIPLE_MATCHING_KEYS",
+]);
 
 export interface EntraIdAuthProviderOptions {
   /**
@@ -57,7 +74,9 @@ export class EntraIdAuthProvider implements AuthProvider {
     const jwksUri =
       options.jwksUri ??
       `${options.authority.replace(/\/+$/, "")}/discovery/v2.0/keys`;
-    this.jwks = options.jwks ?? createRemoteJWKSet(new URL(jwksUri));
+    const jwks = options.jwks ?? createRemoteJWKSet(new URL(jwksUri));
+    this.jwks =
+      typeof jwks === "function" ? withJwksRetrievalRetry(jwks) : jwks;
   }
 
   async verifyAccessToken(token: string): Promise<VerifiedIdentity> {
@@ -70,6 +89,10 @@ export class EntraIdAuthProvider implements AuthProvider {
     const idpSubject = asString(payload.oid);
     if (!idpSubject) {
       throw new AuthError("missing_claim", "Token is missing the `oid` claim");
+    }
+    const tokenExpiresAt = payload.exp;
+    if (typeof tokenExpiresAt !== "number") {
+      throw new AuthError("missing_claim", "Token is missing the `exp` claim");
     }
 
     // Multi-tenant issuer validation: any tenant is accepted, but the issuer
@@ -94,6 +117,7 @@ export class EntraIdAuthProvider implements AuthProvider {
       idp: this.id,
       idpTenant,
       idpSubject,
+      tokenExpiresAt,
       email,
       displayName,
       emailVerified,
@@ -105,16 +129,24 @@ export class EntraIdAuthProvider implements AuthProvider {
       const { payload } = await jwtVerify(token, this.jwks, {
         audience: this.audience,
         algorithms: ["RS256"],
+        requiredClaims: ["exp"],
       });
       return payload;
     } catch (err) {
+      if (err instanceof AuthError) {
+        throw err;
+      }
+
       const code = asString((err as { code?: unknown }).code) ?? "";
       const message = err instanceof Error ? err.message : String(err);
 
       if (code === "ERR_JWT_EXPIRED") {
         throw new AuthError("expired_token", "Access token has expired");
       }
-      if (code === "ERR_JWT_CLAIM_VALIDATION_FAILED") {
+      if (
+        code === "ERR_JWT_CLAIM_VALIDATION_FAILED" &&
+        asString((err as { claim?: unknown }).claim) === "aud"
+      ) {
         // jose raises this for a failed audience (and other) claim checks.
         throw new AuthError("invalid_audience", message);
       }
@@ -124,6 +156,73 @@ export class EntraIdAuthProvider implements AuthProvider {
       );
     }
   }
+}
+
+function withJwksRetrievalRetry(jwks: JWTVerifyGetKey): JWTVerifyGetKey {
+  return async (protectedHeader, token) => {
+    try {
+      return await jwks(protectedHeader, token);
+    } catch (err) {
+      if (isJwksKeySelectionError(err)) {
+        throw err;
+      }
+      if (!isTransientJwksRetrievalError(err)) {
+        throw jwksUnavailableError();
+      }
+    }
+
+    try {
+      return await jwks(protectedHeader, token);
+    } catch (err) {
+      if (isJwksKeySelectionError(err)) {
+        throw err;
+      }
+      throw jwksUnavailableError();
+    }
+  };
+}
+
+function isJwksKeySelectionError(err: unknown): boolean {
+  return JWKS_KEY_SELECTION_ERROR_CODES.has(errorCode(err));
+}
+
+function isTransientJwksRetrievalError(err: unknown): boolean {
+  const code = errorCode(err);
+  if (TRANSIENT_NETWORK_ERROR_CODES.has(code)) {
+    return true;
+  }
+
+  if (
+    err instanceof Error &&
+    (err.name === "AbortError" ||
+      err.name === "TimeoutError" ||
+      /expected 200 OK from the JSON Web Key Set HTTP response/i.test(
+        err.message,
+      ))
+  ) {
+    return true;
+  }
+
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "cause" in err &&
+    isTransientJwksRetrievalError(err.cause)
+  );
+}
+
+function errorCode(err: unknown): string {
+  if (typeof err !== "object" || err === null || !("code" in err)) {
+    return "";
+  }
+  return asString(err.code) ?? "";
+}
+
+function jwksUnavailableError(): AuthError {
+  return new AuthError(
+    "service_unavailable",
+    "Authentication key service is unavailable",
+  );
 }
 
 function asString(value: unknown): string | undefined {
