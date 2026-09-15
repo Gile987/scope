@@ -28,6 +28,12 @@ services:
     mem_limit: 1g
     build:
       target: dev
+    ports:
+      # Node inspector for VS Code. Keep host access loopback-only; .env.base
+      # offsets the host port so multiple worktrees can run concurrently.
+      - "127.0.0.1:${API_DEBUG_PORT:-9200}:9229"
+    environment:
+      NODE_INSPECT_PORT: "9229"
     develop:
       watch:
         - action: sync
