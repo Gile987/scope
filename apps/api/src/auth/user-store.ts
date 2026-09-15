@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { randomUUID } from "node:crypto";
-import type { Collection, UpdateFilter } from "mongodb";
+import { MongoServerError, type Collection, type UpdateFilter } from "mongodb";
 import {
   bootstrapAdminKey,
   type UserDocument,
@@ -17,10 +17,32 @@ export interface UserStoreOptions {
   bootstrapTenants?: Set<string>;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isIdentityUpsertCollision(error: unknown, identity: VerifiedIdentity): boolean {
+  if (!(error instanceof MongoServerError) || error.code !== 11000) return false;
+  const pattern: unknown = error.keyPattern;
+  const value: unknown = error.keyValue;
+  if (isRecord(value) && (
+    value.idp !== identity.idp ||
+    value.idpTenant !== identity.idpTenant ||
+    value.idpSubject !== identity.idpSubject
+  )) return false;
+
+  if (isRecord(pattern)) {
+    return Object.keys(pattern).length === 3 &&
+      pattern.idp === 1 && pattern.idpTenant === 1 && pattern.idpSubject === 1;
+  }
+  // CosmosDB may omit keyPattern/keyValue but still identify the known index.
+  return /\bindex:\s+uniq_identity\s+dup key:/.test(error.message);
+}
+
 /**
  * Persistence for the `users` collection.
  *
- * On each successful login the identity triple is upserted (Just-In-Time
+ * On each explicit login upsert the identity triple is persisted (Just-In-Time
  * provisioning): a new user is minted a Scope User ID (UUID) with the default
  * role `"user"`, and an existing user has its profile (`email`, `displayName`,
  * `emailVerified`) and `lastLoginAt` refreshed. Email is persisted only when
@@ -72,15 +94,29 @@ export class UserStore {
     const update = { $set: set, $setOnInsert: setOnInsert } as unknown as
       UpdateFilter<UserDocument>;
 
-    const result = await this.collection.findOneAndUpdate(
-      {
-        idp: identity.idp,
-        idpTenant: identity.idpTenant,
-        idpSubject: identity.idpSubject,
-      },
-      update,
-      { upsert: true, returnDocument: "after" },
-    );
+    const filter = {
+      idp: identity.idp,
+      idpTenant: identity.idpTenant,
+      idpSubject: identity.idpSubject,
+    };
+    let result: UserDocument | null;
+    try {
+      result = await this.collection.findOneAndUpdate(
+        filter,
+        update,
+        { upsert: true, returnDocument: "after" },
+      );
+    } catch (error) {
+      if (!isIdentityUpsertCollision(error, identity)) throw error;
+      // Another login inserted this exact identity. Refresh it without retrying
+      // the insert or replacing the winner's app-owned ID and role.
+      result = await this.collection.findOneAndUpdate(
+        filter,
+        { $set: set } as UpdateFilter<UserDocument>,
+        { upsert: false, returnDocument: "after" },
+      );
+      if (!result) throw error;
+    }
 
     if (!result) {
       throw new Error("Failed to upsert user during login");
@@ -100,6 +136,15 @@ export class UserStore {
     }
 
     return user;
+  }
+
+  /** Read an existing identity without provisioning or refreshing login/profile fields. */
+  async findByIdentity(identity: VerifiedIdentity): Promise<UserDocument | null> {
+    return this.collection.findOne({
+      idp: identity.idp,
+      idpTenant: identity.idpTenant,
+      idpSubject: identity.idpSubject,
+    });
   }
 
   /** Look up a user by Scope User ID. */

@@ -1,19 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
-import type { UserDocument, VerifiedIdentity } from "shared";
+import { AuthError, type VerifiedIdentity } from "shared";
 import { app, _injectTestDependencies } from "../index.js";
 import { createAllMockDependencies } from "../test-helpers.js";
+import { UserAccessError, type UserAccessService } from "../auth/user-access-resolver.js";
 
-// index.ts imports these at module load — stub them as the other suites do.
 vi.mock("db-migrations/check-migrations", () => ({
-  checkMigrations: vi.fn().mockResolvedValue({
-    ready: true,
-    applied: ["001"],
-    pending: [],
-  }),
+  checkMigrations: vi.fn().mockResolvedValue({ ready: true, applied: ["001"], pending: [] }),
 }));
 vi.mock("../llm.js", () => ({
   isLlmAvailable: vi.fn().mockReturnValue(false),
@@ -29,7 +25,7 @@ vi.mock("../task-prompt-llm.js", () => ({
   generateTaskPrompt: vi.fn(),
 }));
 
-const IDENTITY: VerifiedIdentity = {
+const identity: VerifiedIdentity = {
   idp: "entra",
   idpTenant: "tenant-1",
   idpSubject: "subject-1",
@@ -37,56 +33,44 @@ const IDENTITY: VerifiedIdentity = {
   displayName: "Test User",
   emailVerified: true,
 };
-
-function authUser(): UserDocument {
-  return {
-    _id: "user-uuid-1",
-    idp: "entra",
-    idpTenant: "tenant-1",
-    idpSubject: "subject-1",
-    email: "user@example.com",
-    displayName: "Test User",
-    role: "user",
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  } as UserDocument;
-}
+const principal = {
+  id: "user-uuid-1",
+  role: "user",
+  isAuthenticated: true,
+  ...identity,
+};
+const provider = {
+  id: "entra",
+  verifyAccessToken: vi.fn(async () => identity),
+};
+const resolver = {
+  resolveExisting: vi.fn(async () => principal),
+  enrollOnLogin: vi.fn(async () => principal),
+} satisfies UserAccessService;
 
 describe("GET /api/v1/users/me", () => {
-  let mocks: ReturnType<typeof createAllMockDependencies>;
-
-  beforeAll(() => {
-    mocks = createAllMockDependencies();
-    _injectTestDependencies(mocks);
-  });
-
   beforeEach(() => {
-    vi.clearAllMocks();
-    mocks = createAllMockDependencies();
-    _injectTestDependencies(mocks);
+    vi.resetAllMocks();
+    provider.verifyAccessToken.mockResolvedValue(identity);
+    resolver.resolveExisting.mockResolvedValue(principal);
+    resolver.enrollOnLogin.mockResolvedValue(principal);
+    _injectTestDependencies(createAllMockDependencies());
+    _injectTestDependencies({ authProvider: provider, userAccessResolver: resolver });
   });
 
-  it("returns 401 for an anonymous caller", async () => {
-    const res = await request(app).get("/api/v1/users/me");
+  it.each(["", "?login=true"])("rejects anonymous requests %s without writes", async (query) => {
+    const res = await request(app).get(`/api/v1/users/me${query}`);
     expect(res.status).toBe(401);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
+    expect(resolver.resolveExisting).not.toHaveBeenCalled();
   });
 
-  it("returns the identity for an authenticated caller", async () => {
-    _injectTestDependencies({
-      authProvider: { id: "entra", verifyAccessToken: vi.fn(async () => IDENTITY) },
-      profileEnricher: null,
-      userStore: {
-        upsertOnLogin: vi.fn(async () => authUser()),
-        findById: vi.fn(),
-      } as never,
-    });
-
-    const res = await request(app)
-      .get("/api/v1/users/me")
-      .set("Authorization", "Bearer test-token");
-
+  it.each(["", "?login=false"])("returns the resolved Scope identity without enrolling %s", async (query) => {
+    const res = await request(app).get(`/api/v1/users/me${query}`).set("Authorization", "Bearer token");
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.body).toEqual({
       id: "user-uuid-1",
       role: "user",
       email: "user@example.com",
@@ -94,45 +78,75 @@ describe("GET /api/v1/users/me", () => {
       idp: "entra",
       idpTenant: "tenant-1",
     });
+    expect(provider.verifyAccessToken).toHaveBeenCalledExactlyOnceWith("token");
+    expect(resolver.resolveExisting).toHaveBeenCalledExactlyOnceWith(identity);
+    expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
   });
 
-  it("returns 503 when authentication persistence is unavailable", async () => {
-    _injectTestDependencies({
-      authProvider: {
-        id: "entra",
-        verifyAccessToken: vi.fn(async () => IDENTITY),
-      },
-      profileEnricher: null,
-      userStore: null,
-    });
+  it("enrolls on explicit login without a preceding existing-user lookup", async () => {
+    resolver.enrollOnLogin.mockResolvedValue({ ...principal, role: "admin" });
+    const res = await request(app).get("/api/v1/users/me?login=true").set("Authorization", "Bearer token");
+    expect(res.status).toBe(200);
+    expect(res.body.role).toBe("admin");
+    expect(resolver.enrollOnLogin).toHaveBeenCalledExactlyOnceWith(identity, "token");
+    expect(resolver.resolveExisting).not.toHaveBeenCalled();
+    expect(provider.verifyAccessToken).toHaveBeenCalledOnce();
+  });
 
-    const res = await request(app)
-      .get("/api/v1/users/me")
-      .set("Authorization", "Bearer test-token");
+  it("never enrolls for HEAD even when login=true", async () => {
+    const res = await request(app).head("/api/v1/users/me?login=true").set("Authorization", "Bearer token");
+    expect(res.status).toBe(200);
+    expect(resolver.resolveExisting).toHaveBeenCalledOnce();
+    expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
+  });
 
+  it.each([
+    "login=", "login=1", "login=TRUE", "login=garbage",
+    "login=true&login=false", "login[]=true", "login[nested]=true",
+  ])("rejects invalid query %s with no access lookup or enrollment", async (query) => {
+    const res = await request(app).get(`/api/v1/users/me?${query}`).set("Authorization", "Bearer token");
+    expect(res.status).toBe(400);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(resolver.resolveExisting).not.toHaveBeenCalled();
+    expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "?login=true"])("requires an initialized resolver %s", async (query) => {
+    _injectTestDependencies({ userAccessResolver: null });
+    const res = await request(app).get(`/api/v1/users/me${query}`).set("Authorization", "Bearer token");
     expect(res.status).toBe(503);
-    expect(res.body).toEqual({ error: "Authentication service unavailable" });
+    expect(res.headers["cache-control"]).toBe("no-store");
   });
 
-  it("returns 401 when a bad token is presented", async () => {
-    const { AuthError } = await import("shared");
-    _injectTestDependencies({
-      authProvider: {
-        id: "entra",
-        verifyAccessToken: vi.fn(async () => {
-          throw new AuthError("invalid_token", "bad");
-        }),
-      },
-      userStore: {
-        upsertOnLogin: vi.fn(),
-        findById: vi.fn(),
-      } as never,
-    });
-
-    const res = await request(app)
-      .get("/api/v1/users/me")
-      .set("Authorization", "Bearer bad-token");
-
+  it.each(["", "?login=true"])("rejects bad tokens before access resolution %s", async (query) => {
+    provider.verifyAccessToken.mockRejectedValue(new AuthError("invalid_token", "bad"));
+    const res = await request(app).get(`/api/v1/users/me${query}`).set("Authorization", "Bearer token");
     expect(res.status).toBe(401);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(resolver.resolveExisting).not.toHaveBeenCalled();
+    expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
+  });
+
+  it.each(["user_not_enrolled", "user_disabled"] as const)("reports %s on read", async (code) => {
+    resolver.resolveExisting.mockRejectedValue(new UserAccessError(code));
+    const res = await request(app).get("/api/v1/users/me").set("Authorization", "Bearer token");
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe(code);
+    expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
+  });
+
+  it("propagates login access denial and does not fall through to other middleware", async () => {
+    resolver.enrollOnLogin.mockRejectedValue(new UserAccessError("user_disabled"));
+    const res = await request(app).get("/api/v1/users/me?login=true").set("Authorization", "Bearer token");
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe("user_disabled");
+    expect(resolver.resolveExisting).not.toHaveBeenCalled();
+  });
+
+  it("does not allow login query on another API route to enroll", async () => {
+    const res = await request(app).get("/api/v1/feature-flags?login=true").set("Authorization", "Bearer token");
+    expect(res.status).toBe(200);
+    expect(resolver.resolveExisting).toHaveBeenCalledOnce();
+    expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
   });
 });

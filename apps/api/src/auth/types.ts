@@ -2,7 +2,13 @@
 // Licensed under the MIT License.
 
 import type { Request } from "express";
-import { ANONYMOUS_USER_ID } from "shared";
+import { ANONYMOUS_USER_ID, type VerifiedIdentity } from "shared";
+
+/** Verified IdP credentials, before resolving application access. Request-local only. */
+export interface VerifiedAuthContext {
+  identity: VerifiedIdentity;
+  token: string;
+}
 
 /**
  * The principal set on `req.user` for every request.
@@ -32,6 +38,7 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
+      auth?: VerifiedAuthContext;
       user?: AuthenticatedUser;
     }
   }

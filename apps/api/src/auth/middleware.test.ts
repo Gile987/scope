@@ -1,281 +1,139 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { describe, it, expect, vi } from "vitest";
-import type { Request, Response } from "express";
-import {
-  AuthError,
-  type AuthProvider,
-  type ProfileEnricher,
-  type UserDocument,
-  type UserProfile,
-  type VerifiedIdentity,
-} from "shared";
-import { createAuthMiddleware, type AuthMiddlewareDeps } from "./middleware.js";
-import type { UserStore } from "./user-store.js";
-import type { AuthenticatedUser } from "./types.js";
+import express from "express";
+import request from "supertest";
+import { describe, expect, it, vi } from "vitest";
+import { AuthError, type AuthProvider, type VerifiedIdentity } from "shared";
+import { createAuthMiddleware, createUserAccessMiddleware } from "./middleware.js";
+import { authErrorHandler } from "./error-handler.js";
+import { getUser } from "./types.js";
+import { UserAccessError, type UserAccessService } from "./user-access-resolver.js";
 
-// ── Fakes ─────────────────────────────────────────────────────────────────
-
-const IDENTITY: VerifiedIdentity = {
+const identity: VerifiedIdentity = {
   idp: "entra",
   idpTenant: "tenant-1",
   idpSubject: "subject-1",
-  email: "user@example.com",
-  displayName: "Test User",
-  emailVerified: true,
+};
+const principal = {
+  id: "scope-user",
+  isAuthenticated: true,
+  role: "user",
+  ...identity,
 };
 
-function fakeProvider(
-  impl: (token: string) => Promise<VerifiedIdentity>,
-): AuthProvider {
-  return { id: "entra", verifyAccessToken: vi.fn(impl) };
+function setup(providerEnabled = true, resolverEnabled = true) {
+  const provider = {
+    id: "entra",
+    verifyAccessToken: vi.fn(async () => identity),
+  } satisfies AuthProvider;
+  const resolver = {
+    resolveExisting: vi.fn(async () => principal),
+    enrollOnLogin: vi.fn(async () => principal),
+  } satisfies UserAccessService;
+  const app = express();
+  app.use(createAuthMiddleware({ getProvider: () => providerEnabled ? provider : null }));
+  app.get("/verified-only", (req, res) => {
+    res.json({ identity: req.auth?.identity, user: req.user });
+  });
+  app.use(createUserAccessMiddleware(() => resolverEnabled ? resolver : null));
+  app.get(["/api/v1/private", "/health", "/ready", "/api-docs/test"], (req, res) => {
+    res.json(getUser(req));
+  });
+  app.use(authErrorHandler);
+  return { app, provider, resolver };
 }
 
-function fakeStore(
-  upsert: (i: VerifiedIdentity, p: UserProfile) => Promise<UserDocument>,
-): UserStore {
-  return {
-    upsertOnLogin: vi.fn(upsert),
-    findById: vi.fn(),
-  } as unknown as UserStore;
-}
+describe("IdP verification and application access middleware", () => {
+  it.each(["/health", "/ready", "/api-docs/test"])("skips public path %s", async (path) => {
+    const { app, provider, resolver } = setup();
+    expect((await request(app).get(path).set("Authorization", "Bearer bad")).status).toBe(200);
+    expect(provider.verifyAccessToken).not.toHaveBeenCalled();
+    expect(resolver.resolveExisting).not.toHaveBeenCalled();
+  });
 
-function userDoc(overrides: Partial<UserDocument> = {}): UserDocument {
-  return {
-    _id: "user-uuid-1",
-    idp: "entra",
-    idpTenant: "tenant-1",
-    idpSubject: "subject-1",
-    email: "user@example.com",
-    displayName: "Test User",
-    role: "user",
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides,
-  } as UserDocument;
-}
+  it("preserves anonymous callers without a token", async () => {
+    const { app, provider, resolver } = setup();
+    const res = await request(app).get("/api/v1/private");
+    expect(res.body).toEqual({ id: "anonymous", isAuthenticated: false });
+    expect(provider.verifyAccessToken).not.toHaveBeenCalled();
+    expect(resolver.resolveExisting).not.toHaveBeenCalled();
+  });
 
-interface FakeCtx {
-  req: Request;
-  res: Response & { statusCode?: number; body?: unknown };
-  next: ReturnType<typeof vi.fn>;
-}
+  it("preserves anonymous mode without an IdP provider", async () => {
+    const { app, resolver } = setup(false);
+    const res = await request(app).get("/api/v1/private").set("Authorization", "Bearer token");
+    expect(res.body.id).toBe("anonymous");
+    expect(resolver.resolveExisting).not.toHaveBeenCalled();
+  });
 
-function makeCtx(opts: { path?: string; authorization?: string } = {}): FakeCtx {
-  const req = {
-    path: opts.path ?? "/api/v1/users/me",
-    headers: opts.authorization ? { authorization: opts.authorization } : {},
-  } as unknown as Request;
+  it("makes verified identity available before access resolution", async () => {
+    const { app, provider, resolver } = setup();
+    const res = await request(app).get("/verified-only").set("Authorization", "bearer token");
+    expect(res.body).toEqual({ identity });
+    expect(provider.verifyAccessToken).toHaveBeenCalledWith("token");
+    expect(resolver.resolveExisting).not.toHaveBeenCalled();
+    expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
+  });
 
-  const res = {
-    statusCode: undefined as number | undefined,
-    body: undefined as unknown,
-    status(code: number) {
-      this.statusCode = code;
-      return this;
+  it("verifies before resolving and never enrolls from a normal route", async () => {
+    const { app, provider, resolver } = setup();
+    const res = await request(app).get("/api/v1/private?login=true").set("Authorization", "Bearer token");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(principal);
+    expect(resolver.resolveExisting).toHaveBeenCalledExactlyOnceWith(identity);
+    expect(provider.verifyAccessToken.mock.invocationCallOrder[0]).toBeLessThan(
+      resolver.resolveExisting.mock.invocationCallOrder[0],
+    );
+    expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
+  });
+
+  it.each(["invalid_token", "expired_token", "invalid_audience"] as const)(
+    "rejects %s before any access lookup", async (code) => {
+      const { app, provider, resolver } = setup();
+      provider.verifyAccessToken.mockRejectedValue(new AuthError(code, "bad token"));
+      const res = await request(app).get("/api/v1/private").set("Authorization", "Bearer token");
+      expect(res.status).toBe(401);
+      expect(res.body.code).toBe(code);
+      expect(resolver.resolveExisting).not.toHaveBeenCalled();
     },
-    json(payload: unknown) {
-      this.body = payload;
-      return this;
+  );
+
+  it.each(["Basic value", "Bearer", "Bearer token extra"])(
+    "rejects malformed credentials %s instead of downgrading to anonymous", async (header) => {
+      const { app, provider, resolver } = setup();
+      const res = await request(app).get("/api/v1/private").set("Authorization", header);
+      expect(res.status).toBe(401);
+      expect(provider.verifyAccessToken).not.toHaveBeenCalled();
+      expect(resolver.resolveExisting).not.toHaveBeenCalled();
     },
-  } as unknown as Response & { statusCode?: number; body?: unknown };
+  );
 
-  return { req, res, next: vi.fn() };
-}
-
-function deps(overrides: Partial<AuthMiddlewareDeps> = {}): AuthMiddlewareDeps {
-  return {
-    getProvider: () => null,
-    getEnricher: () => null,
-    getUserStore: () => null,
-    ...overrides,
-  };
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────
-
-describe("createAuthMiddleware", () => {
-  it("skips public paths without touching the provider", async () => {
-    const provider = fakeProvider(async () => IDENTITY);
-    const mw = createAuthMiddleware(deps({ getProvider: () => provider }));
-    const { req, res, next } = makeCtx({ path: "/health" });
-
-    await mw(req, res, next);
-
-    expect(next).toHaveBeenCalledOnce();
-    expect(provider.verifyAccessToken).not.toHaveBeenCalled();
-    expect(req.user).toBeUndefined();
+  it("returns 503 for unavailable JWKS before looking up access", async () => {
+    const { app, provider, resolver } = setup();
+    provider.verifyAccessToken.mockRejectedValue(new AuthError("service_unavailable", "JWKS unavailable"));
+    const res = await request(app).get("/api/v1/private").set("Authorization", "Bearer token");
+    expect(res.status).toBe(503);
+    expect(resolver.resolveExisting).not.toHaveBeenCalled();
   });
 
-  it("treats a request with no provider as anonymous", async () => {
-    const mw = createAuthMiddleware(deps());
-    const { req, res, next } = makeCtx({ authorization: "Bearer abc" });
-
-    await mw(req, res, next);
-
-    expect(next).toHaveBeenCalledOnce();
-    expect(req.user?.isAuthenticated).toBe(false);
-    expect(req.user?.id).toBe("anonymous");
+  it("returns 503 if the access resolver has not initialized", async () => {
+    const { app, provider } = setup(true, false);
+    const res = await request(app).get("/api/v1/private").set("Authorization", "Bearer token");
+    expect(res.status).toBe(503);
+    expect(provider.verifyAccessToken).toHaveBeenCalledOnce();
   });
 
-  it("treats a request with no bearer token as anonymous", async () => {
-    const provider = fakeProvider(async () => IDENTITY);
-    const mw = createAuthMiddleware(deps({ getProvider: () => provider }));
-    const { req, res, next } = makeCtx();
-
-    await mw(req, res, next);
-
-    expect(next).toHaveBeenCalledOnce();
-    expect(req.user?.isAuthenticated).toBe(false);
-    expect(provider.verifyAccessToken).not.toHaveBeenCalled();
-  });
-
-  it("responds 401 when the token fails verification", async () => {
-    const provider = fakeProvider(async () => {
-      throw new AuthError("expired_token", "token expired");
-    });
-    const store = fakeStore(async () => userDoc());
-    const mw = createAuthMiddleware(
-      deps({ getProvider: () => provider, getUserStore: () => store }),
-    );
-    const { req, res, next } = makeCtx({ authorization: "Bearer bad" });
-
-    await mw(req, res, next);
-
-    expect(next).not.toHaveBeenCalled();
-    expect(res.statusCode).toBe(401);
-    expect((res.body as { code?: string }).code).toBe("expired_token");
-    expect(req.user).toBeUndefined();
-  });
-
-  it("responds 503 when token verification cannot retrieve JWKS", async () => {
-    const provider = fakeProvider(async () => {
-      throw new AuthError(
-        "service_unavailable",
-        "Authentication key service is unavailable",
-      );
-    });
-    const store = fakeStore(async () => userDoc());
-    const mw = createAuthMiddleware(
-      deps({ getProvider: () => provider, getUserStore: () => store }),
-    );
-    const { req, res, next } = makeCtx({ authorization: "bearer token" });
-
-    await mw(req, res, next);
-
-    expect(next).not.toHaveBeenCalled();
-    expect(res.statusCode).toBe(503);
-    expect(res.body).toEqual({
-      error: "Authentication service unavailable",
-      code: "service_unavailable",
-    });
-    expect(store.upsertOnLogin).not.toHaveBeenCalled();
-  });
-
-  it("sets req.user and JIT-upserts on a valid token", async () => {
-    const provider = fakeProvider(async () => IDENTITY);
-    const store = fakeStore(async () => userDoc());
-    const mw = createAuthMiddleware(
-      deps({ getProvider: () => provider, getUserStore: () => store }),
-    );
-    const { req, res, next } = makeCtx({ authorization: "Bearer good" });
-
-    await mw(req, res, next);
-
-    expect(next).toHaveBeenCalledOnce();
-    expect(store.upsertOnLogin).toHaveBeenCalledOnce();
-    const user = req.user as AuthenticatedUser;
-    expect(user.isAuthenticated).toBe(true);
-    expect(user.id).toBe("user-uuid-1");
-    expect(user.role).toBe("user");
-    expect(user.email).toBe("user@example.com");
-    expect(user.displayName).toBe("Test User");
-  });
-
-  it("passes the enriched profile to the store", async () => {
-    const provider = fakeProvider(async () => IDENTITY);
-    const enricher: ProfileEnricher = {
-      id: "graph",
-      enrich: vi.fn(async () => ({
-        email: "graph@example.com",
-        displayName: "Graph Name",
-      })),
-    };
-    let captured: UserProfile | undefined;
-    const store = fakeStore(async (_i, p) => {
-      captured = p;
-      return userDoc({ email: p.email, displayName: p.displayName });
-    });
-    const mw = createAuthMiddleware(
-      deps({
-        getProvider: () => provider,
-        getEnricher: () => enricher,
-        getUserStore: () => store,
-      }),
-    );
-    const { req, res, next } = makeCtx({ authorization: "Bearer good" });
-
-    await mw(req, res, next);
-
-    expect(enricher.enrich).toHaveBeenCalledOnce();
-    expect(captured?.email).toBe("graph@example.com");
-    expect(req.user?.email).toBe("graph@example.com");
-  });
-
-  it("responds 403 for a disabled user", async () => {
-    const provider = fakeProvider(async () => IDENTITY);
-    const store = fakeStore(async () => userDoc({ disabledAt: new Date() }));
-    const mw = createAuthMiddleware(
-      deps({ getProvider: () => provider, getUserStore: () => store }),
-    );
-    const { req, res, next } = makeCtx({ authorization: "Bearer good" });
-
-    await mw(req, res, next);
-
-    expect(next).not.toHaveBeenCalled();
-    expect(res.statusCode).toBe(403);
-    expect(req.user).toBeUndefined();
-  });
-
-  it("responds 401 when the resolved id is the reserved system id", async () => {
-    const provider = fakeProvider(async () => IDENTITY);
-    const store = fakeStore(async () => userDoc({ _id: "system" }));
-    const mw = createAuthMiddleware(
-      deps({ getProvider: () => provider, getUserStore: () => store }),
-    );
-    const { req, res, next } = makeCtx({ authorization: "Bearer good" });
-
-    await mw(req, res, next);
-
-    expect(next).not.toHaveBeenCalled();
-    expect(res.statusCode).toBe(401);
-  });
-
-  it("responds 503 when auth is configured without a user store", async () => {
-    const provider = fakeProvider(async () => IDENTITY);
-    const mw = createAuthMiddleware(deps({ getProvider: () => provider }));
-    const { req, res, next } = makeCtx({ authorization: "Bearer good" });
-
-    await mw(req, res, next);
-
-    expect(next).not.toHaveBeenCalled();
-    expect(provider.verifyAccessToken).not.toHaveBeenCalled();
-    expect(res.statusCode).toBe(503);
-    expect(req.user).toBeUndefined();
-  });
-
-  it("accepts a case-insensitive bearer scheme", async () => {
-    const provider = fakeProvider(async () => IDENTITY);
-    const store = fakeStore(async () => userDoc());
-    const mw = createAuthMiddleware(
-      deps({ getProvider: () => provider, getUserStore: () => store }),
-    );
-    const { req, res, next } = makeCtx({ authorization: "bearer good" });
-
-    await mw(req, res, next);
-
-    expect(store.upsertOnLogin).toHaveBeenCalledOnce();
-    expect(req.user?.isAuthenticated).toBe(true);
+  it.each([
+    ["user_not_enrolled", 403],
+    ["user_disabled", 403],
+    ["invalid_principal", 401],
+    ["service_unavailable", 503],
+  ] as const)("maps resolver failure %s to %s", async (code, status) => {
+    const { app, resolver } = setup();
+    resolver.resolveExisting.mockRejectedValue(new UserAccessError(code));
+    const res = await request(app).get("/api/v1/private").set("Authorization", "Bearer token");
+    expect(res.status).toBe(status);
+    expect(res.body.code).toBe(code);
   });
 });

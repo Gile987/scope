@@ -9,6 +9,7 @@ import type { QueueClient } from "@azure/storage-queue";
 import type { BlobStorage } from "shared";
 import type { HeartbeatStore } from "shared";
 import type { UserStore } from "./auth/user-store.js";
+import type { UserAccessService } from "./auth/user-access-resolver.js";
 import type {
   TaskPromptStore,
   TaskPromptDocument,
@@ -121,6 +122,7 @@ export interface RouteContext {
   authProvider: AuthProvider | null;
   profileEnricher: ProfileEnricher | null;
   userStore: UserStore | null;
+  userAccessResolver: UserAccessService | null;
 
   // Queue
   queueClients: Map<WorkerType, QueueClient>;

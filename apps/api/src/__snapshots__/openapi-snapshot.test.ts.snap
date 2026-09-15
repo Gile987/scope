@@ -11072,6 +11072,21 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/users/me": {
       "get": {
+        "description": "Pass login=true after an IdP callback to JIT-enroll the user, refresh their profile and lastLoginAt, apply bootstrap-admin rules, and warm the access cache. Omit login (or use false) for a read-only cached identity lookup. Login-marked GET requests have side effects and must not be prefetched or HTTP-cached.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "login",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "200": {
             "content": {
@@ -11083,8 +11098,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "description": "Success",
           },
+          "400": {
+            "description": "Invalid login query parameter",
+          },
           "401": {
             "description": "Not authenticated",
+          },
+          "403": {
+            "description": "User is not enrolled or is disabled",
           },
           "503": {
             "description": "Authentication service unavailable",

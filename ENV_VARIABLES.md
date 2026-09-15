@@ -10,6 +10,18 @@ The sophisticated criteria system can be configured via environment variables in
 
 Base URL of the Scope API used by all CLI commands. Override this to point the CLI at a remote or Docker-hosted API instance.
 
+## Docker Development
+
+### API_DEBUG_PORT
+**Default:** `9200`
+**Type:** integer (Docker Compose development only)
+
+Host port for the API's Node inspector when using `docker-compose.dev.yml`,
+including `pnpm docker:dev:portal`. The generated `.env` offsets this port per
+worktree. The inspector listens on port `9229` inside the container and is
+published to `127.0.0.1` only. Use the **Attach API (Docker)** VS Code launch
+configuration and enter the current worktree's generated `API_DEBUG_PORT`.
+
 ## Agent Target Validation
 
 ### SCOPE_STRICT_AGENT_CAPABILITIES
@@ -346,10 +358,12 @@ done. In **production** builds the config is only considered valid when
 `VITE_AUTH_CLIENT_ID` and `VITE_AUTH_AUTHORITY` are present; otherwise the Portal
 renders a "not configured" screen instead of silently pointing at `localhost`.
 
-> Authentication only — there is no authorization (roles/permissions) yet, and
-> the API does not verify the token yet. The token is attached to API requests
-> and the app is gated client-side; identity shown in the UI is derived from the
-> MSAL account token claims.
+> The API verifies the IdP token on every non-public authenticated request, then
+> resolves an active Scope user. Full route RBAC/ownership enforcement is still
+> deferred. After a redirect callback, the Portal's first Scope API request is
+> `GET /api/v1/users/me?login=true`; after a cached-account reload it is plain
+> `/users/me`. `AuthContext` takes the Scope UUID and role from that response, not
+> MSAL account claims. All eager queries, including feature flags, wait for it.
 
 ### ⚠️ IMPORTANT — Feature toggle (3 per-environment controls)
 
@@ -358,12 +372,12 @@ per-environment controls** — one each for **local dev**, **integration**, and
 **production**. It is **ON by default (secure by default)** in every environment;
 a control must **explicitly** opt out.
 
-> **Turn auth OFF until the API ships token verification.** The API does not yet
-> validate bearer tokens. Until it does, any environment that runs the auth-gated
-> Portal against that API should disable auth **for that environment only** (see
-> the table). Flip it back on (or remove the override) once the auth-enabled API
-> is deployed there. Because the three controls are independent, you can, for
-> example, keep auth on locally while it stays off in integration and production.
+> **Coordinate API and Portal rollout per environment.** The API in this branch
+> verifies bearer tokens and implements the explicit-login handshake. Do not infer
+> a deployed environment's version or flag state from the source tree. Enable
+> Portal auth after deploying/configuring the compatible API and verifying
+> `/users/me?login=true` followed by plain `/me`. These controls are independent
+> across environments and do not turn on global API lockdown.
 
 When auth is disabled the Portal behaves **exactly as it did before auth
 existed**: no sign-in gate, no account menu, and no `Authorization` header on API
@@ -380,8 +394,8 @@ promoted image — uses a build-time flag.
 | Environment | Control | Kind | Where to set | Default |
 | --- | --- | --- | --- | --- |
 | **Local dev** | `VITE_AUTH_ENABLED_LOCAL` | build-time (`import.meta.env.DEV`) | `docker-compose.dev.yml` or your shell | `true` |
-| **Integration** | `SCOPE_AUTH_ENABLED` | runtime (container env) | integration portal deployment env | `true` (default); currently `false` |
-| **Production** | `SCOPE_AUTH_ENABLED` | runtime (container env) | production portal deployment env | `true` (default); currently `false` |
+| **Integration** | `SCOPE_AUTH_ENABLED` | runtime (container env) | integration portal deployment env | `true`; verify deployed override |
+| **Production** | `SCOPE_AUTH_ENABLED` | runtime (container env) | production portal deployment env | `true`; verify deployed override |
 
 **Type:** boolean-ish string. `true`/`1`/`yes`/`on` enable; `false`/`0`/`no`/`off`
 disable (case-insensitive). Any other/unset value falls back to the secure
@@ -403,8 +417,8 @@ so local always falls through to the Vite flag.
   (or your shell) to skip sign-in while iterating on UI, without standing up
   `entra-local`.
 - **Integration / production:** set `SCOPE_AUTH_ENABLED=false` on the portal
-  Deployment in that environment's overlay (currently `false` in both until the
-  API verifies tokens). No image rebuild is needed — it takes effect on the next
+  Deployment in that environment's overlay when an anonymous rollout is intended.
+  No image rebuild is needed — it takes effect on the next
   pod start.
 
 ### Local dev setup (entra-local)
@@ -502,7 +516,9 @@ Where MSAL navigates after sign-out.
 **Default:** `localStorage`
 **Type:** `localStorage` | `sessionStorage`
 
-Where MSAL persists its token cache.
+Where MSAL persists its **IdP token** cache. This is unrelated to the API's Redis
+user-access cache (`AUTH_USER_CACHE_TTL_SECONDS`). No Scope session token or
+additional browser bearer store is introduced.
 
 ## Portal Runtime Configuration
 
@@ -713,25 +729,86 @@ TTL applied to per-run liveness heartbeat keys in Redis (`run-heartbeat:<runId>`
 
 ## API Authentication
 
-The API verifies Microsoft Entra ID access tokens and attaches the caller's
-identity to each request (`req.user`). Authentication is **identity-only and
-non-breaking**: when all of these variables are unset the API still boots and
-treats every caller as anonymous, so existing unauthenticated clients (e.g. the
-report-generator worker) keep working. A partial configuration fails startup
-rather than silently disabling authentication. Once configured, a valid bearer
-token is required only where a route opts in — today the only such route is
-`GET /api/v1/users/me`. A malformed/expired token is always rejected with `401`;
-a *missing* token stays anonymous.
+The API verifies Microsoft Entra ID access-token signature/claims **before any
+Redis/Mongo user lookup**. Every authenticated call keeps using the same IdP
+bearer; there is no `/auth/login`, token exchange, Scope JWT, or signing secret.
+`req.user` contains the resolved Scope UUID and database role, not an IdP role.
 
-Authorization (roles/permissions enforcement) is **not** part of this milestone.
+Only **actual `GET /api/v1/users/me?login=true`** creates missing users or refreshes
+profile, `lastLoginAt`, and bootstrap-admin promotion. The upsert still precedes
+the disabled-user check: an explicit login can update those fields before returning
+`403`. `lastLoginAt` is the explicit upsert timestamp, not general activity or
+trustworthy proof of an interactive sign-in. Plain `/me` (or `login=false`) and other
+routes read an existing active user from Redis, falling back to an exact
+`(idp, tid, oid)` Mongo lookup on miss/unavailability; they never JIT or refresh profile.
+Invalid/repeated/structured login values return `400`; HEAD never enrolls.
+
+The `/users/me` responses, including failures, are **`Cache-Control: no-store`**.
+Clients also use no-store; the login-marked GET has side effects and must never be
+prefetched or polled. New CLI/raw-bearer identities must deliberately enroll through
+it; already-enrolled callers remain compatible without any token change.
+
+With auth unconfigured, the API still boots and uses the existing anonymous rollout,
+so unauthenticated workers keep working. Partial auth configuration fails startup.
+With auth configured, missing tokens remain anonymous except where a route requires
+identity (`/users/me`); existing public exclusions remain unchanged. A verified
+identity is never silently downgraded to anonymous: missing users are
+`403 user_not_enrolled`, disabled users `403 user_disabled`, and the reserved `system`
+principal `401`. Invalid/expired tokens on non-public routes are rejected with `401`
+before cache access. Required Mongo/JWKS unavailability returns `503`; unexpected
+implementation/database errors use the logged `500` path.
+
+Full route RBAC/ownership enforcement is **not** part of this milestone. See
+[the auth flow and method walkthrough](docs/architecture/auth-rbac.md#3-api-authentication-middleware).
+
+### AUTH_USER_CACHE_TTL_SECONDS
+**Default:** `300` (only when unset)
+**Type:** positive safe integer (seconds)
+**Scope:** API
+
+Fixed, **non-sliding** lifetime of an existing active user's Redis snapshot.
+Blank, zero, negative, fractional, nonnumeric, or unsafe values fail startup,
+even when IdP auth is disabled.
+This variable alone does **not** enable IdP authentication or count as partial
+IdP configuration. Explicit login or successful Mongo fallback writes using
+atomic `SET ... EX <ttl>`; hits only `GET` and never extend expiry.
+
+Redis uses existing `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, and `REDIS_TLS`.
+A missing/blank Redis host creates no cache client and logs rate-limited
+unavailability; existing-user resolution falls back to Mongo.
+The key is
+`auth-user:v1:<encoded Mongo database namespace>:<encoded idp>:<encoded tid>:<encoded oid>`,
+with each component independently encoded using `encodeURIComponent`. The namespace
+is the configured MongoDB database name: independent databases sharing Redis must
+use distinct database names/namespaces (or separate Redis instances). No new Redis
+deployment or namespace secret is needed; verify this isolation in external
+deployment overlays before rollout.
+
+The repository's `.env.example`, `.env.local.example`, and API Compose environment
+wire this TTL setting. No additional tracked deployment manifests with auth
+configuration were found here; externally managed overlays and deployed values
+must be checked separately.
+
+Only validated active human principals are cached; no missing/disabled negative
+entries, raw bearer tokens, or IdP-derived permissions. Invalid/mismatched payloads
+are logged and evicted best-effort. Expected cache read/write/delete failures are
+rate-limited in logs without tokens/PII and fall back to Mongo; recovery restores
+caching. Connection/command waits are bounded, with no offline command queuing/replay
+or process-local authorization cache. Cache-write failure does not discard a
+successful Mongo result; required Mongo failure still fails the request.
+
+Database-only role/disable edits can stay stale until TTL expiry. Future mutation
+endpoints must evict this key; logout is not cache invalidation. No deployment-wide
+immediate revocation guarantee is implied by this cache.
 
 ### AUTH_PROVIDER
 **Default:** (not set)
 **Type:** string (`entra`)
 
-Selects the identity-provider implementation. Set to `entra` to enable Microsoft
-Entra ID token verification. When unset, auth is disabled and all callers are
-anonymous.
+Selects the identity-provider implementation. Set to `entra` with the required
+authority/audience settings to enable verification. When all IdP auth settings
+are unset, auth is disabled and callers remain anonymous; setting other IdP
+settings without `AUTH_PROVIDER` fails startup rather than disabling verification.
 
 ### AUTH_AUTHORITY
 **Type:** URL string — **Required when `AUTH_PROVIDER` is set**
@@ -776,33 +853,41 @@ so tokens minted for other applications are rejected.
 ### AUTH_CLI_CLIENT_ID
 **Type:** string (GUID)
 
-The public client ID advertised to the CLI for interactive sign-in. Reserved for
-the client-auth milestone; not used by API verification.
+The public client ID reserved for future CLI interactive sign-in configuration;
+not used by API verification and not served by an `/auth/config` endpoint.
 
 ### AUTH_PORTAL_CLIENT_ID
 **Type:** string (GUID)
 
-The public client ID advertised to the Portal for interactive sign-in. Reserved
-for the client-auth milestone; not used by API verification.
+Reserved client-configuration metadata; not used by API verification. The current
+Portal uses build-time `VITE_AUTH_CLIENT_ID`, not this API setting or an
+`/auth/config` endpoint.
 
 ### AUTH_SCOPES
 **Default:** (empty)
 **Type:** comma/space-separated string
 
-Scopes the CLI/Portal should request when acquiring an access token for the API
-(e.g. `api://<AUTH_API_CLIENT_ID>/access`). Advertised to clients; not consumed
-by API verification.
+Scopes intended for clients acquiring an API access token
+(e.g. `api://<AUTH_API_CLIENT_ID>/access`). Not consumed by API verification or
+served by a config endpoint; configure the current Portal through `VITE_AUTH_SCOPES`.
 
 ### AUTH_BOOTSTRAP_ADMINS
 **Default:** (empty)
 **Type:** comma-separated list of identity keys
 
-Identities to promote to the `admin` role on first login, formatted as
+Identities to promote to the `admin` role on explicit `/users/me?login=true`
+enrollment or subsequent login refresh, formatted as
 `${idp}:${idpTenant}/${idpSubject}` (e.g.
 `entra:00000000-0000-0000-0000-000000000000/11111111-1111-1111-1111-111111111111`).
 Promotion requires `email_verified = true` and an explicit tenant match in
 `AUTH_BOOTSTRAP_TENANTS`. It is **promote-only**: an existing admin is never
 demoted, and users not listed here are never auto-promoted.
+
+The verified-email assertion must be present in the **API access token**, not just
+the browser's ID token or IdP directory record. A seeded entra-local account can
+therefore sign in successfully yet retain the default `user` role when its access
+token omits `email_verified`. Being named in the bootstrap settings alone is not
+sufficient; the claim requirement is not bypassed for local development.
 
 ### AUTH_BOOTSTRAP_TENANTS
 **Default:** (empty)
@@ -813,7 +898,7 @@ Tenant allowlist that gates admin bootstrap. This setting is required when
 identity is promoted only when its tenant is explicitly listed here.
 
 > **Future — Graph profile enrichment.** `email`/`displayName` are read directly
-> from the verified token claims today (no Microsoft Graph call, no client
+> from the verified token claims during explicit login today (no Microsoft Graph call, no client
 > secret). A later On-Behalf-Of enrichment would introduce
 > `AUTH_API_CLIENT_SECRET`; it is **not** used now.
 

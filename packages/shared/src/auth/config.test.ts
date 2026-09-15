@@ -48,6 +48,40 @@ describe("loadAuthConfigFromEnv", () => {
     expect(runtime?.enricher).toBeDefined();
     expect(runtime?.bootstrapAdmins.size).toBe(0);
     expect(runtime?.bootstrapTenants.size).toBe(0);
+    expect(runtime?.userCacheTtlSeconds).toBe(300);
+  });
+
+  it.each(["1", "60", "300", "9007199254740991"])("accepts a positive safe cache TTL of %s", (ttl) => {
+    expect(loadAuthConfigFromEnv({
+      ...baseEnv(),
+      AUTH_USER_CACHE_TTL_SECONDS: ttl,
+    })?.userCacheTtlSeconds).toBe(Number(ttl));
+  });
+
+  it.each([
+    "", " ", " 300", "300 ", "0", "-1", "0.5", "1.0", "1e3", "+5",
+    "0x10", "NaN", "Infinity", "abc", "300seconds", "9007199254740992",
+  ])("rejects an invalid cache TTL of %j", (ttl) => {
+    expect(() => loadAuthConfigFromEnv({
+      ...baseEnv(),
+      AUTH_USER_CACHE_TTL_SECONDS: ttl,
+    })).toThrow(/AUTH_USER_CACHE_TTL_SECONDS must be a positive safe integer/);
+  });
+
+  it("does not enable IdP configuration when only a valid cache TTL is set", () => {
+    expect(loadAuthConfigFromEnv({ AUTH_USER_CACHE_TTL_SECONDS: "60" })).toBeNull();
+  });
+
+  it("validates a supplied cache TTL even with authentication disabled", () => {
+    expect(() => loadAuthConfigFromEnv({ AUTH_USER_CACHE_TTL_SECONDS: "0" }))
+      .toThrow(/AUTH_USER_CACHE_TTL_SECONDS/);
+  });
+
+  it("does not let a cache TTL bypass incomplete IdP configuration", () => {
+    expect(() => loadAuthConfigFromEnv({
+      AUTH_USER_CACHE_TTL_SECONDS: "60",
+      AUTH_PROVIDER: "entra",
+    })).toThrow(/AUTH_AUTHORITY, AUTH_API_CLIENT_ID/);
   });
 
   it("accepts the entra-local issuer/JWKS overrides without error", () => {

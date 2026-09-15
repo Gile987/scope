@@ -222,6 +222,8 @@ export function createAllMockDependencies() {
     profileCollection,
     profileVersionCollection,
     usersCollection,
+    authProvider: null,
+    userAccessResolver: null,
     taskPromptStore,
     skillRevisionStore,
     skillResolver,

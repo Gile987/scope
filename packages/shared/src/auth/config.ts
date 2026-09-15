@@ -35,6 +35,8 @@ export interface AuthRuntime {
   bootstrapAdmins: Set<string>;
   /** Required tenant allowlist within which bootstrap promotion may apply. */
   bootstrapTenants: Set<string>;
+  /** Fixed lifetime of an active Scope-user cache entry. */
+  userCacheTtlSeconds: number;
 }
 
 /** Build the identity key used to match {@link AuthRuntime.bootstrapAdmins}. */
@@ -66,16 +68,27 @@ function getRequiredAuthValue(
   return value;
 }
 
+function parseUserCacheTtl(raw: string | undefined): number {
+  if (raw === undefined) return 300;
+  const value = Number(raw);
+  if (!/^[0-9]+$/.test(raw) || !Number.isSafeInteger(value) || value <= 0) {
+    throw new Error("AUTH_USER_CACHE_TTL_SECONDS must be a positive safe integer");
+  }
+  return value;
+}
+
 /**
  * Build the {@link AuthRuntime} from environment variables. Returns `null` only
- * when every known auth setting is absent, so the API can still run in the
+ * when every IdP auth setting is absent, so the API can still run in the
  * non-breaking anonymous mode. Partial configuration throws to prevent auth
  * from being disabled by a missing or misspelled required setting.
  *
  * Required to enable auth: `AUTH_PROVIDER`, `AUTH_AUTHORITY`,
  * `AUTH_API_CLIENT_ID`. Optional: `AUTH_ISSUER_TEMPLATE`, `AUTH_JWKS_URI`,
  * `AUTH_BOOTSTRAP_ADMINS`, `AUTH_BOOTSTRAP_TENANTS`. Bootstrap tenants are
- * required whenever bootstrap admins are configured.
+ * required whenever bootstrap admins are configured. `AUTH_USER_CACHE_TTL_SECONDS`
+ * defaults to 300 when unset and is validated even without IdP configuration;
+ * setting it alone does not enable authentication.
  *
  * `AUTH_ISSUER_TEMPLATE` / `AUTH_JWKS_URI` override the Entra-cloud defaults so
  * a self-hosted issuer (e.g. the `entra-local` emulator, whose issuer is
@@ -85,6 +98,7 @@ function getRequiredAuthValue(
 export function loadAuthConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): AuthRuntime | null {
+  const userCacheTtlSeconds = parseUserCacheTtl(env.AUTH_USER_CACHE_TTL_SECONDS);
   const configuredKeys = AUTH_ENV_KEYS.filter(
     (key) => (env[key]?.trim().length ?? 0) > 0,
   );
@@ -135,5 +149,6 @@ export function loadAuthConfigFromEnv(
     enricher,
     bootstrapAdmins,
     bootstrapTenants,
+    userCacheTtlSeconds,
   };
 }

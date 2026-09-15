@@ -117,7 +117,6 @@ export class EntraIdAuthProvider implements AuthProvider {
       idp: this.id,
       idpTenant,
       idpSubject,
-      tokenExpiresAt,
       email,
       displayName,
       emailVerified,

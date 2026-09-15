@@ -3,8 +3,8 @@
 
 import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
+import { AuthError } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
-import { getUser } from "../auth/types.js";
 import type { RouteContext } from "../route-context.js";
 
 extendZodWithOpenApi(z);
@@ -21,31 +21,36 @@ const UserMeResponseSchema = z
   .openapi("UserMeResponse");
 
 export function registerUsersRoutes(ctx: RouteContext): void {
-  // Current user's identity. Resolved from the bearer token by the auth
-  // middleware. Anonymous callers get 401 — this endpoint is meaningless
-  // without an identity (still non-breaking, since it is a brand-new route).
-  //
-  // The profile (email/displayName) is sourced through the same enrichment
-  // seam as authentication; today that is the token claims already on
-  // `req.user`, so a future Graph-backed `/me` is a drop-in replacement.
-  // No permissions are returned yet — that is part of the RBAC milestone.
   apiRoute(ctx.app, ctx.registry, {
     method: "get",
     path: "/api/v1/users/me",
     tags: ["Users"],
     summary: "Get the authenticated user's identity",
+    description: "Pass login=true after an IdP callback to JIT-enroll the user, refresh their profile and lastLoginAt, apply bootstrap-admin rules, and warm the access cache. Omit login (or use false) for a read-only cached identity lookup. Login-marked GET requests have side effects and must not be prefetched or HTTP-cached.",
+    query: z.object({
+      login: z.enum(["true", "false"]).optional(),
+    }),
     response: UserMeResponseSchema,
     errorResponses: {
+      400: { description: "Invalid login query parameter" },
       401: { description: "Not authenticated" },
-      403: { description: "User is disabled" },
+      403: { description: "User is not enrolled or is disabled" },
       503: { description: "Authentication service unavailable" },
     },
     handler: async (req, res) => {
-      const user = getUser(req);
-      if (!user.isAuthenticated) {
+      if (!req.auth) {
         res.status(401).json({ error: "Authentication required" });
         return;
       }
+      const resolver = ctx.userAccessResolver;
+      if (!resolver) {
+        throw new AuthError("service_unavailable", "Authentication service unavailable");
+      }
+      // Express also dispatches HEAD to GET handlers; HEAD must never enroll.
+      const user = req.method === "GET" && req.query.login === "true"
+        ? await resolver.enrollOnLogin(req.auth.identity, req.auth.token)
+        : await resolver.resolveExisting(req.auth.identity);
+      req.user = user;
       res.json({
         id: user.id,
         role: user.role,

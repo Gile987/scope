@@ -30,6 +30,31 @@ flowchart LR
 
 ## Data Model
 
+### Application users and access resolution
+
+`users._id` is a Scope-owned UUID. The unique external identity is
+`(idp, idpTenant, idpSubject)` (`idp`, Entra `tid`, Entra `oid`), never email.
+`UserStore.upsertOnLogin()` is called only by the explicit
+`GET /api/v1/users/me?login=true` path for JIT/profile/`lastLoginAt`/eligible
+bootstrap-admin writes. `lastLoginAt` records that upsert, not request activity or
+proof of an interactive prompt; the disabled check still occurs after the upsert.
+
+After IdP verification, `UserAccessResolver.resolveExisting()` uses a validated
+`RedisUserAccessCache` snapshot or `UserStore.findByIdentity()` on cache miss/outage.
+It never upserts. The versioned cache key includes independently encoded Mongo
+database namespace, provider, tenant, and subject; only active users are positively
+cached. Fixed/non-sliding TTL defaults to 300 seconds
+(`AUTH_USER_CACHE_TTL_SECONDS`), so DB-only role/disable edits can remain stale until
+expiry. Redis failure falls back to Mongo, not anonymous access.
+
+The Portal handshake uses login=true after callback and plain `/me` after an
+MSAL-cached reload, gating all queries until its API-authoritative UUID/role arrives.
+The singular stored role is metadata today: the permission bundles, ownership
+enforcement, service credentials, and internal JWTs in
+[Authentication & RBAC](auth-rbac.md) are deferred, not a global API lockdown.
+
+### Benchmark entities
+
 Runs are the central entity:
 
 ```mermaid
@@ -95,7 +120,8 @@ To support submitting an AGENTS.md prompt with a run, the request carries:
 A **Project** (`projects` collection, `ProjectStore`) is the top-level container that
 partitions all user-facing data. Every scoped entity carries one **immutable `projectId`**,
 set at creation and never changed. This is the data-organization layer only — it is a
-**filter, not a security boundary** (access control lives in `auth-rbac.md`; any caller may
+**filter, not a security boundary** (future ownership/RBAC is specified in
+[`auth-rbac.md`](auth-rbac.md); any caller admitted by the current auth rollout may
 pass any `projectId`).
 
 ### Scoped vs. unscoped entities

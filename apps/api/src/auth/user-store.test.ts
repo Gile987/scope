@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi } from "vitest";
-import type { Collection } from "mongodb";
+import { MongoNetworkError, MongoServerError, type Collection } from "mongodb";
 import type { UserDocument, UserProfile, VerifiedIdentity } from "shared";
 import { UserStore } from "./user-store.js";
 
@@ -38,8 +38,10 @@ function baseDoc(overrides: Partial<UserDocument> = {}): UserDocument {
 
 /** Fake collection whose findOneAndUpdate returns queued documents in order. */
 function fakeCollection(queue: (UserDocument | null)[]) {
-  const findOneAndUpdate = vi.fn(async () => queue.shift() ?? null);
-  const findOne = vi.fn(async () => null);
+  const findOneAndUpdate = vi.fn(async (
+    _filter: unknown, _update: unknown, _options: unknown,
+  ) => queue.shift() ?? null);
+  const findOne = vi.fn<(filter: unknown) => Promise<UserDocument | null>>(async () => null);
   const collection = { findOneAndUpdate, findOne } as unknown as
     Collection<UserDocument>;
   return { collection, findOneAndUpdate, findOne };
@@ -210,6 +212,99 @@ describe("UserStore.upsertOnLogin", () => {
     const store = new UserStore(collection);
 
     await expect(store.upsertOnLogin(IDENTITY, PROFILE)).rejects.toThrow();
+  });
+
+  it("retries only the update when a concurrent login wins the unique identity insert", async () => {
+    const { collection, findOneAndUpdate } = fakeCollection([baseDoc({ role: "admin" })]);
+    findOneAndUpdate.mockRejectedValueOnce(new MongoServerError({
+      code: 11000,
+      keyPattern: { idp: 1, idpTenant: 1, idpSubject: 1 },
+      keyValue: { idp: IDENTITY.idp, idpTenant: IDENTITY.idpTenant, idpSubject: IDENTITY.idpSubject },
+    }));
+    const store = new UserStore(collection);
+
+    expect(await store.upsertOnLogin(IDENTITY, PROFILE)).toMatchObject({
+      _id: "user-uuid-1", role: "admin",
+    });
+    const [filter, update, options] = findOneAndUpdate.mock.calls[1];
+    expect(filter).toEqual(findOneAndUpdate.mock.calls[0][0]);
+    expect(options).toEqual({ upsert: false, returnDocument: "after" });
+    expect(update).toEqual({
+      $set: expect.objectContaining({
+        email: PROFILE.email,
+        displayName: PROFILE.displayName,
+        lastLoginAt: expect.any(Date),
+      }),
+    });
+  });
+
+  it("recognizes the exact named identity index when Cosmos omits index metadata", async () => {
+    const { collection, findOneAndUpdate } = fakeCollection([baseDoc()]);
+    findOneAndUpdate.mockRejectedValueOnce(new MongoServerError({
+      code: 11000, message: "E11000 duplicate key error index: uniq_identity dup key: {}",
+    }));
+    await expect(new UserStore(collection).upsertOnLogin(IDENTITY, PROFILE)).resolves.toEqual(baseDoc({
+      createdAt: expect.any(Date), updatedAt: expect.any(Date),
+    }));
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    new MongoNetworkError("connection lost"),
+    new MongoServerError({ code: 11000, keyPattern: { _id: 1 } }),
+    new MongoServerError({ code: 11000, message: "duplicate key" }),
+    new MongoServerError({ code: 11000, message: "index: uniq_identity_extra dup key: {}" }),
+    new MongoServerError({
+      code: 11000, keyPattern: { idp: 1, idpTenant: 1, idpSubject: 1 },
+      keyValue: { idp: "entra", idpTenant: "another-tenant", idpSubject: "subject-1" },
+    }),
+    new MongoServerError({ code: 121, keyPattern: { idp: 1, idpTenant: 1, idpSubject: 1 } }),
+    Object.assign(new Error("duplicate key"), {
+      code: 11000, keyPattern: { idp: 1, idpTenant: 1, idpSubject: 1 },
+    }),
+  ])("does not retry unrelated failures ($name)", async (error) => {
+    const { collection, findOneAndUpdate } = fakeCollection([]);
+    findOneAndUpdate.mockRejectedValueOnce(error);
+    await expect(new UserStore(collection).upsertOnLogin(IDENTITY, PROFILE)).rejects.toBe(error);
+    expect(findOneAndUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("does not loop if the identity collision retry fails or no longer finds the winner", async () => {
+    const { collection, findOneAndUpdate } = fakeCollection([null]);
+    const error = new MongoServerError({
+      code: 11000, keyPattern: { idp: 1, idpTenant: 1, idpSubject: 1 },
+    });
+    findOneAndUpdate.mockRejectedValueOnce(error);
+    await expect(new UserStore(collection).upsertOnLogin(IDENTITY, PROFILE)).rejects.toBe(error);
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("UserStore.findByIdentity", () => {
+  it("looks up the exact identity triple without writing login or profile data", async () => {
+    const { collection, findOne, findOneAndUpdate } = fakeCollection([]);
+    const doc = baseDoc();
+    findOne.mockResolvedValueOnce(doc);
+    const store = new UserStore(collection);
+
+    expect(await store.findByIdentity(IDENTITY)).toBe(doc);
+    expect(findOne).toHaveBeenCalledExactlyOnceWith({
+      idp: "entra", idpTenant: "tenant-1", idpSubject: "subject-1",
+    });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("returns null for a missing identity without enrolling", async () => {
+    const { collection, findOneAndUpdate } = fakeCollection([]);
+    expect(await new UserStore(collection).findByIdentity(IDENTITY)).toBeNull();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("preserves database errors for the resolver to classify", async () => {
+    const { collection, findOne } = fakeCollection([]);
+    const error = new MongoNetworkError("unreachable");
+    findOne.mockRejectedValueOnce(error);
+    await expect(new UserStore(collection).findByIdentity(IDENTITY)).rejects.toBe(error);
   });
 });
 
