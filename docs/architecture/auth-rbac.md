@@ -280,7 +280,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   idpTenant: string,           // Entra `tid` — part of the identity key (multi-tenant)
   idpSubject: string,          // Entra `oid` — stable per (tenant, user); identity link only
   email?: string,              // mutable, advisory; never an authorization input
-  emailVerified?: boolean,     // captured when the IdP asserts it (bootstrap gate)
+  emailVerified?: boolean,     // captured when the IdP asserts it (email storage only)
   displayName?: string,
   role: UserRole,              // "user" | "admin"  (persisted role union only)
   /** Optional explicit grants/denies layered on top of the role. Empty today;
@@ -337,6 +337,8 @@ mode any tenant can sign users in):
   `(idp, idpTenant, idpSubject)`
   appears in `AUTH_BOOTSTRAP_ADMINS` **and** their `idpTenant` is in
   `AUTH_BOOTSTRAP_TENANTS`. Email is **never** the match key.
+- Bootstrap does not require `email` or `email_verified`; ordinary Entra workforce
+  and local-emulator access tokens can bootstrap without those claims.
 - `email_verified` (where the IdP asserts it) is required before any email is even stored
   as advisory; an unverified email never influences a grant.
 - **Bootstrap promotes but does not silently demote.** Presence in the list grants admin;
@@ -472,6 +474,7 @@ browser session/revocation store; Portal logout does not delete shared Redis acc
 
 | Condition | Response |
 | --- | --- |
+| Present but empty, malformed, or unsupported `Authorization` header on a non-public route with auth configured | `401`, `code: "invalid_token"`, before token verification or access lookup; never anonymous fallback. Only an absent header preserves the no-token anonymous rollout. |
 | Invalid/expired IdP token | `401`, preserving verifier codes, **before Redis/Mongo access**. |
 | No verified identity on `/users/me` | `401`; no enrollment or warming. |
 | Missing stored user | `403`, `code: "user_not_enrolled"`; never anonymous fallback. |
@@ -482,6 +485,19 @@ browser session/revocation store; Portal logout does not delete shared Redis acc
 | Redis unavailable, required Mongo operation succeeds | Continue with Mongo result; log cache failure. |
 | Required Mongo operation unavailable | `503`; never grant/anonymous fallback. |
 | Unexpected implementation/database error | Logged centralized `500` path, not catch-all `503`. |
+
+#### OpenAPI authentication metadata (implemented)
+
+`GET /api/v1/users/me` declares the HTTP bearer scheme `bearerAuth` in OpenAPI,
+covering both plain lookups and `?login=true`. Swagger UI's **Authorize** control
+accepts the unchanged IdP access token without its `Bearer` prefix, not an ID
+token or a Scope-issued token. The operation retains its documented
+`400`/`401`/`403`/`503` responses.
+
+`apiRoute()` forwards optional `security` metadata only. There is no global
+OpenAPI security requirement, and other operations retain their existing
+anonymous rollout. This does not implement the deferred authorization guards
+below.
 
 ### 4. Deferred: route-level authorization
 
@@ -974,9 +990,10 @@ verified separately when those deferred credentials are introduced.
 3. ✅ **Explicit-login API authn + access cache** — Verify IdP JWT before cache,
    register `/users/me` before existing-user middleware, and share
    `UserAccessResolver`. Only scalar `login=true` on actual GET enrolls/refreshes/
-   bootstraps. Exact identity + tenant allowlists and verified-email promotion remain
-   promote-only. Normal requests use fixed-TTL Redis, then read-only indexed Mongo
-   fallback. Missing/disabled users receive distinct `403`s; `system` receives `401`.
+   bootstraps. Promotion uses exact identity + tenant allowlists and remains
+   promote-only; email storage still requires verification. Normal requests use
+   fixed-TTL Redis, then read-only indexed Mongo fallback. Missing/disabled users
+   receive distinct `403`s; `system` receives `401`.
    Preserve anonymous/public rollout. **Deferred**: permissions, service/internal-JWT
    verification, and mutation-driven eviction endpoints.
 
@@ -1073,6 +1090,13 @@ verified separately when those deferred credentials are introduced.
     > `setApiTokenProvider`/`setReauthHandler` seams). IdP config is build-time
     > (`VITE_AUTH_*`, see [ENV_VARIABLES.md](../../ENV_VARIABLES.md)) defaulting to
     > the `entra-local` emulator for local dev.
+    > Docker's `builder` stage accepts these public settings as build arguments:
+    > Compose forwards them through `portal.build.args`, and CI forwards the
+    > same-named GitHub Actions configuration variables. They are embedded by
+    > Vite, not read from the final nginx container's environment. The dev image
+    > continues to read them from the Vite process environment. Changing the
+    > IdP requires rebuilding the image; promoting one image preserves its IdP
+    > settings. Empty optional redirect settings retain the current Portal origin.
     >
     > **Feature toggle (important).** Portal auth is **on by default (secure by
     > default)** but can be turned off per environment via **three independent
@@ -1097,11 +1121,20 @@ verified separately when those deferred credentials are introduced.
     >
     > **One-command local dev.** Any `pnpm docker:dev:*` script that starts the
     > Portal brings up the `entra-local` emulator (compose `auth` profile) over
-    > HTTPS with an mkcert-issued, locally-trusted `localhost` cert
-    > (`scripts/ensure-dev-certs.sh`), and auto-registers the per-worktree Portal
+    > HTTPS with an mkcert-issued certificate covering both `localhost` and the
+    > Compose hostname `entra-local` (`scripts/ensure-dev-certs.sh`), and
+    > auto-registers the per-worktree Portal
     > redirect URI via a one-shot `entra-local-init` service. MSAL requires the
     > authority to be served over HTTPS (it rejects non-HTTPS authorities with
     > `authority_uri_insecure`), hence the mkcert TLS setup rather than plain HTTP.
+    > The provisioning script renews older localhost-only or expiring certificates
+    > and exports only the public CA. Compose shares that CA in a separate,
+    > read-only volume with the API and redirect-registration helper via
+    > `NODE_EXTRA_CA_CERTS`; the emulator health check trusts it too. The API
+    > never receives the emulator private key, and no auth-related HTTPS call
+    > disables certificate verification. The CA initializer remains optional
+    > without the `auth` profile; recreate clients after rotating the CA because
+    > Node loads extra CAs at startup.
     > The only interactive step is a one-time `mkcert -install` password prompt.
     > See [ENV_VARIABLES.md](../../ENV_VARIABLES.md) "Local dev setup (entra-local)".
     >
@@ -1278,7 +1311,7 @@ It does not replace the Portal callback/order checks or live IdP/JWKS outage tes
 | Scenario | Expected result |
 | --- | --- |
 | Fresh Portal callback | First Scope API call is `/api/v1/users/me?login=true`; feature flags and all other eager queries wait for success. |
-| First enrollment | Scope UUID/default `user` role; verified profile handling; exact identity + tenant + verified-email bootstrap; explicit `lastLoginAt` write; active cache warmed. |
+| First enrollment | Scope UUID/default `user` role; verified profile handling; exact identity + tenant bootstrap independent of email verification; explicit `lastLoginAt` write; active cache warmed. |
 | Login on active cache hit | Still bypasses the read cache and upserts, returning/warming the latest stored role. |
 | Ordinary/plain `/me` hit | Verify token first; no Mongo operation, profile enrichment, bootstrap promotion, or `lastLoginAt` write; TTL not extended. |
 | Miss/expiry | Exact identity Mongo read, validate/warm; missing user is `403 user_not_enrolled`, never JIT. |
@@ -1411,7 +1444,7 @@ ship; they are not dependencies or secrets introduced by explicit login/caching.
 | Cache isolation | `auth-user:v1:<encoded Mongo database namespace>:<encoded idp>:<encoded tid>:<encoded oid>`. |
 | Expiration | `AUTH_USER_CACHE_TTL_SECONDS`, default 300 only when unset, positive safe integer, fixed/non-sliding `SET EX`. |
 | Denial vs cache miss | Miss/unavailable reads Mongo; missing/disabled users are distinct `403`s, reserved `system` is `401`; no negative cache. |
-| Bootstrap | Exact verified identity tuple + explicit tenant allowlist + verified-email requirement, only on explicit login, promote-only. |
+| Bootstrap | Exact verified identity tuple + explicit tenant allowlist, independent of email verification, only on explicit login, promote-only. |
 | Timestamp | `lastLoginAt` records the explicit upsert, not ordinary activity or trustworthy proof of an interactive callback; disabled check follows upsert. |
 | Portal readiness | Callback login=true, cached-account plain `/me`; API UUID/role authoritative; all queries gated and account-bound work deduplicated/cancelled. |
 | Rollout | Public and anonymous behavior preserved; no full RBAC/ownership lockdown; enrolled CLI bearers remain compatible. |
@@ -1440,7 +1473,7 @@ credential or cache consistency contract.
 | Downstream user identity | Forward IdP token vs Scope-minted internal token | **Scope-minted internal JWT (`iss=scope-api`, asymmetric, public-key verified); IdP token never leaves the API.** To keep authorization from going stale, the token carries **`sub` only and permissions are re-resolved downstream** (preferred), or — if perms are embedded — `exp ≤ 5min` **and** a `jti` revocation list, **both** required. `disabledAt`/revocation is re-checked on the internal-JWT path, not just the IdP path. | Downstream stays IdP-agnostic; revocation (disable user, demote admin, drop a permission) takes effect within minutes, not at token `exp`. |
 | Internal-JWT staleness | Long-lived perms-in-token vs re-resolve / tight exp + jti | **Re-resolve from `sub` downstream (preferred); else `exp ≤ 5min` + `jti` denylist** | Embedding permissions makes revocation impossible until `exp`; a 5-minute ceiling plus a denylist makes "short exp" concrete and enforceable. |
 | Entra tenancy | Single-tenant vs multi-tenant | **Multi-tenant** (Question D): accept configured tenants, no `tid` pinning in business logic; tenant filtering at the App Registration + `AUTH_BOOTSTRAP_TENANTS` allowlist for promotion | App-registration-level control; code stays tenant-agnostic. Because `oid` is unique only **within** a tenant (and guests carry their home-tenant `oid`), the unique identity index is **`(idp, idpTenant, idpSubject)`** — `tid` is part of the key. |
-| Bootstrap-admin matching | Match on email vs identity tuple | **Match on `(idp, idpTenant, idpSubject)`, require `email_verified`, restrict to `AUTH_BOOTSTRAP_TENANTS`; promotion is promote-only (removal from the list does not auto-demote)** | Entra `email`/`preferred_username` is mutable and not guaranteed verified; matching on identity + verified email + tenant allowlist closes the auto-promote-by-email-collision hole and the silent-demote-by-ConfigMap risk. |
+| Bootstrap-admin matching | Match on email vs identity tuple | **Match on `(idp, idpTenant, idpSubject)`, restrict to `AUTH_BOOTSTRAP_TENANTS`; promotion is independent of email verification and promote-only (removal from the list does not auto-demote)** | Entra `email`/`preferred_username` is mutable and not guaranteed verified; exact identity + tenant matching prevents promotion by email collision without depending on a nonstandard workforce email-verification claim. Promote-only behavior prevents silent demotion by a ConfigMap edit. |
 | Security audit | None vs log-only vs Mongo + metrics | **Append-only `security_audit` in MongoDB + Prometheus counters** (Question F) for login/logout/onboarding, key-regeneration, **token minting**, **service-key cross-user reads**, and **permission overrides** | Durable forensic record + alerting; single `recordSecurityEvent()` helper; a failed audit write **fails the operation closed**; retention TTL is an explicit policy choice; no secrets in audit. |
 | Secret storage | Env-only vs Key Vault + ESO | **Key Vault → External Secrets** for per-service `INTERNAL_API_KEY_<NAME>`/client secret; JWKS fetched (not stored); **CLI tokens via a Scope-owned `SecretStore` backed by `cross-keychain`** (`0600` fallback) | Matches existing `mongo-secrets`/`redis-secrets` pattern; public keys are not secrets; the `SecretStore` wrapper replaces unmaintained `keytar` and isolates the backing library. |
 | CLI login UX | Print URL+code only vs assisted | **Clipboard copy + browser auto-open, manual fallback always shown** | Fast happy path, still works headless/SSH. |
@@ -1529,9 +1562,10 @@ v1 implements `private`/`shared` + deep links and reserves the remaining optiona
 **Decision** *(confirmed)*: `AUTH_BOOTSTRAP_ADMINS` is the **sole** bootstrap mechanism
 for seeding the first admin, but it is matched on the **identity tuple
 `(idp, idpTenant, idpSubject)`** — **not** on email, which is mutable and not guaranteed
-verified. The matched explicit `/users/me?login=true` request must also have
-`email_verified = true` and originate from a
-tenant in `AUTH_BOOTSTRAP_TENANTS`. Bootstrap is **promote-only**: removing an entry does
+verified. The matched explicit `/users/me?login=true` request must originate from a
+tenant in `AUTH_BOOTSTRAP_TENANTS`. Neither `email` nor `email_verified` is required
+for promotion; verified-email storage remains a separate, unchanged policy.
+Bootstrap is **promote-only**: removing an entry does
 **not** auto-demote an existing admin (prevents a misconfigured ConfigMap from silently
 revoking access). We do **not** use Entra App Roles. Future admin user-management
 endpoints (`scope/user:admin`) must invalidate the corresponding cache entry.
@@ -1775,8 +1809,9 @@ the query-param fallback) given the proxy timeouts in
 17. **Bootstrap-admin trusts a mutable email claim** — Entra `email`/`preferred_username`
     is not guaranteed verified and is mutable; in multi-tenant mode an email collision
     could auto-promote the wrong user, and list edits could silently demote/promote.
-    **Resolved**: bootstrap matches on `(idp, idpTenant, idpSubject)`, requires
-    `email_verified`, is restricted to `AUTH_BOOTSTRAP_TENANTS`, and is **promote-only**.
+    **Resolved**: bootstrap matches on the verified `(idp, idpTenant, idpSubject)`,
+    is restricted to `AUTH_BOOTSTRAP_TENANTS`, and is **promote-only**.
+    Neither email nor its verification flag influences promotion.
 18. **Multi-tenant identity collision** — `(idp, idpSubject)` is **not** unique because
     `oid` is stable only per tenant and guests carry a home-tenant `oid`. **Resolved**:
     the unique index is **`(idp, idpTenant, idpSubject)`** — `tid` is part of the key.

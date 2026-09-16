@@ -55,9 +55,11 @@ describe("IdP verification and application access middleware", () => {
   it("preserves anonymous callers without a token", async () => {
     const { app, provider, resolver } = setup();
     const res = await request(app).get("/api/v1/private");
+    expect(res.status).toBe(200);
     expect(res.body).toEqual({ id: "anonymous", isAuthenticated: false });
     expect(provider.verifyAccessToken).not.toHaveBeenCalled();
     expect(resolver.resolveExisting).not.toHaveBeenCalled();
+    expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
   });
 
   it("preserves anonymous mode without an IdP provider", async () => {
@@ -67,14 +69,17 @@ describe("IdP verification and application access middleware", () => {
     expect(resolver.resolveExisting).not.toHaveBeenCalled();
   });
 
-  it("makes verified identity available before access resolution", async () => {
-    const { app, provider, resolver } = setup();
-    const res = await request(app).get("/verified-only").set("Authorization", "bearer token");
-    expect(res.body).toEqual({ identity });
-    expect(provider.verifyAccessToken).toHaveBeenCalledWith("token");
-    expect(resolver.resolveExisting).not.toHaveBeenCalled();
-    expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
-  });
+  it.each(["bearer token", "bEaReR token", "bearer   token"])(
+    "makes verified identity available before access resolution for %s", async (header) => {
+      const { app, provider, resolver } = setup();
+      const res = await request(app).get("/verified-only").set("Authorization", header);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ identity });
+      expect(provider.verifyAccessToken).toHaveBeenCalledWith("token");
+      expect(resolver.resolveExisting).not.toHaveBeenCalled();
+      expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
+    },
+  );
 
   it("verifies before resolving and never enrolls from a normal route", async () => {
     const { app, provider, resolver } = setup();
@@ -104,8 +109,22 @@ describe("IdP verification and application access middleware", () => {
       const { app, provider, resolver } = setup();
       const res = await request(app).get("/api/v1/private").set("Authorization", header);
       expect(res.status).toBe(401);
+      expect(res.body.code).toBe("invalid_token");
       expect(provider.verifyAccessToken).not.toHaveBeenCalled();
       expect(resolver.resolveExisting).not.toHaveBeenCalled();
+      expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["", " ", "\t", "Bearer ", "Bearer   "])(
+    "rejects empty credentials %j instead of downgrading to anonymous", async (header) => {
+      const { app, provider, resolver } = setup();
+      const res = await request(app).get("/api/v1/private").set("Authorization", header);
+      expect(res.status).toBe(401);
+      expect(res.body.code).toBe("invalid_token");
+      expect(provider.verifyAccessToken).not.toHaveBeenCalled();
+      expect(resolver.resolveExisting).not.toHaveBeenCalled();
+      expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
     },
   );
 

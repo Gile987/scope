@@ -26,6 +26,7 @@ export function registerUsersRoutes(ctx: RouteContext): void {
     path: "/api/v1/users/me",
     tags: ["Users"],
     summary: "Get the authenticated user's identity",
+    security: [{ bearerAuth: [] }],
     description: "Pass login=true after an IdP callback to JIT-enroll the user, refresh their profile and lastLoginAt, apply bootstrap-admin rules, and warm the access cache. Omit login (or use false) for a read-only cached identity lookup. Login-marked GET requests have side effects and must not be prefetched or HTTP-cached.",
     query: z.object({
       login: z.enum(["true", "false"]).optional(),

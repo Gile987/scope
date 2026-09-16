@@ -3587,6 +3587,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "type": "object",
       },
     },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "description": "Use the unchanged IdP access token, without the Bearer prefix.",
+        "scheme": "bearer",
+        "type": "http",
+      },
+    },
   },
   "info": {
     "description": "REST API for the Scope platform — benchmarking AI coding agents",
@@ -11111,6 +11119,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "description": "Authentication service unavailable",
           },
         },
+        "security": [
+          {
+            "bearerAuth": [],
+          },
+        ],
         "summary": "Get the authenticated user's identity",
         "tags": [
           "Users",

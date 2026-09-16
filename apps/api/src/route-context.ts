@@ -124,11 +124,6 @@ export interface RouteContext {
   userStore: UserStore | null;
   userAccessResolver: UserAccessService | null;
 
-  // Queue
-  queueClients: Map<WorkerType, QueueClient>;
-  reportQueueClient: QueueClient;
-  getOrCreateQueueClient: (queueName: string) => QueueClient;
-
   // Blob storage (log persistence + snapshots)
   blobStorage: BlobStorage;
 

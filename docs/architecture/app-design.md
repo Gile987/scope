@@ -383,6 +383,10 @@ Multiple agents or versions may advertise the same queue. The scheduler
 deduplicates that queue and claims requests only for the exact registered
 `workerType` + `agentVersion` targets mapped to it.
 
+The API owns only the report-generation queue. Its `RouteContext` exposes one
+`reportQueueClient`, not coding-agent queue clients or a queue-client factory;
+those belong to the scheduler.
+
 Capabilities are explicit opt-ins. The supported keys are
 `supportsReasoningEffort`, `supportsMcpServers`, `supportsSkills`, and
 `supportsExtensions`; an omitted or false key means unsupported.
@@ -685,6 +689,20 @@ The REST API exposes an auto-generated **OpenAPI 3.1** spec built with [Zod](htt
 Zod schemas live in `packages/shared/src/schemas/` (16 files, ~78 schemas) so they can be reused by the API, CLI, and workers. Each entity has separate **input** (what the client sends) and **response** (what the API returns) schemas.
 
 OpenAPI route registrations live in `apps/api/src/openapi/routes/` — one file per resource group. The registry and generator are in `apps/api/src/openapi/registry.ts`.
+
+### Authentication metadata
+
+The registry declares `bearerAuth` as an HTTP bearer scheme for unchanged IdP
+access tokens. `apiRoute()` accepts optional OpenAPI `security` metadata;
+`GET /api/v1/users/me` sets `security: [{ bearerAuth: [] }]`. In Swagger UI,
+use **Authorize** and paste the access token without its `Bearer` prefix.
+
+The requirement is operation-scoped: there is no global security requirement,
+and existing anonymous endpoints are not advertised as protected. This metadata
+does not install authentication or authorization guards; runtime enforcement
+remains in the existing middleware and route handlers.
+
+### Generated artifact
 
 The static documentation site consumes the committed artifact at
 `website/src/openapi/scope-openapi.json`. Generate it from the API

@@ -189,9 +189,10 @@ describe("UserStore.upsertOnLogin", () => {
     expect(findOneAndUpdate).toHaveBeenCalledOnce();
   });
 
-  it("does not promote when the identity email is not verified", async () => {
+  it.each([false, undefined])("promotes an allowlisted identity with emailVerified=%s", async (emailVerified) => {
     const { collection, findOneAndUpdate } = fakeCollection([
       baseDoc({ role: "user" }),
+      baseDoc({ role: "admin" }),
     ]);
     const store = new UserStore(collection, {
       bootstrapAdmins: new Set(["entra:tenant-1/subject-1"]),
@@ -199,9 +200,29 @@ describe("UserStore.upsertOnLogin", () => {
     });
 
     const user = await store.upsertOnLogin(
-      { ...IDENTITY, emailVerified: false },
-      { ...PROFILE, emailVerified: false },
+      { ...IDENTITY, emailVerified },
+      { ...PROFILE, emailVerified },
     );
+
+    expect(user.role).toBe("admin");
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
+    const update = findOneAndUpdate.mock.calls[0][1];
+    expect(update).not.toHaveProperty("$set.email");
+    expect(update).not.toHaveProperty("$set.emailVerified", true);
+  });
+
+  it.each([
+    "entra:tenant-1/other-subject",
+    "entra:other-tenant/subject-1",
+    "other-idp:tenant-1/subject-1",
+  ])("does not promote when only a different identity is allowlisted (%s)", async (bootstrapAdmin) => {
+    const { collection, findOneAndUpdate } = fakeCollection([baseDoc()]);
+    const store = new UserStore(collection, {
+      bootstrapAdmins: new Set([bootstrapAdmin]),
+      bootstrapTenants: new Set(["tenant-1"]),
+    });
+
+    const user = await store.upsertOnLogin(IDENTITY, PROFILE);
 
     expect(user.role).toBe("user");
     expect(findOneAndUpdate).toHaveBeenCalledOnce();

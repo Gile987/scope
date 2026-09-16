@@ -46,8 +46,8 @@ function isIdentityUpsertCollision(error: unknown, identity: VerifiedIdentity): 
  * provisioning): a new user is minted a Scope User ID (UUID) with the default
  * role `"user"`, and an existing user has its profile (`email`, `displayName`,
  * `emailVerified`) and `lastLoginAt` refreshed. Email is persisted only when
- * explicitly verified. Admin bootstrap is **promote-only** and requires both a
- * verified email claim and membership in the configured tenant allowlist.
+ * explicitly verified. Admin bootstrap is **promote-only** and requires an
+ * exact identity match and membership in the configured tenant allowlist.
  */
 export class UserStore {
   private readonly bootstrapAdmins: Set<string>;
@@ -162,7 +162,6 @@ export class UserStore {
       identity.idpSubject,
     );
     if (!this.bootstrapAdmins.has(key)) return false;
-    if (identity.emailVerified !== true) return false;
     return this.bootstrapTenants.has(identity.idpTenant);
   }
 }

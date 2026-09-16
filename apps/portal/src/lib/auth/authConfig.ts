@@ -176,20 +176,20 @@ function resolveConfig(): PortalAuthConfig {
     envList(env.VITE_AUTH_SCOPES as string | undefined) ??
     (isDev ? ENTRA_LOCAL_DEFAULTS.scopes : []);
   const protocolMode =
-    (env.VITE_AUTH_PROTOCOL_MODE as ProtocolMode | undefined) ??
+    (env.VITE_AUTH_PROTOCOL_MODE as ProtocolMode | undefined) ||
     (isDev ? ENTRA_LOCAL_DEFAULTS.protocolMode : "AAD");
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const redirectUri =
-    (env.VITE_AUTH_REDIRECT_URI as string | undefined) ?? origin;
+    (env.VITE_AUTH_REDIRECT_URI as string | undefined) || origin;
   const postLogoutRedirectUri =
-    (env.VITE_AUTH_POST_LOGOUT_REDIRECT_URI as string | undefined) ?? origin;
+    (env.VITE_AUTH_POST_LOGOUT_REDIRECT_URI as string | undefined) || origin;
 
   const cacheLocation =
     (env.VITE_AUTH_CACHE_LOCATION as
       | "localStorage"
       | "sessionStorage"
-      | undefined) ?? "localStorage";
+      | undefined) || "localStorage";
 
   return {
     clientId,

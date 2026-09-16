@@ -358,6 +358,41 @@ done. In **production** builds the config is only considered valid when
 `VITE_AUTH_CLIENT_ID` and `VITE_AUTH_AUTHORITY` are present; otherwise the Portal
 renders a "not configured" screen instead of silently pointing at `localhost`.
 
+**Docker builds:** the Portal Dockerfile accepts `VITE_AUTH_CLIENT_ID`,
+`VITE_AUTH_AUTHORITY`, `VITE_AUTH_KNOWN_AUTHORITIES`, `VITE_AUTH_SCOPES`,
+`VITE_AUTH_PROTOCOL_MODE`, `VITE_AUTH_REDIRECT_URI`,
+`VITE_AUTH_POST_LOGOUT_REDIRECT_URI`, and `VITE_AUTH_CACHE_LOCATION` as build
+arguments in its `builder` stage. Vite embeds them during `pnpm --filter portal
+build`; setting these variables only on the final nginx container has no effect.
+These are public client settings, not secrets; never pass client secrets or
+access tokens as Portal build arguments.
+
+- **Local Compose:** `pnpm docker:up:portal` forwards the settings from your shell
+  or `.env.local` through `portal.build.args`, using the seeded emulator and
+  per-worktree ports by default. `pnpm docker:dev:portal` supplies the same
+  settings to the Vite dev-server environment instead.
+- **CI:** the Portal image build in `.github/workflows/ci.yml` forwards the
+  same-named GitHub Actions configuration variables (`vars.VITE_AUTH_*`).
+  Configure at least the SPA client ID, authority, and the API's exposed scope
+  before building an image intended for authenticated use. No GitHub variable
+  values are provisioned by the workflow itself.
+- **Direct Docker build:** supply the settings with `--build-arg`, for example:
+
+  ```bash
+  docker build -f apps/portal/Dockerfile -t scope-portal \
+    --build-arg VITE_AUTH_CLIENT_ID="<spa-client-id>" \
+    --build-arg VITE_AUTH_AUTHORITY="https://login.microsoftonline.com/<tenant-id>" \
+    --build-arg VITE_AUTH_SCOPES="api://<api-client-id>/access_as_user" .
+  ```
+
+Rebuild and recreate the Portal after changing IdP settings. A single image
+promoted between environments retains the same IdP settings; only
+`SCOPE_AUTH_ENABLED` remains a runtime auth switch. Empty optional redirect
+arguments retain the current Portal origin, while empty protocol/cache settings
+retain their documented defaults. For Entra cloud through local Compose, also
+set `VITE_AUTH_PROTOCOL_MODE=AAD` and `VITE_AUTH_KNOWN_AUTHORITIES=` to override
+the emulator-specific defaults.
+
 > The API verifies the IdP token on every non-public authenticated request, then
 > resolves an active Scope user. Full route RBAC/ownership enforcement is still
 > deferred. After a redirect callback, the Portal's first Scope API request is
@@ -430,25 +465,64 @@ that starts the Portal (e.g. `pnpm docker:dev:copilot`, `pnpm docker:dev:portal`
 
 1. Ensures a locally-trusted TLS cert exists via **mkcert** (`scripts/ensure-dev-certs.sh`,
    invoked by `scripts/dev-compose.sh`). mkcert installs a local root CA into the
-   OS/browser trust store and mints `.certs/entra-local.pem` for `localhost`, so
-   `https://localhost:<ENTRA_LOCAL_PORT>` is trusted with no cert warning. MSAL
+   OS/browser trust store and mints `.certs/entra-local.pem` for `localhost`,
+   loopback IPs, and the Compose hostname `entra-local`, so
+   `https://localhost:<ENTRA_LOCAL_PORT>` is trusted with no cert warning. Older
+   localhost-only certificates, certificates nearing expiry, and certificates
+   signed by a different CA are regenerated automatically. The public CA is
+   exported to `.certs/rootCA.pem`; the CA private key is never copied. MSAL
    requires the authority to be served over HTTPS, which is why the emulator uses
    TLS rather than plain HTTP.
-2. Starts the `entra-local` emulator (compose `auth` profile, added automatically
+2. Stages the public CA into a separate `entra_local_ca` volume. The API,
+   emulator health check, and redirect-registration helper mount it read-only
+   and use `NODE_EXTRA_CA_CERTS=/ca/rootCA.pem`. The API never mounts the
+   emulator's private key, and TLS certificate verification stays enabled for
+   both local and external HTTPS calls.
+3. Starts the `entra-local` emulator (compose `auth` profile, added automatically
    by the dev scripts). `PUBLIC_ORIGIN`/`ISSUER` are pinned to
    `https://localhost:${ENTRA_LOCAL_PORT}` so the OIDC discovery document's
    `issuer`/endpoints use the host-facing port (the container binds `8443`
    internally; per-worktree port offsets would otherwise leak into the issuer and
    fail MSAL's authority match).
-3. Runs the one-shot `entra-local-init` service, which waits for the emulator to
+4. Runs the one-shot `entra-local-init` service, which waits for the emulator to
    become healthy and idempotently registers `http://localhost:${PORTAL_PORT}` as
    a `spa` redirect URI on the seeded Sample SPA app (the seed ships only
    `https://localhost:3000`, and each worktree gets its own `PORTAL_PORT`).
 
-**Prerequisite:** [mkcert](https://github.com/FiloSottile/mkcert) must be
-installed (`brew install mkcert nss`). The first run triggers `mkcert -install`,
+**Prerequisites:** [mkcert](https://github.com/FiloSottile/mkcert) and `openssl`
+must be installed (`brew install mkcert nss` on macOS, with `openssl` available
+on `PATH`). The first run triggers `mkcert -install`,
 which asks for your password once to add the local CA to the system trust store.
-This is the only interactive step.
+For a browser using that same trust store, this is the only interactive step.
+
+For WSL, remote development, or an integrated browser with a separate trust
+store, trust `.certs/rootCA.pem` on the machine or in the browser that opens the
+Portal as well. `mkcert -install` in the development shell cannot configure a
+different browser host. An `ERR_CERT_AUTHORITY_INVALID` error when MSAL fetches
+the emulator's discovery document means that browser-side trust is still
+missing; do not work around it by disabling TLS verification. Import only the
+public CA certificate, never `rootCA-key.pem` or the emulator private key.
+
+For a Windows browser with a WSL development shell, run
+`wslpath -w "$PWD/.certs/rootCA.pem"` in WSL to obtain the Windows path, then
+use an interactive Windows PowerShell session:
+
+```powershell
+Import-Certificate -FilePath "<Windows path printed by wslpath>" -CertStoreLocation Cert:\CurrentUser\Root
+```
+
+Review and approve the Windows certificate confirmation, then reload the Portal
+(restart the browser if it still caches the old trust result). This trusts
+certificates signed by the development CA for the current Windows user, not
+only the Scope certificate; it does not import a private key or require a
+machine-wide trust change.
+
+The CA initializer is optional when the `auth` profile is not enabled, so
+cloud-only Compose setups do not require mkcert. Set `NODE_EXTRA_CA_CERTS=` in
+that case to use only Node's normal CA trust store and avoid a missing-local-CA
+warning on a fresh volume. After rotating the local CA, recreate the API and
+emulator containers and update browser-side CA trust: Node reads extra CA
+certificates only at process startup.
 
 Then open the Portal at `http://localhost:${PORTAL_PORT}`, click **Log in**, and
 sign in with a seeded user (`alice@entralocal.dev` / `bob@entralocal.dev`).
@@ -482,7 +556,7 @@ Hosts MSAL is allowed to talk to for non-Microsoft (custom OIDC) authorities.
 Required for entra-local; typically unset for production Entra.
 
 ### VITE_AUTH_SCOPES
-**Default (dev):** `api://cccccccc-0000-0000-0000-000000000001/access_as_user`
+**Default (dev):** `api://cccccccc-0000-0000-0000-000000000005/access_as_user`
 **Type:** comma-separated scope list
 
 Scopes requested for the API access token (in addition to `openid`/`profile`,
@@ -839,10 +913,16 @@ derived from `AUTH_AUTHORITY`. The `entra-local` emulator's default JWKS
 (`<authority>/discovery/v2.0/keys`) already matches the derivation, so this is
 usually left unset.
 
-> **Local dev TLS.** The `entra-local` emulator serves a self-signed certificate
-> over HTTPS. Because token verification fetches the JWKS over that channel,
-> either trust the emulator CA or set `NODE_TLS_REJECT_UNAUTHORIZED=0` for the
-> API in local development only — never in production.
+> **Local dev TLS.** Compose trusts the emulator's mkcert CA through a read-only
+> public-CA mount and `NODE_EXTRA_CA_CERTS`; the certificate covers the internal
+> `entra-local` hostname as well as `localhost`. TLS verification remains enabled,
+> including for external requests. Do not set `NODE_TLS_REJECT_UNAUTHORIZED=0`.
+>
+> For a native API process, run `scripts/ensure-dev-certs.sh`, then launch with
+> `NODE_EXTRA_CA_CERTS="$PWD/.certs/rootCA.pem" pnpm dev:api`. Use the host-facing
+> `https://localhost:<ENTRA_LOCAL_PORT>/<tenant>/discovery/v2.0/keys` as
+> `AUTH_JWKS_URI`, not the Compose-only `entra-local` hostname. Remove any old
+> `NODE_TLS_REJECT_UNAUTHORIZED=0` override from the shell or local env files.
 
 ### AUTH_API_CLIENT_ID
 **Type:** string (GUID) — **Required when `AUTH_PROVIDER` is set**
@@ -879,15 +959,15 @@ Identities to promote to the `admin` role on explicit `/users/me?login=true`
 enrollment or subsequent login refresh, formatted as
 `${idp}:${idpTenant}/${idpSubject}` (e.g.
 `entra:00000000-0000-0000-0000-000000000000/11111111-1111-1111-1111-111111111111`).
-Promotion requires `email_verified = true` and an explicit tenant match in
-`AUTH_BOOTSTRAP_TENANTS`. It is **promote-only**: an existing admin is never
+Promotion requires an exact match for the verified identity and an explicit tenant
+match in `AUTH_BOOTSTRAP_TENANTS`. It is **promote-only**: an existing admin is never
 demoted, and users not listed here are never auto-promoted.
 
-The verified-email assertion must be present in the **API access token**, not just
-the browser's ID token or IdP directory record. A seeded entra-local account can
-therefore sign in successfully yet retain the default `user` role when its access
-token omits `email_verified`. Being named in the bootstrap settings alone is not
-sufficient; the claim requirement is not bypassed for local development.
+Bootstrap does not depend on `email` or `email_verified`. Ordinary Entra workforce
+and seeded entra-local identities can therefore bootstrap without custom email
+claims when both allowlists match. Token verification remains required; this is
+not a local authentication bypass. Email storage is unchanged: only an explicitly
+verified profile email is persisted.
 
 ### AUTH_BOOTSTRAP_TENANTS
 **Default:** (empty)

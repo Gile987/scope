@@ -21,7 +21,7 @@ function isPublicPath(path: string): boolean {
 
 function extractBearerToken(req: Request): string | null {
   const header = req.headers.authorization;
-  if (!header) return null;
+  if (header === undefined) return null;
   const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
   if (!match) throw new AuthError("invalid_token", "Malformed bearer header");
   return match[1];
