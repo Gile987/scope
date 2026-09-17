@@ -159,6 +159,26 @@ MongoDB is CosmosDB-compatible — avoid MongoDB features that CosmosDB's MongoD
 6. Open the PR and complete the CLA check if the bot asks you to. Address review feedback and keep the
    branch up to date with `main`.
 
+### Recording a demo
+
+For user-visible changes (Portal/CLI features or UX changes), attach a short recording in the PR's
+Demo section. For user-visible bug fixes, show the same steps before and after the fix. Aim for
+20-30 seconds focused on the changed interaction and its result. Write "N/A" for changes that aren't
+user-visible, such as documentation, internal refactors, or infrastructure-only changes.
+
+Use a screen recorder such as macOS Screenshot (`Shift+Command+5`), Windows Snipping Tool's video
+capture, or OBS Studio to capture the relevant browser or terminal area. An agent with browser or
+terminal automation and recording tools can run the steps and produce an annotated recording for
+you; review its output before uploading.
+
+Use synthetic data and scrub tokens, cookies, credentials, and real run/customer data from the
+recording, including terminal output and browser UI. Check the entire clip before sharing it.
+Drag and drop an `.mp4`, `.mov`, or `.gif` into the PR description to upload it to GitHub, and add a
+one-line caption describing what it shows so reviewers can search for the behavior.
+
+Recordings complement, not replace, the Testing section: keep test commands, results, and any manual
+checks in text. Screenshots can add context but do not show interaction or timing.
+
 ## Third-party notices
 
 Scope redistributes npm production dependencies in its service images and Rust
