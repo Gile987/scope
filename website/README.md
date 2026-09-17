@@ -75,6 +75,11 @@ The workflow builds from this `website/` directory (via a
 and `base` are driven by `actions/configure-pages` outputs with safe
 localhost defaults.
 
+The site build uses Node.js 22. The GitHub Actions runtimes are separate:
+the cache and Pages actions use Node.js 24. Keep
+`actions/upload-pages-artifact` updated alongside the other actions, since
+it selects the underlying `actions/upload-artifact` version.
+
 ## Learn more
 
 - [Astro docs](https://docs.astro.build)
