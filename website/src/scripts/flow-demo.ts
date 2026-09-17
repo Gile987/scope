@@ -89,8 +89,7 @@ class ScopeFlow extends HTMLElement {
 		}, { signal });
 		this.querySelector('select')?.addEventListener('change', (event) => {
 			if (!(event.target instanceof HTMLSelectElement)) return;
-			const scenario = scenarios[event.target.value];
-			if (!scenario) throw new Error('Unknown Scope demo scenario');
+			const scenario = scenarios[event.target.value] ?? scenarios.board;
 			this.interacted = true;
 			this.stop();
 			this.scenario = scenario;
