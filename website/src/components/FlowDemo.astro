@@ -52,7 +52,7 @@ const wires = [incoming, outgoing, `M770 ${center} H830`];
 			</button>
 			<div class="flow-agent-nodes">
 				{sampleAgents.map((agent) => (
-					<button type="button" class="flow-node flow-agent" data-node="1" aria-label={`Inspect ${agent.name} sample execution`} disabled>
+					<button type="button" class="flow-node flow-agent" data-node="1" aria-label="Inspect sample agent execution" disabled>
 						<span class="flow-agent-initial" aria-hidden="true">{agent.initial}</span><span><strong>{agent.name}</strong><span class="flow-node-kicker">Sample profile {agent.profile}</span></span>
 						<span class="flow-agent-status" data-agent-status>Ready</span>
 					</button>
