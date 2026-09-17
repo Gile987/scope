@@ -346,8 +346,15 @@ mode any tenant can sign users in):
   explicit administrative change), so a bad ConfigMap edit can't quietly strip admins.
   Admin mutation endpoints and the durable security audit (§F) remain deferred.
 
-Index: unique compound `(idp, idpTenant, idpSubject)`; secondary on `email` (advisory
-lookup only). Folding `idpTenant` into the key is mandatory — `oid` is unique only *within*
+Index: database-enforced unique compound `(idp, idpTenant, idpSubject)`, named
+`uniq_identity`. Both backends have a non-unique `email` index for advisory
+lookup: sparse on native MongoDB, non-sparse on CosmosDB. Migration 029
+creates the Cosmos identity index with the collection and refuses incompatible
+existing collections without deleting data or weakening uniqueness. See
+[migration 029](db-migrations.md#migration-029-users-identity-uniqueness) for
+backend handling and the remaining live-Cosmos validation.
+
+Folding `idpTenant` into the key is mandatory — `oid` is unique only *within*
 a tenant, so `(idp, idpSubject)` alone collides across tenants and mis-identifies guest/B2B
 users (Open Question D).
 
@@ -1219,7 +1226,7 @@ Auth & RBAC rollout
 │
 ├── Phase 0 — Foundations (no behavior change)              [subtasks 1, 2]
 │   ├── shared/auth: AuthProvider, EntraIdAuthProvider, Permission, ROLE_PERMISSIONS
-│   ├── users collection + (idp, idpTenant, idpSubject) / email indexes
+│   ├── users collection + unique identity index; non-unique email index (sparse on native MongoDB only)
 │   └── add ownerId + visibility to requests/runs/catalog (+ indexes); backfill "system" sentinel
 │       └── Gate: migrations up/down clean; shared unit tests green
 │
