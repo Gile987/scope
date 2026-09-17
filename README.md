@@ -5,7 +5,7 @@
   <p><strong>An open-source agentic experience evaluation platform.</strong></p>
 
   <p>
-    Evaluate how coding agents approach real tasks, use tools, and respond to feedback.
+    Evaluate how AI agents use your product, approach real tasks and respond to feedback. Compare accross surfaces (CLI, MCP, Skills, doc, ...), context, tasks, operating systems, ...
     Define success with reusable criteria, follow each run live, and inspect the
     evidence behind every result through the Portal or CLI.
   </p>
