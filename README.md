@@ -41,7 +41,7 @@ Use repeatable evaluations to understand both successes and failures.
 - **Automate evaluations.** Submit and manage runs from the CLI or REST API,
   and explore results, reports, and insights in the Portal.
 
-Scope is for developers, researchers, and teams evaluating coding-agent behavior.
+Scope is for product managers, developers, researchers, and teams evaluating how their software is being used by coding agents.
 Results describe the tasks and configurations you tested, not a universal agent
 ranking. The automated Judge can make mistakes; important conclusions need human
 review.
