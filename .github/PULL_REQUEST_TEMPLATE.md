@@ -2,6 +2,14 @@
 
 <!-- What changed and why? Link the related issue, if any. -->
 
+## Demo
+
+<!-- For user-visible Portal/CLI changes, attach a short recording (before/after for fixes)
+and a one-line caption. Write "N/A" if the change isn't user-visible.
+For tooling, agent-assisted recording, and upload tips, see:
+https://github.com/microsoft/scope/blob/main/CONTRIBUTING.md#recording-a-demo
+Scrub tokens, cookies, and real run/customer data before uploading. Demos complement Testing. -->
+
 ## Testing
 
 <!-- List commands/manual checks and results, or explain why testing isn't applicable. -->
