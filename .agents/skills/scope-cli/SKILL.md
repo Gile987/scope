@@ -23,19 +23,20 @@ an **IdP access token**. Already-enrolled users keep using that bearer unchanged
 there is no Scope-token exchange or new CLI login implementation in this milestone.
 Do not assume the deferred `scope auth login`/keychain commands exist.
 
-A new identity must explicitly call **`GET /api/v1/users/me?login=true`** using its
+A new identity must explicitly call **`POST /api/v1/users/me`** using its
 IdP bearer before ordinary authenticated commands. Use the configured Scope API URL:
 
 ```bash
 curl --fail-with-body -sS \
+  -X POST \
   -H "Authorization: Bearer $SCOPE_TOKEN" \
   -H "Cache-Control: no-store" \
-  "${SCOPE_API_URL%/}/api/v1/users/me?login=true"
+  "${SCOPE_API_URL%/}/api/v1/users/me"
 ```
 
-This GET creates/refreshes the user, profile, `lastLoginAt`, and eligible bootstrap
+This POST creates/refreshes the user, profile, `lastLoginAt`, and eligible bootstrap
 promotion; never prefetch, poll, or automatically use it to recover an ordinary
-lookup. Plain `/users/me` only checks existing access. `403 user_not_enrolled` calls
+lookup. GET `/users/me` only checks existing access. `403 user_not_enrolled` calls
 for explicit enrollment; `403 user_disabled` is a denial, not a refresh-token prompt.
 Invalid/expired bearer → `401`; required Mongo/JWKS outage → `503`.
 

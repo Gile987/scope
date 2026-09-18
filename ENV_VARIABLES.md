@@ -396,8 +396,8 @@ the emulator-specific defaults.
 > The API verifies the IdP token on every non-public authenticated request, then
 > resolves an active Scope user. Full route RBAC/ownership enforcement is still
 > deferred. After a redirect callback, the Portal's first Scope API request is
-> `GET /api/v1/users/me?login=true`; after a cached-account reload it is plain
-> `/users/me`. `AuthContext` takes the Scope UUID and role from that response, not
+> `POST /api/v1/users/me`; after a cached-account reload it is
+> `GET /users/me`. `AuthContext` takes the Scope UUID and role from that response, not
 > MSAL account claims. All eager queries, including feature flags, wait for it.
 
 ### ⚠️ IMPORTANT — Feature toggle (3 per-environment controls)
@@ -411,7 +411,7 @@ a control must **explicitly** opt out.
 > verifies bearer tokens and implements the explicit-login handshake. Do not infer
 > a deployed environment's version or flag state from the source tree. Enable
 > Portal auth after deploying/configuring the compatible API and verifying
-> `/users/me?login=true` followed by plain `/me`. These controls are independent
+> POST `/users/me` followed by GET `/me`. These controls are independent
 > across environments and do not turn on global API lockdown.
 
 When auth is disabled the Portal behaves **exactly as it did before auth
@@ -808,17 +808,17 @@ Redis/Mongo user lookup**. Every authenticated call keeps using the same IdP
 bearer; there is no `/auth/login`, token exchange, Scope JWT, or signing secret.
 `req.user` contains the resolved Scope UUID and database role, not an IdP role.
 
-Only **actual `GET /api/v1/users/me?login=true`** creates missing users or refreshes
+Only **`POST /api/v1/users/me`** creates missing users or refreshes
 profile, `lastLoginAt`, and bootstrap-admin promotion. The upsert still precedes
 the disabled-user check: an explicit login can update those fields before returning
 `403`. `lastLoginAt` is the explicit upsert timestamp, not general activity or
-trustworthy proof of an interactive sign-in. Plain `/me` (or `login=false`) and other
+trustworthy proof of an interactive sign-in. Every GET `/me` and other
 routes read an existing active user from Redis, falling back to an exact
 `(idp, tid, oid)` Mongo lookup on miss/unavailability; they never JIT or refresh profile.
 Invalid/repeated/structured login values return `400`; HEAD never enrolls.
 
 The `/users/me` responses, including failures, are **`Cache-Control: no-store`**.
-Clients also use no-store; the login-marked GET has side effects and must never be
+Clients also use no-store; the enrollment POST has side effects and must never be
 prefetched or polled. New CLI/raw-bearer identities must deliberately enroll through
 it; already-enrolled callers remain compatible without any token change.
 
@@ -955,7 +955,7 @@ served by a config endpoint; configure the current Portal through `VITE_AUTH_SCO
 **Default:** (empty)
 **Type:** comma-separated list of identity keys
 
-Identities to promote to the `admin` role on explicit `/users/me?login=true`
+Identities to promote to the `admin` role on explicit POST `/users/me`
 enrollment or subsequent login refresh, formatted as
 `${idp}:${idpTenant}/${idpSubject}` (e.g.
 `entra:00000000-0000-0000-0000-000000000000/11111111-1111-1111-1111-111111111111`).

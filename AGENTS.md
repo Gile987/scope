@@ -51,9 +51,9 @@ Express.js REST server. Orchestrates runs, streams logs via SSE, manages criteri
 - Environment variables: [ENV_VARIABLES.md](ENV_VARIABLES.md)
 
 > **Authentication invariant:** verify the unchanged IdP bearer before any user-access
-> cache lookup. Only actual `GET /api/v1/users/me?login=true` calls
+> cache lookup. Only `POST /api/v1/users/me` calls
 > `UserAccessResolver.enrollOnLogin()` for JIT/profile/lastLogin/bootstrap writes.
-> Plain `/me` and other routes use `resolveExisting()` (Redis hit: no Mongo;
+> Every `GET /users/me` and other routes use `resolveExisting()` (Redis hit: no Mongo;
 > miss/outage: exact identity read, never upsert). Missing/disabled identities deny
 > access, never become anonymous. Preserve existing no-token/public rollout; full
 > RBAC and Scope internal tokens remain deferred. See
@@ -85,11 +85,11 @@ Evaluation engine that scores agent output against a criteria DAG (directed acyc
 
 React 19 web UI with Vite, Tailwind CSS, Radix UI (shadcn/ui), TanStack Query, and XYFlow for criteria DAG visualization. Communicates with the API via REST and SSE.
 
-`AuthProvider` owns the Scope-user handshake: callback → `/users/me?login=true`;
+`AuthProvider` owns the Scope-user handshake: callback → `POST /users/me`;
 cached-account reload → plain `/users/me`. Gate all eager queries (including
 providers outside `RequireAuth`) until ready; do not treat MSAL account claims as
 the Scope UUID/role. Deduplicate account/login work and cancel it on account change
-or logout. The login GET is no-store and must never be prefetched/polled.
+or logout. The enrollment POST is no-store and must never be prefetched/polled.
 
 - Real-time data flow: [docs/research/realtime-data-flow.md](docs/research/realtime-data-flow.md)
 

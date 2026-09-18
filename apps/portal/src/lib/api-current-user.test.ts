@@ -14,16 +14,15 @@ beforeEach(() => {
   vi.mocked(apiClient).mockResolvedValue(new Response(JSON.stringify(user)));
 });
 
-describe("api.getCurrentUser", () => {
+describe("current user API", () => {
   it.each([
-    [undefined, "/api/v1/users/me"],
-    [false, "/api/v1/users/me"],
-    [true, "/api/v1/users/me?login=true"],
-  ])("sends an uncached GET with login=%s and caller cancellation", async (login, path) => {
+    ["getCurrentUser", "GET"],
+    ["enrollCurrentUser", "POST"],
+  ] as const)("sends %s as an uncached %s request with caller cancellation", async (operation, method) => {
     const controller = new AbortController();
-    expect(await api.getCurrentUser({ login, signal: controller.signal })).toEqual(user);
-    expect(apiClient).toHaveBeenCalledWith(path, {
-      method: "GET",
+    expect(await api[operation]({ signal: controller.signal })).toEqual(user);
+    expect(apiClient).toHaveBeenCalledWith("/api/v1/users/me", {
+      method,
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
       signal: controller.signal,

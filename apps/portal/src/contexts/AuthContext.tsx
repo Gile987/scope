@@ -132,9 +132,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       mounted.current && session.current === current && !current.controller.signal.aborted;
 
     // Deliberately outside React Query: no focus/reconnect or automatic retries
-    // may repeat the login-marked GET's database writes.
-    void api.getCurrentUser({
-      login: Boolean(redirectLogin),
+    // may repeat the enrollment POST's database writes.
+    const resolveUser = redirectLogin ? api.enrollCurrentUser : api.getCurrentUser;
+    void resolveUser({
       signal: current.controller.signal,
     }).then((user) => {
       if (!isCurrent()) return;

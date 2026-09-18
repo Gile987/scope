@@ -3,7 +3,7 @@
 > Status: **Explicit-login authentication and user-access caching implemented; 
 > full RBAC, ownership enforcement, CLI interactive login, and internal-token
 > designs remain deferred.** Original RBAC proposal: 2026-06-10; auth contract updated:
-> 2026-09-14. This is not a statement that every deployed environment has migrated.
+> 2026-09-18. This is not a statement that every deployed environment has migrated.
 
 ## Scope and deferred goals
 
@@ -12,9 +12,9 @@ Scope verifies IdP access tokens and resolves an active application user, but do
 no-token/auth-not-configured anonymous rollout and public endpoints remain supported.
 An authenticated identity that is missing or disabled in Scope is **not** anonymous.
 
-The implemented boundary is narrow: only **`GET /api/v1/users/me?login=true`**
+The implemented boundary is narrow: only **`POST /api/v1/users/me`**
 may JIT-create a user, refresh their profile/`lastLoginAt`, or apply bootstrap-admin
-promotion. Plain `/users/me` and other authenticated routes verify the IdP token,
+Every GET `/users/me` and other -authenticated routes verify the IdP token,
 then read an existing active principal through one Redis-backed resolver. Clients
 continue to send the **unchanged IdP access token on every call**; there is no
 `/auth/login`, token exchange, Scope session JWT, or new signing-key configuration.
@@ -45,7 +45,7 @@ The following are **deferred RBAC goals**, not guarantees of the current rollout
 > **Current milestone — explicit enrollment, then cached application access.**
 > Portal/API authentication uses the existing Entra identity and singular Scope `role`.
 > Already-enrolled CLI/raw-bearer callers remain compatible; a new identity must
-> explicitly call `/users/me?login=true` before other authenticated requests.
+> explicitly POST `/users/me` before other authenticated requests.
 > CLI device-code login and ownership enforcement are separate work. In particular,
 > **Scope-issued PAT / API tokens delivered through `SCOPE_TOKEN`** are very likely the
 > right long-term answer for **user CI integrations and user-attributed automation**, but
@@ -75,7 +75,7 @@ must be resolved with stakeholders before or during implementation.
 | Runs data model | `RequestResponseSchema` + embedded `RunStateSchema`; history in `runs` collection (`RunHistoryDocumentSchema`). **No owner field.** | [packages/shared/src/schemas/request.ts](../../packages/shared/src/schemas/request.ts) |
 | Run listing | Cursor-paginated `GET /api/v1/requests` with filters; no per-user scoping. | [apps/api/src/routes/requests.ts](../../apps/api/src/routes/requests.ts) |
 | CLI | Centralized `apiFetch()` injects `SCOPE_TOKEN` as a raw IdP bearer. No CLI interactive-login implementation is added here. New identities must explicitly enroll; ordinary CLI calls never enroll them. | [apps/cli/src/utils/api-client.ts](../../apps/cli/src/utils/api-client.ts), [CLI guidance](../../.agents/skills/scope-cli/SKILL.md) |
-| Portal | MSAL supplies the IdP bearer; `AuthProvider` gates queries on `/users/me`. Fresh callback uses `login=true`; cached-account reload uses plain `/me`. Scope UUID and role come from the API, not account claims. | [AuthContext.tsx](../../apps/portal/src/contexts/AuthContext.tsx), [apps/portal/src/lib/api.ts](../../apps/portal/src/lib/api.ts), [apps/portal/src/main.tsx](../../apps/portal/src/main.tsx) |
+| Portal | MSAL supplies the IdP bearer; `AuthProvider` gates queries on `/users/me`. Fresh callback uses POST; cached-account reload uses GET. Scope UUID and role come from the API, not account claims. | [AuthContext.tsx](../../apps/portal/src/contexts/AuthContext.tsx), [apps/portal/src/lib/api.ts](../../apps/portal/src/lib/api.ts), [apps/portal/src/main.tsx](../../apps/portal/src/main.tsx) |
 | Token Manager | Already has a `users`-like pattern for **provider** credentials (not app users). Reuse its KeyVault/Mongo patterns, not its schema. | [apps/token-manager/src/account-routes.ts](../../apps/token-manager/src/account-routes.ts) |
 | Migrations | `mongo-migrate-ts`, numbered files with `up()`/`down()`. CosmosDB-compatible constraints apply. | [packages/db-migrations/src/migrations](../../packages/db-migrations/src/migrations) |
 
@@ -111,10 +111,10 @@ touches MongoDB + Storage Queues directly), so it needs no API auth.
 ```mermaid
 flowchart TB
     Clients[Portal or bearer client] -->|unchanged IdP access token| Verify[verifyAccessToken<br/>signature and claims first]
-    Verify -->|verified identity| Me[GET users/me]
+    Verify -->|verified identity| Me[users/me]
     Verify -->|other routes| Existing[resolveExisting]
-    Me -->|login absent or false; HEAD| Existing
-    Me -->|GET login=true only| Login[enrollOnLogin]
+    Me -->|GET or HEAD| Existing
+    Me -->|POST only| Login[enrollOnLogin]
     Login -->|profile and upsertOnLogin| Users[(MongoDB users)]
     Existing -->|GET| Cache[(Redis active-user cache)]
     Cache -->|valid hit: no Mongo| Principal[Scope UUID and role]
@@ -289,7 +289,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   permissionsRemove?: Permission[],
   createdAt: Date,
   updatedAt: Date,
-  lastLoginAt?: Date,          // explicit login=true upsert time, not request activity
+  lastLoginAt?: Date,          // explicit enrollment POST time, not request activity
   disabledAt?: Date,           // soft-disable
 }
 ```
@@ -316,12 +316,12 @@ set in v1**; a future public/demo mode is a deliberate, explicit change scoped t
 public-only data (Open Questions J), not an emergent property of this principal.
 
 **Current JIT provisioning**: only an actual
-`GET /api/v1/users/me?login=true`, after successful token verification, calls
+`POST /api/v1/users/me`, after successful token verification, calls
 `UserAccessResolver.enrollOnLogin()` and `UserStore.upsertOnLogin()`. A missing user
 gets a Scope-owned UUID and default role `user`; an existing user's profile and
 `lastLoginAt` are refreshed even if Redis already contains an active snapshot.
-Plain `/me`, cache expiry, and all other routes never upsert, enrich, promote, or
-write `lastLoginAt`.
+Every GET `/me`, cache expiry, and all other routes never upsert, enrich, promote, 
+or write `lastLoginAt`.
 
 `lastLoginAt` means **the explicit login upsert time**, not proof of an interactive
 IdP prompt or callback: callers can invoke/retry the endpoint themselves. The existing
@@ -377,24 +377,25 @@ resolution (or with the existing anonymous principal when no token/auth configur
 is present). There is **no Scope-token verifier or query-based middleware bypass**:
 adding `?login=true` to a different route does not enroll a user.
 
-#### `/users/me` query and method contract
+#### `/users/me` method contract
 
-Both variants require a verified identity, return the same response (`id`, `role`,
+Both methods require a verified identity, return the same response (`id`, `role`,
 optional `email`, `displayName`, `idp`, `idpTenant`), and set `req.user` from the
 shared resolver. `id` is the **Scope UUID**, never Entra `oid`.
 
 | Request | Behavior |
 | --- | --- |
-| Actual `GET /api/v1/users/me?login=true` | Explicit enrollment/profile/timestamp/bootstrap writes, then access validation and cache warming. |
-| Plain `GET /api/v1/users/me` or scalar `login=false` | Read-only existing-user resolution. |
+| `POST /api/v1/users/me` | Explicit enrollment/profile/timestamp/bootstrap writes, then access validation and cache warming. Returns `200` with the current-user representation. |
+| `GET /api/v1/users/me` | Read-only existing-user resolution. |
 | Other values, repeated `login`, arrays, objects, or an empty value | `400`; no enrollment. |
 | `HEAD /api/v1/users/me?login=true` | Read-only resolution; Express dispatch to the GET handler must not cause JIT. |
 | `?login=true` on another route | Normal existing-user resolution; no enrollment. |
 
-This is intentionally a **GET with side effects**. All `/users/me` responses,
-including errors, are `Cache-Control: no-store`; clients also request `cache:
-"no-store"`. **Do not prefetch, poll, automatically query-retry, or conditionally
-HTTP-cache the login variant.** An explicit user retry is allowed.
+Only the POST has side effects. All `/users/me` responses, including errors, are
+`Cache-Control: no-store`; clients also request `cache: "no-store"`. **Do not prefetch,
+poll, automatically retry transient failures, or conditionally HTTP-cache the
+enrollment POST.** An explicit user retry is allowed. The existing one-time `401`
+token-refresh retry is safe because authentication fails before enrollment.
 
 #### Shared resolver and Redis contract
 
@@ -450,9 +451,9 @@ browser session/revocation store; Portal logout does not delete shared Redis acc
 1. **Fresh Portal callback → explicit login.** `initializeAuth()` records the
    account-bound redirect result; `getAccountKey()` and `getPendingRedirectLogin()`
    associate it with the current account. `wireApiAuth()` keeps the existing MSAL bearer
-   transport. `AuthProvider` calls `api.getCurrentUser({ login: true, signal })`
+   transport. `AuthProvider` calls `api.enrollCurrentUser({ signal })`
    before mounting/querying authenticated application data. `createAuthMiddleware()`
-   calls `AuthProvider.verifyAccessToken()` first. The `/users/me` handler calls
+   calls `AuthProvider.verifyAccessToken()` first. The POST `/users/me` handler calls
    `UserAccessResolver.enrollOnLogin(identity, token)`, which bypasses cache reads,
    invokes `ProfileEnricher.enrich()` (claims-only today), then
    `UserStore.upsertOnLogin()`. The resolver validates/maps the stored result and calls
@@ -472,7 +473,7 @@ browser session/revocation store; Portal logout does not delete shared Redis acc
    resumes after Redis recovers without replaying offline writes.
 5. **Cached-account Portal reload → plain `/me`.** `initializeAuth()` restores an
    account without a new redirect login event. `AuthProvider` calls
-   `api.getCurrentUser({ login: false, signal })`, producing plain `/users/me`.
+   `api.getCurrentUser({ signal })`, producing GET `/users/me`.
    That route calls `resolveExisting()`, with the hit/miss/outage behavior above.
    It never refreshes profile or `lastLoginAt`; `user_not_enrolled` offers explicit
    sign-in rather than silently switching to enrollment.
@@ -495,11 +496,11 @@ browser session/revocation store; Portal logout does not delete shared Redis acc
 
 #### OpenAPI authentication metadata (implemented)
 
-`GET /api/v1/users/me` declares the HTTP bearer scheme `bearerAuth` in OpenAPI,
-covering both plain lookups and `?login=true`. Swagger UI's **Authorize** control
-accepts the unchanged IdP access token without its `Bearer` prefix, not an ID
-token or a Scope-issued token. The operation retains its documented
-`400`/`401`/`403`/`503` responses.
+Both `GET` and `POST /api/v1/users/me` declare the HTTP bearer scheme `bearerAuth`
+in OpenAPI. Swagger UI's **Authorize** control accepts the unchanged IdP access token
+without its `Bearer` prefix, not an ID token or a Scope-issued token. GET retains its
+documented `400`/`401`/`403`/`503` responses; POST documents
+`401`/`403`/`503` and a `200` current-user response.
 
 `apiRoute()` forwards optional `security` metadata only. There is no global
 OpenAPI security requirement, and other operations retain their existing
@@ -770,8 +771,8 @@ downstream service applies the same ownership scoping). When that's required:
 
 Today `apiFetch()` attaches the caller's raw IdP `SCOPE_TOKEN`. Already-enrolled
 users keep using it unchanged. A new identity must intentionally call
-`GET /api/v1/users/me?login=true` with that bearer before ordinary authenticated
-commands; plain `/me` returns `403 user_not_enrolled` rather than auto-enrolling.
+`POST /api/v1/users/me` with that bearer before ordinary authenticated commands;
+GET `/me` returns `403 user_not_enrolled` rather than auto-enrolling.
 No CLI code is added by this milestone. For the explicit enrollment request, use
 `Cache-Control: no-store`, never prefetch it, and keep tokens out of logs.
 
@@ -781,7 +782,7 @@ The remaining interactive CLI design is **deferred**:
   - `scope auth login` — Entra **device-code flow** via
     `@azure/msal-node` `PublicClientApplication.acquireTokenByDeviceCode`. Provides a
     **great login UX** (see below). After successful device-code authentication, its
-    first Scope API call must be `/users/me?login=true`; token refresh is not enrollment.
+    first Scope API call must be POST `/users/me`; token refresh is not enrollment.
   - `scope auth logout` — clears the cached tokens from the `SecretStore` (OS keychain).
   - `scope auth status` / `scope auth whoami` — shows the signed-in identity + role
     (calls `GET /api/v1/users/me`).
@@ -888,8 +889,9 @@ The remaining interactive CLI design is **deferred**:
   `VITE_AUTH_*` configuration; there is no `/api/v1/auth/config` fetch.
 - `initializeAuth()` distinguishes an account-bound completed callback from a
   cached-account reload. `AuthProvider` alone owns the Scope handshake via
-  `api.getCurrentUser({ login, signal })`: **callback → `/users/me?login=true`**;
-  **cached account → plain `/users/me`**. A silent token refresh is not a new login.
+  `api.enrollCurrentUser({ signal })` or `api.getCurrentUser({ signal })`:
+  **callback → POST `/users/me`**; **cached account → GET `/users/me`**.
+  A silent token refresh is not a new login.
 - The context exposes signed-out/resolving/ready/denied/error states. **MSAL account
   presence is not application authentication.** In `main.tsx`, `RequireAuth` wraps
   all eager API-query providers and `App`, including its version/favicon request.
@@ -902,7 +904,7 @@ The remaining interactive CLI design is **deferred**:
 - `useAccount()` observes active-account-only changes; `getAccountKey()` includes
   home/local account IDs, tenant, and environment. In-flight handshakes are
   deduplicated per account/login event. Re-render,
-  StrictMode, focus, or query retries must not repeat a completed `login=true`
+  StrictMode, focus, or query retries must not repeat a completed enrollment POST
   request. Consume a callback event only after success; explicit retries retain
   it. A plain `/me` `user_not_enrolled` denial shows a sign-in action, not automatic JIT.
 - `wireApiAuth()` and the existing shared `api-client` interceptor remain the only
@@ -913,15 +915,15 @@ The remaining interactive CLI design is **deferred**:
   `401` token-refresh retry, then interactive redirect. `403` and `503` do not
   automatically reauthenticate: show denial/sign-in or retry/sign-out actions.
   Natural network retries in `ky` are disabled so a lost response cannot
-  automatically replay an already-completed login GET's writes.
+  automatically replay an already-completed enrollment POST's writes.
 - Logout/account change uses `clearSession()` to abort the handshake and shared API
   session signal (`setApiSessionSignal()`), cancel/clear QueryClient data, and
   discard the abandoned callback event. It ignores late
   results, clears Scope state, and prevents another account's query data from
   appearing. It does **not** delete the shared Redis cache entry.
-- No new bearer store, Scope session token, or sign-in endpoint is introduced.
-  `/users/me` uses client/server no-store; the login variant is never prefetched or
-  polled.
+- No new bearer store, Scope session token, or separate sign-in endpoint is
+  introduced. `/users/me` uses client/server no-store; the enrollment POST is never
+  prefetched or polled.
 - `SCOPE_AUTH_ENABLED` (integration/production runtime) and
   `VITE_AUTH_ENABLED_LOCAL` (local build-time) disable the Portal feature wholesale
   (no MSAL, gate, token, or fabricated principal). They do not lock down the API;
@@ -996,8 +998,8 @@ verified separately when those deferred credentials are introduced.
 
 3. ✅ **Explicit-login API authn + access cache** — Verify IdP JWT before cache,
    register `/users/me` before existing-user middleware, and share
-   `UserAccessResolver`. Only scalar `login=true` on actual GET enrolls/refreshes/
-   bootstraps. Promotion uses exact identity + tenant allowlists and remains
+   `UserAccessResolver`. Only POST `/users/me` enrolls/refreshes/bootstraps; every
+   GET is read-only. Promotion uses exact identity + tenant allowlists and remains
    promote-only; email storage still requires verification. Normal requests use
    fixed-TTL Redis, then read-only indexed Mongo fallback. Missing/disabled users
    receive distinct `403`s; `system` receives `401`.
@@ -1146,7 +1148,7 @@ verified separately when those deferred credentials are introduced.
     > See [ENV_VARIABLES.md](../../ENV_VARIABLES.md) "Local dev setup (entra-local)".
     >
     > **Scope handshake delivered:** after callback the first Scope API request is
-    > `/users/me?login=true`; a cached-account reload first uses plain `/users/me`.
+    > POST `/users/me`; a cached-account reload first uses GET `/users/me`.
     > `AuthContext` does not expose application-authenticated identity until that
     > succeeds; feature flags and route queries wait too. MSAL-only identity display
     > is no longer the contract. Self-scoping and permission-aware UI remain deferred.
@@ -1234,11 +1236,11 @@ Auth & RBAC rollout
 │   │   Current slice: explicit enrollment + active-user resolution; no route RBAC.
 │   ├── API authn middleware (verify token → req.user)       [3]
 │   │     • verify every configured non-public bearer; anonymous rollout retained
-│   │     • /users/me?login=true ONLY: JIT/profile/lastLoginAt/bootstrap
+│   │     • POST /users/me ONLY: JIT/profile/lastLoginAt/bootstrap
 │   │     • ordinary requests: verify → Redis → indexed Mongo fallback (no writes)
 │   ├── GET /users/me: Scope UUID + singular role; no permission expansion [6, partial]
 │   ├── CLI: apiFetch() delivered; interactive login/SecretStore deferred [7, 8]
-│   └── Portal: callback login=true / cached-account plain-me handshake [10]
+│   └── Portal: callback POST / cached-account GET handshake [10]
 │       └── Gate: queries wait for Scope identity; new bearer identities enroll explicitly;
 │                 anonymous/public rollout remains unchanged
 │
@@ -1317,7 +1319,7 @@ It does not replace the Portal callback/order checks or live IdP/JWKS outage tes
 
 | Scenario | Expected result |
 | --- | --- |
-| Fresh Portal callback | First Scope API call is `/api/v1/users/me?login=true`; feature flags and all other eager queries wait for success. |
+| Fresh Portal callback | First Scope API call is `POST /api/v1/users/me`; feature flags and all other eager queries wait for success. |
 | First enrollment | Scope UUID/default `user` role; verified profile handling; exact identity + tenant bootstrap independent of email verification; explicit `lastLoginAt` write; active cache warmed. |
 | Login on active cache hit | Still bypasses the read cache and upserts, returning/warming the latest stored role. |
 | Ordinary/plain `/me` hit | Verify token first; no Mongo operation, profile enrichment, bootstrap promotion, or `lastLoginAt` write; TTL not extended. |
@@ -1325,7 +1327,7 @@ It does not replace the Portal callback/order checks or live IdP/JWKS outage tes
 | Tenant/provider/database isolation | Same `oid` in a different tenant/provider or independently namespaced database cannot reuse an entry. |
 | Bad cache payload | Malformed/version-mismatched/identity-mismatched data is a logged, evicted miss, not an authenticated user. |
 | Invalid/expired token with warm cache | `401` before all cache/DB operations. |
-| Query/method boundary | Absent/false is read-only; invalid/repeated/structured login values are `400`; HEAD and other routes never enroll. |
+| Query/method boundary | Every GET is read-only; invalid/repeated/structured login values are `400`; only POST enrolls, while HEAD and other routes never do. |
 | Disabled/reserved identity | `403 user_disabled` / `401 invalid_principal`; no negative cache, discovered old active entry evicted best-effort. |
 | Disabled explicit login ordering | Existing upsert may refresh profile/timestamps before disabled validation returns `403`; still never caches/admit the user. |
 | TTL | Unset → 300; positive safe integer override accepted; invalid values rejected; hits non-sliding; DB-only role/disable changes visible after expiry. |
@@ -1446,14 +1448,14 @@ ship; they are not dependencies or secrets introduced by explicit login/caching.
 | Decision | Choice |
 | --- | --- |
 | Credential | IdP access token unchanged on every call, verified before any cache access; no Scope session JWT or `/auth/login`. |
-| Enrollment | Only actual GET `/users/me?login=true`; plain `/me` and other routes resolve existing active users. |
+| Enrollment | Only POST `/users/me`; every GET `/me` and other routes resolve existing active users. |
 | Store identity | Exact `(idp, tid, oid)` lookup; Scope-owned UUID and database role returned to clients. |
 | Cache isolation | `auth-user:v1:<encoded Mongo database namespace>:<encoded idp>:<encoded tid>:<encoded oid>`. |
 | Expiration | `AUTH_USER_CACHE_TTL_SECONDS`, default 300 only when unset, positive safe integer, fixed/non-sliding `SET EX`. |
 | Denial vs cache miss | Miss/unavailable reads Mongo; missing/disabled users are distinct `403`s, reserved `system` is `401`; no negative cache. |
 | Bootstrap | Exact verified identity tuple + explicit tenant allowlist, independent of email verification, only on explicit login, promote-only. |
 | Timestamp | `lastLoginAt` records the explicit upsert, not ordinary activity or trustworthy proof of an interactive callback; disabled check follows upsert. |
-| Portal readiness | Callback login=true, cached-account plain `/me`; API UUID/role authoritative; all queries gated and account-bound work deduplicated/cancelled. |
+| Portal readiness | Callback POST `/me`, cached-account GET `/me`; API UUID/role authoritative; all queries gated and account-bound work deduplicated/cancelled. |
 | Rollout | Public and anonymous behavior preserved; no full RBAC/ownership lockdown; enrolled CLI bearers remain compatible. |
 
 ### Retained RBAC roadmap decisions
@@ -1569,7 +1571,7 @@ v1 implements `private`/`shared` + deep links and reserves the remaining optiona
 **Decision** *(confirmed)*: `AUTH_BOOTSTRAP_ADMINS` is the **sole** bootstrap mechanism
 for seeding the first admin, but it is matched on the **identity tuple
 `(idp, idpTenant, idpSubject)`** — **not** on email, which is mutable and not guaranteed
-verified. The matched explicit `/users/me?login=true` request must originate from a
+verified. The matched explicit POST `/users/me` request must originate from a
 tenant in `AUTH_BOOTSTRAP_TENANTS`. Neither `email` nor `email_verified` is required
 for promotion; verified-email storage remains a separate, unchanged policy.
 Bootstrap is **promote-only**: removing an entry does
@@ -1638,7 +1640,7 @@ approach.
 Mongo is the durable record, Prometheus is for alerting/dashboards.
 
 **Events (v1, minimum)** — emitted at minimum for:
-- **Explicit login** (`/users/me?login=true` completes successfully) and **failed login**.
+- **Explicit login** (POST `/users/me` completes successfully) and **failed login**.
   Ordinary token verification/cache hits are not login events. The endpoint invocation
   is not trustworthy proof of an interactive IdP prompt.
 - **Logout** (explicit `scope auth logout` / Portal sign-out).
@@ -1712,7 +1714,7 @@ ownership model makes it straightforward to add later if needed.
   Existing anonymous worker rollout remains unchanged in this milestone.
 - **User-attributed automation / CI** uses `SCOPE_TOKEN`. **For the current milestone**,
   `SCOPE_TOKEN` is a **raw IdP bearer**. Existing enrolled callers are compatible;
-  new identities must explicitly call `/users/me?login=true` first. This keeps
+  new identities must explicitly POST `/users/me` first. This keeps
   the user-auth milestone unblocked. **Scope-issued PAT/API tokens** (long-lived,
   user-minted, revocable) delivered via the same `SCOPE_TOKEN` slot are the likely
   **future** answer for CI and user-attributed automation, but they are **out of scope**

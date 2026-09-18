@@ -133,8 +133,8 @@ external GitHub API with its own `token` auth and must never receive the Scope
 
 `SCOPE_TOKEN` remains a raw **IdP access token**, not a Scope-issued credential.
 Existing enrolled users are compatible; a new identity must intentionally call
-`GET /api/v1/users/me?login=true` before ordinary authenticated commands. The login
-GET is no-store and must not be prefetched/polled. Interactive CLI login/keychain
+`POST /api/v1/users/me` before ordinary authenticated commands. The enrollment
+POST is no-store and must not be prefetched/polled. Interactive CLI login/keychain
 support remains deferred; see [CLI authentication guidance](../../apps/cli/README.md#authentication).
 
 `apiFetch()` is a thin facade over the [`ky`](https://github.com/sindresorhus/ky)

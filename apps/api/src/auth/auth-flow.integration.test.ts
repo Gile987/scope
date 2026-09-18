@@ -109,7 +109,7 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
     expect(notEnrolled.body.code).toBe("user_not_enrolled");
     expect(await users.countDocuments()).toBe(0);
 
-    const login = await request(app).get("/api/v1/users/me?login=true").set("Authorization", bearer);
+    const login = await request(app).post("/api/v1/users/me").set("Authorization", bearer);
     expect(login.status).toBe(200);
     expect(login.body.role).toBe("admin");
     expect(login.body.id).not.toBe(subject);
@@ -166,7 +166,7 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
   it("uses MongoDB and admits no missing users when the cache is unavailable", async () => {
     const otherSubject = randomUUID();
     const bearer = `Bearer ${token(otherSubject)}`;
-    const login = await request(app).get("/api/v1/users/me?login=true").set("Authorization", bearer);
+    const login = await request(app).post("/api/v1/users/me").set("Authorization", bearer);
     expect(login.status).toBe(200);
     await cache.close();
     const before = await users.findOne({ idpSubject: otherSubject });

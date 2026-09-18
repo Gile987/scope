@@ -146,16 +146,24 @@ async function request<T>(path: string, init?: RequestInit, opts?: RequestOpts):
   return res.json();
 }
 
+async function requestCurrentUser(
+  method: "GET" | "POST",
+  opts: { signal?: AbortSignal } = {},
+): Promise<CurrentUserResponse> {
+  const user = await request<unknown>("/users/me", {
+    method,
+    cache: "no-store",
+    signal: opts.signal,
+  });
+  return validateCurrentUser(user);
+}
+
 export const api = {
-  /** Only AuthProvider calls this; login-marked GETs must never be prefetched. */
-  getCurrentUser: async (opts: { login?: boolean; signal?: AbortSignal } = {}): Promise<CurrentUserResponse> => {
-    const user = await request<unknown>(`/users/me${opts.login ? "?login=true" : ""}`, {
-      method: "GET",
-      cache: "no-store",
-      signal: opts.signal,
-    });
-    return validateCurrentUser(user);
-  },
+  /** Only AuthProvider calls these; enrollment must never be prefetched. */
+  getCurrentUser: (opts: { signal?: AbortSignal } = {}): Promise<CurrentUserResponse> =>
+    requestCurrentUser("GET", opts),
+  enrollCurrentUser: (opts: { signal?: AbortSignal } = {}): Promise<CurrentUserResponse> =>
+    requestCurrentUser("POST", opts),
 
   /** List runs with cursor-based pagination, server-side filtering and sorting */
   listRuns: (opts?: RunFilterParams & { sortBy?: RunSortField; sortDir?: RunSortDir; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<Run>> => {

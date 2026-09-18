@@ -87,10 +87,11 @@ flowchart TB
 Configured human callers send the **IdP access token unchanged** on each API call.
 The API verifies its signature/claims before resolving an active Scope UUID and role
 through Redis (hit: no Mongo) or an exact `(idp, tid, oid)` Mongo lookup (miss/outage).
-Only `GET /api/v1/users/me?login=true` performs JIT/profile/`lastLoginAt`/bootstrap
-writes. Its GET side effects require no-store and no prefetching.
+Only `POST /api/v1/users/me` performs JIT/profile/`lastLoginAt`/bootstrap writes.
+Every GET is read-only. Enrollment responses use no-store, and clients must not 
+prefetch or poll the POST.
 
-The Portal calls that login variant first after an IdP callback; cached-account
+The Portal calls that POST first after an IdP callback; cached-account
 reloads use plain `/users/me`. All application queries wait for the handshake, and
 the API response—not MSAL claims—owns the Scope identity/role. Enrolled CLI bearers
 remain compatible; new identities must explicitly enroll. Full RBAC/ownership,

@@ -31,17 +31,18 @@ For a new identity, intentionally call this once before other authenticated call
 
 ```bash
 curl --fail-with-body -sS \
+  -X POST \
   -H "Authorization: Bearer $SCOPE_TOKEN" \
   -H "Cache-Control: no-store" \
-  "http://localhost:$API_PORT/api/v1/users/me?login=true"
+  "http://localhost:$API_PORT/api/v1/users/me"
 ```
 
-Only actual GET with scalar `login=true` may JIT-create the user or update profile,
-`lastLoginAt`, and eligible bootstrap-admin promotion. This GET has side effects:
+Only POST `/api/v1/users/me` may JIT-create the user or update profile,
+`lastLoginAt`, and eligible bootstrap-admin promotion. This POST has side effects:
 **never prefetch or poll it**, and do not silently invoke it as an ordinary lookup
 retry. `lastLoginAt` records this explicit upsert, not proof of an interactive login.
-For normal identity checks use plain `/api/v1/users/me` (or `login=false`).
-Invalid/repeated/structured login values return `400`; HEAD never enrolls.
+For normal identity checks use GET `/api/v1/users/me`; Invalid/repeated/structured 
+login values return `400`; HEAD never enrolls.
 
 Plain `/me` and other authenticated routes resolve an existing active Scope UUID/role
 from Redis; miss/unavailability reads Mongo by exact `(idp, tid, oid)` and warms the
@@ -76,7 +77,7 @@ curl -s http://localhost:$API_PORT/openapi.json | jq '.paths["/api/v1/requests"]
 ### Key Endpoint Groups
 
 - **System**: `/health`, `/ready`, `/about`, `/api/v1/version`
-- **Identity**: `/api/v1/users/me` (read-only); `?login=true` only for explicit enrollment/login refresh
+- **Identity**: GET `/api/v1/users/me` (read-only); POST `/api/v1/users/me` (explicit enrollment/login refresh)
 - **Requests & Runs**: `/api/v1/requests/*` (create, cancel, retry, pause, resume, bulk ops, logs, HAR, video, snapshots, tool-calls)
 - **Skills**: `/api/v1/skills/*` (discover, search, external, resolve, revisions)
 - **Agents**: `/api/v1/agents/*` (CRUD, versions)

@@ -48,7 +48,7 @@ const resolver = {
   enrollOnLogin: vi.fn(async () => principal),
 } satisfies UserAccessService;
 
-describe("GET /api/v1/users/me", () => {
+describe("/api/v1/users/me", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     provider.verifyAccessToken.mockResolvedValue(identity);
@@ -58,16 +58,19 @@ describe("GET /api/v1/users/me", () => {
     _injectTestDependencies({ authProvider: provider, userAccessResolver: resolver });
   });
 
-  it.each(["", "?login=true"])("rejects anonymous requests %s without writes", async (query) => {
-    const res = await request(app).get(`/api/v1/users/me${query}`);
+  it.each([
+    ["GET", () => request(app).get("/api/v1/users/me")],
+    ["POST", () => request(app).post("/api/v1/users/me")],
+  ])("rejects anonymous %s requests without writes", async (_method, send) => {
+    const res = await send();
     expect(res.status).toBe(401);
     expect(res.headers["cache-control"]).toBe("no-store");
     expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
     expect(resolver.resolveExisting).not.toHaveBeenCalled();
   });
 
-  it.each(["", "?login=false"])("returns the resolved Scope identity without enrolling %s", async (query) => {
-    const res = await request(app).get(`/api/v1/users/me${query}`).set("Authorization", "Bearer token");
+  it("returns the resolved Scope identity without enrolling on GET", async () => {
+    const res = await request(app).get("/api/v1/users/me").set("Authorization", "Bearer token");
     expect(res.status).toBe(200);
     expect(res.headers["cache-control"]).toBe("no-store");
     expect(res.body).toEqual({
@@ -83,44 +86,42 @@ describe("GET /api/v1/users/me", () => {
     expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
   });
 
-  it("enrolls on explicit login without a preceding existing-user lookup", async () => {
+  it("enrolls on POST without a preceding existing-user lookup", async () => {
     resolver.enrollOnLogin.mockResolvedValue({ ...principal, role: "admin" });
-    const res = await request(app).get("/api/v1/users/me?login=true").set("Authorization", "Bearer token");
+    const res = await request(app).post("/api/v1/users/me").set("Authorization", "Bearer token");
     expect(res.status).toBe(200);
+    expect(res.headers["cache-control"]).toBe("no-store");
     expect(res.body.role).toBe("admin");
     expect(resolver.enrollOnLogin).toHaveBeenCalledExactlyOnceWith(identity, "token");
     expect(resolver.resolveExisting).not.toHaveBeenCalled();
     expect(provider.verifyAccessToken).toHaveBeenCalledOnce();
   });
-
-  it("never enrolls for HEAD even when login=true", async () => {
-    const res = await request(app).head("/api/v1/users/me?login=true").set("Authorization", "Bearer token");
-    expect(res.status).toBe(200);
-    expect(resolver.resolveExisting).toHaveBeenCalledOnce();
-    expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
+  it("requires an initialized resolver for GET", async () => {
+    _injectTestDependencies({ userAccessResolver: null });
+    const res = await request(app).get("/api/v1/users/me").set("Authorization", "Bearer token");
+    expect(res.status).toBe(503);
+    expect(res.headers["cache-control"]).toBe("no-store");
   });
 
-  it.each([
-    "login=", "login=1", "login=TRUE", "login=garbage",
-    "login=true&login=false", "login[]=true", "login[nested]=true",
-  ])("rejects invalid query %s with no access lookup or enrollment", async (query) => {
-    const res = await request(app).get(`/api/v1/users/me?${query}`).set("Authorization", "Bearer token");
-    expect(res.status).toBe(400);
+  it("requires an initialized resolver for POST", async () => {
+    _injectTestDependencies({ userAccessResolver: null });
+    const res = await request(app).post("/api/v1/users/me").set("Authorization", "Bearer token");
+    expect(res.status).toBe(503);
+    expect(res.headers["cache-control"]).toBe("no-store");
+  });
+
+  it("rejects bad tokens before GET access resolution", async () => {
+    provider.verifyAccessToken.mockRejectedValue(new AuthError("invalid_token", "bad"));
+    const res = await request(app).get("/api/v1/users/me").set("Authorization", "Bearer token");
+    expect(res.status).toBe(401);
     expect(res.headers["cache-control"]).toBe("no-store");
     expect(resolver.resolveExisting).not.toHaveBeenCalled();
     expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
   });
 
-  it.each(["", "?login=true"])("requires an initialized resolver %s", async (query) => {
-    _injectTestDependencies({ userAccessResolver: null });
-    const res = await request(app).get(`/api/v1/users/me${query}`).set("Authorization", "Bearer token");
-    expect(res.status).toBe(503);
-    expect(res.headers["cache-control"]).toBe("no-store");
-  });
-
-  it.each(["", "?login=true"])("rejects bad tokens before access resolution %s", async (query) => {
+  it("rejects bad tokens before POST enrollment", async () => {
     provider.verifyAccessToken.mockRejectedValue(new AuthError("invalid_token", "bad"));
-    const res = await request(app).get(`/api/v1/users/me${query}`).set("Authorization", "Bearer token");
+    const res = await request(app).post("/api/v1/users/me").set("Authorization", "Bearer token");
     expect(res.status).toBe(401);
     expect(res.headers["cache-control"]).toBe("no-store");
     expect(resolver.resolveExisting).not.toHaveBeenCalled();
@@ -135,18 +136,12 @@ describe("GET /api/v1/users/me", () => {
     expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
   });
 
-  it("propagates login access denial and does not fall through to other middleware", async () => {
+  it("propagates enrollment access denial and does not fall through to other middleware", async () => {
     resolver.enrollOnLogin.mockRejectedValue(new UserAccessError("user_disabled"));
-    const res = await request(app).get("/api/v1/users/me?login=true").set("Authorization", "Bearer token");
+    const res = await request(app).post("/api/v1/users/me").set("Authorization", "Bearer token");
     expect(res.status).toBe(403);
     expect(res.body.code).toBe("user_disabled");
     expect(resolver.resolveExisting).not.toHaveBeenCalled();
   });
 
-  it("does not allow login query on another API route to enroll", async () => {
-    const res = await request(app).get("/api/v1/feature-flags?login=true").set("Authorization", "Bearer token");
-    expect(res.status).toBe(200);
-    expect(resolver.resolveExisting).toHaveBeenCalledOnce();
-    expect(resolver.enrollOnLogin).not.toHaveBeenCalled();
-  });
 });

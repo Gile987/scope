@@ -164,15 +164,19 @@ describe("Scope authentication handshake", () => {
     return fetchMock.mock.calls.map(([request]) => pathOf(request));
   }
 
-  it("sends exactly the login-marked GET first; flags, favicon and pages wait for its response", async () => {
+  function requestMethods() {
+    return fetchMock.mock.calls.map(([request]) => (request as Request).method);
+  }
+
+  it("sends exactly the enrollment POST first; flags, favicon and pages wait for its response", async () => {
     freshLogin();
     const lookup = deferred<Response>();
     fetchMock.mockImplementationOnce(() => lookup.promise);
     const view = render(tree());
 
-    await waitFor(() => expect(requests()).toEqual(["/api/v1/users/me?login=true"]));
+    await waitFor(() => expect(requests()).toEqual(["/api/v1/users/me"]));
     const request = fetchMock.mock.calls[0][0] as Request;
-    expect(request.method).toBe("GET");
+    expect(request.method).toBe("POST");
     expect(request.headers.get("authorization")).toBe("Bearer idp-access-token");
     expect(auth.isReady).toBe(false);
     expect(auth.isAuthenticated).toBe(false);
@@ -184,7 +188,7 @@ describe("Scope authentication handshake", () => {
       focusManager.setFocused(false);
       focusManager.setFocused(true);
     });
-    expect(requests()).toEqual(["/api/v1/users/me?login=true"]);
+    expect(requests()).toEqual(["/api/v1/users/me"]);
     expect(msal.consume).not.toHaveBeenCalled();
 
     await act(async () => lookup.resolve(response(scopeAlice)));
@@ -212,6 +216,7 @@ describe("Scope authentication handshake", () => {
     render(tree());
     await waitFor(() => expect(auth.isReady).toBe(true));
     expect(requests()[0]).toBe("/api/v1/users/me");
+    expect(requestMethods()[0]).toBe("GET");
     expect(auth.user).toEqual({
       id: scopeAlice.id, role: "admin", name: alice.name,
       username: alice.username, subject: alice.localAccountId,
@@ -278,51 +283,60 @@ describe("Scope authentication handshake", () => {
     expect(auth.isAuthenticated).toBe(false);
     expect(auth.isReady).toBe(false);
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-    expect(requests()).toEqual(["/api/v1/users/me?login=true"]);
+    expect(requests()).toEqual(["/api/v1/users/me"]);
+    expect(requestMethods()).toEqual(["POST"]);
     expect(msal.consume).not.toHaveBeenCalled();
     expect(reauth).not.toHaveBeenCalled();
     expect(token).toHaveBeenCalledTimes(1);
   });
 
-  it.each([true, false])("retries a 503 explicitly, preserving login=%s and deduplicating clicks", async (fresh) => {
-    if (fresh) freshLogin();
-    const path = `/api/v1/users/me${fresh ? "?login=true" : ""}`;
-    fetchMock.mockResolvedValueOnce(response({ error: "Database unavailable" }, 503));
-    const retryResult = deferred<Response>();
-    fetchMock.mockImplementationOnce(() => retryResult.promise);
-    render(tree());
-    await screen.findByText("Unable to connect to Scope");
-    expect(auth.status).toBe("error");
-    expect(auth.error).toMatchObject({ status: 503 });
-    expect(requests()).toEqual([path]);
-    expect(reauth).not.toHaveBeenCalled();
-    expect(msal.consume).not.toHaveBeenCalled();
+  it.each([true, false])(
+    "retries a 503 explicitly with the original method (fresh login=%s) and deduplicates clicks",
+    async (fresh) => {
+      if (fresh) freshLogin();
+      const path = "/api/v1/users/me";
+      const method = fresh ? "POST" : "GET";
+      fetchMock.mockResolvedValueOnce(response({ error: "Database unavailable" }, 503));
+      const retryResult = deferred<Response>();
+      fetchMock.mockImplementationOnce(() => retryResult.promise);
+      render(tree());
+      await screen.findByText("Unable to connect to Scope");
+      expect(auth.status).toBe("error");
+      expect(auth.error).toMatchObject({ status: 503 });
+      expect(requests()).toEqual([path]);
+      expect(requestMethods()).toEqual([method]);
+      expect(reauth).not.toHaveBeenCalled();
+      expect(msal.consume).not.toHaveBeenCalled();
 
-    act(() => { auth.retry(); auth.retry(); });
-    await waitFor(() => expect(requests()).toEqual([path, path]));
-    await act(async () => retryResult.resolve(response(scopeAlice)));
-    await waitFor(() => expect(auth.isReady).toBe(true));
-    expect(msal.consume).toHaveBeenCalledTimes(fresh ? 1 : 0);
-  });
+      act(() => { auth.retry(); auth.retry(); });
+      await waitFor(() => expect(requests()).toEqual([path, path]));
+      expect(requestMethods()).toEqual([method, method]);
+      await act(async () => retryResult.resolve(response(scopeAlice)));
+      await waitFor(() => expect(auth.isReady).toBe(true));
+      expect(msal.consume).toHaveBeenCalledTimes(fresh ? 1 : 0);
+    },
+  );
 
   it("preserves the existing single 401 refresh retry before interactive reauthentication", async () => {
     freshLogin();
     fetchMock.mockImplementation(async () => response({ error: "Invalid JWT" }, 401));
     render(tree());
     await screen.findByText("Unable to connect to Scope");
-    expect(requests()).toEqual(["/api/v1/users/me?login=true", "/api/v1/users/me?login=true"]);
+    expect(requests()).toEqual(["/api/v1/users/me", "/api/v1/users/me"]);
+    expect(requestMethods()).toEqual(["POST", "POST"]);
     expect(token).toHaveBeenNthCalledWith(2, { forceRefresh: true });
     expect(reauth).toHaveBeenCalledTimes(1);
     expect(msal.consume).not.toHaveBeenCalled();
     expect(auth.isAuthenticated).toBe(false);
   });
 
-  it("does not automatically replay a login write after a network failure", async () => {
+  it("does not automatically replay an enrollment write after a network failure", async () => {
     freshLogin();
     fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     render(tree());
     await screen.findByText("Unable to connect to Scope");
-    expect(requests()).toEqual(["/api/v1/users/me?login=true"]);
+    expect(requests()).toEqual(["/api/v1/users/me"]);
+    expect(requestMethods()).toEqual(["POST"]);
     expect(msal.pending).toBeDefined();
     expect(msal.consume).not.toHaveBeenCalled();
     expect(reauth).not.toHaveBeenCalled();
@@ -343,7 +357,8 @@ describe("Scope authentication handshake", () => {
     expect(auth.error?.message).toBe("Invalid user response from Scope");
     expect(auth.user).toBeNull();
     expect(msal.consume).not.toHaveBeenCalled();
-    expect(requests()).toEqual(["/api/v1/users/me?login=true"]);
+    expect(requests()).toEqual(["/api/v1/users/me"]);
+    expect(requestMethods()).toEqual(["POST"]);
   });
 
   it("cancels a replaced account's handshake and discards its late response and cache", async () => {
@@ -363,7 +378,8 @@ describe("Scope authentication handshake", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(firstRequest.signal.aborted).toBe(true);
     expect(client.getQueryData(["old-user-data"])).toBeUndefined();
-    expect(requests()).toEqual(["/api/v1/users/me?login=true", "/api/v1/users/me"]);
+    expect(requests()).toEqual(["/api/v1/users/me", "/api/v1/users/me"]);
+    expect(requestMethods()).toEqual(["POST", "GET"]);
 
     await act(async () => first.resolve(response(scopeAlice)));
     expect(auth.user).toBeNull();
@@ -441,7 +457,8 @@ describe("Scope authentication handshake", () => {
     expect(auth.status).toBe("signed-out");
     expect(msal.pending).toBeUndefined();
     expect(msal.consume).not.toHaveBeenCalled();
-    expect(requests()).toEqual(["/api/v1/users/me?login=true"]);
+    expect(requests()).toEqual(["/api/v1/users/me"]);
+    expect(requestMethods()).toEqual(["POST"]);
   });
 
   it("aborts a handshake on a real unmount, unlike StrictMode's effect replay", async () => {

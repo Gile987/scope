@@ -35,7 +35,7 @@ flowchart LR
 `users._id` is a Scope-owned UUID. The unique external identity is
 `(idp, idpTenant, idpSubject)` (`idp`, Entra `tid`, Entra `oid`), never email.
 `UserStore.upsertOnLogin()` is called only by the explicit
-`GET /api/v1/users/me?login=true` path for JIT/profile/`lastLoginAt`/eligible
+`POST /api/v1/users/me` path for JIT/profile/`lastLoginAt`/eligible
 bootstrap-admin writes. `lastLoginAt` records that upsert, not request activity or
 proof of an interactive prompt; the disabled check still occurs after the upsert.
 
@@ -47,7 +47,7 @@ cached. Fixed/non-sliding TTL defaults to 300 seconds
 (`AUTH_USER_CACHE_TTL_SECONDS`), so DB-only role/disable edits can remain stale until
 expiry. Redis failure falls back to Mongo, not anonymous access.
 
-The Portal handshake uses login=true after callback and plain `/me` after an
+The Portal handshake uses POST `/me` after callback and GET `/me` after an
 MSAL-cached reload, gating all queries until its API-authoritative UUID/role arrives.
 The singular stored role is metadata today: the permission bundles, ownership
 enforcement, service credentials, and internal JWTs in
@@ -694,7 +694,7 @@ OpenAPI route registrations live in `apps/api/src/openapi/routes/` — one file 
 
 The registry declares `bearerAuth` as an HTTP bearer scheme for unchanged IdP
 access tokens. `apiRoute()` accepts optional OpenAPI `security` metadata;
-`GET /api/v1/users/me` sets `security: [{ bearerAuth: [] }]`. In Swagger UI,
+both `GET` and `POST /api/v1/users/me` set `security: [{ bearerAuth: [] }]`. In Swagger UI,
 use **Authorize** and paste the access token without its `Bearer` prefix.
 
 The requirement is operation-scoped: there is no global security requirement,

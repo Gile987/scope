@@ -145,7 +145,7 @@ export const apiClient: KyInstance = ky.create({
   retry: {
     limit: 1,
     // Forced ky.retry() on 401 bypasses this. Network failures must not replay
-    // a login-marked GET whose database write may already have succeeded.
+    // an enrollment POST whose database write may already have succeeded.
     shouldRetry: () => false,
   },
   hooks: {

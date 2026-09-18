@@ -42,13 +42,14 @@ Before a **new identity** makes ordinary authenticated calls, explicitly enroll 
 
 ```bash
 curl --fail-with-body -sS \
+  -X POST \
   -H "Authorization: Bearer $SCOPE_TOKEN" \
   -H "Cache-Control: no-store" \
-  "${SCOPE_API_URL%/}/api/v1/users/me?login=true"
+  "${SCOPE_API_URL%/}/api/v1/users/me"
 ```
 
-This GET has side effects (user/profile/`lastLoginAt`/eligible bootstrap updates):
-never prefetch or poll it. Plain `/api/v1/users/me` is read-only and returns
+This POST has side effects (user/profile/`lastLoginAt`/eligible bootstrap updates):
+never prefetch or poll it. `GET /api/v1/users/me` is read-only and returns
 `403 user_not_enrolled` for missing enrollment or `403 user_disabled` for disabled
 access; do not auto-enroll/retry these as token-refresh errors.
 
