@@ -173,7 +173,7 @@ services:
   # entra-local-certs-init) so the browser trusts it with no manual cert step —
   # MSAL requires an https authority. See the auth docs.
   entra-local:
-    image: ghcr.io/cmaneu/entra-local:0.1.0
+    image: ghcr.io/cmaneu/entra-local:0.1.1
     profiles: [auth]
     ports:
       - "${ENTRA_LOCAL_PORT:-8443}:8443"
@@ -248,7 +248,7 @@ services:
   # emulator over the compose network (https://entra-local:8443/admin/api); the
   # shared CA and entra-local certificate SAN keep TLS verification enabled.
   entra-local-init:
-    image: ghcr.io/cmaneu/entra-local:0.0.3
+    image: ghcr.io/cmaneu/entra-local:0.1.1
     profiles: [auth]
     restart: "no"
     entrypoint: ["node", "-e"]
@@ -326,6 +326,13 @@ services:
     restart: on-failure:5
     ports:
       - "${API_PORT:-3100}:80"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:80/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      # Dev startup runs tsx and tsc concurrently under the API's CPU limit.
+      start_period: 120s
     env_file:
       # .env.local holds developer-managed values that worktree-env must not
       # overwrite: AZURE_AI_INFERENCE_ENDPOINT, AZURE_AI_INFERENCE_API_KEY,
@@ -380,7 +387,7 @@ services:
     image: alpine:3.21
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./apps/workers:/workers:ro
       - ./scripts/register-agent.sh:/register-agent.sh:ro

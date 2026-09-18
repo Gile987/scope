@@ -173,9 +173,13 @@ export interface AuthClientConfig {
   and accepts **any tenant** — no `tid` pinning in code. Tenant restriction (if any) is
   configured at the **App Registration** level. `jose` caches keys from the configured
   JWKS endpoint (`AUTH_JWKS_URI`, otherwise derived from `AUTH_AUTHORITY`) and handles
-  key rotation; the token's tenant must match its verified issuer template.
+  key rotation. Scope requires the selected JWK to publish an `issuer` and enforces that
+  Entra-specific key restriction: a `{tenantid}` key issuer is expanded from the token's
+  `tid`, while a tenant-specific key issuer must match exactly.
 - Verifies signature (RS256), `iss` (per-tenant issuer template), `aud`
-  (`AUTH_API_CLIENT_ID`), `exp`, `nbf`.
+  (`AUTH_API_CLIENT_ID`), `exp`, `nbf`. Both the configured token issuer template and
+  the selected signing key's issuer must match; missing or malformed key issuer metadata
+  fails closed.
 - Extracts `oid` → `idpSubject`, `tid` → `idpTenant`, `email` (falling back to
   `preferred_username`), optional boolean `email_verified`, and `name`. The
   `(idp, idpTenant, idpSubject)` triple — **not** email — is the durable identity key

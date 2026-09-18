@@ -82,7 +82,15 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
       authProvider: new EntraIdAuthProvider({
         authority: "https://login.microsoftonline.com/common",
         audience: "scope-api",
-        jwks: async () => keys.publicKey,
+        jwks: {
+          resolve: async () => keys.publicKey,
+          getCurrentJwks: () => ({
+            keys: [{
+              kty: "RSA",
+              issuer: "https://login.microsoftonline.com/{tenantid}/v2.0",
+            }],
+          }),
+        },
       }),
       userAccessResolver: resolver,
     });

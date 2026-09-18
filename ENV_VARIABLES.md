@@ -892,7 +892,9 @@ issuer. For multi-tenant Entra apps this is typically
 `https://login.microsoftonline.com/common`. Point it at the `entra-local`
 emulator for offline development
 (e.g. `https://localhost:8443/<tenant>`). The JWKS URI is derived as
-`<AUTH_AUTHORITY>/discovery/v2.0/keys` unless `AUTH_JWKS_URI` is set.
+`<AUTH_AUTHORITY>/discovery/v2.0/keys` unless `AUTH_JWKS_URI` is set. Scope
+retains `jose`'s remote key caching and rollover behavior while additionally
+validating the selected key's Entra-specific `issuer` metadata.
 
 ### AUTH_ISSUER_TEMPLATE
 **Default:** `https://login.microsoftonline.com/{tenantid}/v2.0`
@@ -902,7 +904,9 @@ Per-tenant issuer the token's `iss` claim must match; `{tenantid}` is substitute
 from each token's `tid`. Override this for a self-hosted issuer whose URL differs
 from Entra cloud — e.g. the `entra-local` emulator uses
 `https://localhost:8443/{tenantid}/v2.0`. Verification stays multi-tenant: any
-tenant is accepted as long as its issuer matches this template.
+tenant is accepted as long as its issuer matches this template. The selected
+JWK's required `issuer` uses the same substitution rule when it contains
+`{tenantid}`; otherwise it must exactly match the token issuer.
 
 ### AUTH_JWKS_URI
 **Default:** derived as `<AUTH_AUTHORITY>/discovery/v2.0/keys`
@@ -911,7 +915,15 @@ tenant is accepted as long as its issuer matches this template.
 Explicit JWKS (signing keys) endpoint. Set this only when the JWKS URL cannot be
 derived from `AUTH_AUTHORITY`. The `entra-local` emulator's default JWKS
 (`<authority>/discovery/v2.0/keys`) already matches the derivation, so this is
-usually left unset.
+usually left unset. Every selected key must contain a non-empty string `issuer`;
+missing, malformed, ambiguous, or mismatched key issuer metadata rejects the
+token.
+
+> **entra-local compatibility prerequisite.** At the time this validation was
+> introduced, the external `cmaneu/entra-local` JWKS omitted the `issuer`
+> extension. Auth-enabled local development therefore requires an emulator
+> version that publishes the configured per-tenant issuer on every signing key.
+> This Scope change does not modify the external emulator.
 
 > **Local dev TLS.** Compose trusts the emulator's mkcert CA through a read-only
 > public-CA mount and `NODE_EXTRA_CA_CERTS`; the certificate covers the internal

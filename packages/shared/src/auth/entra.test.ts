@@ -1,10 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { createServer } from "node:http";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { SignJWT, generateKeyPair } from "jose";
-import type { KeyLike } from "jose";
-import { EntraIdAuthProvider } from "./entra.js";
+import { createLocalJWKSet, exportJWK, SignJWT, generateKeyPair } from "jose";
+import type {
+  JSONWebKeySet,
+  JWTVerifyGetKey,
+  KeyLike,
+} from "jose";
+import { EntraIdAuthProvider, type EntraJwks } from "./entra.js";
 import { AuthError } from "./types.js";
 
 const TENANT = "11111111-1111-1111-1111-111111111111";
@@ -12,10 +17,13 @@ const OTHER_TENANT = "99999999-9999-9999-9999-999999999999";
 const SUBJECT = "22222222-2222-2222-2222-222222222222";
 const AUDIENCE = "api-client-id";
 const AUTHORITY = "https://login.microsoftonline.com/common";
+const KEY_ID = "test-signing-key";
+const KEY_ISSUER = "https://login.microsoftonline.com/{tenantid}/v2.0";
 
 let privateKey: KeyLike;
 let publicKey: KeyLike;
 let wrongPrivateKey: KeyLike;
+let publicJwk: JSONWebKeySet["keys"][number];
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -41,14 +49,38 @@ async function sign(
   payload: Record<string, unknown>,
   key: KeyLike = privateKey,
 ): Promise<string> {
-  return new SignJWT(payload).setProtectedHeader({ alg: "RS256" }).sign(key);
+  return new SignJWT(payload)
+    .setProtectedHeader({ alg: "RS256", kid: KEY_ID })
+    .sign(key);
 }
 
-function makeProvider(): EntraIdAuthProvider {
+function makeJwks(
+  issuer: unknown = KEY_ISSUER,
+  includeIssuer = true,
+  resolve?: JWTVerifyGetKey,
+): EntraJwks {
+  const key = {
+    ...publicJwk,
+    alg: "RS256",
+    use: "sig",
+    kid: KEY_ID,
+    ...(includeIssuer ? { issuer } : {}),
+  };
+  const jwks = { keys: [key] };
+  return {
+    resolve: resolve ?? createLocalJWKSet(jwks),
+    getCurrentJwks: () => jwks,
+  };
+}
+
+function makeProvider(
+  issuer: unknown = KEY_ISSUER,
+  includeIssuer = true,
+): EntraIdAuthProvider {
   return new EntraIdAuthProvider({
     authority: AUTHORITY,
     audience: AUDIENCE,
-    jwks: async () => publicKey,
+    jwks: makeJwks(issuer, includeIssuer),
   });
 }
 
@@ -59,6 +91,7 @@ beforeAll(async () => {
   ({ privateKey: wrongPrivateKey } = await generateKeyPair("RS256", {
     extractable: true,
   }));
+  publicJwk = await exportJWK(publicKey);
 });
 
 describe("EntraIdAuthProvider.verifyAccessToken", () => {
@@ -74,6 +107,49 @@ describe("EntraIdAuthProvider.verifyAccessToken", () => {
       displayName: "Ada Lovelace",
       emailVerified: true,
     });
+  });
+
+  it("retains issuer metadata from the cached remote JWKS", async () => {
+    const jwks = makeJwks().getCurrentJwks();
+    if (!jwks) throw new Error("Test JWKS is unavailable");
+
+    let requestCount = 0;
+    const server = createServer((_request, response) => {
+      requestCount += 1;
+      response
+        .writeHead(200, { "content-type": "application/json" })
+        .end(JSON.stringify(jwks));
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Test JWKS server has no TCP address");
+      }
+      const provider = new EntraIdAuthProvider({
+        authority: AUTHORITY,
+        audience: AUDIENCE,
+        jwksUri: `http://127.0.0.1:${address.port}/keys`,
+      });
+      const token = await sign(basePayload());
+
+      await expect(provider.verifyAccessToken(token)).resolves.toMatchObject({
+        idpTenant: TENANT,
+      });
+      await expect(provider.verifyAccessToken(token)).resolves.toMatchObject({
+        idpTenant: TENANT,
+      });
+      expect(requestCount).toBe(1);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("prefers the `email` claim over `preferred_username`", async () => {
@@ -103,7 +179,7 @@ describe("EntraIdAuthProvider.verifyAccessToken", () => {
       const provider = new EntraIdAuthProvider({
         authority: AUTHORITY,
         audience: AUDIENCE,
-        jwks,
+        jwks: makeJwks(KEY_ISSUER, true, jwks),
       });
 
       await expect(provider.verifyAccessToken(token)).resolves.toMatchObject({
@@ -122,7 +198,7 @@ describe("EntraIdAuthProvider.verifyAccessToken", () => {
     const provider = new EntraIdAuthProvider({
       authority: AUTHORITY,
       audience: AUDIENCE,
-      jwks,
+      jwks: makeJwks(KEY_ISSUER, true, jwks),
     });
 
     await expect(provider.verifyAccessToken(token)).rejects.toMatchObject({
@@ -141,7 +217,7 @@ describe("EntraIdAuthProvider.verifyAccessToken", () => {
     const provider = new EntraIdAuthProvider({
       authority: AUTHORITY,
       audience: AUDIENCE,
-      jwks,
+      jwks: makeJwks(KEY_ISSUER, true, jwks),
     });
 
     await expect(provider.verifyAccessToken(token)).rejects.toMatchObject({
@@ -181,6 +257,63 @@ describe("EntraIdAuthProvider.verifyAccessToken", () => {
     );
   });
 
+  it("accepts an exact signing key issuer for the token tenant", async () => {
+    const token = await sign(basePayload());
+    const identity = await makeProvider(
+      `https://login.microsoftonline.com/${TENANT}/v2.0`,
+    ).verifyAccessToken(token);
+
+    expect(identity.idpTenant).toBe(TENANT);
+  });
+
+  it("validates the issuer of the selected key, not unrelated JWKS entries", async () => {
+    const jwks = makeJwks();
+    jwks.getCurrentJwks()?.keys.push({
+      ...publicJwk,
+      alg: "RS256",
+      use: "sig",
+      kid: "unrelated-key",
+      issuer: `https://login.microsoftonline.com/${OTHER_TENANT}/v2.0`,
+    });
+    const provider = new EntraIdAuthProvider({
+      authority: AUTHORITY,
+      audience: AUDIENCE,
+      jwks,
+    });
+
+    await expect(provider.verifyAccessToken(await sign(basePayload()))).resolves
+      .toMatchObject({ idpTenant: TENANT });
+  });
+
+  it("rejects a signing key restricted to another tenant", async () => {
+    const token = await sign(basePayload());
+    await expect(
+      makeProvider(
+        `https://login.microsoftonline.com/${OTHER_TENANT}/v2.0`,
+      ).verifyAccessToken(token),
+    ).rejects.toMatchObject({
+      name: "AuthError",
+      code: "invalid_issuer",
+    });
+  });
+
+  it.each([
+    ["missing", undefined, false],
+    ["empty", "", true],
+    ["non-string", 42, true],
+  ])(
+    "rejects a selected signing key with %s issuer metadata",
+    async (_description, issuer, includeIssuer) => {
+      const token = await sign(basePayload());
+      await expect(
+        makeProvider(issuer, includeIssuer).verifyAccessToken(token),
+      ).rejects.toMatchObject({
+        name: "AuthError",
+        code: "invalid_issuer",
+      });
+    },
+  );
+
   it("rejects a token missing the `oid` claim", async () => {
     const payload = basePayload();
     delete payload.oid;
@@ -210,7 +343,7 @@ describe("EntraIdAuthProvider.verifyAccessToken", () => {
       authority: "https://localhost:8443/common",
       audience: AUDIENCE,
       issuerTemplate: "https://localhost:8443/{tenantid}/v2.0",
-      jwks: async () => publicKey,
+      jwks: makeJwks("https://localhost:8443/{tenantid}/v2.0"),
     });
     const token = await sign({
       ...basePayload(),

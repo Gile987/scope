@@ -3,14 +3,31 @@
 
 import {
   createRemoteJWKSet,
+  jwksCache,
   jwtVerify,
+  type JWK,
+  type JSONWebKeySet,
+  type JWKSCacheInput,
+  type JWTHeaderParameters,
   type JWTPayload,
   type JWTVerifyGetKey,
+  type JWTVerifyResult,
 } from "jose";
 import { AuthError, type AuthProvider, type VerifiedIdentity } from "./types.js";
 
-/** The key material accepted by {@link jwtVerify} (remote JWKS, or a local key in tests). */
-type VerifyKey = Parameters<typeof jwtVerify>[1];
+interface EntraJwk extends JWK {
+  issuer?: unknown;
+}
+
+interface EntraJsonWebKeySet extends JSONWebKeySet {
+  keys: EntraJwk[];
+}
+
+/** A key resolver paired with the metadata used to select its verification key. */
+export interface EntraJwks {
+  resolve: JWTVerifyGetKey;
+  getCurrentJwks(): EntraJsonWebKeySet | undefined;
+}
 
 /** Default Entra v2.0 per-tenant issuer template. `{tenantid}` is substituted. */
 const DEFAULT_ISSUER_TEMPLATE =
@@ -49,8 +66,8 @@ export interface EntraIdAuthProviderOptions {
   jwksUri?: string;
   /** Issuer template with a `{tenantid}` placeholder. Defaults to Entra v2.0. */
   issuerTemplate?: string;
-  /** Injectable key resolver for tests (defaults to a cached remote JWKS). */
-  jwks?: VerifyKey;
+  /** Injectable metadata-aware key source for tests (defaults to a cached remote JWKS). */
+  jwks?: EntraJwks;
 }
 
 /**
@@ -65,7 +82,8 @@ export class EntraIdAuthProvider implements AuthProvider {
 
   private readonly audience: string | string[];
   private readonly issuerTemplate: string;
-  private readonly jwks: VerifyKey;
+  private readonly resolveKey: JWTVerifyGetKey;
+  private readonly getCurrentJwks: () => EntraJsonWebKeySet | undefined;
 
   constructor(options: EntraIdAuthProviderOptions) {
     this.audience = options.audience;
@@ -74,13 +92,14 @@ export class EntraIdAuthProvider implements AuthProvider {
     const jwksUri =
       options.jwksUri ??
       `${options.authority.replace(/\/+$/, "")}/discovery/v2.0/keys`;
-    const jwks = options.jwks ?? createRemoteJWKSet(new URL(jwksUri));
-    this.jwks =
-      typeof jwks === "function" ? withJwksRetrievalRetry(jwks) : jwks;
+    const jwks = options.jwks ?? createRemoteEntraJwks(new URL(jwksUri));
+    this.resolveKey = withJwksRetrievalRetry(jwks.resolve);
+    this.getCurrentJwks = () => jwks.getCurrentJwks();
   }
 
   async verifyAccessToken(token: string): Promise<VerifiedIdentity> {
-    const payload = await this.verifySignatureAndClaims(token);
+    const { payload, protectedHeader } =
+      await this.verifySignatureAndClaims(token);
 
     const idpTenant = asString(payload.tid);
     if (!idpTenant) {
@@ -104,6 +123,12 @@ export class EntraIdAuthProvider implements AuthProvider {
         `Unexpected token issuer: ${String(payload.iss)}`,
       );
     }
+    validateSigningKeyIssuer(
+      this.getCurrentJwks(),
+      protectedHeader,
+      expectedIssuer,
+      idpTenant,
+    );
 
     const email =
       asString(payload.email) ?? asString(payload.preferred_username);
@@ -123,14 +148,15 @@ export class EntraIdAuthProvider implements AuthProvider {
     };
   }
 
-  private async verifySignatureAndClaims(token: string): Promise<JWTPayload> {
+  private async verifySignatureAndClaims(
+    token: string,
+  ): Promise<JWTVerifyResult<JWTPayload>> {
     try {
-      const { payload } = await jwtVerify(token, this.jwks, {
+      return await jwtVerify(token, this.resolveKey, {
         audience: this.audience,
         algorithms: ["RS256"],
         requiredClaims: ["exp"],
       });
-      return payload;
     } catch (err) {
       if (err instanceof AuthError) {
         throw err;
@@ -155,6 +181,65 @@ export class EntraIdAuthProvider implements AuthProvider {
       );
     }
   }
+}
+
+function createRemoteEntraJwks(url: URL): EntraJwks {
+  // This closure-private cache exposes the fetched metadata without allowing
+  // callers to replace the trusted JWKS contents.
+  const cache: JWKSCacheInput = {};
+  const remoteJwks = createRemoteJWKSet(url, { [jwksCache]: cache });
+  return {
+    resolve: remoteJwks,
+    getCurrentJwks: () => ("jwks" in cache ? cache.jwks : undefined),
+  };
+}
+
+function validateSigningKeyIssuer(
+  jwks: EntraJsonWebKeySet | undefined,
+  protectedHeader: JWTHeaderParameters,
+  tokenIssuer: string,
+  tenantId: string,
+): void {
+  const matchingKeys =
+    jwks?.keys.filter((jwk) => isMatchingVerificationJwk(jwk, protectedHeader)) ??
+    [];
+  if (matchingKeys.length !== 1) {
+    throw new AuthError(
+      "invalid_issuer",
+      "Unable to identify signing key issuer metadata",
+    );
+  }
+
+  const keyIssuer = asString(matchingKeys[0].issuer);
+  if (
+    !keyIssuer ||
+    keyIssuer.replaceAll("{tenantid}", tenantId) !== tokenIssuer
+  ) {
+    throw new AuthError(
+      "invalid_issuer",
+      "Signing key issuer does not match token issuer",
+    );
+  }
+}
+
+function isMatchingVerificationJwk(
+  jwk: EntraJwk,
+  protectedHeader: JWTHeaderParameters,
+): boolean {
+  if (jwk.kty !== "RSA") return false;
+  if (
+    typeof protectedHeader.kid === "string" &&
+    jwk.kid !== protectedHeader.kid
+  ) {
+    return false;
+  }
+  if (typeof jwk.alg === "string" && jwk.alg !== protectedHeader.alg) {
+    return false;
+  }
+  if (typeof jwk.use === "string" && jwk.use !== "sig") {
+    return false;
+  }
+  return !Array.isArray(jwk.key_ops) || jwk.key_ops.includes("verify");
 }
 
 function withJwksRetrievalRetry(jwks: JWTVerifyGetKey): JWTVerifyGetKey {
