@@ -1,98 +1,176 @@
 # Authentication & RBAC
 
-> Status: **Proposed** — implementation plan. Date: 2026-06-10.
+> **Status:** Proposed — implementation plan. Revised: 2026-09-18.
 
 ## Problem
 
-Scope currently has **no authentication or authorization**. The API (`apps/api/`)
-serves every endpoint unauthenticated, the Portal (`apps/portal/`) talks to it over a
-same-origin nginx proxy with no credentials, and the CLI (`apps/cli/`) issues bare
-`fetch` calls against `SCOPE_API_URL`. Any caller can read, submit, mutate, or delete
-any run and any catalog resource.
+Scope currently has no authentication or authorization. The API, Portal, and CLI allow
+any caller to read, submit, mutate, or delete every run and catalog resource.
 
-We need to:
+Scope needs authentication and authorization that support shared work without treating
+documents as belonging to individual users:
 
-1. **Authenticate** every human-facing caller (CLI, API, Portal) using **Microsoft
-   Entra ID** (formerly Azure AD).
-2. Support a **pluggable identity-provider (IdP) abstraction** so that, once the
-   project is open-sourced, other IdPs (Google, GitHub, generic OIDC, Keycloak,
-   Auth0…) can be added without touching call sites.
-3. Introduce **two roles** — `user` and `admin` — but model them as **named bundles of
-   fine-grained permissions** (e.g. `scope/run:write`) so the system can grow to
-   arbitrary roles/custom permission sets later **without a schema change**.
-4. **Scope data ownership**: model ownership so that **owning data grants discoverability
-   and editability**, while **shared deep links grant read-only access without ownership**.
-   A first cut uses **two levels — personal (private) and global (shared)**: private data
-   is discoverable, usable, and editable only by its owner; shared data is globally
-   discoverable and usable by everyone but **read-only unless you own it**. An `admin` sees
-   everything. (See §5.)
-5. Keep **anonymous/public mode out of scope.** The `anonymous` principal carries **zero
-   permissions** and is rejected by any permission-gated route. Treating it as a named
-   principal is a guard *mechanism* convenience only — it is **not** a public experience and
-   must not be granted permissions until a future, explicit public/demo mode is introduced
-   over **public-only** data (see Open Question J).
+1. Authenticate every human caller (API, Portal, and CLI) with Microsoft Entra ID.
+2. Keep identity-provider verification behind a pluggable abstraction so other OIDC
+   providers can be added without changing callers.
+3. Make **projects** the access boundary for project-scoped data. An account can belong
+   to any number of projects and have a different role in each one.
+4. Provide a narrowly scoped **platform administrator** role for global platform
+   administration. Platform administration must not implicitly grant access to a
+   project's contents.
+5. Keep anonymous/public access out of scope. An anonymous principal has no permissions.
 
-> **Primary milestone — authenticate the user.** The one must-ship outcome of this work is
-> **user authentication across Portal, API, and CLI** (Entra ID identity, with ownership
-> scoping built on it). Everything else is sequenced around that. In particular,
-> **Scope-issued PAT / API tokens delivered through `SCOPE_TOKEN`** are very likely the
-> right long-term answer for **user CI integrations and user-attributed automation**, but
-> they are **explicitly out of scope for, and must not block, the user-auth milestone**
-> (see Open Question H). Until then `SCOPE_TOKEN` is treated as a raw bearer escape hatch,
-> not a Scope-managed credential.
+> **Primary milestone:** authenticate users across the Portal, API, and CLI, then enforce
+> platform and project access consistently. This includes Scope-issued personal access
+> tokens (PATs) for non-interactive CLI and API automation. A v1 PAT is a credential
+> for its issuing Scope user, not an independent role or authorization grant.
 
-> **Note on the Token Manager.** [apps/token-manager](../../apps/token-manager) is **not**
-> a user-identity system. It stores **provider credentials** (GitHub Copilot / Claude /
-> Cursor / Anthropic accounts and API keys) that the *agents* consume. This feature does
-> **not** build on or extend the token-manager's `accounts`/`keys` schema. We reuse only
-> its **infrastructure patterns** (MongoDB collection + Azure Key Vault via External
-> Secrets) where relevant.
-
-This document is the architecture spec and implementation plan. It deliberately
-**lists open questions** (notably the exact permission matrix for `user` vs `admin`) that
-must be resolved with stakeholders before or during implementation.
+> **Token Manager is not user identity.** It stores provider credentials that coding
+> agents consume. This work does not reuse or extend its `accounts` or `keys` schema; it
+> only follows its MongoDB, Key Vault, and External Secrets infrastructure patterns.
 
 ---
 
-## Current State (investigation summary)
+## Authorization model
+
+### Scope boundaries
+
+There are two independent authorization scopes:
+
+| Scope | Role | Capabilities | Does not grant |
+|---|---|---|---|
+| Platform | `admin` | Manage global feature flags, agents, models, and secrets; list all projects; delete any project; manage RBAC for any project; manage platform-admin assignments. | Access to project-scoped data or settings unless the user also has a role in that project. |
+| Project | `user` | Read, create, update, and delete runs, statistics, reports, insights, prompts, criteria, features, and codebases in that project. | Other project resources, project membership administration, or another project's data. |
+| Project | `admin` | Everything a project user can do, plus all other project resources and that project's settings and membership/RBAC. | Global platform administration or another project's data. |
+
+An authenticated account has no project access until it is a member of a project. The
+same account can, for example, be a project `user` in two projects and a project `admin`
+in three others.
+
+Every authenticated account can create a project. Project creation atomically creates a
+`project_memberships` record assigning its creator the `admin` role for that project.
+Projects are platform data, not user-owned documents: the creating user gains access
+through this explicit membership, not through an `ownerId`.
+
+### Global platform resources
+
+**Feature flags, agents, models, and secrets are platform resources.** They have no
+read-only access level: a caller must be a platform administrator to list, read, create,
+update, or delete any of them. In particular, a project role never makes an agent, model,
+feature flag, or secret visible.
+
+`secrets` includes the provider credentials and related secret-management surfaces
+currently exposed through the Token Manager. It does not include a caller's Entra access
+token or other user-session material.
+
+### Project resources
+
+All non-platform user-facing data is project-scoped. Project roles authorize the
+following resource classes:
+
+| Resource class | Project `user` | Project `admin` |
+|---|---|---|
+| Runs, attempts, logs, snapshots, archives | Full CRUD | Full CRUD |
+| Statistics and analytics | Full CRUD/read of all project aggregates | Full CRUD/read of all project aggregates |
+| Reports and insights | Full CRUD | Full CRUD |
+| Prompts and criteria | Full CRUD | Full CRUD |
+| Features and codebases, including revisions | Full CRUD | Full CRUD |
+| Profiles, personas, scenarios, skills, skill revisions, report templates | — | Full CRUD |
+| MCP servers and extensions | — | Full CRUD |
+| Project metadata and project memberships | — | Full CRUD, except project deletion |
+
+“Full CRUD” means all API methods supported for that resource, not merely read access.
+The authorization policy does not distinguish a document's creator from another member
+of the same project.
+
+Project deletion is deliberately platform-admin-only. A project admin may update the
+project's metadata and RBAC, but may not delete the project.
+
+### Platform administrators do not bypass project membership
+
+A platform administrator can list and inspect metadata for every project, delete any
+project, and update the RBAC membership of any project. That is sufficient to add
+themselves as a project admin when operationally necessary.
+
+It does **not** permit that administrator to list, read, create, update, or delete
+project-scoped resources merely because they are a platform admin. Project-content
+requests always require a membership in the target project, including requests made by
+platform administrators.
+
+### No ownership, visibility, or general document sharing
+
+This design deliberately does **not** include:
+
+- `ownerId`, `ownerType`, document creator authorization, or a legacy `"system"` owner;
+- `visibility: "private" | "shared"`, global sharing, or per-document ACLs;
+- a general sharing mechanism for arbitrary project documents.
+
+Every project-scoped document carries one immutable `projectId`; authorization normally
+derives solely from the caller's membership for that `projectId`. The authenticated
+run/report sharing link below is the sole, explicit exception.
+
+### Authenticated run and report sharing links
+
+A project member with read access to a run or report may create a **read-only sharing
+link** for that specific run or report. The recipient must authenticate to Scope, but
+does not need membership in the source project. The link grants neither a platform role
+nor a project role and does not make the project or resource discoverable in lists.
+
+Links use an opaque, random 256-bit capability. Scope stores only a hash, with the
+following metadata:
+
+```ts
+interface SharedLinkDocument {
+  _id: string;
+  resourceType: "run" | "report";
+  resourceId: string;
+  projectId: string;
+  tokenHash: string;
+  createdByUserId: string;
+  expiresAt: Date;
+  revokedAt?: Date;
+  createdAt: Date;
+}
+```
+
+The Portal link places the capability in the URL fragment, for example
+`/runs/<id>#share=<capability>`, so it is not sent to the web server or included in
+referrer headers. The Portal sends it to the API in `X-Scope-Share-Link` alongside the
+recipient's normal `Authorization` bearer token. The API must redact this header and
+the fragment-derived value from logs, audit detail, diagnostics, and support bundles.
+
+The API validates the authenticated recipient, token hash, resource type and ID,
+expiry, and revocation state before allowing the read. Links expire after 30 days by
+default and may not exceed the configured `SHARE_LINK_MAX_TTL`. The creator or a project
+admin may revoke a link at any time. A link is never accepted by a create, update,
+delete, membership, list, or platform-resource route.
+
+A run link permits read-only access to that exact run and the attempts, logs, snapshots,
+and archives required to render its details. It does not grant access to reports,
+insights, or any other run. A report link permits only that exact report and its
+rendering artifacts; it does not grant access to the parent run, sibling reports, or
+other insights.
+
+---
+
+## Current state
 
 | Component | Today | Relevant files |
-|-----------|-------|----------------|
-| API | Express app, no auth middleware. Routes registered via `apiRoute()` helper that also feeds the OpenAPI registry. CORS open, `express.json()` only. | [apps/api/src/index.ts](../../apps/api/src/index.ts), [apps/api/src/openapi/api-route.ts](../../apps/api/src/openapi/api-route.ts), [apps/api/src/route-context.ts](../../apps/api/src/route-context.ts) |
-| Runs data model | `RequestResponseSchema` + embedded `RunStateSchema`; history in `runs` collection (`RunHistoryDocumentSchema`). **No owner field.** | [packages/shared/src/schemas/request.ts](../../packages/shared/src/schemas/request.ts) |
-| Run listing | Cursor-paginated `GET /api/v1/requests` with filters; no per-user scoping. | [apps/api/src/routes/requests.ts](../../apps/api/src/routes/requests.ts) |
-| CLI | `commander` CLI, each command takes `-u/--url` (`SCOPE_API_URL`), bare `fetch`, **no auth header**. | [apps/cli/src/commands/run.ts](../../apps/cli/src/commands/run.ts), [apps/cli/src/index.ts](../../apps/cli/src/index.ts) |
-| Portal | React 19 SPA, `fetch` against same-origin `/api/v1` via nginx proxy, **no token**. | [apps/portal/src/lib/api.ts](../../apps/portal/src/lib/api.ts), [apps/portal/src/main.tsx](../../apps/portal/src/main.tsx), [apps/portal/nginx.conf](../../apps/portal/nginx.conf) |
-| Token Manager | Already has a `users`-like pattern for **provider** credentials (not app users). Reuse its KeyVault/Mongo patterns, not its schema. | [apps/token-manager/src/account-routes.ts](../../apps/token-manager/src/account-routes.ts) |
-| Migrations | `mongo-migrate-ts`, numbered files with `up()`/`down()`. CosmosDB-compatible constraints apply. | [packages/db-migrations/src/migrations](../../packages/db-migrations/src/migrations) |
+|---|---|---|
+| API | Express has no API authentication middleware. Routes are registered through `apiRoute()`, which also feeds the OpenAPI registry. | [apps/api/src/index.ts](../../apps/api/src/index.ts), [apps/api/src/openapi/api-route.ts](../../apps/api/src/openapi/api-route.ts) |
+| Data model | Requests/runs do not yet have project authorization. The proposed project organization design introduces `projectId`; no ownership fields are required by this design. | [packages/shared/src/schemas/request.ts](../../packages/shared/src/schemas/request.ts), [data-organization-projects.md](data-organization-projects.md) |
+| CLI | Commands use the centralized `apiFetch()` facade but do not yet implement interactive CLI login or API-side authorization. | [apps/cli/src/utils/api-client.ts](../../apps/cli/src/utils/api-client.ts) |
+| Portal | The Portal has an MSAL authentication MVP and centralized token injection, but the API does not yet verify tokens or enforce roles. | [apps/portal/src/contexts/AuthContext.tsx](../../apps/portal/src/contexts/AuthContext.tsx), [apps/portal/src/lib/api-client.ts](../../apps/portal/src/lib/api-client.ts) |
+| Projects | The proposed `projects` model currently organizes data but does not yet define or enforce membership. This document supplies that access layer. | [data-organization-projects.md](data-organization-projects.md) |
 
-Key constraint: **coder workers** do **not** call the API for run state — they write to
-MongoDB directly, so their traffic is out of scope for user auth. **But there is one
-concrete internal API consumer today: the report-generator worker**
-([apps/workers/report-generator](../../apps/workers/report-generator)). It calls the API
-over HTTP (`SCOPE_MT_API_URL`) to read a specific run and write insights/reports:
-`GET /api/v1/requests/:id`, `GET /api/v1/requests/:id/snapshots/:iteration`,
-`GET /api/v1/report-templates/:id`, `GET /api/v1/insights/search`,
-`POST /api/v1/insights`, `POST /api/v1/reports/:id/insights`
-([tools.ts](../../apps/workers/report-generator/src/tools.ts),
-[report-queue-processor.ts](../../apps/workers/report-generator/src/report-queue-processor.ts)).
-The **scheduler** ([apps/scheduler](../../apps/scheduler)) does **not** call the API (it
-touches MongoDB + Storage Queues directly), so it needs no API auth.
-
-> **This makes service-to-service auth an immediate requirement, not a future one.** The
-> moment ownership scoping (§5) lands, `GET /api/v1/requests/:id` becomes owner-scoped and
-> the report-generator — which has no user identity — would receive `404`s and its
-> insight/report writes would be rejected. Service-to-service auth (§6) must therefore
-> ship **together with** ownership scoping. Because the report-generator operates on **one
-> specific user's run**, it should use the **on-behalf-of internal token** (§6) carrying
-> that run's owner id, so `readScope`/`writeScope` resolve naturally — not a broad system
-> credential (which would let any report job read any run).
+Coder workers write run state directly to MongoDB and do not call the API. The
+report-generator worker does call the API to read a run and write reports/insights, so it
+must ship with the project authorization path. The scheduler uses MongoDB and Storage
+Queues directly and needs no API credential today.
 
 ---
 
-## Architecture
-
-### Overview
+## Authentication architecture
 
 ```mermaid
 flowchart TB
@@ -107,1410 +185,613 @@ flowchart TB
 
     subgraph API[API service]
         MW[authn middleware<br/>verify JWT via AuthProvider]
-        RBAC[authz: role + ownership scope]
+        RBAC[platform + project authz]
         Routes[Routes apiRoute&#40;&#41;]
-        Users[(users collection)]
+        Users[(users)]
+        Memberships[(project_memberships)]
+        PATs[(personal_access_tokens)]
     end
 
-    CLI -->|1 device-code login| OIDC
-    Portal -->|1 redirect login| OIDC
-    OIDC -->|access token JWT| CLI
-    OIDC -->|access token JWT| Portal
-    CLI -->|2 Bearer token| MW
-    Portal -->|2 Bearer token| MW
-    MW -->|verify sig/aud/iss/exp<br/>JWKS cache| OIDC
-    MW -->|JIT upsert + role lookup| Users
-    MW --> RBAC --> Routes
+    CLI -->|Entra access token or Scope PAT| MW
+    Portal -->|access token| MW
+    MW -->|verify sig/aud/iss/exp| OIDC
+    MW -->|JIT upsert| Users
+    MW -->|hash lookup + live user| PATs
+    RBAC --> Memberships
+    RBAC --> Routes
 ```
 
-### 1. Pluggable IdP abstraction (`packages/shared/src/auth/`)
+### 1. Pluggable identity-provider abstraction
 
-A backend-side `AuthProvider` interface decouples token verification from Entra
-specifics. Selection is config-driven; adding an IdP = new implementation + config,
-no call-site changes.
+`packages/shared/src/auth/` defines a backend-side `AuthProvider` interface. It
+verifies an access token and returns identity only; it never interprets IdP roles or
+groups.
 
 ```ts
-// packages/shared/src/auth/types.ts
 export interface VerifiedIdentity {
-  /** Stable, IdP-unique subject (Entra: `oid`; OIDC: `sub`). */
-  idpSubject: string;
-  /** Provider id, e.g. "entra", "google", "oidc". */
   idp: string;
+  idpTenant: string;
+  idpSubject: string;
   email?: string;
+  emailVerified?: boolean;
   name?: string;
 }
 
 export interface AuthProvider {
   readonly id: string;
-  /** Verify a bearer access token. Throws AuthError on any failure. */
   verifyAccessToken(token: string): Promise<VerifiedIdentity>;
 }
 
-/** Shape of the IdP config the CLI and Portal **hardcode** for now (there is no
- *  `/auth/config` endpoint — see §3/§7/§8). Kept as a type so both clients hold an
- *  identical, reviewable shape and a future IdP swap is a one-line config change. */
 export interface AuthClientConfig {
-  provider: string;          // "entra"
-  authority: string;         // https://login.microsoftonline.com/<tenant>
-  clientId: string;          // app registration (CLI/portal public client)
-  scopes: string[];          // ["api://<api-app-id>/access_as_user"]
-  audience: string;          // expected `aud`
+  provider: string;
+  authority: string;
+  clientId: string;
+  scopes: string[];
+  audience: string;
 }
 ```
 
-> **No IdP-side roles.** The `AuthProvider` extracts **identity only** — it does **not**
-> read Entra App Roles or any IdP-asserted role/group claims. All authorization
-> (roles → permissions) is owned by Scope (see §2). This keeps RBAC identical across
-> every IdP and avoids per-tenant Entra app-role configuration.
+The initial `EntraIdAuthProvider`:
 
-`EntraIdAuthProvider` (the first implementation):
+- validates multi-tenant Entra tokens with cached JWKS, keyed by `(tenant, kid)`;
+- verifies RS256 signature, issuer, audience, `exp`, and `nbf`;
+- extracts `oid`, `tid`, verified email where available, and display name;
+- uniquely identifies an IdP account by `(idp, idpTenant, idpSubject)`, never email;
+- uses `jose`, not a server-side MSAL dependency.
 
-- **Multi-tenant**: validates against the Entra **common/organizations** issuer pattern
-  and accepts **any tenant** — no `tid` pinning in code. Tenant restriction (if any) is
-  configured at the **App Registration** level. JWKS is resolved per-tenant via OIDC
-  discovery (or common metadata) and cached by `(tenant, kid)` with TTL + rotation.
-- Verifies signature (RS256), `iss` (per-tenant issuer template), `aud`
-  (`AUTH_API_CLIENT_ID`), `exp`, `nbf`.
-- Extracts `oid` → `idpSubject`, `tid` → `idpTenant`, `preferred_username`/`email`
-  (+ the `email_verified`/`verified_primary_email` signal where present), `name`. The
-  `(idp, idpTenant, idpSubject)` triple — **not** email — is the durable identity key
-  (see §2 and Open Question D).
-- Uses `jose` for JWKS + verification (no heavyweight MSAL dependency on the API).
+Entra tenant restriction is configured at the App Registration. Scope does not use Entra
+App Roles or group claims for authorization.
 
-The provider is instantiated from env in API bootstrap:
-
-```
-AUTH_PROVIDER=entra                # selects implementation
-AUTH_AUTHORITY=https://login.microsoftonline.com/common   # multi-tenant (or /organizations)
-AUTH_API_CLIENT_ID=<api-app-id>    # expected audience (pinned)
-AUTH_CLIENT_ID=<public-client-id>  # CLI/portal client id (hardcoded by clients too)
+```text
+AUTH_PROVIDER=entra
+AUTH_AUTHORITY=https://login.microsoftonline.com/common
+AUTH_API_CLIENT_ID=<api-app-id>
+AUTH_CLIENT_ID=<public-client-id>
 AUTH_SCOPES=api://<api-app-id>/access_as_user
-# Bootstrap admins are matched on the *verified subject*, NOT a mutable email — see §2 / Q C:
-AUTH_BOOTSTRAP_ADMINS=entra:<tid>/<oid>,entra:<tid>/<oid>   # (idp:tenant/subject) tuples
-AUTH_BOOTSTRAP_TENANTS=<tid-1>,<tid-2>   # tenant allowlist that bootstrap may apply within
-# Tenant filtering, if needed, is enforced at the App Registration — not here.
+AUTH_BOOTSTRAP_PLATFORM_ADMINS=entra:<tid>/<oid>,entra:<tid>/<oid>
+AUTH_BOOTSTRAP_TENANTS=<tid-1>,<tid-2>
 ```
-> **No dev/bypass mode — by design.** There is **no `AUTH_ENABLED` switch and no
-> env-selectable synthetic principal**. The middleware **always** verifies a real token; no
-> environment variable, header, or flag can mint a user or elevate a role. The previous
-> `local-user`/`local-admin` + `X-Dev-User`/`DEV_USER` bypass is **removed entirely** — it
-> was a standing privilege-escalation and "ships to prod by accident" risk.
->
-> Local development authenticates against a **real IdP** like every other environment. A
-> dedicated **Entra ID local emulator** (built as a **separate project**) will provide a
-> standards-compliant local OIDC issuer; Scope consumes it purely as **another IdP
-> configuration** (`AUTH_AUTHORITY`/`AUTH_API_CLIENT_ID`/JWKS pointed at the emulator) via
-> the existing `AuthProvider` abstraction — **no Scope code path knows it is "dev".**
 
-### 2. App users, roles & permissions (`users` collection)
+There is no API-side synthetic principal, `X-Dev-User`, `DEV_USER`, or
+`AUTH_ENABLED` bypass. Local development uses a real IdP or a standards-compliant local
+Entra emulator configured through the same provider interface.
 
-Authorization lives entirely in **our** database, not in the IdP, so RBAC is portable
-across IdPs and survives IdP migration. The IdP only proves *identity*; Scope owns
-*authorization*.
+### 2. Users, platform roles, and project memberships
 
-**Permissions are the atomic unit.** A permission is a namespaced `resource:action`
-string, e.g. `scope/run:write`. A **role** is just a named bundle of permissions. Today
-we ship exactly two roles (`user`, `admin`), but because the model is
-permission-first, adding custom roles or per-user permission overrides later is **not** a
-schema change.
+Scope owns authorization in MongoDB. The IdP proves an identity; Scope maps it to a
+stable internal user ID and role records.
 
 ```ts
-// packages/shared/src/auth/permissions.ts
 export type Action = "read" | "write" | "delete" | "admin";
 export type Permission = `${string}/${string}:${Action}`;
+export type PlatformRole = "admin";
+export type ProjectRole = "user" | "admin";
 
-// Examples: "scope/run:read", "scope/run:write", "scope/run:delete",
-//           "scope/criteria:write", "scope/user:admin", ...
+export interface UserDocument {
+  _id: string; // Scope-owned UUID
+  idp: string;
+  idpTenant: string;
+  idpSubject: string;
+  email?: string; // advisory only
+  emailVerified?: boolean;
+  name?: string;
+  platformRole?: PlatformRole;
+  createdAt: Date;
+  updatedAt: Date;
+  lastLoginAt?: Date;
+  disabledAt?: Date;
+}
 
-/** Persisted application roles (what a `users` doc may store). */
-export type UserRole = "user" | "admin";
-
-/** Roles a *request principal* may carry at runtime. `anonymous`/`service` are never
- *  persisted on a `users` doc — they exist only on the in-flight principal. Keeping these
- *  separate from `UserRole` avoids the typing conflicts (and unsafe casts) that arise from
- *  overloading one `Role` union for both storage and request shapes. */
-export type PrincipalRole = UserRole | "anonymous" | "service";
-
-/** Roles are bundles of permissions. The set is data, not hardcoded logic. */
-export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
-  user:  ["scope/run:read", "scope/run:write", "scope/run:delete", /* own-scoped */ ],
-  admin: ["scope/*:admin" /* resource wildcard ⇒ admin on every resource — see below */],
-};
-```
-
-> **Wildcard semantics — specified, not implied.** `hasPermission(user, required)` must be
-> precisely defined and **negatively unit-tested**, because wildcard authorization is a
-> classic bypass source. Rules:
-> - The **resource** segment may be the literal `*` meaning "every resource" (e.g.
->   `scope/*:admin` = admin on all resources). The `*` is a wildcard **only** in the
->   resource position; namespaces and actions are never wildcards.
-> - **Action subsumption**: `admin` implies `read`/`write`/`delete` on the **same
->   resource**. So `scope/run:admin` satisfies `scope/run:read`. There is **no** cross-axis
->   implication: it does **not** satisfy `write`/`delete`/`read` on a *different* resource.
-> - A held permission `H = hRes/hAct` satisfies a required `R = rNs/rRes:rAct` iff
->   `H.namespace == R.namespace` **and** (`hRes == rRes` or `hRes == "*"`) **and**
->   (`hAct == rAct` or `hAct == "admin"`).
-> - **Required mandatory negative cases** (must be asserted in tests):
->   `scope/run:write` is **not** satisfied by `scope/criteria:admin` (different resource);
->   `scope/run:write` is **not** satisfied by `scope/run:read` (no action upgrade);
->   a required permission is **never** satisfied by the empty/anonymous set.
-
-```ts
-// users collection
-{
-  _id: string,                 // **Scope User ID** — app-owned UUID; this is what
-                               //   `ownerId` references everywhere (NOT the idpSubject).
-                               //   Reserved value "system" is NEVER assigned to a live
-                               //   principal (see middleware §3).
-  idp: string,                 // "entra"
-  idpTenant: string,           // Entra `tid` — part of the identity key (multi-tenant)
-  idpSubject: string,          // Entra `oid` — stable per (tenant, user); identity link only
-  email?: string,              // mutable, advisory; never an authorization input
-  emailVerified?: boolean,     // captured when the IdP asserts it (bootstrap gate)
-  name?: string,
-  role: UserRole,              // "user" | "admin"  (persisted role union only)
-  /** Optional explicit grants/denies layered on top of the role. Empty today;
-   *  present in the schema so future custom permissions need no migration. */
-  permissionsAdd?: Permission[],
-  permissionsRemove?: Permission[],
-  createdAt: Date,
-  updatedAt: Date,
-  lastLoginAt?: Date,
-  disabledAt?: Date,           // soft-disable
+export interface ProjectMembershipDocument {
+  _id: string;
+  projectId: string;
+  userId: string; // users._id
+  role: ProjectRole;
+  createdAt: Date;
+  updatedAt: Date;
+  createdByUserId: string;
 }
 ```
 
-> `_id` is **minted by Scope** on first login and is **stable for the lifetime of the
-> user**, independent of the IdP. The `(idp, idpTenant, idpSubject)` triple is the *link*
-> to the external identity; re-linking it to a new IdP keeps the same `_id` (and thus all
-> owned data). `ownerId` on runs always stores this `_id`, and **never** the reserved
-> `"system"` id.
+The database has a unique identity index on `(idp, idpTenant, idpSubject)` and a unique
+membership index on `(projectId, userId)`. It indexes `projectId` and `userId` for the
+membership lookups used by lists and route guards.
 
-**Effective permissions** = `ROLE_PERMISSIONS[role]` ∪ `permissionsAdd` −
-`permissionsRemove`. The authz layer always checks **permissions**, never role names
-directly — so swapping or adding roles never touches route code.
+JIT provisioning creates a user with no platform role. Bootstrap identity tuples may
+promote a user to platform admin only when the verified tenant appears in
+`AUTH_BOOTSTRAP_TENANTS`. Bootstrap is promote-only; removal from configuration does not
+silently demote an existing admin. Email is never a bootstrap key.
 
-**The `anonymous` principal is a guard *mechanism*, not a public experience.** A reserved,
-non-persisted principal (`{ id: "anonymous", role: "anonymous", permissions: [] }`)
-represents unauthenticated callers so route guards have a uniform shape. It carries
-**zero permissions** and **any** permission-gated route rejects it. This convenience does
-**not** make a public mode "free": route authors still own the *policy*, and the easy
-default of "just check the permission" would silently expose data if anyone ever granted
-`anonymous` a real permission. Therefore: **no permission is ever added to the anonymous
-set in v1**; a future public/demo mode is a deliberate, explicit change scoped to
-public-only data (Open Questions J), not an emergent property of this principal.
+Platform-admin assignment and removal are explicit audited administrative operations.
+There are no per-user permission additions/removals: platform roles and project
+memberships are the complete v1 authorization model.
 
-**JIT provisioning**: on first successful token verification, upsert a `users` doc with
-default role `user`. **Admin bootstrap is identity-keyed, not email-keyed** (Entra
-`email`/`preferred_username` is mutable and not guaranteed verified, and in multi-tenant
-mode any tenant can sign users in):
+### 3. Personal access tokens for CLI and API automation
 
-- A user is bootstrapped to `admin` **only if** their `(idp, idpTenant, idpSubject)`
-  appears in `AUTH_BOOTSTRAP_ADMINS` **and** their `idpTenant` is in
-  `AUTH_BOOTSTRAP_TENANTS`. Email is **never** the match key.
-- `email_verified` (where the IdP asserts it) is required before any email is even stored
-  as advisory; an unverified email never influences a grant.
-- **Bootstrap promotes but does not silently demote.** Presence in the list grants admin;
-  *removal* from the list does **not** auto-demote a sitting admin (that requires an
-  explicit admin action via §6), so a bad ConfigMap edit can't quietly strip admins. The
-  reconcile is **append-only promotion**, logged to the security audit (§F) on every change.
+Scope issues personal access tokens (PATs) to let a signed-in user authenticate the CLI
+or a non-interactive API client without an Entra browser/device-code flow. A v1 PAT is
+**global and user-equivalent**:
 
-Index: unique compound `(idp, idpTenant, idpSubject)`; secondary on `email` (advisory
-lookup only). Folding `idpTenant` into the key is mandatory — `oid` is unique only *within*
-a tenant, so `(idp, idpSubject)` alone collides across tenants and mis-identifies guest/B2B
-users (Open Question D).
+- it authenticates only as its issuing `users._id`;
+- on every request, Scope reloads that user's current disabled state, platform role, and
+  membership for the route's target project;
+- “global” means the credential is not itself restricted to a selected project: it
+  receives the full set of the issuing user's **current** effective permissions, but
+  never grants additional project memberships or bypasses project-content guards;
+- it has no embedded, copied, snapshotted, delegated, or elevated permissions;
+- it immediately reflects a user's disablement, demotion, or removal from a project;
+  revoking or expiring the token invalidates that credential.
 
-### 3. API authentication middleware
+PATs are not service credentials and cannot be created for another user, assigned to a
+project, given an independent role, or used for Scope internal service-to-service
+authentication. They do not change the platform/project role matrix or the
+authenticated run/report sharing-link model.
 
-A single Express middleware mounted **before** route registration:
+```ts
+interface PersonalAccessTokenDocument {
+  _id: string; // opaque token ID; safe to show as a token-list identifier
+  userId: string; // users._id, immutable
+  secretHash: string; // keyed HMAC-SHA-256 of the high-entropy secret
+  note: string; // short, user-only label; never authorization data
+  expiresAt: Date;
+  revokedAt?: Date;
+  lastUsedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
 
-1. Skip public routes (`/health`, `/ready`, `/about`, `/openapi.json`,
-   `/api/v1/version`). **There is no `/api/v1/auth/config`** — clients hardcode their IdP
-   config (§7/§8).
-2. Extract `Authorization: Bearer <token>`. Missing ⇒ attach the `anonymous` principal
-   (routes that require a permission will then return `401`/`403`).
-3. Verify the token. Two issuer paths share one shape (`AuthProvider`-style verification):
-   - **IdP token** (`iss` = Entra) ⇒ `authProvider.verifyAccessToken(token)` ⇒
-     `VerifiedIdentity` (invalid ⇒ `401`).
-   - **Scope internal token** (`iss = scope-api`) ⇒ verify against the Scope **public**
-     key, `aud = scope-internal`, `exp`, and `jti` against the revocation list (§6).
-4. JIT-upsert `users`, load role, compute **effective permissions**, attach
-   `req.user: AuthenticatedUser`
-   (`{ id, role: PrincipalRole, permissions, email, idp, idpTenant, idpSubject, isService? }`).
-5. **Liveness/revocation re-check on *every* path** (not just the IdP path): if the
-   resolved user's `disabledAt` is set ⇒ `403`; if a carried `jti` is revoked ⇒ `401`.
-   Internal tokens that carry permissions are re-validated against the live user wherever
-   feasible (see §6 — preference is to carry `sub` only and re-resolve downstream).
-6. **`req.user.id` must never be `"system"` for a live caller.** The reserved `"system"`
-   id is a backfill sentinel only (§5); the middleware refuses to ever assign it to an
-   authenticated principal, and treats any token that resolves to it as a hard `401`. A
-   missing/fallback user is `anonymous`, never `"system"`.
+Creation generates a versioned, recognizable value such as
+`scope_pat_v1_<token-id>_<random-secret>`, where the random secret contains at least
+256 bits from a cryptographically secure generator. The API returns the complete
+plaintext value **once**, only in the successful creation response. It never stores or
+audits that plaintext, and cannot return, export, or re-display it later. The token ID
+is not a secret; the random secret is.
 
-`AuthenticatedUser` is added to the `TypedRequest` type; it rides on the request object
-(no change to `RouteContext`). A typed accessor `getUser(req)` and a
-`hasPermission(user, perm)` helper (wildcard semantics per §2) are provided.
+Scope stores only `secretHash`, calculated as an HMAC with a dedicated PAT hashing key
+kept in Key Vault and delivered through External Secrets. Authentication parses and
+validates the fixed format, looks up the token by ID, calculates the HMAC for the
+presented secret, and compares hashes in constant time. It rejects malformed, unknown,
+revoked, expired, and user-disabled tokens with `401`; it must not reveal which
+condition failed. A successful authentication updates `lastUsedAt` best effort without
+retaining the credential. The PAT hashing key is not an API signing key or a
+service-to-service credential.
 
-### 4. Route-level authorization
+A user supplies a short note and expiration date on creation. The note is user-visible
+metadata only: trim it, require non-empty text, enforce a small configured maximum
+length, and never render it as HTML. `expiresAt` is required, must be in the future,
+and may not exceed `PAT_MAX_TTL`. There is no non-expiring PAT in v1. Deletion revokes
+the token immediately by setting `revokedAt`; the record is retained for audit and
+operational reconciliation rather than physically deleted. A user can view and revoke
+only their own token records. Neither project nor platform administrators receive an
+endpoint to list or recover another user's PATs.
 
-Extend `ApiRouteConfig` (the `apiRoute()` helper) with optional fields so authz is
-declarative and shows up in the OpenAPI spec (`security` + `401`/`403` responses):
+The self-service API is deliberately small:
+
+```text
+GET    /api/v1/users/me/personal-access-tokens
+POST   /api/v1/users/me/personal-access-tokens
+DELETE /api/v1/users/me/personal-access-tokens/:tokenId
+```
+
+List responses return only `_id`, `note`, `createdAt`, `expiresAt`, `lastUsedAt`, and
+`revokedAt`; creation additionally returns `token` once; delete returns no token value.
+These routes require ordinary user authentication and operate only on the authenticated
+`/users/me` identity. They are not project routes and must not accept `userId` as a
+query, path, or body selector.
+
+### 4. Permission resolution
+
+Route code authorizes on permissions, while two context-specific resolvers derive those
+permissions from platform and project roles.
+
+```ts
+const PROJECT_USER_PERMISSIONS: Permission[] = [
+  "scope/run:read", "scope/run:write", "scope/run:delete",
+  "scope/statistic:read", "scope/statistic:write", "scope/statistic:delete",
+  "scope/report:read", "scope/report:write", "scope/report:delete",
+  "scope/insight:read", "scope/insight:write", "scope/insight:delete",
+  "scope/prompt:read", "scope/prompt:write", "scope/prompt:delete",
+  "scope/criteria:read", "scope/criteria:write", "scope/criteria:delete",
+  "scope/feature:read", "scope/feature:write", "scope/feature:delete",
+  "scope/codebase:read", "scope/codebase:write", "scope/codebase:delete",
+];
+
+const PROJECT_ADMIN_PERMISSIONS: Permission[] = ["scope/*:admin"];
+
+const PLATFORM_ADMIN_PERMISSIONS: Permission[] = [
+  "scope/feature-flag:admin",
+  "scope/agent:admin",
+  "scope/model:admin",
+  "scope/secret:admin",
+  "scope/project:admin",
+  "scope/user:admin",
+];
+```
+
+`PROJECT_ADMIN_PERMISSIONS` is resolved only after the caller's membership in the target
+project is verified. It can never satisfy a platform permission. Likewise, platform
+permissions can never satisfy a project-resource guard.
+
+Wildcard semantics remain explicit:
+
+- `*` is allowed only in the resource position;
+- `admin` implies `read`, `write`, and `delete` on the same resource;
+- namespace and action are never wildcards;
+- a permission on one resource never satisfies another resource's guard;
+- the empty/anonymous permission set satisfies nothing.
+
+The mandatory negative tests include that a platform admin's `scope/project:admin` does
+not authorize `scope/run:read`, and that a project-admin permission does not authorize
+`scope/agent:read`.
+
+### 5. API authentication and authorization
+
+Global middleware runs before route registration:
+
+1. Leave only `/health`, `/ready`, `/about`, `/openapi.json`, and `/api/v1/version`
+   public.
+2. Extract `Authorization: Bearer <token>`. A missing token attaches the non-persisted
+   `anonymous` principal with no permissions.
+3. Identify a Scope PAT by its fixed prefix; otherwise verify an IdP access token.
+   IdP verification JIT-upserts its user record and rejects a disabled user with `403`.
+   PAT verification resolves its issuer from `personal_access_tokens` and returns `401`
+   for a disabled issuer, just as it does for an invalid, expired, or revoked PAT.
+4. Attach the authenticated principal, including the Scope user ID and platform role.
+   Membership is loaded by the route guard for its requested project, not trusted from a
+   client header or token claim.
+5. Verify Scope internal tokens as described in [service-to-service auth](#7-service-to-service-auth);
+   re-check user liveness and membership on the internal-token path too, returning
+   `403` when that authenticated internal request no longer has a live authorized user.
+
+`ApiRouteConfig` gains declarative authorization fields:
 
 ```ts
 interface ApiRouteConfig<...> {
-  // ...existing...
-  /** Default true. Set false for public endpoints. */
-  auth?: boolean;
-  /** Permission(s) required to call this route. Omit ⇒ any authenticated
-   *  principal. e.g. "scope/run:write", or ["scope/user:admin"]. */
-  permissions?: Permission | Permission[];
+  auth?: boolean; // true by default
+  platformPermissions?: Permission | Permission[];
+  projectPermissions?: Permission | Permission[];
+  projectId?: (req: TypedRequest) => string | undefined;
 }
 ```
 
-`apiRoute()` injects a per-route guard that runs after the global authn middleware:
-if `auth !== false` and the principal is `anonymous` ⇒ `401`; if `permissions` is set
-and the principal's **effective permissions** don't satisfy them (per the **specified
-wildcard/subsumption semantics in §2** — e.g. `scope/*:admin` matches, but
-`scope/criteria:admin` does **not** satisfy `scope/run:write`) ⇒ `403`. Guards check
-**permissions, never role names**, so new roles work without touching routes.
+- `platformPermissions` invokes the platform resolver. It is required for feature
+  flags, agents, models, secrets, and platform-level project operations.
+- `projectPermissions` obtains `projectId` from the required `?projectId=` query
+  parameter for root routes or from a parent document loaded server-side for child routes,
+  resolves the caller's membership for that exact project, and then evaluates the requested
+  project permissions.
+- A route may require one context only. Routes that need both—for example, a platform
+  admin changing a membership for a project they do not belong to—use an explicit
+  platform project-RBAC guard, never a project-content guard.
 
-> Roles still exist as the *authoring* convenience (you assign a user a role, which
-> expands to permissions). Routes are authored against permissions.
+The required `?projectId=` query parameter selects a root resource's target project; it
+never grants access. A project-scoped create validates membership first and then sets
+`projectId` from that validated target. Child resources derive their project from the
+parent. The API never accepts `ownerId` or visibility fields.
 
-### 5. Data ownership & scoping
+All project-scoped list queries add a project membership predicate. A single-resource
+read, mutation, stream, or derived-data request resolves its parent `projectId` and
+checks membership before reading a blob, snapshot, archive, or related collection.
+For the exact run/report read routes and their explicitly permitted display children, a
+valid authenticated sharing link is an alternative to membership. Callers without
+membership or a valid link receive `404` to avoid disclosing project content.
+If a caller presents a valid link to a run or report and attempts any non-read operation
+on that linked resource, the API returns `403`; the capability establishes that the
+resource is known but grants read only.
 
-The model rests on two ideas, kept deliberately small for v1:
+### 6. Project access and RBAC management
 
-1. **Ownership grants discoverability *and* editability.** The owner can find, use, and
-   edit their data.
-2. **Sharing is decoupled from ownership.** Data can be made readable to others **without
-   transferring ownership** — either by marking it *shared* (globally discoverable,
-   read-only to non-owners) or by handing out a *deep link* (read-only access to one
-   specific item).
+The project API has three distinct classes of operation:
 
-> **`ownerId` is a Scope User ID — never an IdP subject, never trusted from the client.**
-> Ownership is keyed on the **Scope-owned** `users._id` (minted during JIT provisioning),
-> **not** the Entra `oid` / OIDC `sub` (`idpSubject`). It is **always derived server-side
-> from the authenticated principal** — never read from the request body. Consistency rules:
-> - It survives **IdP migration** — re-link `(idp, idpTenant, idpSubject)` on the *same*
->   `users._id` and all owned data stays owned.
-> - It keeps the data model **IdP-agnostic** (the open-source goal) — documents never embed
->   provider-specific identifiers.
-> - `req.user.id` **is** the `users._id`. Any code that writes `ownerId` must use
->   `req.user.id`; writing an `idpSubject`, or a client-supplied `ownerId`, into `ownerId`
->   is a bug.
-> - The reserved id `"system"` is a **legacy-backfill sentinel only** and is **never** a
->   live principal (§3). It is not a login, not an account, and grants no session.
+| Operation | Required authorization |
+|---|---|
+| Create a project | Any authenticated account; creator becomes project admin atomically. |
+| List/inspect projects | Project member sees their projects; platform admin sees all project metadata. |
+| Read or change project-scoped content | Membership in that project with the resource permission; platform admin alone is insufficient. |
+| Update project metadata or that project's memberships | Project admin for that project, or platform admin. |
+| Delete a project | Platform admin only. |
 
-#### Two-level visibility (v1): personal vs global
+Project membership endpoints must identify the project in the path:
 
-Every piece of **user-owned data** (runs and the user-authored catalog data —
-criteria, profiles, MCP servers, etc.) carries:
-
-- `ownerId: string` — the Scope User ID of the creator (set server-side).
-- `visibility: "private" | "shared"` — **chosen by the user at creation** (default
-  `"private"`). This is the "personal vs global" choice:
-  - **private** — discoverable, usable, **and editable only by the owner** (and admins).
-  - **shared** — **globally discoverable and usable by everyone**, but **read-only unless
-    you own it**. Only the owner (or an admin) can edit or delete it.
-
-Concretely, on `POST` (create) of a user-owned resource:
-
-```ts
-const doc = {
-  ...validatedBody,                 // body MUST NOT carry ownerId; it is ignored/stripped
-  ownerId: req.user.id,             // derived from the authenticated user — never trusted
-  visibility: validatedBody.visibility ?? "private",
-};
+```text
+GET    /api/v1/projects/:projectId/members
+PUT    /api/v1/projects/:projectId/members/:userId
+DELETE /api/v1/projects/:projectId/members/:userId
 ```
 
-API responses **include `ownerId`** (and `visibility`) where relevant, so clients can show
-owner / "shared by" and enable/disable edit affordances — but the server, not the response
-shape, is the enforcement boundary.
+They support `user` and `admin` membership roles only. A platform administrator may use
+these endpoints for every project, including to add themselves as an admin; they do not
+gain project-content access until that membership write completes.
 
-#### Scoping helpers (one chokepoint per axis)
+`GET /api/v1/users/me` returns the caller's identity, platform role, and project
+memberships (project ID, name, and role). Platform-user administration routes require
+`scope/user:admin`; they manage platform-admin assignment and user disablement. All role
+and membership changes take effect on the next request.
 
-Reads and writes go through two resolvers so every call site is consistent. `<resource>`
-is the permission namespace for the collection (e.g. `run`, `criteria`):
+Run and report sharing-link endpoints are project-member routes:
 
-```ts
-// DISCOVERY / READ: your own data (any visibility) PLUS everyone's shared data.
-// Admins on the resource see everything.
-function readScope(user: AuthenticatedUser, resource: string): Filter {
-  if (hasPermission(user, `scope/${resource}:admin`)) return {};
-  return { $or: [{ ownerId: user.id }, { visibility: "shared" }] };
-}
-
-// EDIT / DELETE: owner only (admins on the resource bypass).
-function writeScope(user: AuthenticatedUser, resource: string): Filter {
-  if (hasPermission(user, `scope/${resource}:admin`)) return {};
-  return { ownerId: user.id };
-}
+```text
+POST   /api/v1/requests/:requestId/share-links
+GET    /api/v1/requests/:requestId/share-links
+DELETE /api/v1/requests/:requestId/share-links/:linkId
+POST   /api/v1/reports/:reportId/share-links
+GET    /api/v1/reports/:reportId/share-links
+DELETE /api/v1/reports/:reportId/share-links/:linkId
 ```
 
-- **Every** read/list merges `readScope`; **every** mutation merges `writeScope`.
-- For single-resource fetches, return `404` (not `403`) when the doc exists but is neither
-  owned, shared, nor reachable via a valid deep link — to avoid leaking existence.
-- For a mutation on a *shared* doc the caller doesn't own, return `403` (the resource is
-  legitimately discoverable, so existence isn't secret — it's an authorization failure).
-- **Runs default to `private`** and are primarily shared via **deep links** (below);
-  marking a run `shared` is allowed but is the global-discovery path.
+Creating or listing links requires the corresponding run/report read permission in the
+source project. Deleting a link requires its creator or a project admin. The capability
+is returned only when it is created; later list responses expose metadata but never the
+capability value or hash.
 
-#### Read-only deep-link sharing
+### 7. Service-to-service auth
 
-A user may share a **deep link** that grants **read-only** access to **one specific item**
-**without** ownership and **without** making it globally discoverable:
+Every internal caller uses its own narrow service identity: a per-service signed JWT or
+an `INTERNAL_API_KEY_<NAME>` value compared in constant time with an explicit service
+name. There is no shared all-powerful key.
 
-- A deep link is a **signed, revocable, read-only capability** bound to a single resource
-  id (and optionally an `exp`). It is resolved on the read path **only** — it can never
-  satisfy `writeScope`.
-- The read handler accepts the link capability as an alternative to `readScope` **for that
-  id alone**: `isOwnerOrShared(doc) || validDeepLink(token, doc._id)`.
-- Deep-link grants are recorded (Scope-owned) so they can be **revoked** and audited; they
-  confer **no** edit/delete and **no** broader discovery.
+Services that operate on a user's project data—including the report-generator—act
+on behalf of the initiating user:
 
-#### Associated data & analytics
+- The API mints a short-lived asymmetric Scope internal JWT with `sub = users._id`,
+  `iss = "scope-api"`, `aud = "scope-internal"`, an expiry of at most five minutes, and
+  a `jti`.
+- The token carries no platform or project permissions. The downstream verifier
+  re-resolves the live user, disabled state, and membership for the target `projectId`.
+- The API private key and per-service keys are held in Key Vault; verifiers receive only
+  the internal JWT public key.
+- The report queue message carries `projectId` with the request/report IDs. It does not
+  carry an owner ID because runs and reports are not user-owned.
 
-- **Associated data** (run attempts, logs/SSE, archives, snapshots, reports tied to a run)
-  is authorized **through its parent request**: resolve the parent with `readScope` (or a
-  valid deep link) before serving the derived resource. No derived endpoint queries
-  blob/secondary storage before the access check passes.
-- Cross-cutting analytics (`/api/v1/analysis`, grouping) apply `readScope` for callers
-  without the resource `:admin` permission; admins see global aggregates. (Whether *shared*
-  data appears in another user's aggregates is an Open Question — see A.)
+The external IdP token and IdP verification configuration terminate at the API. They are
+never sent to downstream services.
 
-#### Future-proofing: sharing, groups & projects
+### 8. CLI and Portal
 
-The v1 axes above (`ownerId`, `visibility`, deep-link grants) are designed so that
-**group/project** ownership can be added later **without re-modelling existing data or
-rewriting every query**:
+The API client refactor is delivered: CLI and Portal call sites use centralized
+`ky`-backed clients with token-provider and re-auth seams. Direct `fetch` remains only
+for the documented external release check and unauthenticated readiness probe.
 
-- **Keep all authorization flowing through the two chokepoints** (`readScope`/`writeScope`).
-  When groups arrive, they generalize to include the ids of any group/project the user
-  belongs to (a Mongo `$or`), and call sites don't change.
-- **Reserve the remaining shape now, populate later** (all optional, ignored by v1 logic):
-  - `ownerType: "user" | "group"` (defaults to `"user"`).
-  - `groupId?: string` / `projectId?: string` — owning group/project (future
-    `groups`/`projects` collections, also keyed by Scope-owned ids).
-  - `sharedWith?: Array<{ principalId: string; principalType: "user" | "group";
-    permissions: Permission[] }>` — explicit ACL entries beyond the deep-link case.
-  - A future third visibility level (e.g. `group`) extends the union additively.
-- **Permissions already namespace cleanly.** Group/project administration slots in as new
-  permissions (e.g. `scope/group:write`) under the existing model — no route-guard change.
-- **Membership lives in Scope, not the IdP** — keyed on `users._id`; any IdP group claims
-  are advisory at most.
+CLI authentication supports both MSAL device code for interactive use and Scope PATs
+for automation. The primary documented `SCOPE_TOKEN` flow is a Scope PAT, sent as the
+normal bearer credential. For compatibility, `SCOPE_TOKEN` may also supply an existing
+Entra bearer token, which follows the normal IdP verification path rather than bypassing
+authentication. The variable takes precedence over a locally stored interactive
+credential, is never persisted by the CLI, and is redacted from errors, debug archives,
+telemetry, and command output.
 
-See Open Question **B** for the decisions (per-item ACL vs project-scoped, group roles)
-that must be settled before that work is scheduled. **v1 ships `ownerId` +
-`private`/`shared` visibility + read-only deep links**; the `group`/`project`/`sharedWith`
-fields above are documented intent, not implemented yet.
+The CLI provides:
 
+- `scope auth login/logout/status/whoami` using MSAL device code and a Scope
+  `SecretStore`, backed by `cross-keychain` with a warning-backed `0600` file fallback
+  where no system keyring exists;
+- `scope auth token create --note <note> --expires-at <RFC3339-date>` to call the
+  self-service creation endpoint as the current authenticated user, display the returned
+  token once, and tell the user to store it securely;
+- `scope auth token list` to show only token metadata, and
+  `scope auth token delete <token-id>` to revoke a token after explicit confirmation
+  (with a non-interactive confirmation flag for CI);
+- project-aware commands and a project selector/explicit project option.
 
-### 6. Service-to-service auth
+PAT-aware CLI requests use the same `apiFetch()` facade and `Authorization` handling as
+interactive requests. A `401` for a PAT reports an authentication failure without
+distinguishing expiration from revocation or invalidity; it must never echo the supplied
+value. PAT creation is intentionally not an input/output shortcut for shell pipelines:
+the CLI does not write the secret to a config file, logs, diagnostics, or history-like
+artifact.
 
-Internal callers (scheduler, report-generator, future internal API consumers) and any
-worker that reaches the API authenticate with a **service principal**, not a user.
-**No Entra App Roles are used**, and **no single all-powerful shared key exists** — each
-service has its **own identity** and a **narrow, least-privilege** permission set owned by
-Scope:
+The Portal authentication MVP provides MSAL redirect login, token acquisition, a route
+guard, and sign-in/sign-out UI. Once API authorization is available, its auth context
+must use `/api/v1/users/me` and expose the active project role. It must:
 
-- **Per-service identity (primary).** Every internal caller is registered as a named
-  service principal with an **explicit, minimal** permission set — **never** blanket
-  `scope/*:admin`. Two interchangeable credential mechanisms:
-  - **Per-service signed JWT (preferred).** Each service presents a Scope-signed service
-    token (`iss = scope-api`, `aud = scope-internal`, `sub = service:<name>`, short `exp`,
-    `jti`) verified with the Scope **public** key. The principal's permissions are
-    **resolved from a Scope-owned service registry by `<name>`**, not read from the token,
-    so they can be tightened/revoked centrally.
-  - **Per-service key.** Where a pre-shared secret is simpler, each service gets its **own**
-    `INTERNAL_API_KEY_<NAME>` (distinct secret, constant-time compared) presented on
-    `X-Internal-Key` + `X-Service-Name`. There is **no** global key shared by all services.
-- The resulting principal is
-  `{ id: "service:<name>", role: "service", permissions: <registry[name]>, isService: true }`,
-  where `<registry[name]>` is the **least-privilege** set for that service (e.g. the
-  report-generator gets only `scope/insight:write`, `scope/report:write`, and reads runs
-  **on behalf of the owner**, not a global run-read admin).
-- **Optional (Entra client-credentials)**: a deployment may instead present a
-  client-credentials access token mapped (by verified `oid` in `AUTH_SERVICE_SUBJECTS`) to
-  the **same named, narrow** service principal. **Identity only** — no Entra app-role claim
-  is read. This Entra token **terminates at the API** and is never forwarded.
+- show all project content only when the active project membership permits it;
+- expose project-admin resources (including MCP servers and extensions) only to a
+  project admin;
+- expose feature flags, agents, models, secrets, global project administration, and
+  platform-user administration only to a platform admin;
+- avoid treating platform admin as sufficient for the selected project's content.
 
-> **Decided (Question E)**: per-service identities with **narrow** permissions are the
-> design; a single shared `scope/*:admin` key is **rejected** (blast-radius). The optional
-> Entra client-credentials path remains a footnote for deployments that already have one.
+The authenticated user's **Profile** page includes a **Personal access tokens**
+subsection. It lists only that user's PAT metadata (note, token ID, created, last-used,
+expiration, and revoked/active state), provides a create dialog with the required short
+note and expiration date, and provides a delete/revoke action per token. Immediately
+after successful creation, a one-time disclosure panel displays the plaintext PAT with
+copy control and an explicit warning that it cannot be viewed again. Closing or
+navigating away from that panel clears the value from Portal state. The normal list,
+subsequent reloads, and deletion confirmation never contain the secret. This
+self-service Profile capability is available to every authenticated user and is
+independent of platform role or active-project membership.
 
-Service principals are scoped to **exactly their granted permissions** — they do **not**
-get implicit full admin. A service may bypass *ownership* only for the resources its
-permissions cover (system action), and every service mutation / cross-user read is
-auditable (§F).
+The existing Portal toggle is a rollout gate that disables the client feature wholesale
+and fabricates no principal. It must be removed before API enforcement is declared
+complete; the API itself never has an authentication bypass.
 
-#### Propagating user identity downstream (Scope-minted internal token)
+### 9. SSE and derived data
 
-Some downstream calls need to run **on behalf of the originating user** (e.g. so the
-downstream service applies the same ownership scoping). When that's required:
+`EventSource` cannot attach Authorization headers, so Portal and CLI use fetch-based
+streaming for live logs. It sends the normal bearer header and authorizes the parent run
+through its `projectId` before starting the stream. A valid run sharing link also permits
+this read-only stream for that run only. A query-token fallback, if retained, must be
+short-lived, stream-only, and scrubbed from all logs.
 
-- **Never propagate the IdP token or any IdP settings.** The external Entra/OIDC access
-  token (and its `authority`, `audience`, JWKS, tenant, scopes, etc.) **must not** leave
-  the API boundary. Downstream services have **no** knowledge of the IdP and must never
-  be configured with IdP verification material. The IdP token is verified once, at the
-  edge, and discarded.
-- **Mint a short-lived Scope internal bearer token instead.** The API issues its own
-  signed JWT: `sub = users._id` (the **Scope User ID**), `iss = "scope-api"`,
-  `aud = "scope-internal"`, a short `exp`, and a `jti`. It is signed with a **Scope-owned
-  asymmetric signing key** — the API holds the **private** key; downstream services hold
-  only the **public** key to verify. (An HMAC `INTERNAL_JWT_SECRET` is a simpler
-  single-deployment alternative, but the public/private split is the chosen design.)
-  **Independent of the IdP.**
-- **Permissions are NOT baked into the token (revocation must work).** Embedding a
-  `permissions` array means a disabled user, a demoted admin, or a removed permission keeps
-  working until `exp` — revocation becomes theoretical. So:
-  - **Preferred: carry `sub` only.** Downstream **re-resolves** role + effective
-    permissions **and `disabledAt`** from the live `users` record (the same JIT/lookup path
-    as the IdP flow), so revocation and demotion take effect immediately. The
-    `disabledAt → 403` check applies on the **internal-JWT path**, not just the IdP path.
-  - **If permissions must be carried** (e.g. downstream can't reach Mongo), bound the
-    staleness explicitly: a hard **`exp` ceiling of ≤ 5 minutes** (not a vague "minutes")
-    **and** a **`jti` revocation list** the verifier consults, so a token can be killed
-    before `exp`. Both are required together; neither alone is sufficient.
-- **Downstream validates the internal token, not the IdP token.** Each internal service
-  verifies signature + `iss`/`aud`/`exp` against the Scope **public** key, checks `jti`
-  against the revocation list, then reconstructs the same `AuthenticatedUser` (re-resolving
-  permissions per above), so `readScope`/`writeScope` work identically downstream. This is
-  a normal `AuthProvider`-style verification path, just with the **internal issuer**.
-- **`X-Internal-Key`/service JWT vs internal user token are distinct.** A service credential
-  authenticates a **service acting as itself** (narrow system principal). The minted user
-  token authenticates a **service acting on behalf of a user** (carries the Scope User ID,
-  subject to ownership scoping). A call uses one or the other; it must not use the IdP token
-  for either.
+Snapshots, archives, attempts, logs, reports, insights, and analytics are always
+authorized through their project's parent entity. No secondary-storage read occurs
+before the project authorization check.
 
-> **Concrete v1 consumer — report-generator.** The report-generator worker reads a
-> **specific user's run** to produce a report. So when the API enqueues a report job it
-> includes the run's `ownerId`; the worker calls back with an **on-behalf-of internal
-> token** minted for that owner (not the system `X-Internal-Key`), so the report-generator
-> sees exactly what the run's owner can see. Flow:
->
-> ```mermaid
-> sequenceDiagram
->     participant API
->     participant Q as Report Queue
->     participant RG as report-generator
->     API->>Q: enqueue report job { reportId, requestId, ownerId }
->     RG->>API: GET /api/v1/requests/:id  (Bearer on-behalf-of token for ownerId)
->     API-->>RG: run (owner-scoped → 200)
->     RG->>API: POST /api/v1/reports/:id/insights (same token)
-> ```
->
-> The minting endpoint is API-internal: the worker exchanges its **own service** credential
-> (a per-service JWT or `INTERNAL_API_KEY_<NAME>`) + the job's `ownerId` for a short-lived
-> on-behalf-of token, or the token is handed to it directly on the queue message (short
-> `exp`). Either way the IdP is never involved.
+### 10. Security audit and secrets
 
-- New command group `scope auth`:
-  - `scope auth login` — Entra **device-code flow** via
-    `@azure/msal-node` `PublicClientApplication.acquireTokenByDeviceCode`. Provides a
-    **great login UX** (see below).
-  - `scope auth logout` — clears the cached tokens from the `SecretStore` (OS keychain).
-  - `scope auth status` / `scope auth whoami` — shows the signed-in identity + role
-    (calls `GET /api/v1/users/me`).
-- **Secure token storage via a Scope `SecretStore` abstraction.** We do **not** depend on
-  `keytar` (unmaintained). Instead, Scope defines its **own** small `SecretStore` interface
-  and wires the MSAL token cache (access + refresh tokens) through it:
+The API writes append-only `security_audit` records to MongoDB and emits Prometheus
+counters for successful/failed login, logout, onboarding, PAT creation/revocation and
+successful/failed authentication, platform-role changes, project membership/role
+changes, user disablement, service-key use, cross-project administration, sharing-link
+creation/revocation/access, and on-behalf-of token minting. PAT audit events include
+only the actor/issuer user ID, token ID, and expiration; the private note is never
+copied to audit records, logs, metrics, diagnostics, or support bundles. Metrics use
+bounded outcome labels and never token IDs, notes, or values.
 
-  ```ts
-  // packages/shared (or cli) — Scope-owned, swappable backend
-  export interface SecretStore {
-    get(account: string): Promise<string | null>;
-    set(account: string, secret: string): Promise<void>;
-    delete(account: string): Promise<void>;
-  }
-  ```
+For security-sensitive operations, failure to persist the Mongo audit event fails the
+operation closed; metrics are best effort. Audit detail is structured and redacted:
+plaintext PATs, token hashes, bearer credentials, refresh tokens, private keys, and
+service keys are never written. Request logging, exception serialization, OpenAPI
+examples, support bundles, and CLI/Portal diagnostics must apply the same redaction.
+Retention is an explicit policy decision.
 
-  - **Default backend: [`cross-keychain`](https://www.npmjs.com/package/cross-keychain)**
-    (`magarcia/cross-keychain`) — cross-platform native storage (macOS Keychain via
-    Security.framework, Windows Credential Manager, Linux Secret Service) with a
-    `setPassword`/`getPassword`/`deletePassword` API. Used under service `scope-cli`,
-    account = the API origin. Wired into MSAL as the `ICachePlugin`
-    (`beforeCacheAccess`/`afterCacheAccess`). **Silent refresh** before each request; falls
-    back to device-code when the refresh token is expired.
-  - Because the backend sits behind `SecretStore`, swapping `cross-keychain` for another
-    implementation later is a one-file change with **no call-site impact**.
-  - *Fallback*: where no Secret Service is available (e.g. headless Linux/CI without a
-    keyring), a `SecretStore` file backend writes a `0600` file at
-    `~/.config/scope/auth.json` with a loud warning.
-- **Device-code login UX** (`scope auth login`):
-  1. Copy the user code to the **clipboard** (via `clipboardy`) and tell the user it's
-     copied.
-  2. Attempt to **open the browser** to the verification URL
-     (`https://microsoft.com/devicelogin`) using the workspace convention
-     `"$BROWSER" <url>` (fall back to `open`/`xdg-open`/`start`).
-  3. Always **print the URL + code** as a manual fallback (for headless/SSH/remote
-     sessions). A `--no-browser` flag skips the auto-open.
-  4. Poll until authenticated; show a spinner and a clear success/identity summary.
-- **Auth config is hardcoded** (authority, clientId, scopes, audience) in the CLI for now —
-  there is **no** `GET /api/v1/auth/config` endpoint. Retargeting the IdP is a config/code
-  change in the CLI (and Portal) rather than a runtime fetch.
-- Every API call attaches `Authorization: Bearer <token>`. Resolution order:
-  1. `SCOPE_TOKEN` env — a **raw bearer escape hatch** for CI / scripted use. (This is the
-     slot a future **Scope-issued PAT** will fill for user-attributed automation; that PAT
-     work is **out of scope** for this milestone — see Open Question H. Today it is just a
-     bearer the caller supplies.)
-  2. Cached token from the `SecretStore` (refresh if near expiry).
-  3. No token ⇒ friendly error: "run `scope auth login`".
-
-> **No dev-user shortcut.** There is **no `--dev-user`/`SCOPE_DEV_USER`/`X-Dev-User`**
-> path: dev mode is gone (§1). Actual internal **services** authenticate with their own
-> per-service credential (§6), not via the human CLI.
-
-> [!IMPORTANT]
-> **Large cross-cutting refactor — centralized `apiFetch()` on top of [`ky`](https://github.com/sindresorhus/ky).**
-> The CLI today calls `fetch` directly in ~every command
-> ([apps/cli/src/commands/run.ts](../../apps/cli/src/commands/run.ts)
-> alone has a dozen call sites, plus `run-get-action.ts`, and every other command
-> module), and the **Portal** has its own ad-hoc `fetch` paths in
-> [apps/portal/src/lib/api.ts](../../apps/portal/src/lib/api.ts) and
-> `hooks/useHarExtraction.ts`. Auth makes a **single shared `apiFetch()` wrapper**
-> mandatory — it must own bearer/service header injection, `401`→re-auth handling,
-> base-URL normalization, and error shaping. **Migrating all existing call sites to it
-> is a large, repo-wide change** and should be treated as its own tracked workstream
-> (it touches every CLI command, the Portal API layer, and their tests), not a side
-> effect of one subtask.
->
-> **Use `ky` as the internal HTTP engine — keep an API-client facade in front of it.**
-> Do **not** hand-roll a `fetch` wrapper. The facade (`apiFetch()` in the CLI, the
-> `api`/`request()` layer in the Portal) is the only surface call sites see; **`ky`**
-> lives *behind* it as the transport. This buys us `ky`'s hook pipeline
-> (`beforeRequest` for auth-header injection, `afterResponse`/`beforeError` for
-> response handling), first-class `Request`/`Response` semantics, and a single place to
-> later enable retry/backoff. The facade configures one `ky` instance with
-> `throwHttpErrors: false` (call sites keep their existing `response.ok` / `response.json()`
-> handling and **must not** start catching thrown `HTTPError`s), `timeout: false`, and
-> `retry: 0` for now (transient-retry is a later, opt-in tightening). Auth is injected
-> in a `beforeRequest` hook from a **pluggable token provider** (CLI: `SCOPE_TOKEN` today,
-> `SecretStore` later; Portal: MSAL token later) and must never clobber a caller-supplied
-> `Authorization`. **Note:** `ky` invokes the global `fetch` with a `Request` object
-> (`fetch(request, options)`), so tests that asserted `fetch(urlString, init)` must be
-> updated to inspect the `Request` instead — this is expected and the assertions stay
-> semantically equivalent (same URL, method, body, headers).
->
-> **Design `apiFetch()` for debuggability from day one.** Route every request/response
-> through a pluggable logging sink that can capture: method, URL, redacted headers
-> (tokens/keys **always** scrubbed), request/response bodies (size-capped, secrets
-> redacted), status, timing, and a correlation id. Because `ky`'s `afterResponse` hook
-> clones the response on every call, the sink is wired in the **facade** (guarded so it
-> only clones when a sink is actually registered) rather than as an always-on `ky` hook —
-> this keeps the zero-overhead default path and avoids breaking thin mock responses in
-> tests. This unlocks a **`scope --debug-zip <file>`** global flag: run any command with
-> full request/response + client log capture, then bundle a redacted, shareable **support
-> package** (a `.zip` containing the request log, CLI version/`about` info, OS info, and
-> sanitized config) that users can send to the developers. Redaction is mandatory and
-> tested — the zip must never contain a live token, refresh token, or any service key
-> (`INTERNAL_API_KEY_<NAME>`).
-
-### 8. Portal authentication
-
-- Add `@azure/msal-browser` + `@azure/msal-react`. Wrap the app in `<MsalProvider>` in
-  [apps/portal/src/main.tsx](../../apps/portal/src/main.tsx).
-- **Auth Code + PKCE** redirect flow. MSAL config (authority, clientId, scopes, audience)
-  is **hardcoded** in the Portal build for now — there is **no** `GET /api/v1/auth/config`
-  fetch. Retargeting the IdP is a config change in the Portal (mirroring the CLI).
-- `<MsalAuthenticationTemplate>` (or a route guard) gates the app; unauthenticated
-  users are redirected to login.
-- The `request()` helper in [apps/portal/src/lib/api.ts](../../apps/portal/src/lib/api.ts)
-  acquires a token silently (`acquireTokenSilent`, falling back to redirect) and sets
-  the `Authorization` header. On `401`, it triggers re-auth.
-- **Permission-aware UI**: an `AuthContext` exposes `{ user, role, permissions }` (from
-  `GET /api/v1/users/me`). Nav items, the Tokens/Accounts/Admin/Users pages, and
-  catalog-write actions are shown/enabled based on **permissions** (e.g.
-  `hasPermission("scope/user:admin")`), not hardcoded role names. (UI gating is
-  convenience only; the API is the enforcement boundary.)
-- **No dev role switcher.** Dev mode is removed (§1); the Portal always authenticates
-  against a real IdP. There is no `X-Dev-User` toggle and no synthetic-principal
-  bypass. The per-environment `SCOPE_AUTH_ENABLED` (integration/production, runtime)
-  and `VITE_AUTH_ENABLED_LOCAL` (local dev, build-time) controls (subtask 10) are
-  **not** such a bypass: they turn the auth **feature** off wholesale (no gate, no
-  token, **no fabricated principal**) as a rollout gate while the API lacks token
-  verification — they never authenticate a request as a user.
-
-### 9. SSE / log streaming
-
-`EventSource` cannot set custom headers, so **`fetch`-based streaming (`ReadableStream`)
-is the preferred transport** for the live-log SSE endpoints in both Portal and CLI: it can
-send the **normal `Authorization: Bearer` header**, identical to every other request. A
-query-param token (`?access_token=`) is a **fallback only** (for clients that genuinely
-cannot use fetch-streaming) and, when used, the token **must be short-lived and narrowly
-scoped** to the stream, and **must never be logged** (scrubbed at the proxy and app layers).
-The SSE endpoint applies the same `readScope` access check on the parent run.
-
-### 10. Where secrets are stored
-
-We classify the auth-related material and store each appropriately. The guiding rule:
-**public verification material is fetched, not stored; real secrets go to Key Vault via
-the existing External Secrets pipeline.**
-
-| Material | Secret? | Where it lives | Notes |
-|----------|---------|----------------|-------|
-| **IdP JWKS** (signing public keys) | No | **Fetched at runtime** from the IdP's `jwks_uri`, cached in-memory in the API with TTL + `kid` rotation | Public keys; never persisted to disk or DB. |
-| **OIDC discovery / authority / clientId / scopes / audience** | No | Plain env / ConfigMap for the API; **hardcoded into the CLI and Portal builds** (no `/auth/config` endpoint) | Non-secret configuration. |
-| **`INTERNAL_API_KEY_<NAME>`** (per-service key, service-to-service) | **Yes** | **Azure Key Vault** \u2192 synced to a K8s Secret by **External Secrets Operator** (same pattern as `mongo-secrets`/`redis-secrets`); each service gets its **own** key mounted as env | Constant-time compared; **no single global key**; rotate per-service in Key Vault. || **`INTERNAL_JWT_SECRET` / internal signing key** (mints on-behalf-of user tokens) | **Yes** | **Azure Key Vault** → External Secret. **Asymmetric (chosen)**: API holds the **private** key; downstream verifiers hold only the **public** key. HMAC secret is a single-deployment alternative. | Scope-owned, **independent of the IdP**; rotate via Key Vault. || **Entra API client secret** (only if the optional confidential-client/client-credentials path in \u00a76 is used) | **Yes** | **Azure Key Vault** \u2192 External Secret | The public CLI/Portal clients are **public** clients (PKCE / device-code) and have **no** secret. |
-| **CLI user tokens** (access/refresh) | **Yes** | User's machine via the Scope **`SecretStore`** abstraction (default backend **`cross-keychain`** → OS keychain, service `scope-cli`); `0600` file backend only where no keyring exists | MSAL token cache; never logged; silent refresh. **No `keytar`.** |
-| **Portal tokens** | **Yes** | Browser memory via MSAL (session/`localStorage` per MSAL cache config) | No tokens in app code or repo. |
-| **App user records / roles / permissions** | No (PII) | MongoDB `users` collection | Identity + authorization data, not credentials. |
-
-Local dev (`docker:up:infra` + Lowkey Vault) follows the same shape: per-service
-`INTERNAL_API_KEY_<NAME>` values come from `.env`, and IdP verification points at a real
-IdP (or the future **Entra ID local emulator**, §1) — there is **no** auth-bypass mode, so
-local dev exercises the same verification path as production. New env vars are documented in
-[ENV_VARIABLES.md](../../ENV_VARIABLES.md) and wired through the API's
-External Secrets / SecretStore manifests.
+Public IdP JWKS are fetched and cached. Private signing keys and per-service credentials
+and the dedicated PAT hashing key live in Azure Key Vault and are synchronized through
+External Secrets. CLI refresh tokens live in the local SecretStore; Portal tokens live
+in the browser's MSAL cache. PAT plaintext values are held only by their caller, not by
+Scope after the creation response.
 
 ---
 
-## Subtasks
+## Data migration
 
-> Ordered. Each `auth?`/`permissions` default keeps unlisted routes authenticated.
-> Tests are Vitest, co-located as `<file>.test.ts`.
+The project data-organization design provides one immutable `projectId` on every
+project-scoped entity. This authorization design adds no owner, visibility, or sharing
+fields to those documents; it stores run/report sharing links separately.
 
-1. ⬜ **Auth abstraction in `shared`** — Add `packages/shared/src/auth/` with
-   `AuthProvider`, `VerifiedIdentity`, `AuthClientConfig` (the **hardcoded-by-clients**
-   config shape), `AuthError`, the `Permission`/`Action` types, `UserRole` +
-   `PrincipalRole`, the `ROLE_PERMISSIONS` map + `hasPermission()` (with the **specified
-   wildcard/subsumption semantics**, §2), and `EntraIdAuthProvider` (JWKS verify via
-   `jose`, extracting `oid`/`tid`/`email_verified`). Add `UserDocument` schema (role +
-   `permissionsAdd`/`permissionsRemove` + `idpTenant`/`emailVerified`). Export from
-   `shared`. **Done when** unit tests verify a signed JWT (mocked JWKS) passes,
-   tampered/expired/wrong-aud tokens throw, and `hasPermission` resolves role bundles +
-   wildcards correctly **including the mandatory negative cases** (e.g. `scope/run:write`
-   not satisfied by `scope/criteria:admin` or by `scope/run:read`).
+The RBAC migration:
 
-2. ⬜ **`users` collection + migration** — New migration: create `users` with unique
-   `(idp, idpTenant, idpSubject)` index + `email` index; add `ownerId` (a **Scope User
-   ID** = `users._id`) **and `visibility` (`"private"|"shared"`, default `private`)** to
-   `requests`/`runs` and the user-owned catalog collections, with indexes (incl. a
-   `visibility`+`ownerId` index for `readScope`); backfill `ownerId = "system"` (a reserved
-   **sentinel** Scope User ID — **never** a login/live principal) for existing docs (see
-   Decisions). **Done when** `pnpm migrate:up`/`down` succeed locally and indexes exist.
-   Depends on 1.
+1. Creates the `users` collection and its unique identity index.
+2. Creates `project_memberships` with unique `(projectId, userId)`, plus `projectId` and
+   `userId` lookup indexes.
+3. Creates `personal_access_tokens` with a unique `_id` index, an index on `userId` for
+   self-service listing, and an `expiresAt` index for operational expiry cleanup. It
+   stores only the keyed secret hash and lifecycle metadata; it must not use a TTL index
+   that would erase revoked-token audit evidence.
+4. Creates `shared_links` with a unique `tokenHash` index and indexes on
+   `(resourceType, resourceId)` and `expiresAt`.
+5. Creates or migrates `projects` and project-scoped `projectId` indexes according to
+   [data-organization-projects.md](data-organization-projects.md).
+6. Files legacy project-scoped data into the Default project without attempting to infer
+   a document owner or membership from historic data.
+7. Lets a platform administrator explicitly establish memberships for the Default
+   project before granting anyone access to legacy project content.
 
-3. ⬜ **API authn middleware + bootstrap** — Instantiate `AuthProvider` from env;
-   mount global middleware; JIT-provision users; **bootstrap admins matched on
-   `(idp, idpTenant, idpSubject)` within `AUTH_BOOTSTRAP_TENANTS`** (never email),
-   promote-only; resolve effective permissions; `anonymous` principal for no-token;
-   **per-service principal recognition** (per-service JWT or `INTERNAL_API_KEY_<NAME>`,
-   narrow perms). **No dev/bypass principals and no `AUTH_ENABLED`.** Enforce
-   `disabledAt → 403` on **both** the IdP and internal-JWT paths, and **never** assign
-   `req.user.id = "system"` to a live caller. Add `getUser(req)`/`hasPermission` + typed
-   `req.user`. **Done when** protected routes return `401` anonymous / `200` with a valid
-   token, a disabled user is rejected mid-session, and a per-service credential
-   authenticates with only its granted permissions. Depends on 1, 2.
-
-4. ⬜ **Route authz in `apiRoute()`** — Add `auth`/`permissions` to `ApiRouteConfig`,
-   per-route permission guard (wildcard-aware, per §2 semantics incl. negative cases), and
-   OpenAPI `security`/`401`/`403` documentation. **Done when** a route requiring
-   `scope/user:admin` returns `403` for a `user` token and `200` for `admin`, and the
-   OpenAPI snapshot reflects security. Depends on 3.
-
-5. ⬜ **Ownership: stamp + scope** — Split for sequencing (see Implementation Plan):
-   - **5a (provenance, Phase 2)**: set `ownerId = req.user.id` (**derived server-side,
-     never from the request body**) and `visibility` (validated `private`/`shared`) on
-     creation (`POST /api/v1/requests` and user-owned catalog creates) and on
-     retry/new-attempt runs. Return `ownerId`/`visibility` in responses. No read/write
-     blocking yet.
-   - **5b (enforcement, Phase 3)**: apply `readScope` (own + shared) and `writeScope`
-     (owner only) to all `requests`/`runs` + user-owned catalog reads, lists, mutations,
-     analysis, grouping, and derived-data endpoints (attempts, logs/SSE, archive,
-     snapshots); add **read-only deep-link** resolution on the read path.
-   **Done when** new items carry a real Scope User ID + visibility (5a); a `user` cannot
-   get/mutate another user's **private** item (`404`), can read but not edit a **shared**
-   item (`403` on write), and a valid deep link grants read-only access (5b); `admin` sees
-   all. **5b must ship with subtask 11.** Depends on 3 (5a) / 3, 4, 11 (5b).
-
-6. ⬜ **User endpoints** — `GET /api/v1/users/me` (self; returns role + effective
-   permissions), `GET/PATCH /api/v1/users` + `/:id/role` and permission overrides
-   (requires `scope/user:admin`, soft-disable). **No `/api/v1/auth/config` endpoint** —
-   client config is hardcoded (§7/§8). **Done when** endpoints return correct data and
-   role/permission changes take effect on next request. Depends on 3, 4.
-
-7. ✅ **Centralized `apiFetch()` refactor on `ky`** *(large, cross-cutting)* — Introduce a single
-   `apiFetch()` wrapper in the CLI — **built on [`ky`](https://github.com/sindresorhus/ky)** as the
-   internal transport behind the facade — that owns base-URL normalization, **`Authorization:
-   Bearer` injection** (from `SecretStore`/`SCOPE_TOKEN`) via a `ky` `beforeRequest` hook, `401`→re-auth
-   handling, error shaping, and a **pluggable logging sink** with mandatory secret redaction (no
-   `X-Dev-User` path — dev mode is gone). **Migrate every existing `fetch` call site** — the CLI
-   ([apps/cli/src/commands/run.ts](../../apps/cli/src/commands/run.ts), `run-get-action.ts`, and all
-   other command modules) **and the Portal** ([apps/portal/src/lib/api.ts](../../apps/portal/src/lib/api.ts)
-   `request()` + raw `fetch` sites, `hooks/useHarExtraction.ts`) — plus their tests. **Done when** no
-   CLI/Portal module calls `fetch` directly (bar the documented health/external exceptions) and the
-   existing CLI **and** Portal test suites pass against the wrapper. Depends on 6 (independent of 8 for
-   the refactor itself, but auth header injection lands here).
-   > **Delivered.** **CLI** — [apps/cli/src/utils/api-client.ts](../../apps/cli/src/utils/api-client.ts)
-   > (tests in `api-client.test.ts`): `apiFetch(baseUrl, path, init?)` joins `normalizeUrl(baseUrl)` + path
-   > and calls a cached `ky` instance (`throwHttpErrors: false`, `timeout: false`, `retry: 0`). A `ky`
-   > `beforeRequest` hook injects `Authorization: Bearer` from the pluggable token provider
-   > (default `process.env.SCOPE_TOKEN`) without clobbering caller headers and honouring a per-call
-   > `skipAuth`. `401`→re-auth retry-once and the redacting logging sink live in the facade (the sink
-   > clones the response only when registered, so the default path stays zero-overhead and thin test
-   > mocks don't need `clone()`). Seams for subtasks 8/9: `setTokenProvider`, `setReauthHandler`,
-   > `setApiLogSink`, `resetApiClient`; error shaping via `ApiError` + `readApiError(response)`. **Portal** —
-   > [apps/portal/src/lib/api-client.ts](../../apps/portal/src/lib/api-client.ts) exports a shared `ky`
-   > instance (`apiClient`) with the same config + a `setApiTokenProvider` auth seam; `lib/api.ts`
-   > `request()`/`batchArchive` and `hooks/useHarExtraction.ts` now route through it (`recordServerDate`
-   > stays in the facade). The **only** remaining direct `fetch` calls are: the wrappers themselves, the
-   > CLI's external GitHub Releases poll in `utils/update-check.ts` (its own `token` auth — must never
-   > receive `SCOPE_TOKEN`), and the Portal's root-level `/ready` health probe in `getReadiness` (no auth,
-   > bespoke `503` handling). Because `ky` calls `fetch` with a `Request`, the few tests that asserted
-   > `fetch(urlString, init)` were updated to inspect the `Request`. SecretStore/MSAL tokens (subtask 8)
-   > and `--debug-zip` (subtask 9) plug into these seams without touching call sites. EventSource/SSE log
-   > streams are left on direct `EventSource` pending subtask 13.
-
-8. ⬜ **CLI auth** — `@azure/msal-node`; `scope auth login/logout/status/whoami`;
-   **secure token storage via the Scope `SecretStore` abstraction** (default backend
-   **`cross-keychain`**, `0600` file backend fallback with warning) wired as the MSAL
-   `ICachePlugin` — **no `keytar`**; device-code login UX (clipboard copy via
-   `clipboardy`, browser auto-open via `"$BROWSER"` with `--no-browser` + manual
-   fallback, always print URL+code); **hardcoded IdP config** (no `/auth/config` fetch);
-   `SCOPE_TOKEN` raw-bearer override. **Done when** a logged-in user can submit/list/get
-   only their runs, tokens live in the keychain via `SecretStore`, and CI works via
-   `SCOPE_TOKEN`. Depends on 6, 7.
-
-9. ⬜ **CLI `--debug-zip` support package** — Wire the `apiFetch()` logging sink to a
-   global `--debug-zip <file>` flag that captures redacted request/response logs + client
-   logs for a command, then bundles a shareable, **redacted** `.zip` (request log, CLI
-   version/`about`, OS info, sanitized config). **Done when** running any command with
-   `--debug-zip` produces a zip, and a redaction test asserts no token/refresh-token/
-   service key ever appears in the output. Depends on 7.
-
-10. 🟡 **Portal auth** — `@azure/msal-react`; `MsalProvider`; route guard; token
-    injection in `api.ts`; `AuthContext` with `useMe()`; permission-aware nav/pages;
-    **hardcoded IdP config** (no `/auth/config`). **No dev role switcher.** **Done when**
-    unauthenticated users are redirected to login, runs list is self-scoped, and admin UI
-    is hidden for `user`. Depends on 6.
-
-    > **MVP shipped (authentication only).** Delivered so far: MSAL sign-in
-    > (auth-code + PKCE redirect), `MsalProvider` + `AuthProvider`, a `RequireAuth`
-    > route guard, a header sign-in/sign-out `UserMenu`, and centralized token
-    > acquisition + silent refresh + `401`→re-auth handled entirely inside the
-    > `api-client` interceptor (`apps/portal/src/lib/api-client.ts`, via the
-    > `setApiTokenProvider`/`setReauthHandler` seams). IdP config is build-time
-    > (`VITE_AUTH_*`, see [ENV_VARIABLES.md](../../ENV_VARIABLES.md)) defaulting to
-    > the `entra-local` emulator for local dev.
-    >
-    > **Feature toggle (important).** Portal auth is **on by default (secure by
-    > default)** but can be turned off per environment via **three independent
-    > controls** — one each for local dev, integration, and production:
-    > `VITE_AUTH_ENABLED_LOCAL` (local `vite dev` only, build-time) and
-    > `SCOPE_AUTH_ENABLED` (integration and production, **runtime** container env).
-    > Int/prod are runtime because the Portal image is **built once and promoted**
-    > int→prod, so a build-time flag can't differ between them; the runtime value is
-    > written into `/config.js` by `apps/portal/docker-entrypoint.sh` (same
-    > mechanism as `SCOPE_DOCS_BASE_URL`). When off, the Portal skips MSAL entirely
-    > — no sign-in gate, no account menu, no `Authorization` header. This is a
-    > **rollout gate**, used to keep auth off in an environment **until its API
-    > verifies tokens** (the API does not yet). It is **not** a dev auth-bypass: it
-    > disables the feature wholesale and fabricates **no** principal (contrast the
-    > forbidden `X-Dev-User`/synthetic-user bypass in §8 and the security matrix).
-    > Since the API is the enforcement boundary, disabling a control once the API
-    > verifies tokens simply means the Portal sends no token and the API rejects the
-    > request — it cannot grant access. Resolution precedence: runtime
-    > `authEnabled` (int/prod) wins; else `VITE_AUTH_ENABLED_LOCAL` (local dev); else
-    > default enabled. See [ENV_VARIABLES.md](../../ENV_VARIABLES.md) "Feature
-    > toggle".
-    >
-    > **One-command local dev.** Any `pnpm docker:dev:*` script that starts the
-    > Portal brings up the `entra-local` emulator (compose `auth` profile) over
-    > HTTPS with an mkcert-issued, locally-trusted `localhost` cert
-    > (`scripts/ensure-dev-certs.sh`), and auto-registers the per-worktree Portal
-    > redirect URI via a one-shot `entra-local-init` service. MSAL requires the
-    > authority to be served over HTTPS (it rejects non-HTTPS authorities with
-    > `authority_uri_insecure`), hence the mkcert TLS setup rather than plain HTTP.
-    > The only interactive step is a one-time `mkcert -install` password prompt.
-    > See [ENV_VARIABLES.md](../../ENV_VARIABLES.md) "Local dev setup (entra-local)".
-    >
-    > **Deferred (needs subtask 6 + API-side authn):** because the API does not
-    > verify tokens yet, enforcement is **client-side only** and identity shown in
-    > the UI comes from **MSAL account token claims**, not `GET /api/v1/users/me`
-    > (no `useMe()` yet). Self-scoped runs lists and permission-aware nav / admin-UI
-    > hiding are authorization concerns and are **out of scope for this MVP**.
-
-11. ⬜ **Service-to-service auth** *(co-requisite of subtask 5)* — **Per-service** principal
-    recognition: per-service JWT (verified with the Scope public key) **or**
-    `INTERNAL_API_KEY_<NAME>` (constant-time compare) mapping to a **named, least-privilege**
-    `service` principal (no blanket `scope/*:admin`). **Scope-minted on-behalf-of user
-    token** (asymmetric JWT: private key signs at API, public key verifies downstream;
-    `iss=scope-api`, `aud=scope-internal`, **`exp` ≤ 5 min**, **`jti`** checked against a
-    revocation list, carrying **`sub` only** so downstream **re-resolves** permissions +
-    `disabledAt`). **Migrate the report-generator worker**
-    ([apps/workers/report-generator](../../apps/workers/report-generator)) to send an
-    on-behalf-of token for the run's `ownerId` (carried on the report queue message), and
-    **never** the IdP token. **Done when** the report-generator can read its target run +
-    write insights/reports under ownership scoping, a revoked `jti`/disabled user is
-    rejected mid-`exp`, and anonymous internal traffic is rejected. **Must ship together
-    with subtask 5.** Depends on 3, 5.
-
-12. ⬜ **Security audit log + metrics** — Add the append-only `security_audit` MongoDB
-    collection (+ configurable TTL/prune — the retention window is an **explicit policy
-    decision**, not a silent default) and a `recordSecurityEvent()` helper that writes
-    Mongo **and** increments Prometheus counters, with a **defined failure mode** (a Mongo
-    write failure must not silently drop the event — fail loudly / buffer / alert, and
-    never block the security-sensitive operation's own outcome handling). Expose
-    `GET /metrics` via `prom-client`. Emit events for **login / failed login / logout /
-    user onboarding / key regeneration / role+permission-override changes / user
-    disable / on-behalf-of token minting / per-service-key (internal) usage / cross-user
-    (admin or service) access**. **Done when** the listed events appear in `security_audit`
-    and on `/metrics`, the Mongo-failure path is tested, and a redaction test asserts no
-    secret/token appears in `detail`. Depends on 3, 6, 11.
-
-13. ⬜ **SSE auth** — `fetch`-stream `Authorization`-header injection in Portal/CLI
-    (preferred); **short-lived, narrowly-scoped, never-logged** query-param fallback only;
-    `readScope` check on the parent run. **Done when** log streaming works authenticated
-    and is owner/shared-scoped. Depends on 5, 8, 10.
-
-14. ⬜ **Deployment & config** — Add auth env vars to
-    [ENV_VARIABLES.md](../../ENV_VARIABLES.md) and the API/portal K8s manifests
-    (deployment, configmap), **External
-    Secrets** for the **per-service `INTERNAL_API_KEY_<NAME>`** values + the **internal JWT
-    signing key** (private at API, public at verifiers), and a
-    **`ServiceMonitor`** scraping the API `/metrics` for the security counters.
-    App Registration setup: **multi-tenant** public clients only (CLI device-code +
-    Portal SPA PKCE), exposed `access_as_user` scope, redirect URIs, **tenant filtering
-    at the registration** — **no Entra App Roles**. **Done when** the int overlay
-    deploys with auth enforced (no bypass mode exists). Depends on 3–13.
-
-15. ⬜ **Docs** — Update [AGENTS.md](../../AGENTS.md), the `scope-api` /
-    `scope-cli` skills, [docs/architecture/overview.md](overview.md), and
-    [docs/architecture/app-design.md](app-design.md) to reflect auth/RBAC, the `users`
-    model, `ownerId`, and the `security_audit`/metrics surface. **Done when** docs
-    describe the auth flow and the open questions are resolved/recorded. Depends on
-    all above.
+Migration must be CosmosDB-compatible. In particular, it uses supported compound indexes
+and avoids unsupported partial-index assumptions.
 
 ---
 
-## Implementation Plan (phased)
+## Implementation plan
 
-The work is sequenced so that **authenticating the user and stamping `ownerId` on
-created items comes first**; **enforcing permissions/ownership comes second**. This lets
-us ship identity + provenance early (low risk — nothing is locked down yet), then turn on
-enforcement once data is correctly attributed and the report-generator is ready.
+### Phase 0 — foundations
 
-```
-Auth & RBAC rollout
-│
-├── Phase 0 — Foundations (no behavior change)              [subtasks 1, 2]
-│   ├── shared/auth: AuthProvider, EntraIdAuthProvider, Permission, ROLE_PERMISSIONS
-│   ├── users collection + (idp, idpTenant, idpSubject) / email indexes
-│   └── add ownerId + visibility to requests/runs/catalog (+ indexes); backfill "system" sentinel
-│       └── Gate: migrations up/down clean; shared unit tests green
-│
-├── Phase 1 — Authenticate the user (IDENTITY FIRST)        [subtasks 3, 6, 7, 8, 10]
-│   │   Goal: every human caller is identified; NO enforcement yet. (THE milestone.)
-│   ├── API authn middleware (verify token → req.user)       [3]
-│   │     • always-verify (NO bypass mode); anonymous principal = zero perms
-│   │     • JIT-provision users; bootstrap admins by (idp,tenant,subject)
-│   │     • permissions resolved & attached, but NOT yet enforced on routes
-│   ├── GET /users/me (auth config is hardcoded, no endpoint)  [6, partial]
-│   ├── CLI: apiFetch() refactor + `scope auth` login/SecretStore [7, 8]
-│   └── Portal: MsalProvider + login + token injection        [10]
-│       └── Gate: logged-in identity flows end-to-end on CLI + Portal;
-│                 app still behaves as today for everyone
-│
-├── Phase 2 — Stamp ownerId on created items (PROVENANCE)   [subtask 5a]
-│   │   Goal: every NEW item records its owner + visibility; still no read/write blocking.
-│   ├── POST /api/v1/requests sets ownerId = req.user.id (NEVER from body) + visibility
-│   ├── retries/new attempts inherit ownerId onto runs
-│   └── (reads/lists remain unscoped — admins & users see all, as today)
-│       └── Gate: new items carry a real Scope User ID + visibility; dashboards show owner
-│
-│   ── PRIORITY LINE: everything above can ship before any lockdown ──
-│
-├── Phase 3 — Enforce ownership & service auth (LOCKDOWN)   [subtasks 5b, 11]
-│   │   Goal: own+shared visibility enforced; report-generator keeps working.
-│   ├── apply readScope/writeScope (+ deep links) to reads/lists/mutations/derived [5b]
-│   ├── per-service auth + on-behalf-of internal token (sub-only, ≤5m, jti)        [11]
-│   │     • report-generator migrated (MUST land with 5b)
-│   └── SSE access check                                                          [13]
-│       └── Gate: foreign private → 404; write on shared-not-owned → 403; reports green
-│
-├── Phase 4 — Enforce permissions (RBAC)                    [subtasks 4, 6b]
-│   ├── apiRoute() auth/permissions guards + OpenAPI security  [4]
-│   ├── admin user/role/permission endpoints                   [6b]
-│   └── Portal/CLI permission-aware UI gating
-│       └── Gate: admin-only routes 403 for user; role changes take effect
-│
-└── Phase 5 — Observability & hardening                     [subtasks 12, 9, 14, 15]
-    ├── security_audit + Prometheus (/metrics)                 [12]
-    ├── CLI --debug-zip support package                        [9]
-    ├── deployment/config (secrets, ServiceMonitor, app regs)  [14]
-    └── docs                                                   [15]
-```
+1. **Auth abstraction in shared.** Add `AuthProvider`, Entra verification, principals,
+   platform/project role types, permission resolver, and tests for token verification,
+   wildcard rules, and scope separation.
+2. **Users, projects, and memberships migration.** Add user platform role,
+   `project_memberships`, `personal_access_tokens`, `shared_links`, indexes, and the
+   project backfill. Provision the dedicated Key Vault PAT hashing key. Do not add
+   `ownerId` or `visibility`.
 
-**Why this order**
-- **Phases 0–2 are non-breaking**: they add identity and `ownerId` provenance without
-  denying anyone access, so they can merge and run in production safely and incrementally.
-- **The hard cutover is Phase 3** (ownership enforcement + service-to-service auth shipped
-  together). Doing identity + provenance first means that by the time we flip enforcement
-  on, runs are already correctly attributed and the report-generator path is ready —
-  avoiding `404`s and mis-scoped data.
-- **Permission enforcement (Phase 4) is deliberately second**, per the priority: identity
-  and ownership are the must-haves; fine-grained RBAC builds on the already-attached
-  `permissions`.
+### Phase 1 — authentication
 
-> Subtask 5 is split for sequencing: **5a** (stamp `ownerId` + `visibility` on create,
-> Phase 2) and **5b** (apply `readScope`/`writeScope` + deep links to reads/writes,
-> Phase 3).
+3. **API authentication middleware.** Verify real tokens, JIT-provision users, bootstrap
+   platform admins from identity tuples, enforce disabled users, and attach principals.
+   Add fixed-format PAT lookup, keyed hashing, constant-time comparison, expiration and
+   revocation checks, and live role/membership resolution.
+4. **User and project-RBAC APIs.** Implement `/users/me`, platform-user administration,
+   project membership APIs, and self-service PAT list/create/revoke APIs with audited
+   lifecycle changes and secret-redaction tests.
+5. **CLI authentication and automation.** Add device-code flow, `SecretStore`, login
+   commands, PAT create/list/delete commands, `SCOPE_TOKEN` PAT validation, and project
+   selection.
+6. **Portal authentication and Profile completion.** Replace claim-derived UI identity
+   with `/users/me`; add the self-service Personal access tokens subsection with
+   one-time secret disclosure; remove the Portal rollout gate before production API
+   enforcement.
+
+### Phase 2 — authorization enforcement
+
+7. **Route guards and OpenAPI.** Add platform/project authorization fields to
+   `apiRoute()`, 401/403 documentation, and route-level tests.
+8. **Project-resource scoping.** Require membership for every project-scoped list,
+   read, write, delete, analytics, and derived-data endpoint. Apply the user/admin
+   resource matrix exactly.
+9. **Platform-resource scoping.** Protect feature flags, agents, models, and secrets
+   with platform-admin-only guards for every method; no read-only role exists.
+10. **Service-to-service migration.** Move report generation to project-aware,
+    on-behalf-of tokens and ship it with project-resource enforcement.
+11. **Sharing links and SSE authorization.** Add authenticated, read-only run/report
+    sharing links, then move log streaming to authenticated fetch streams and parent
+    project checks.
+
+### Phase 3 — hardening and operations
+
+12. **Security audit and metrics.** Add `security_audit`, counters, PAT lifecycle and
+    authentication events, redaction tests, and explicit retention.
+13. **CLI support package.** Add `--debug-zip` using the existing redacting API client
+    logging sink.
+14. **Deployment.** Configure Entra applications, Key Vault/External Secrets,
+    service-specific credentials, and metrics scraping.
+15. **Documentation.** Update architecture, API/CLI skills, environment variables, and
+    operational runbooks.
 
 ---
 
-## Acceptance Scenarios
+## Acceptance scenarios
 
-### Setup
-
-- Start infra: `pnpm docker:up:infra`; run migrations: `pnpm migrate:up`.
-- Register an Entra **API app** (expose `access_as_user`) and a **public client**
-  (device-code + SPA redirect URIs), both **multi-tenant**. **No App Roles** —
-  roles/permissions are managed in Scope. Tenant filtering (if any) is set on the
-  registration.
-- Env: `AUTH_AUTHORITY`, `AUTH_API_CLIENT_ID`, `AUTH_CLIENT_ID`, `AUTH_SCOPES`,
-  `AUTH_BOOTSTRAP_ADMINS=entra:<tid>/<oid>`, `AUTH_BOOTSTRAP_TENANTS=<tid>`,
-  `INTERNAL_API_KEY_REPORTGEN=<secret>`. (No `AUTH_ENABLED` — there is no bypass mode.)
-  The CLI/Portal carry the **hardcoded** IdP config (no `/auth/config`).
-- Two test identities: `admin@…` (its `(idp,tenant,subject)` in the bootstrap list) and
-  `user@…` (not).
-
-### Scenarios
-
-| # | Scenario | Steps | Expected Result |
-|---|----------|-------|-----------------|
-| 1 | Unauthenticated request rejected | `curl /api/v1/requests` (no header) | `401` (anonymous lacks the permission) |
-| 2 | Public endpoints open | `curl /health`, `/about` | `200`, no token needed (there is **no** `/auth/config`) |
-| 3 | CLI login (device code) | `scope auth login` → complete in browser → `scope auth whoami` | Code copied to clipboard, browser opens, URL+code also printed; after login shows identity + role |
-| 4 | User sees only own runs | As `user`, submit a run; as `admin`, submit another; `scope run list` as `user` | Only the user's own run is listed |
-| 5 | User cannot access foreign run | As `user`, `scope run get -i <admin-run-id>` | `404` (not `403`) |
-| 6 | Admin sees all runs | `scope run list` as `admin` | Both runs listed |
-| 7 | Permission-gated route blocked | As `user`, `PATCH /api/v1/users/<id>/role` (needs `scope/user:admin`) | `403` |
-| 8 | Admin manages roles | As `admin`, promote `user`→`admin`; user re-requests | New permissions effective on next request |
-| 9 | Portal login + scoping | Open Portal as `user` | Redirected to Entra; after login, Runs list shows only own runs; admin nav hidden |
-| 10 | Portal admin UI | Open Portal as `admin` | Tokens/Accounts/Admin/Users pages visible; all runs listed |
-| 11 | Shared vs private visibility | As `user`, create one `private` and one `shared` criterion; as another `user`, list/get/edit both | Both visible & usable; **only the owner** can edit; editing the shared one as non-owner → `403`; the private one is invisible to the other user (`404` on get) |
-| 12 | Per-service key | report-generator presents `X-Internal-Key: $INTERNAL_API_KEY_REPORTGEN` + `X-Service-Name` | Authorized as a **narrow** service principal (only its granted perms; **not** `scope/*:admin`); wrong/absent key rejected; a different service's key can't act as report-gen |
-| 13 | Owner-scoped logs | As `user`, stream logs of own run vs foreign private run | Own run streams; foreign private run `404` |
-| 14 | Token refresh | Let CLI access token expire, run any command | Silent refresh succeeds; no re-login prompt |
-| 15 | Expired/tampered token | Send a malformed/expired JWT | `401` |
-| 16 | Permission override | As `admin`, add `permissionsRemove: ["scope/run:delete"]` to a user | That user can no longer delete runs (`403`) without a role change; the override change is audited |
-| 17 | Keychain storage | After `scope auth login`, inspect the OS keychain; no plaintext token file when a keyring exists | Token present via `SecretStore`/`cross-keychain` (service `scope-cli`); `--no-browser` skips auto-open |
-| 18 | Debug-zip redaction | `scope run get -i <id> --debug-zip /tmp/report.zip`; unzip and grep for token/key strings | Zip contains request log + env info; **no** token/refresh-token/service key present |
-| 19 | Audit log written | Onboard a new user, logout, regenerate a service key, mint an on-behalf-of token | `security_audit` has `user_onboarded`, `login`, `logout`, `key_regenerated`, `token_minted` rows; no secrets in `detail` |
-| 20 | Audit metrics exposed | `curl /metrics` after the above | `scope_auth_logins_total`, `scope_auth_onboarded_total`, `scope_auth_key_regenerations_total` counters incremented |
-| 21 | Read-only deep link | Owner shares a deep link to a `private` run; recipient opens it, then attempts an edit | Recipient can **view** the run read-only; any write/delete → `403`; revoking the link → subsequent view `404` |
-| 22 | Revocation takes effect | Disable a user (or revoke an on-behalf-of `jti`) while a token is still within `exp` | Next request → `403`/`401` (no waiting for `exp`); covers both the IdP and internal-JWT paths |
-| 23 | No bypass mode | Set any env (`AUTH_ENABLED`, `DEV_USER`) and send `X-Dev-User` | Ignored entirely; request is still anonymous → `401`; no synthetic principal is ever created |
-
-UI checks (Portal): login redirect, loading/empty/error states on Runs list, admin-only
-nav hidden for `user`, role badge in header. Responsive at 375 / 768 / 1280 px.
-
----
-
-## Constraints
-
-- **CosmosDB-compatible Mongo**: unique compound index `(idp, idpTenant, idpSubject)` and
-  the new `ownerId`/`visibility` indexes must use features the Cosmos Mongo API supports
-  (avoid partial/TTL index features not supported). Verify against existing migration patterns.
-- **No secrets in tokens at rest**: CLI tokens in the OS keychain (`0600` file only as
-  keyring-less fallback); never log tokens; never put tokens in URLs except the
-  documented SSE fallback; the `--debug-zip` package is always redaction-tested.
-- **`SecretStore` / `cross-keychain` dependency**: the CLI stores tokens behind a
-  Scope-owned `SecretStore` interface backed by `cross-keychain` (replacing the
-  unmaintained `keytar`). On Linux it still relies on a Secret Service (`libsecret`),
-  so the CLI must **degrade gracefully** (file fallback + warning) when unavailable, and
-  CI/packaging must account for the native path (or prefer `SCOPE_TOKEN` in CI to avoid
-  the keyring entirely). Keeping the wrapper means the backing library can change later
-  without touching call sites.
-- **OpenAPI parity**: every route's `auth`/`permissions` must surface in the generated
-  spec; the snapshot test must be updated.
-- **CLI ↔ Portal parity** (AGENTS.md): any auth/role capability in the Portal must
-  exist in the CLI.
-- **No bypass / dev mode**: there is **no** env-toggled auth bypass. No `AUTH_ENABLED`,
-  `DEV_USER`, or `X-Dev-User` synthetic principal exists in any environment. Local
-  development authenticates against a real IdP; a future **Entra ID local emulator**
-  (separate project) plugs in purely as an IdP configuration, with no code path that
-  fabricates a principal.
-- **JWKS resilience**: cache keys, handle rotation, fail closed on verification.
-- **No IdP-side authorization**: roles/permissions are never read from IdP claims.
-- **IdP token terminates at the API**: the external IdP access token and all IdP
-  verification config (authority, audience, JWKS, tenant) never cross the API boundary;
-  downstream identity is carried only by a short-lived Scope-minted internal token.
-- **Security audit is mandatory and secret-free**: login/logout/onboarding,
-  key-regeneration, **token minting (on-behalf-of)**, **service-key usage for cross-user
-  reads**, and **permission overrides** are written to the append-only `security_audit`
-  collection **and** Prometheus; the `/metrics` endpoint is the repo's first metrics
-  surface (scraped cluster-internally); audit `detail` is redaction-tested. A failed
-  Mongo audit write must **fail the security-sensitive operation closed** (not silently
-  drop the record); the retention TTL is an explicit policy decision, not an incidental
-  default.
-- **Performance**: token verification per request must be local (cached JWKS), no
-  network round-trip to the IdP on the hot path; user lookup is a single indexed
-  Mongo read (cacheable per request).
+| # | Scenario | Expected result |
+|---|---|---|
+| 1 | Anonymous caller requests a protected route | `401`; anonymous receives no permissions. |
+| 2 | Any authenticated account creates a project | Project is created and the creator is its project admin. |
+| 3 | A user is a member of projects A and B and an admin of C, D, and E | `/users/me` reports all five memberships and the correct independent role for each. |
+| 4 | Project user accesses runs, statistics, reports, insights, prompts, criteria, features, or codebases in their project | All supported read/write/delete methods succeed. |
+| 5 | Project user accesses an MCP server or extension in their project | `403`. |
+| 6 | Project admin accesses MCP servers, extensions, profiles, or project membership settings in their project | Supported methods succeed. |
+| 7 | Caller accesses project content without membership or a sharing link | `404`, including logs, snapshots, reports, analytics, and other derived endpoints. |
+| 8 | Platform admin lists projects and changes RBAC on a project they do not belong to | Succeeds; they can add themselves as project admin. |
+| 9 | Platform admin accesses a run in a project they have not joined | `404`; platform role alone is insufficient. |
+| 10 | Platform admin accesses feature flags, agents, models, or secrets | All supported methods succeed. |
+| 11 | Non-platform-admin accesses feature flags, agents, models, or secrets | `403` for list, read, create, update, and delete; no read-only exception exists. |
+| 12 | Project admin attempts to delete their project | `403`; a platform admin can delete it. |
+| 13 | Report generator handles a report for a project where the initiating user has membership | It can read/write only through an on-behalf-of token that resolves that user's current membership. |
+| 14 | User is disabled or loses project membership while an internal token remains unexpired | The next request is rejected; the service re-resolves liveness and membership. |
+| 15 | Expired, tampered, wrong-audience, or wrong-issuer access token | `401`. |
+| 16 | Role or membership change | Takes effect on the next request and writes a redacted audit event. |
+| 17 | A project member shares a run or report link with an authenticated non-member | The recipient can view only the exact linked resource read-only; it is absent from lists and grants no project membership. |
+| 18 | A link recipient updates/deletes a linked resource or reads an unrelated resource | `403` for an attempted write and `404` for unrelated or unlinked project content. |
+| 19 | The creator or project admin revokes a sharing link | The recipient's subsequent request returns `404`, even before the original expiry. |
+| 20 | A user creates a PAT with a valid short note and expiration | The token is returned once; its list entry contains only metadata and Scope retains only its hash. |
+| 21 | A user presents their PAT after a platform-role or project-membership change | The next request has exactly the user's newly effective access; it cannot retain the prior access or gain any new independent privilege. |
+| 22 | A PAT is expired, revoked, malformed, unknown, or belongs to a disabled user | The authentication-failure response is indistinguishable `401`; no secret appears in that response, audit event, log, metric, or diagnostic. |
+| 23 | A user or platform administrator lists another user's PATs or requests a previously created plaintext value | The API has no such route or value to return; only the issuing user can list/revoke their own metadata. |
+| 24 | CLI uses `SCOPE_TOKEN` containing a Scope PAT | CLI uses it as the bearer credential without saving or displaying it; an existing Entra bearer token remains compatible through normal IdP verification. |
+| 25 | User creates a PAT from the Portal Profile page | The one-time disclosure can be copied then is cleared on close/navigation; reloads and token deletion never reveal it. |
 
 ---
 
 ## Decisions
 
-| Decision | Options Considered | Choice | Rationale |
-|----------|-------------------|--------|-----------|
-| Where authorization lives | (a) Entra App Roles; (b) Scope DB; (c) Hybrid | **(b) Scope DB only** | Per feedback: **no Entra App Roles**. Portable across IdPs; IdP proves identity only. |
-| Authorization model | Hardcoded role checks vs permission bundles | **Permissions (`scope/run:write`) as the atomic unit; roles are named bundles** | Two roles today, but future custom roles/permissions need **no schema or route change**. |
-| Unauthenticated callers | Reject early vs first-class `anonymous` principal | **`anonymous` = zero-permission guard input only** | The guard *mechanism* treats it uniformly, but it grants **nothing**; a future public/demo mode is a separate, explicit decision over public-only data. Anonymous is never a route-author convenience. |
-| Token verification lib (API) | MSAL-node, `jsonwebtoken`+jwks-rsa, `jose` | **`jose`** | Lightweight, modern, standards-based JWKS verification; no MSAL server dep. |
-| IdP abstraction boundary | Verify-only vs full OAuth orchestration in API | **Verify-only `AuthProvider`** | API only validates bearer tokens; clients own the interactive flow. Simplest, most portable. |
-| Client config delivery | Hardcode per build vs API-served | **Hardcoded in CLI + Portal** | One IdP for now; a config endpoint is unauthenticated attack surface and an indirection we don't need yet. Revisit if/when multiple IdP targets exist. |
-| Ownership leak on foreign resource | `403` vs `404` | **`404`** | Avoids leaking existence of other users' runs. |
-| New-user default role | `user` vs `admin` | **`user`** (admins via bootstrap/admin API) | Least privilege. |
-| `ownerId` identity | IdP subject (`oid`/`sub`) vs Scope-owned `users._id` | **Scope User ID (`users._id`)** | Survives IdP migration; keeps run docs IdP-agnostic; `req.user.id` is this id. |
-| Ownership & visibility model | Per-user silos vs owner + shareable | **Two visibility levels: `private` (owner-only) and `shared` (globally discoverable + usable, read-only unless owner)**; `ownerId` derived from `req.user.id` on create (**never** from the request body); deep links grant read-only access without ownership | Matches "find/edit what you own; read what's shared with you"; create-time owner derivation removes a spoofing vector. |
-| Future sharing/groups | Generalize `ownerId` now vs reserve fields + single chokepoint | **`ownerId` + `visibility` in v1; reserve `ownerType`/`groupId`/`sharedWith`; scope via one `readScope`/`writeScope` resolver** | Additive later (groups, per-user shares) with no query rewrites or data re-modelling. |
-| Backfill ownerId for existing runs | null/"system" vs assign to an admin | **`ownerId = "system"`** (a reserved Scope User ID; admin-visible; configurable via `AUTH_LEGACY_OWNER_ID`) **for legacy data only** | Admins already see everything; avoids mis-attributing legacy data to a real user. **The middleware must never set `req.user.id = "system"` for a live request** — no default, missing-user fallback, or bypass may produce it (hard `401` instead). |
-| Service auth | mTLS, Entra client-credentials, shared key | **Per-service identities** (Question E): each service gets its own credential — `INTERNAL_API_KEY_<NAME>` or a per-service signed JWT — and a **narrow, least-privilege** permission set (**never** blanket `scope/*:admin`). Entra client-credentials **not required**. | No single global key whose leak grants everything; per-service perms + per-service rotation; works in any self-hosted/open-source env. |
-| Downstream user identity | Forward IdP token vs Scope-minted internal token | **Scope-minted internal JWT (`iss=scope-api`, asymmetric, public-key verified); IdP token never leaves the API.** To keep authorization from going stale, the token carries **`sub` only and permissions are re-resolved downstream** (preferred), or — if perms are embedded — `exp ≤ 5min` **and** a `jti` revocation list, **both** required. `disabledAt`/revocation is re-checked on the internal-JWT path, not just the IdP path. | Downstream stays IdP-agnostic; revocation (disable user, demote admin, drop a permission) takes effect within minutes, not at token `exp`. |
-| Internal-JWT staleness | Long-lived perms-in-token vs re-resolve / tight exp + jti | **Re-resolve from `sub` downstream (preferred); else `exp ≤ 5min` + `jti` denylist** | Embedding permissions makes revocation impossible until `exp`; a 5-minute ceiling plus a denylist makes "short exp" concrete and enforceable. |
-| Entra tenancy | Single-tenant vs multi-tenant | **Multi-tenant** (Question D): accept configured tenants, no `tid` pinning in business logic; tenant filtering at the App Registration + `AUTH_BOOTSTRAP_TENANTS` allowlist for promotion | App-registration-level control; code stays tenant-agnostic. Because `oid` is unique only **within** a tenant (and guests carry their home-tenant `oid`), the unique identity index is **`(idp, idpTenant, idpSubject)`** — `tid` is part of the key. |
-| Bootstrap-admin matching | Match on email vs identity tuple | **Match on `(idp, idpTenant, idpSubject)`, require `email_verified`, restrict to `AUTH_BOOTSTRAP_TENANTS`; promotion is promote-only (removal from the list does not auto-demote)** | Entra `email`/`preferred_username` is mutable and not guaranteed verified; matching on identity + verified email + tenant allowlist closes the auto-promote-by-email-collision hole and the silent-demote-by-ConfigMap risk. |
-| Security audit | None vs log-only vs Mongo + metrics | **Append-only `security_audit` in MongoDB + Prometheus counters** (Question F) for login/logout/onboarding, key-regeneration, **token minting**, **service-key cross-user reads**, and **permission overrides** | Durable forensic record + alerting; single `recordSecurityEvent()` helper; a failed audit write **fails the operation closed**; retention TTL is an explicit policy choice; no secrets in audit. |
-| Secret storage | Env-only vs Key Vault + ESO | **Key Vault → External Secrets** for per-service `INTERNAL_API_KEY_<NAME>`/client secret; JWKS fetched (not stored); **CLI tokens via a Scope-owned `SecretStore` backed by `cross-keychain`** (`0600` fallback) | Matches existing `mongo-secrets`/`redis-secrets` pattern; public keys are not secrets; the `SecretStore` wrapper replaces unmaintained `keytar` and isolates the backing library. |
-| CLI login UX | Print URL+code only vs assisted | **Clipboard copy + browser auto-open, manual fallback always shown** | Fast happy path, still works headless/SSH. |
-| CLI debuggability | Ad-hoc logging vs structured sink + `--debug-zip` | **Centralized `apiFetch()` logging sink feeding a redacted `--debug-zip` support package** | Repeatable, shareable bug reports without leaking secrets. |
-| Dev bypass | Env-toggled synthetic principal vs none | **None — removed entirely** | No env (`AUTH_ENABLED`/`DEV_USER`) or header (`X-Dev-User`) may fabricate a principal; it's a standing privilege-escalation risk. Local dev uses a real IdP; a future **Entra ID local emulator** (separate project) plugs in as an IdP config only. |
-| Role typing | One `Role` union vs split persisted/runtime | **`UserRole = "user" \| "admin"` (persisted) vs `PrincipalRole = UserRole \| "anonymous" \| "service"` (request)** | Avoids the typing conflict/unsafe casts from putting `anonymous`/`service` on the persisted user; each layer uses the correct type. |
-| Wildcard permission semantics | Implicit vs specified + tested | **`*` allowed only in the resource position; `admin` subsumes read/write/delete on the *same* resource; no cross-resource implication** | Wildcard authz is a classic bypass source; `hasPermission` is unit-tested for negative cases (e.g. `scope/run:write` is **not** satisfied by `scope/criteria:admin` or `scope/run:read`). |
-| SCOPE_TOKEN / PAT | Block milestone on PAT vs raw-bearer now | **`SCOPE_TOKEN` is a raw bearer escape hatch now; Scope-issued PAT/API tokens are future and do not block the user-auth milestone** | The primary milestone is interactive user auth across Portal/API/CLI; PATs for CI/automation are valuable but separable. |
-| SSE auth | Query param vs fetch-stream | **fetch-stream primary, query-param fallback** | Headers > tokens-in-URL; fallback documented and unlogged. |
+| Decision | Choice | Rationale |
+|---|---|---|
+| Authorization location | Scope database, not Entra roles/groups | Keeps authorization portable across IdPs and under Scope administration. |
+| Primary access boundary | Project membership | Shared work is authorized at the project level; documents are not individually owned. |
+| Platform role | One `admin` platform role | Global administration is intentionally narrow and separate from project access. |
+| Project roles | `user` and `admin`, many memberships per account | Models an account's different responsibilities across projects. |
+| Platform admin/project relationship | No implicit project-content access | Limits global-admin blast radius while permitting RBAC recovery by self-assignment. |
+| Global platform resources | Feature flags, agents, models, secrets require platform admin for every method | These sensitive global resources have no read-only role. |
+| Project deletion | Platform admin only | Prevents accidental or local deletion of a project container. |
+| Document ownership/sharing | Omit ownership, visibility, and generic ACLs; retain authenticated read-only links for runs and reports only | Project membership is the normal collaboration model; the narrow link capability supports intentional external review without granting a project role. |
+| Service access | Per-service identity plus short-lived on-behalf-of user token | Keeps services least-privilege and preserves project authorization downstream. |
+| CLI/API automation | Expiring, revocable Scope PATs that are global and user-equivalent | Allows non-interactive use while every request retains the issuer's live platform role and project memberships. |
+| PAT privilege model | No scopes, project binding, delegation, or independent roles in v1 | Prevents a token from becoming a copied, stale, or elevated authorization grant. |
+| PAT storage and disclosure | Dedicated keyed hash at rest; plaintext returned only at creation | Limits a database compromise and avoids recovery, logging, or accidental redisclosure of the bearer secret. |
+| Bootstrap admin identity | Verified `(idp, tenant, subject)` tuple | Email is mutable and unsuitable for authorization. |
+| Anonymous access | No permissions | Public/demo mode requires a separate explicit design. |
 
 ---
 
-## Open Questions
+## Open questions
 
-These must be resolved with stakeholders. Provisional recommendations are given but are
-**not** final.
-
-### A. Permission matrix — what can a `user` vs `admin` do?
-
-The biggest open question. The **ownership model now applies beyond runs**: criteria,
-profiles, MCP servers, and other user-created data are **owned** and carry a
-`visibility` (`private`/`shared`), so a `user` can create and edit their own and read
-others' `shared` ones (§5). What remains open is which resources are **admin-curated
-catalog** (system-managed, not user-creatable) vs **user-owned**. The answer defines the
-contents of `ROLE_PERMISSIONS` (which permissions each role's bundle contains). Proposed
-default (to be confirmed):
-
-| Resource | `user` permissions | `admin` permissions | Notes / question |
-|----------|--------|---------|------------------|
-| Runs (own) | `scope/run:read`, `:write`, `:delete` (own-scoped) | `scope/run:admin` (all runs) | Confirm a user may delete/retry their own runs. |
-| Runs (shared) | `:read` (read-only, not owner) | full | Shared runs are discoverable read-only via §5. |
-| Criteria | `:read`, `:write` (own; read shared) | `:admin` | **User-owned** (private/shared), per §5. |
-| Scenarios / task-prompts | `:read`, `:write` (own; read shared) | `:admin` | User-owned or admin catalog? Provisional: user-owned. |
-| Personas | `:read`, `:write` (own; read shared) | `:admin` | User-owned. |
-| Profiles | `:read`, `:write` (own; read shared) | `:admin` | **User-owned** personal/shared profiles, per §5. |
-| Agents / Models | `:read` | `:write` | Likely shared/admin-managed catalog. |
-| MCP servers | `:read`, `:write` (own; read shared) | `:admin` | **User-owned** (private/shared), per §5. |
-| Skills / Extensions | `:read` | `:write` | Admin catalog? Confirm. |
-| Reports | own (derived from own runs) | all | How are report templates scoped? |
-| Report templates | `:read` | `:write` | Shared? |
-| Insights | own-scoped (derived) | all | Insights inherit the parent run's owner/visibility. |
-| Prompt-features | `:read` | `:write` | Confirm. |
-| Feature flags | — | `:write` | Admin-only. |
-| Tokens (Token Manager) | — | full | **Admin-only** (provider/agent secrets — *not* a user system). Confirm no user access. |
-| Accounts (Token Manager) | — | full | Admin-only. Confirm. |
-| Users / roles | self (`me`) | `scope/user:admin` | Confirm self-service profile edits. |
-
-**Question A1**: Which resources are **admin-curated catalog** (system-managed, not
-user-creatable) vs **user-owned** (private/shared, per §5)? Provisional: criteria,
-profiles, MCP servers, scenarios, and personas are **user-owned**; agents/models,
-skills/extensions, and report templates remain **admin-curated** read-only catalog.
-
-**Question A2**: For user-owned types, is the default `private` (recommended) — and is
-there any type that should be forced `shared` (e.g. a globally useful MCP server an admin
-promotes)?
-
-### B. Sharing, groups & projects
-
-**Question B**: v1 **already ships** two-level visibility (`private`/`shared`) and
-read-only **deep links** (§5). What remains future is **groups/projects** and
-**per-user/per-group ACLs**. §5 ("Future-proofing") reserves the data shape and routes
-all scoping through one `readScope`/`writeScope` chokepoint so this is additive. Decisions
-to settle **before** scheduling that work:
-
-- **B1 — Unit of sharing**: beyond `shared` (global read-only) and deep links, do we add
-  per-**run** ACLs vs **project/group** containers that own runs (membership grants
-  access) vs both? Provisional: groups own runs (coarse-grained) **plus** optional per-run
-  ACL (fine-grained).
-- **B2 — Group permissions**: a single role per group (member/admin) vs full
-  per-member permission sets? Provisional: reuse the same permission bundles, scoped to
-  a group (`scope/group:*`).
-- **B3 — Default visibility**: confirmed `private` for v1 (owner chooses `shared` at
-  create time). Groups, when added, may introduce a third "group-visible" level.
-- **B4 — Group/project identity**: confirm groups/projects are **Scope-owned** records
-  keyed on `users._id` (not IdP groups). Provisional: yes; any IdP group claims are
-  advisory only.
-- **B5 — `ownerId` stays singular**: keep one `ownerId` (Scope User ID) and express
-  groups via `ownerType`/`groupId`/`sharedWith`, rather than overloading `ownerId`.
-  Provisional: yes.
-
-v1 implements `private`/`shared` + deep links and reserves the remaining optional fields;
-**none** of the group/ACL machinery ships yet.
-
-### C. Admin bootstrap — **decided**
-
-**Decision** *(confirmed)*: `AUTH_BOOTSTRAP_ADMINS` is the **sole** bootstrap mechanism
-for seeding the first admin, but it is matched on the **identity tuple
-`(idp, idpTenant, idpSubject)`** — **not** on email, which is mutable and not guaranteed
-verified. The matched login must also have `email_verified = true` and originate from a
-tenant in `AUTH_BOOTSTRAP_TENANTS`. Bootstrap is **promote-only**: removing an entry does
-**not** auto-demote an existing admin (prevents a misconfigured ConfigMap from silently
-revoking access). We do **not** use Entra App Roles. All later role/permission changes go
-through the admin user-management endpoints (`scope/user:admin`).
-
-### D. Multi-tenant Entra — **decided**
-
-**Decision**: The deployment is **multi-tenant Entra**. The `EntraIdAuthProvider`
-validates tokens against the **common/organizations** issuer set and accepts any tenant —
-**Scope does not pin or filter on `tid`** at the application layer. Any tenant
-restriction (which orgs may sign in) is enforced at the **Entra App Registration** level
-(supported account types / Conditional Access / tenant allowlist on the app), not in
-code.
-
-Implications:
-- Issuer validation must accept the multi-tenant issuer pattern (per-tenant `iss`
-  containing the caller's `tid`); `aud` is still pinned to `AUTH_API_CLIENT_ID`.
-- JWKS is resolved via OIDC discovery for the token's tenant (or the common metadata
-  endpoint); the key cache is keyed by `(tenant, kid)`.
-- Identity stays unique via **`(idp, idpTenant, idpSubject)`** where `idpSubject = oid`
-  and `idpTenant = tid`. The Entra `oid` is **stable per user per tenant** — it is **not**
-  globally unique, and guest/B2B users carry their **home-tenant** `oid`. Including `tid`
-  in the key is therefore required: two different users in two tenants (or the same guest
-  seen through two tenants) must not collide. The unique index is the three-part tuple.
-- No code change is needed to add/remove tenants — it's an App Registration setting (plus
-  the `AUTH_BOOTSTRAP_TENANTS` allowlist for admin promotion).
-
-### E. Service-to-service mechanism — **decided**
-
-**Decision**: Service-to-service auth uses **per-service identities**, not one global
-key. Each service principal gets its **own** credential — `INTERNAL_API_KEY_<NAME>` or a
-per-service signed JWT — and a **narrow, least-privilege** permission set (**never**
-blanket `scope/*:admin`). The optional Entra client-credentials path is **not required**.
-
-For acting **on behalf of a user**, Scope mints an internal **JWT** signed by the API and
-verified downstream with a **shared public key** (asymmetric). To keep authorization from
-going stale:
-- **Preferred**: the token carries **`sub` only** and downstream **re-resolves** the
-  user's role/permissions (and `disabledAt`) from the database on each request.
-- **If permissions are embedded** instead: `exp ≤ 5min` **and** a **`jti` revocation
-  list** are **both** mandatory, and `disabledAt`/revocation is checked on the
-  internal-JWT path — not only the IdP path.
-
-Details:
-- **Asymmetric by default**: the API holds the **private** signing key; downstream
-  services hold only the **public** key to verify — no shared *secret* is distributed to
-  verifiers. (`INTERNAL_JWT_SECRET` HMAC remains a simpler single-deployment option, but
-  the public/private split is the chosen design.)
-- The on-behalf-of token contains `sub = users._id`, `iss = "scope-api"`,
-  `aud = "scope-internal"`, `exp ≤ 5min`, `jti` (and, only in the embedded variant,
-  `role`/`permissions`).
-- The per-service `INTERNAL_API_KEY_<NAME>` header path is for **system principal** calls
-  (a service acting as itself, not on behalf of a user), each scoped to its own narrow
-  permissions.
-
-This removes the Entra client-credentials option from scope; §6, the secrets table, and
-the decisions table reflect per-service identities + the public/private internal-JWT
-approach.
-
-### F. Security audit log — **decided**
-
-**Decision**: Scope keeps a **security audit log**, **persisted in MongoDB** and
-**emitted to Prometheus** as metrics. Both sinks are written for every security event;
-Mongo is the durable record, Prometheus is for alerting/dashboards.
-
-**Events (v1, minimum)** — emitted at minimum for:
-- **Login** (successful token verification → session established) and **failed login**
-  (token rejected).
-- **Logout** (explicit `scope auth logout` / Portal sign-out).
-- **User onboarding** (JIT provisioning of a new `users` doc on first login).
-- **Key regeneration** — rotation/regeneration of any `INTERNAL_API_KEY_<NAME>`, the
-  internal JWT signing key, and (admin-initiated) any Token-Manager provider key the
-  audit surface covers.
-- **Token minting** — every on-behalf-of internal JWT mint (a privilege-escalation
-  operation; record `actorUserId`, target `sub`, `jti`, `exp`).
-- **Service-key usage for cross-user reads** — a service principal reading another user's
-  data (the deferred cross-user path) is audited each time.
-- **Permission overrides** — `permissionsAdd`/`permissionsRemove` writes and role changes.
-- **User disable/enable**.
-
-**MongoDB sink** — a new append-only `security_audit` collection:
-
-```ts
-// security_audit collection (append-only; never updated/deleted by app code)
-{
-  _id: string,                       // uuid
-  ts: Date,
-  event: "login" | "login_failed" | "logout" | "user_onboarded"
-       | "key_regenerated" | "token_minted" | "permission_changed" | "role_changed"
-       | "user_disabled" | "cross_user_access",
-  actorUserId?: string,              // Scope User ID (users._id) — omitted for anonymous/failed
-  actorIdp?: string,                 // "entra"
-  actorIdpSubject?: string,          // for forensic correlation only
-  targetUserId?: string,             // affected user (onboarding, role change, disable)
-  resource?: string,                 // e.g. "run:<id>", "key:internal-jwt"
-  ip?: string,
-  userAgent?: string,
-  outcome: "success" | "failure",
-  detail?: Record<string, unknown>,  // structured, **no secrets/tokens** (redacted)
-}
-```
-
-Retention is an **explicit policy decision**, not an incidental default: set the TTL index
-on `ts` deliberately (e.g. 365 days) with sign-off from whoever owns the retention policy
-— verify CosmosDB TTL support, else a scheduled prune job. **No secret material** is ever
-written to `detail`.
-
-**Failure mode** — `recordSecurityEvent()` writes Mongo **and** Prometheus in one call,
-but the two sinks have **different** failure semantics: a failed **Mongo** write for a
-security-sensitive operation (token mint, key regeneration, permission change, login)
-**fails the operation closed** (the audit record is part of the operation's integrity),
-whereas a Prometheus emit failure is best-effort and must never block the request. This
-must be specified at every call site, not left to the helper's default.
-
-**Prometheus sink** — counters on the API's `/metrics` endpoint (this introduces the
-**first metrics surface** in the repo; see Constraints):
-- `scope_auth_logins_total{outcome,idp}`
-- `scope_auth_logouts_total`
-- `scope_auth_onboarded_total`
-- `scope_auth_key_regenerations_total{key_type}`
-- `scope_auth_cross_user_access_total` (optional)
-
-Use `prom-client`; expose `GET /metrics` (unauthenticated cluster-internal, scraped by a
-`ServiceMonitor`). A thin `recordSecurityEvent(event)` helper writes both sinks so call
-sites emit once.
-
-### G. Quotas / rate limiting — **out of scope**
-
-**Decision**: **Ignored for now.** No per-user quotas or rate limiting in this work. The
-ownership model makes it straightforward to add later if needed.
-
-### H. CI / non-interactive tokens
-
-**Question H**: What does non-interactive automation present? Two separable concerns:
-- **System jobs** use a **per-service** `INTERNAL_API_KEY_<NAME>` service principal with
-  narrow permissions (§6, Question E).
-- **User-attributed automation / CI** uses `SCOPE_TOKEN`. **For the current milestone**,
-  `SCOPE_TOKEN` is a **raw bearer** (a token already obtained interactively) — this keeps
-  the user-auth milestone unblocked. **Scope-issued PAT/API tokens** (long-lived,
-  user-minted, revocable) delivered via the same `SCOPE_TOKEN` slot are the likely
-  **future** answer for CI and user-attributed automation, but they are **out of scope**
-  for this work and must **not** block it.
-
-### J. Unauthenticated / public mode
-
-**Question J**: The `anonymous` principal ships with **zero** permissions and is **out of
-scope** to extend in this work. A public/demo mode is a **separate, future, explicit**
-decision: it would be introduced as an opt-in config granting at most `scope/run:read`
-over **explicitly-public data only** (a separated public `ownerId`/`visibility`), and it
-must never be reachable by accidentally granting a permission to `anonymous` on an
-existing route. Until then, anonymous stays a zero-permission guard input only.
-
-### I. SSE token handling
-
-**Question I**: Confirm the Portal/CLI can use `fetch`-stream everywhere (vs needing
-the query-param fallback) given the proxy timeouts in
-[apps/portal/nginx.conf](../../apps/portal/nginx.conf).
-
----
-
-## Review
-
-> Adversarial self-review pass. Findings and resolutions:
-
-1. **Existence leak** — Returning `403` for foreign runs reveals they exist. **Resolved**:
-   use `404` for owner-scoped single-resource fetches.
-2. **Derived data bypass** — Logs/archives/snapshots could be fetched directly without
-   checking the parent run's owner. **Resolved**: all derived endpoints load the parent
-   request with `readScope` before serving; no blob access precedes the check.
-3. **Worker / internal traffic locked out** — Workers write to Mongo directly (fine), but
-   scheduler/report-generator call the API. **Resolved**: **per-service** principal auth
-   (subtask 9) via `INTERNAL_API_KEY_<NAME>` with narrow least-privilege permissions (no
-   single global key, no Entra App Roles).
-4. **SSE can't set headers** — `EventSource` limitation. **Resolved**: fetch-stream
-   primary, documented unlogged query-param fallback, owner check on parent run.
-5. **Authorization coupled to Entra** would block other IdPs and contradicts the
-   no-App-Roles requirement. **Resolved**: roles **and** permissions live in Scope DB;
-   the IdP supplies identity only.
-6. **Backfill mis-attribution & "system" backdoor** — assigning legacy runs to a real
-   user is wrong, and a magic `system` owner with admin visibility becomes a permanent
-   backdoor if a live request ever acquires it. **Resolved**: `ownerId = "system"` is used
-   **only** for legacy backfill (admin-visible, configurable); the middleware **must never
-   set `req.user.id = "system"` for a live request** — no default, missing-user fallback,
-   or (now-removed) dev path may produce it. A live request that would resolve to `system`
-   is a hard `401`.
-7. **Dev-mode bypass is a standing escalation risk** — an env/header that fabricates a
-   principal can be flipped on in the wrong environment. **Resolved**: dev mode is
-   **removed entirely** — no `AUTH_ENABLED`, `DEV_USER`, `X-Dev-User`, or
-   `local-user`/`local-admin`. Local dev uses a real IdP; a future **Entra ID local
-   emulator** (separate project) plugs in only as an IdP configuration.
-8. **JWKS network on hot path** — verifying per request must not call the IdP.
-   **Resolved**: cached JWKS with rotation; local RS256 verification.
-9. **CLI token security** — tokens on disk, plus reliance on the unmaintained `keytar`.
-   **Resolved**: tokens are stored behind a Scope-owned **`SecretStore`** interface backed
-   by **`cross-keychain`** (`0600` file only as a keyring-less fallback), silent refresh,
-   never logged; the wrapper isolates the backing library so it can change without
-   touching call sites; the `--debug-zip` support package is redaction-tested.
-10. **Hardcoded two-role check would not scale** — future custom roles would need route
-    rewrites. **Resolved**: routes authorize on **permissions**; roles are just bundles,
-    so new roles/permissions need no route or schema change.
-11. **`ownerId` keyed on IdP subject** would break on IdP migration and leak
-    provider-specific ids into run docs. **Resolved**: `ownerId` is the **Scope User ID**
-    (`users._id`); `(idp, idpTenant, idpSubject)` is only the identity link and can be
-    re-pointed at the same `_id`.
-12. **No room for sharing/groups** — bolting them on later could force a data re-model.
-    **Resolved**: v1 ships two-level `visibility` (`private`/`shared`) + read-only deep
-    links, with reserved `ownerType`/`groupId`/`sharedWith` fields and a single
-    `readScope`/`writeScope` chokepoint that makes groups/ACLs additive later.
-13. **Forwarding the IdP token downstream** would leak provider tokens/config across the
-    system and couple every service to the IdP; embedding stale permissions defeats
-    revocation. **Resolved**: the IdP token terminates at the API; on-behalf-of calls carry
-    a **Scope-minted internal token** (`iss=scope-api`) that downstream verifies with a
-    Scope-owned key and that carries **`sub` only (re-resolved downstream)** — or, if
-    permissions are embedded, `exp ≤ 5min` **plus** a `jti` revocation list, with
-    `disabledAt` checked on the internal-JWT path.
-14. **No security visibility** — auth events were unobservable. **Resolved**: append-only
-    `security_audit` in MongoDB + Prometheus counters for login/logout/onboarding,
-    key-regeneration, **token minting**, **service-key cross-user reads**, and
-    **permission overrides**, written via one helper (Mongo write fails the operation
-    closed); `detail` is redaction-tested so the audit never stores secrets, and the
-    retention TTL is an explicit policy decision.
-15. **Open scope creep** — the user explicitly asked for open questions on the
-    user/admin permission matrix; these are surfaced in **Open Questions** rather than
-    silently decided, so stakeholders sign off before implementation of subtasks 5–8.
-16. **`ownerId` spoofing on create** — trusting `ownerId` from the request body lets a
-    caller plant data as another user. **Resolved**: create **derives** the owner from the
-    authenticated principal (`req.user.id`); the body's `ownerId` is ignored. `ownerId`
-    is **returned** in responses where relevant, but never **accepted** on input.
-17. **Bootstrap-admin trusts a mutable email claim** — Entra `email`/`preferred_username`
-    is not guaranteed verified and is mutable; in multi-tenant mode an email collision
-    could auto-promote the wrong user, and list edits could silently demote/promote.
-    **Resolved**: bootstrap matches on `(idp, idpTenant, idpSubject)`, requires
-    `email_verified`, is restricted to `AUTH_BOOTSTRAP_TENANTS`, and is **promote-only**.
-18. **Multi-tenant identity collision** — `(idp, idpSubject)` is **not** unique because
-    `oid` is stable only per tenant and guests carry a home-tenant `oid`. **Resolved**:
-    the unique index is **`(idp, idpTenant, idpSubject)`** — `tid` is part of the key.
-19. **Wildcard authorization under-specified** — `scope/*:admin` semantics were ambiguous
-    (a classic bypass source). **Resolved**: `*` is allowed only in the **resource**
-    position; `admin` subsumes read/write/delete on the **same** resource; **no**
-    cross-resource implication; `hasPermission` carries mandatory **negative** unit tests
-    (e.g. `scope/run:write` is not satisfied by `scope/criteria:admin` or `scope/run:read`).
-20. **Role typing conflict** — putting `anonymous`/`service` on the persisted `Role`
-    union would force unsafe casts. **Resolved**: split `UserRole` (persisted) from
-    `PrincipalRole = UserRole | "anonymous" | "service"` (request principal).
-21. **Anonymous foot-gun** — a "first-class anonymous principal" makes "no code change for
-    public mode" true for the guard *mechanism* but false for the guard *policy*, and
-    invites accidental public exposure if any route ever grants a permission to anonymous.
-    **Resolved**: anonymous is a **zero-permission guard input only**; a public/demo mode is
-    a separate explicit decision over public-only data (Question J), not a default any route
-    author can reach for.
-22. **Deep-link read-only sharing** — shared access must not imply ownership or write.
-    **Resolved**: a deep link is a signed, revocable, read-only capability to one resource;
-    it satisfies `readScope` for that resource only and **never** `writeScope`, so a
-    recipient can view but never edit, and revoking the link removes view access.
+1. **Future fine-grained/scoped tokens (explicitly out of v1):** A future design may
+   add optional project, resource, or action restrictions. Any such restriction must
+   intersect with—not exceed—the issuing user's live effective permissions and must
+   preserve the platform/project boundary and authenticated sharing-link rules.
+2. **SSE fallback:** confirm fetch streaming works through every supported proxy. Retain a
+   query-token fallback only where unavoidable and only with short-lived,
+   stream-specific credentials.
+3. **Audit retention:** choose and document the security-audit retention period, verifying
+   CosmosDB TTL support or scheduling pruning where it is unavailable.
