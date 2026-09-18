@@ -126,24 +126,39 @@ and an initial task prompt as static HTML.
 a custom element. It makes no network requests and adds no framework
 or animation-library dependencies.
 
-Two invented scenarios illustrate task submission, five sample agent profiles,
-a three-node criteria dependency graph, and per-criterion evidence.
-The example results deliberately differ by scenario. They are labeled
-as simulations, not measurements or agent rankings. Keep that
-distinction if adding scenarios.
+Two invented scenarios illustrate task submission, a base profile with
+two alternate profiles, evaluation gates, and per-criterion evidence.
+Results deliberately differ by scenario. Outcomes, token counts, and
+durations are labeled as simulations, not measurements or agent rankings.
+Keep that distinction if adding scenarios.
 
-The sample roster is GitHub Copilot, Claude Code, Cursor, OpenAI Codex,
-and OpenCode. These are the five highest-adoption individually named
-coding agents in the [JetBrains May-July 2026 survey report](https://blog.jetbrains.com/research/2026/08/ai-coding-agent-adoption-2026/);
-the report also lists a combined JetBrains AI/Junie category, which is
-not a single agent. Display order is not rank order.
+The availability strip identifies GitHub Copilot and Claude Code as
+**Supported today**, OpenAI Codex and OpenCode as **Planned**, and Cursor
+as **Not integrated**. Planned agents have no promised release date and
+do not appear in the simulated executions.
 
-[sample-agents.ts](src/scripts/sample-agents.ts) is shared by the static
-diagram and the results renderer. Connector branches and the profile
-count derive from that roster. Results use one row per agent, with
-invented pass/fail/skipped outcomes that respect the criteria chain.
-The playground does not claim that all sample agents are supported
-Scope integrations; the supported-agent links remain separate.
+[sample-agents.ts](src/scripts/sample-agents.ts) separates availability
+from the fictional profiles. The base uses Copilot, Var 1 adds a task
+skill with the same agent and model, and Var 2 changes the agent and
+model to Claude Code. All use the same task and criteria. Connector
+branches and profile counts derive from this shared profile list.
+
+The judge step distinguishes **gates** from the reusable **criteria
+library**. Requirements, Build, and Test are sequential gates. An
+optional **Explore the criteria graph** disclosure shows the graph
+inside each gate, including two independent checks that depend on
+"Tests execute". The graph is collapsed by default to keep the
+homepage introduction approachable.
+
+[flow-demo-data.ts](src/scripts/flow-demo-data.ts) owns the invented
+fixtures and derives consistent gate and criterion outcomes: failing
+a gate skips later gates, while failing a criterion skips its
+descendants, not its siblings. The results table compares each
+variation with the base, showing gates passed, input/output and total
+tokens, elapsed run duration, and signed token/time differences.
+Duration describes the fictional run, not the animation. Lower usage
+or shorter duration is not presented as a win when the run failed.
+Per-criterion outcomes remain available in a separate disclosure.
 
 Playback runs once when the playground enters view. Users can pause,
 reset, replay, select a scenario, or inspect any step with a button.
@@ -151,6 +166,16 @@ Leaving the viewport or hiding the tab stops playback. Reduced-motion
 users get manual **Next step** controls and no animated connectors.
 Without JavaScript, the static diagram and explanation remain visible,
 and nonfunctional playback controls stay hidden.
+
+The playground data tests use the monorepo's existing Vitest runner.
+After installing root and website dependencies, run from the repo root:
+
+```sh
+pnpm exec vitest run --config website/vitest.config.ts
+```
+
+The website has its own test configuration because its standalone
+Astro dependencies are not part of the root pnpm workspace install.
 
 ### Review findings and recommendations
 
@@ -176,7 +201,8 @@ Recommended content follow-ups:
   ID policy. The introduction and reference currently describe three
   agents, while the worker ID list names only two. The landing's
   supported-agent strip names only the two documented ACP workers;
-  its separately labeled fictional playground includes five examples.
+  the playground explicitly separates them from planned or unavailable
+  integrations and runs fictional profiles of supported agents only.
 - Walk the first-run guide against a current deployment, then add
   maintained screenshots. Its claims about preseeded catalogs, model
   availability, and UI labels should not be assumed for every deployment.

@@ -1,13 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-// Illustrative roster, not a ranking or a list of supported Scope workers.
+// Availability is separate from the fictional profiles and their results.
 export const sampleAgents = [
-	{ profile: 'A', name: 'GitHub Copilot', initial: 'G' },
-	{ profile: 'B', name: 'Claude Code', initial: 'C' },
-	{ profile: 'C', name: 'Cursor', initial: 'Cu' },
-	{ profile: 'D', name: 'OpenAI Codex', initial: 'Co' },
-	{ profile: 'E', name: 'OpenCode', initial: 'O' },
+	{ name: 'GitHub Copilot', initial: 'G', status: 'Supported today' },
+	{ name: 'Claude Code', initial: 'C', status: 'Supported today' },
+	{ name: 'OpenAI Codex', initial: 'Co', status: 'Planned' },
+	{ name: 'OpenCode', initial: 'O', status: 'Planned' },
+	{ name: 'Cursor', initial: 'Cu', status: 'Not integrated' },
 ] as const;
 
-export type SampleProfile = typeof sampleAgents[number]['profile'];
+export const sampleProfiles = [
+	{ id: 'base', agent: sampleAgents[0], label: 'Base', name: 'Baseline', setup: 'Pinned model, no extra skills.' },
+	{ id: 'skills', agent: sampleAgents[0], label: 'Var 1', name: 'Add a skill', setup: 'Same agent and model, with a task skill.' },
+	{ id: 'agent', agent: sampleAgents[1], label: 'Var 2', name: 'Change agent', setup: 'Different agent and model, same task.' },
+] as const;
+
+export type SampleProfile = typeof sampleProfiles[number]['id'];
