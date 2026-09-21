@@ -57,7 +57,7 @@ body:has(.scope-home) header.header { background: color-mix(in srgb, var(--scope
 .scope-home * { box-sizing: border-box; }
 .scope-home :is(h1,h2,h3,p) { margin: 0; }
 .scope-home a { text-decoration: none; }
-.scope-home button, .scope-home select { font: inherit; }
+.scope-home button { font: inherit; }
 .scope-home button { cursor: pointer; }
 .scope-home button:disabled { cursor: default; opacity: 0.6; }
 .scope-home :is(section, h2) { scroll-margin-top: 6rem; }
@@ -89,13 +89,12 @@ body:has(.scope-home) header.header { background: color-mix(in srgb, var(--scope
 .scope-text-link { display: inline-flex; align-items: center; justify-content: space-between; gap: 0.75rem; color: var(--scope-brand); font-size: 0.85rem; font-weight: 600; }
 .scope-text-link:hover { text-decoration: underline; }
 
-/* The playground uses a custom element, without a client-side UI framework. */
+/* The interactive example uses a custom element, without a client-side UI framework. */
 .scope-flow { display: block; border: 1px solid var(--scope-border); border-radius: 1rem; background: var(--scope-surface); box-shadow: var(--scope-shadow); overflow: clip; }
 .flow-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem 1.5rem; border-bottom: 1px solid var(--scope-border); }
 .flow-demo-label { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; font-size: 0.85rem; }
 .flow-demo-badge { padding: 0.1rem 0.5rem; color: var(--scope-muted); background: var(--scope-inset); border: 1px solid var(--scope-border); border-radius: 4px; font-family: var(--sl-font-mono); font-size: 0.65rem; }
-.flow-select-label { display: flex; align-items: center; gap: 0.75rem; color: var(--scope-muted); font-size: 0.75rem; }
-.flow-select-label select { min-height: 44px; padding: 0.5rem 2rem 0.5rem 0.75rem; border: 1px solid var(--scope-border); border-radius: 0.4rem; background: var(--scope-surface); color: var(--scope-text); font-size: 0.8rem; cursor: pointer; max-width: 100%; }
+.scope-home .flow-demo-note { margin-top: 0.4rem; color: var(--scope-muted); font-size: 0.75rem; }
 .scope-home .flow-support { display: flex; flex-wrap: wrap; gap: 0.6rem 1.4rem; list-style: none; margin: 0; padding: 0.9rem 1.5rem; border-bottom: 1px solid var(--scope-border); }
 .flow-support li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.75rem; }
 .flow-support strong { font-weight: 500; }
@@ -115,7 +114,7 @@ body:has(.scope-home) header.header { background: color-mix(in srgb, var(--scope
 .flow-node { display: flex; flex-direction: column; text-align: left; gap: 0.5rem; min-width: 0; padding: 1rem; border: 1px solid var(--scope-border); border-radius: 0.65rem; background: var(--scope-surface); color: var(--scope-text); box-shadow: 0 3px 8px #11182706; transition: border-color 200ms, box-shadow 200ms; }
 .flow-node:hover { border-color: var(--scope-brand); }
 .flow-node[aria-current='step'] { border-color: var(--scope-brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--scope-brand) 13%, transparent), 0 8px 24px #1118270c; }
-.flow-node[data-complete='true'] { border-color: color-mix(in srgb, var(--scope-pass) 45%, var(--scope-border)); }
+.flow-node[data-complete='true'] { border-color: color-mix(in srgb, var(--scope-brand) 35%, var(--scope-border)); }
 .flow-node strong { font-size: 0.9rem; line-height: 1.3; letter-spacing: -0.025em; }
 .flow-node > span:not([class]), .flow-node-tag { font-size: 0.7rem; color: var(--scope-muted); line-height: 1.5; }
 .flow-node-kicker { display: block; color: var(--scope-muted); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; }
@@ -140,8 +139,8 @@ body:has(.scope-home) header.header { background: color-mix(in srgb, var(--scope
 .flow-criteria i { width: 1px; height: 9px; background: var(--scope-brand); margin-left: 0.8rem; }
 .flow-report { padding: 0.9rem; }
 .flow-chart { display: flex; align-items: end; gap: 5px; height: 44px; padding: 5px 0 0; width: 100%; border-bottom: 1px solid var(--scope-border); }
-.flow-chart i { flex: 1; height: 25%; background: var(--scope-border); border-radius: 2px 2px 0 0; transform-origin: bottom; transition: transform 500ms, background 500ms; }
-.flow-chart i:nth-child(2) { height: 65%; }.flow-chart i:nth-child(3) { height: 45%; }
+.flow-chart i { flex: 1; background: var(--scope-border); border-radius: 2px 2px 0 0; }
+.flow-result-preview { color: var(--scope-muted); font: 0.75rem/1.5 var(--sl-font-mono); }
 [data-stage='3'] .flow-chart i { background: var(--scope-brand); }
 .flow-controls { display: flex; align-items: center; justify-content: space-between; gap: 1.25rem; padding: 1rem 1.5rem; border-block: 1px solid var(--scope-border); }
 .flow-playback { display: flex; gap: 0.65rem; align-items: center; }
@@ -234,7 +233,7 @@ body:has(.scope-home) header.header { background: color-mix(in srgb, var(--scope
 @media (max-width: 48rem) {
 	.scope-section-heading { display: block; }.scope-section-heading > p, .scope-section-heading > a { display: block; margin-top: 1rem; max-width: 55ch; }
 	.scope-agent-strip { column-gap: 1rem; row-gap: 0.6rem; }.scope-agent-strip > span:first-child { width: 100%; }
-	.flow-toolbar { flex-wrap: wrap; padding: 1rem; }.flow-select-label { width: 100%; justify-content: space-between; }
+	.flow-toolbar { flex-wrap: wrap; padding: 1rem; }
 	.scope-home .flow-support { padding-inline: 1rem; }
 	.flow-gate-graph { grid-template-columns: 1fr; }
 	.flow-gate-group:not(:last-child)::after { top: 100%; left: 50%; width: 0; height: 1.5rem; border-top: 0; border-left: 2px solid var(--scope-brand); }

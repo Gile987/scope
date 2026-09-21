@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { sampleProfiles } from './sample-agents';
-import { criterionOutcomes, demoCriteria, demoGates, formatDelta, formatDuration, gateOutcomes, scenarios, totalTokens } from './flow-demo-data';
+import { criterionOutcomes, demoCriteria, demoGates, exampleScenario, formatDelta, formatDuration, gateOutcomes, passedGateCount, totalTokens } from './flow-demo-data';
 
 const headings = [
 	'Give every agent the same starting line.',
@@ -13,7 +13,6 @@ const headings = [
 
 class ScopeFlow extends HTMLElement {
 	private stage = 0;
-	private scenario = scenarios.board;
 	private timer: ReturnType<typeof setTimeout> | undefined;
 	private playing = false;
 	private observer: IntersectionObserver | undefined;
@@ -25,7 +24,7 @@ class ScopeFlow extends HTMLElement {
 	connectedCallback() {
 		this.events = new AbortController();
 		const { signal } = this.events;
-		this.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button, select').forEach((control) => { control.disabled = false; });
+		this.querySelectorAll<HTMLButtonElement>('button').forEach((control) => { control.disabled = false; });
 		this.addEventListener('click', (event) => {
 			if (!(event.target instanceof Element)) return;
 			if (event.target.closest('summary')) {
@@ -61,15 +60,6 @@ class ScopeFlow extends HTMLElement {
 					this.render();
 				}
 			}
-		}, { signal });
-		this.querySelector('select')?.addEventListener('change', (event) => {
-			if (!(event.target instanceof HTMLSelectElement)) return;
-			const scenario = scenarios[event.target.value] ?? scenarios.board;
-			this.interacted = true;
-			this.stop();
-			this.scenario = scenario;
-			this.stage = 0;
-			this.render();
 		}, { signal });
 		this.motion.addEventListener('change', () => this.stop(), { signal });
 		document.addEventListener('visibilitychange', () => {
@@ -116,22 +106,18 @@ class ScopeFlow extends HTMLElement {
 
 	private renderPlayback() {
 		this.dataset.playing = String(this.playing);
-		this.text('[data-play]', this.motion.matches ? (this.stage === 3 ? 'Start again' : 'Next step') : this.playing ? 'Pause demo' : this.stage === 3 ? 'Replay demo' : this.stage === 0 ? 'Play demo' : 'Resume demo');
+		this.text('[data-play]', this.motion.matches ? (this.stage === 3 ? 'Start again' : 'Next step') : this.playing ? 'Pause animation' : this.stage === 3 ? 'Replay animation' : this.stage === 0 ? 'Play animation' : 'Resume animation');
 	}
 
 	private text(selector: string, value: string) {
-		const element = this.querySelector(selector);
-		if (!element) throw new Error(`Missing Scope demo element: ${selector}`);
-		element.textContent = value;
+		const elements = this.querySelectorAll(selector);
+		if (elements.length === 0) throw new Error(`Missing Scope demo element: ${selector}`);
+		elements.forEach((element) => { element.textContent = value; });
 	}
 
 	private render(announce = true) {
 		this.dataset.stage = String(this.stage);
 		this.renderPlayback();
-		this.text('[data-experiment]', this.scenario.id);
-		this.text('[data-task-title]', this.scenario.title);
-		this.text('[data-task-short]', this.scenario.short);
-		this.text('[data-edge-label]', this.scenario.edge);
 		const explorer = this.querySelector<HTMLElement>('[data-criteria-explorer]');
 		if (!explorer) throw new Error('Missing Scope demo criteria explorer');
 		explorer.hidden = this.stage !== 2;
@@ -144,23 +130,21 @@ class ScopeFlow extends HTMLElement {
 		this.querySelectorAll<HTMLElement>('[data-wire]').forEach((element) => {
 			element.dataset.active = String(Number(element.dataset.wire) <= this.stage);
 		});
-		this.querySelectorAll('[data-agent-status]').forEach((element) => {
-			element.textContent = this.stage === 0 ? 'Ready' : this.stage === 1 ? 'Working' : 'Complete';
-		});
 		this.text('[data-stage-label]', `Step 0${this.stage + 1} / ${['Define', 'Execute', 'Evaluate', 'Understand'][this.stage]}`);
 		this.text('[data-detail-title]', headings[this.stage]);
 		this.text('[data-detail-body]', [
-			this.scenario.context,
+			exampleScenario.context,
 			'Keep the task and criteria fixed. Compare the base profile with an alternate that adds a skill, or one that changes the agent and model. Each profile gets its own run.',
 			'The judge evaluates each gate using checks selected from your library of reusable criteria. This example uses Requirements, Build, and Test gates. If a gate fails after its iteration budget, later gates are skipped.',
 			'Read each variation against the base profile, including input/output tokens and run duration. A faster failed run is not a better result. These numbers and outcomes are fictional, not measured comparisons.',
 		][this.stage]);
 		const panel = this.querySelector('[data-detail-panel]');
 		if (!panel) throw new Error('Missing Scope demo detail panel');
+		const evidenceOpen = panel.querySelector<HTMLDetailsElement>('.flow-result-evidence')?.open ?? false;
 		panel.replaceChildren();
 		if (this.stage === 0) {
 			this.appendText(panel, 'span', 'TASK PROMPT / EXAMPLE', 'flow-code-label');
-			this.appendText(panel, 'p', this.scenario.prompt);
+			this.appendText(panel, 'p', exampleScenario.prompt);
 		} else if (this.stage === 1) {
 			this.appendText(panel, 'span', 'SAME TASK / BASE + ALTERNATE PROFILES', 'flow-code-label');
 			for (const profile of sampleProfiles) {
@@ -178,27 +162,29 @@ class ScopeFlow extends HTMLElement {
 				group.className = 'flow-library-group';
 				this.appendText(group, 'strong', `${gate.label} gate`);
 				for (const criterion of demoCriteria.filter((item) => item.gate === gate.id)) {
-					this.appendText(group, 'span', criterion.id === 'edge_case' ? this.scenario.edge : criterion.label, 'flow-library-criterion');
+					this.appendText(group, 'span', criterion.label, 'flow-library-criterion');
 				}
 				panel.append(group);
 			}
 		} else {
 			this.renderResults(panel);
+			const evidence = panel.querySelector<HTMLDetailsElement>('.flow-result-evidence');
+			if (evidence) evidence.open = evidenceOpen;
 		}
-		if (announce) this.text('[data-announcement]', `${this.scenario.title}. Step ${this.stage + 1} of 4. ${headings[this.stage]}${this.stage === 3 ? ' Demo complete. Results are fictional.' : ''}`);
+		if (announce) this.text('[data-announcement]', `${exampleScenario.title}. Step ${this.stage + 1} of 4. ${headings[this.stage]}${this.stage === 3 ? ' Example complete. Results are fictional.' : ''}`);
 	}
 
 	private renderResults(panel: Element) {
-		const body = this.createTable(panel, ['Profile', 'Gates passed', 'Tokens (input + output)', 'Run duration'], 'Simulated profile comparison / invented outcomes and metrics');
+		const body = this.createTable(panel, ['Profile', 'Gates passed', 'Tokens (input + output)', 'Run duration'], `${exampleScenario.title} / mock outcomes and metrics`);
 		for (const profile of sampleProfiles) {
-			const result = this.scenario.results[profile.id];
-			const base = this.scenario.results.base;
+			const result = exampleScenario.results[profile.id];
+			const base = exampleScenario.results.base;
 			const row = body.insertRow();
 			row.dataset.profile = profile.id;
 			this.profileHeader(row, profile);
 			const gates = gateOutcomes(result);
 			const gateCell = row.insertCell();
-			this.appendText(gateCell, 'strong', `${gates.filter((state) => state === 'Pass').length} / ${demoGates.length}`);
+			this.appendText(gateCell, 'strong', `${passedGateCount(result)} / ${demoGates.length}`);
 			for (const [index, gate] of demoGates.entries()) {
 				const state = document.createElement('span');
 				state.className = 'flow-result-detail';
@@ -220,11 +206,11 @@ class ScopeFlow extends HTMLElement {
 		const summary = document.createElement('summary');
 		summary.textContent = 'Inspect per-criterion outcomes';
 		details.append(summary);
-		const outcomes = this.createTable(details, ['Profile', ...demoCriteria.map((criterion) => criterion.id === 'edge_case' ? this.scenario.edge : criterion.label)], 'Invented criterion outcomes / skipped checks were not evaluated');
+		const outcomes = this.createTable(details, ['Profile', ...demoCriteria.map((criterion) => criterion.label)], `${exampleScenario.title} / mock criterion outcomes; skipped checks were not evaluated`);
 		for (const profile of sampleProfiles) {
 			const row = outcomes.insertRow();
 			this.profileHeader(row, profile);
-			for (const outcome of criterionOutcomes(this.scenario.results[profile.id]).values()) {
+			for (const outcome of criterionOutcomes(exampleScenario.results[profile.id]).values()) {
 				const cell = row.insertCell();
 				cell.textContent = outcome;
 				cell.dataset.result = outcome.toLowerCase();

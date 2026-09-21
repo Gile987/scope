@@ -27,43 +27,26 @@ interface DemoResult {
 	durationSeconds: number;
 }
 
-export interface DemoScenario {
+interface DemoScenario {
 	id: string;
 	title: string;
 	short: string;
 	prompt: string;
-	edge: string;
 	context: string;
 	results: Record<SampleProfile, DemoResult>;
 }
 
 // Invented fixtures teach how to read a comparison, not which setup performs best.
-export const scenarios: Record<string, DemoScenario> = {
-	board: {
-		id: 'task-board',
-		title: 'Build a task board',
-		short: 'A small app. Real acceptance criteria.',
-		prompt: 'Build a task board. Users can add tasks, mark them complete, and filter by status. An empty title must not create a task.',
-		edge: 'Handles empty input',
-		context: 'Create a task board with add, complete, and filter actions. Define the expected behavior before the agents start.',
-		results: {
-			base: { failedCriterion: 'edge_case', inputTokens: 18400, outputTokens: 3200, durationSeconds: 154 },
-			skills: { failedCriterion: null, inputTokens: 15100, outputTokens: 2900, durationSeconds: 128 },
-			agent: { failedCriterion: 'builds', inputTokens: 9900, outputTokens: 1900, durationSeconds: 82 },
-		},
-	},
-	api: {
-		id: 'search-api',
-		title: 'Add a search API',
-		short: 'One endpoint. The details matter.',
-		prompt: 'Add a paginated search endpoint. Return matching items, validate the page size, and return an empty list when nothing matches.',
-		edge: 'Handles no matches',
-		context: 'Add search with pagination and input validation. Give every sample profile the same task and the same acceptance criteria.',
-		results: {
-			base: { failedCriterion: 'builds', inputTokens: 11200, outputTokens: 2300, durationSeconds: 96 },
-			skills: { failedCriterion: 'tests_run', inputTokens: 19800, outputTokens: 3600, durationSeconds: 173 },
-			agent: { failedCriterion: null, inputTokens: 17600, outputTokens: 3100, durationSeconds: 149 },
-		},
+export const exampleScenario: DemoScenario = {
+	id: 'task-board',
+	title: 'Build a task board',
+	short: 'Add, complete, and filter tasks.',
+	prompt: 'Build a task board. Users can add tasks, mark them complete, and filter by status. An empty title must not create a task.',
+	context: 'Create a task board with add, complete, and filter actions. Define the expected behavior before the agents start.',
+	results: {
+		base: { failedCriterion: 'edge_case', inputTokens: 18400, outputTokens: 3200, durationSeconds: 154 },
+		skills: { failedCriterion: null, inputTokens: 15100, outputTokens: 2900, durationSeconds: 128 },
+		agent: { failedCriterion: 'builds', inputTokens: 9900, outputTokens: 1900, durationSeconds: 82 },
 	},
 };
 
@@ -93,6 +76,10 @@ export function gateOutcomes(result: DemoResult): DemoOutcome[] {
 
 export function totalTokens(result: DemoResult): number {
 	return result.inputTokens + result.outputTokens;
+}
+
+export function passedGateCount(result: DemoResult): number {
+	return gateOutcomes(result).filter((outcome) => outcome === 'Pass').length;
 }
 
 export function formatDuration(seconds: number): string {

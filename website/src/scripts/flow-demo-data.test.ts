@@ -3,9 +3,9 @@
 
 import { describe, expect, it } from 'vitest';
 import { sampleAgents, sampleProfiles } from './sample-agents';
-import { criterionOutcomes, demoCriteria, formatDelta, formatDuration, gateOutcomes, scenarios, totalTokens } from './flow-demo-data';
+import { criterionOutcomes, demoCriteria, exampleScenario, formatDelta, formatDuration, gateOutcomes, passedGateCount, totalTokens } from './flow-demo-data';
 
-describe('playground fixtures', () => {
+describe('interactive example fixtures', () => {
 	it('only runs supported agents and identifies a single base profile', () => {
 		expect(sampleProfiles.filter((profile) => profile.id === 'base')).toHaveLength(1);
 		expect(sampleProfiles.every((profile) => profile.agent.status === 'Supported today')).toBe(true);
@@ -13,9 +13,11 @@ describe('playground fixtures', () => {
 		expect(sampleProfiles[1].agent).toBe(sampleProfiles[0].agent);
 	});
 
-	it.each(Object.values(scenarios))('provides complete, positive metrics for $id', (scenario) => {
+	it('provides one task-board example with complete metrics for every profile', () => {
+		expect(exampleScenario.id).toBe('task-board');
+		expect(Object.keys(exampleScenario.results)).toEqual(sampleProfiles.map((profile) => profile.id));
 		for (const profile of sampleProfiles) {
-			const result = scenario.results[profile.id];
+			const result = exampleScenario.results[profile.id];
 			expect(totalTokens(result)).toBe(result.inputTokens + result.outputTokens);
 			expect(result.inputTokens).toBeGreaterThan(0);
 			expect(result.outputTokens).toBeGreaterThan(0);
@@ -25,24 +27,27 @@ describe('playground fixtures', () => {
 	});
 
 	it('skips later gates after a failed build', () => {
-		const result = scenarios.board.results.agent;
+		const result = exampleScenario.results.agent;
 		expect(gateOutcomes(result)).toEqual(['Pass', 'Fail', 'Skipped']);
 		expect([...criterionOutcomes(result).values()]).toEqual(['Pass', 'Fail', 'Skipped', 'Skipped', 'Skipped']);
 	});
 
 	it('skips both dependent checks when their parent fails', () => {
-		const result = scenarios.api.results.skills;
+		const result: typeof exampleScenario.results.base = { ...exampleScenario.results.base, failedCriterion: 'tests_run' };
 		expect(gateOutcomes(result)).toEqual(['Pass', 'Pass', 'Fail']);
 		expect([...criterionOutcomes(result).values()]).toEqual(['Pass', 'Pass', 'Fail', 'Skipped', 'Skipped']);
 	});
 
 	it('does not skip a sibling criterion when the edge-case check fails', () => {
-		expect([...criterionOutcomes(scenarios.board.results.base).values()]).toEqual(['Pass', 'Pass', 'Pass', 'Pass', 'Fail']);
+		expect([...criterionOutcomes(exampleScenario.results.base).values()]).toEqual(['Pass', 'Pass', 'Pass', 'Pass', 'Fail']);
 	});
 
 	it('reports all gates passed only when every criterion passes', () => {
-		expect(gateOutcomes(scenarios.board.results.skills)).toEqual(['Pass', 'Pass', 'Pass']);
-		expect(gateOutcomes(scenarios.api.results.agent)).toEqual(['Pass', 'Pass', 'Pass']);
+		expect(gateOutcomes(exampleScenario.results.skills)).toEqual(['Pass', 'Pass', 'Pass']);
+	});
+
+	it('derives the chart from the profile outcomes', () => {
+		expect(sampleProfiles.map((profile) => passedGateCount(exampleScenario.results[profile.id]))).toEqual([2, 3, 1]);
 	});
 
 	it('formats exact, signed deltas against the base', () => {

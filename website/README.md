@@ -16,7 +16,7 @@ The product and this documentation site live in
 ├── public/                          # static assets
 ├── src/
 │   ├── assets/
-│   ├── components/                  # Astro landing, playground, header, page title
+│   ├── components/                  # Astro landing, interactive example, header, page title
 │   ├── content/docs/                # all user-facing pages (.md / .mdx)
 │   │   ├── introduction/
 │   │   ├── getting-started/
@@ -27,7 +27,7 @@ The product and this documentation site live in
 │   ├── plugins/
 │   │   ├── remark-base-path.mjs    # applies the deployment base to internal links
 │   │   └── remark-http-snippets.mjs # turns ```http blocks into multi-language tabs
-│   ├── scripts/flow-demo.ts         # progressive-enhancement playground controller
+│   ├── scripts/flow-demo.ts         # progressive-enhancement example controller
 │   ├── styles/landing.css           # shared brand tokens + scoped landing styles
 │   └── content.config.ts
 ├── astro.config.mjs                 # sidebar, plugins, starlight-openapi config
@@ -134,7 +134,7 @@ table of contents, code examples, and previous/next navigation.
 - **Motion:** confined to the example experiment, not a permanently
   animated logo or documentation chrome.
 
-### Interactive playground
+### Interactive example
 
 [FlowDemo.astro](src/components/FlowDemo.astro) renders the full diagram
 and an initial task prompt as static HTML.
@@ -142,11 +142,22 @@ and an initial task prompt as static HTML.
 a custom element. It makes no network requests and adds no framework
 or animation-library dependencies.
 
-Two invented scenarios illustrate task submission, a base profile with
+One task-board example illustrates task submission, a base profile with
 two alternate profiles, evaluation gates, and per-criterion evidence.
-Results deliberately differ by scenario. Outcomes, token counts, and
-durations are labeled as simulations, not measurements or agent rankings.
-Keep that distinction if adding scenarios.
+There is no scenario picker: the task and criteria stay fixed throughout
+the walkthrough. Outcomes, token counts, and durations are labeled as
+simulations, not measurements or agent rankings.
+
+The heading and navigation use **Interactive example**, with a neutral
+**Mock data** badge and **No agents run here** explanation at the top.
+There is no glowing status indicator, and profile cards say **Example
+profile**, not "Ready", "Working", or "Complete". Playback controls
+explicitly describe an animation, not an agent execution.
+
+The single example is shared by the static diagram and the controller.
+The diagram's result bars reflect each profile's passed-gate count, and
+the results table uses the same fixture. There is no scenario-switching
+state or change-summary panel.
 
 The availability strip identifies GitHub Copilot and Claude Code as
 **Supported today**, OpenAI Codex and OpenCode as **Planned**, and Cursor
@@ -176,14 +187,14 @@ Duration describes the fictional run, not the animation. Lower usage
 or shorter duration is not presented as a win when the run failed.
 Per-criterion outcomes remain available in a separate disclosure.
 
-Playback runs once when the playground enters view. Users can pause,
-reset, replay, select a scenario, or inspect any step with a button.
+Playback runs once when the example enters view. Users can pause,
+reset, replay, or inspect any step with a button.
 Leaving the viewport or hiding the tab stops playback. Reduced-motion
 users get manual **Next step** controls and no animated connectors.
 Without JavaScript, the static diagram and explanation remain visible,
 and nonfunctional playback controls stay hidden.
 
-The playground data tests use the monorepo's existing Vitest runner.
+The example data tests use the monorepo's existing Vitest runner.
 After installing root and website dependencies, run from the repo root:
 
 ```sh
@@ -217,7 +228,7 @@ Recommended content follow-ups:
   ID policy. The introduction and reference currently describe three
   agents, while the worker ID list names only two. The landing's
   supported-agent strip names only the two documented ACP workers;
-  the playground explicitly separates them from planned or unavailable
+  the interactive example separates them from planned or unavailable
   integrations and runs fictional profiles of supported agents only.
 - Walk the first-run guide against a current deployment, then add
   maintained screenshots. Its claims about preseeded catalogs, model
@@ -227,7 +238,7 @@ Recommended content follow-ups:
   and publishing workflow, so changing it just because the documentation
   moved would be incorrect. A release migration is a separate change.
 - Add a real, reproducible sample-results walkthrough when an approved
-  dataset is available. Keep real evidence separate from the playground.
+  dataset is available. Keep real evidence separate from the example.
 
 ## Learn more
 
