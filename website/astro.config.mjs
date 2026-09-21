@@ -8,13 +8,13 @@ import starlightOpenAPI, { openAPISidebarGroups } from 'starlight-openapi';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
+import remarkBasePath from './src/plugins/remark-base-path.mjs';
 import remarkHttpSnippets from './src/plugins/remark-http-snippets.mjs';
-import remarkBaseLinks from './src/plugins/remark-base-links.mjs';
 
 // https://astro.build/config
 // `site` and `base` are driven by the GitHub Pages deployment URL in CI
-// (set via env vars from `actions/configure-pages` outputs), with safe
-// defaults for local development.
+// (set explicitly in the deployment workflow), with safe defaults
+// for local development.
 //
 // `DOC_PORT` is read from the `.env` file that `worktree-env` writes to
 // the git repo root (so each worktree binds to a unique dev/preview
@@ -56,7 +56,7 @@ export default defineConfig({
 	output: 'static',
 	server: { port: docPort },
 	markdown: {
-		remarkPlugins: [remarkHttpSnippets, [remarkBaseLinks, { base }]],
+		remarkPlugins: [[remarkBasePath, { base }], remarkHttpSnippets],
 	},
 	integrations: [
 		starlight({

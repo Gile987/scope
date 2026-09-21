@@ -25,7 +25,7 @@ The product and this documentation site live in
 │   │   └── resources/
 │   ├── openapi/scope-openapi.json   # artifact generated from the API registry
 │   ├── plugins/
-│   │   ├── remark-base-links.mjs    # project-base-safe Markdown and MDX links
+│   │   ├── remark-base-path.mjs    # applies the deployment base to internal links
 │   │   └── remark-http-snippets.mjs # turns ```http blocks into multi-language tabs
 │   ├── scripts/flow-demo.ts         # progressive-enhancement playground controller
 │   ├── styles/landing.css           # shared brand tokens + scoped landing styles
@@ -46,12 +46,21 @@ Sidebar order is defined in `astro.config.mjs`, not by directory order.
 | `pnpm dev`             | Start dev server at the worktree's `DOC_PORT` (fallback: 4300) |
 | `pnpm build`           | Build the production site to `./dist/`                     |
 | `pnpm preview`         | Preview the production build locally                       |
+| `pnpm test`            | Test site plugins with Node's built-in test runner          |
 | `pnpm refresh:openapi` | Generate the OpenAPI snapshot from `scope-core` |
 
 ## Authoring docs
 
 - Use `.md` for plain Markdown, `.mdx` whenever the page contains JSX
   (e.g. Starlight `<Tabs>`).
+- Write internal Markdown links and literal MDX `href`/`src` attributes
+  relative to the site root, such as `/getting-started/access/`.
+  [src/plugins/remark-base-path.mjs](src/plugins/remark-base-path.mjs)
+  adds the configured base path at build time. Do not hard-code `/scope`
+  in content. External URLs, relative links, fragments, and code examples
+  are left unchanged.
+- Link to `/reference/api/` for the generated API reference landing page.
+  `/reference/api/operations/` has endpoint pages beneath it, but no index.
 - Write HTTP examples as a single fenced ` ```http ` block — the
   custom remark plugin in
   [src/plugins/remark-http-snippets.mjs](src/plugins/remark-http-snippets.mjs)
@@ -75,24 +84,31 @@ where to look in scope-core for any given topic.
 Changes merged to `main` deploy to GitHub Pages via
 [../.github/workflows/static.yml](../.github/workflows/static.yml).
 The workflow builds from this `website/` directory (via a
-`working-directory` default and `website/**` path filters). `site`
-and `base` use `actions/configure-pages` outputs on `main`. Pull
-requests build with the `/scope` project base but do not deploy.
-Root/custom-domain Pages deployments retain an empty base. Output is
-explicitly static: no SSR adapter, server, or API credentials are needed.
+`working-directory` default and `website/**` path filters). Both pull-request
+and production builds use `SITE=https://microsoft.github.io` and
+`BASE_PATH=/scope`, matching the public
+[documentation URL](https://microsoft.github.io/scope/).
+`actions/configure-pages` still configures deployment, but its reported
+hostname and base path are not used to generate URLs: it can report an
+isolated Pages hostname instead of the public project URL.
 
-To reproduce the project-site build locally, run from `website/`:
+Local development defaults to the site root (`/`). To reproduce the
+public deployment locally, run these commands from `website/`:
 
 ```sh
+pnpm test
 SITE=https://microsoft.github.io BASE_PATH=/scope pnpm build
 SITE=https://microsoft.github.io BASE_PATH=/scope pnpm preview
 ```
 
-Open `/scope/` on the preview server. Use the production preview to
-exercise Pagefind search; its index is generated at build time.
+
+Open `/scope/` on the preview server. Keep `BASE_PATH` the same for the
+build and preview so assets, navigation, and search use the same URLs.
+Use the production preview to exercise Pagefind search; its index is
+generated at build time.
 
 Author Markdown links as `/getting-started/access/`, for example.
-The base-link remark plugin prefixes Markdown links, reference
+The base-path remark plugin prefixes Markdown links, reference
 definitions, images, and literal MDX `href`/`src` attributes.
 Astro components must construct internal URLs with
 `import.meta.env.BASE_URL`. External URLs, protocol-relative URLs,
