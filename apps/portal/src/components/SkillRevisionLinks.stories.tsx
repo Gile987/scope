@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { MemoryRouter } from "react-router-dom";
 
 import { SkillRevisionLinks } from "./SkillRevisionLinks";
 
@@ -14,13 +13,6 @@ const meta = {
       "microsoft/example-skills/accessibility@abcdef1234567890",
     ],
   },
-  decorators: [
-    (Story) => (
-      <MemoryRouter>
-        <Story />
-      </MemoryRouter>
-    ),
-  ],
 } satisfies Meta<typeof SkillRevisionLinks>;
 
 export default meta;
