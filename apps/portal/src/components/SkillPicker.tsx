@@ -13,15 +13,7 @@ import { X, Search, Download, Loader2, ChevronDown, ChevronUp, Globe, BookOpen }
 import type { SkillDocument, SkillRevisionDocument, SkillSearchResult } from "@/types";
 import { toast } from "sonner";
 import { SkillImportWizard } from "@/components/SkillImportWizard";
-
-// ---------------------------------------------------------------------------
-// Parse "slug@commitHash" → { slug, commitHash } or "slug" → { slug }
-// ---------------------------------------------------------------------------
-export function parseSkillSpec(spec: string): { slug: string; commitHash?: string } {
-  const at = spec.lastIndexOf("@");
-  if (at > 0) return { slug: spec.substring(0, at), commitHash: spec.substring(at + 1) };
-  return { slug: spec };
-}
+import { parseSkillSpec } from "@/lib/skill-spec";
 
 // ---------------------------------------------------------------------------
 // Revision selector for a single selected skill

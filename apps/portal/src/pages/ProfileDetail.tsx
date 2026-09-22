@@ -23,7 +23,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { parseSkillSpec } from "@/components/SkillPicker";
+import { parseSkillSpec } from "@/lib/skill-spec";
 import { KbdBadge } from "@/components/KbdBadge";
 import { AgentBadge, agentDisplayName, useAgentCatalog } from "@/components/AgentBadge";
 import { toast } from "sonner";
