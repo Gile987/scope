@@ -13,7 +13,7 @@ import { X, Search, Download, Loader2, ChevronDown, ChevronUp, Globe, BookOpen }
 import type { SkillDocument, SkillRevisionDocument, SkillSearchResult } from "@/types";
 import { toast } from "sonner";
 import { SkillImportWizard } from "@/components/SkillImportWizard";
-import { parseSkillSpec } from "@/lib/skill-spec";
+import { parseSkillSpec, shortCommitHash } from "@/lib/skill-spec";
 
 // ---------------------------------------------------------------------------
 // Revision selector for a single selected skill
@@ -42,7 +42,7 @@ function RevisionSelector({ slug, currentCommitHash, onRevisionChange }: {
           {isLoading && <SelectItem value="__loading__" disabled>Loading…</SelectItem>}
           {revisions.map((r: SkillRevisionDocument, idx: number) => (
             <SelectItem key={r.ref} value={r.commitHash}>
-              {r.commitHash.substring(0, 7)}{idx === 0 ? " (latest)" : ""} — {new Date(r.resolvedAt).toLocaleDateString()}
+              {shortCommitHash(r.commitHash)}{idx === 0 ? " (latest)" : ""} — {new Date(r.resolvedAt).toLocaleDateString()}
             </SelectItem>
           ))}
         </SelectContent>
@@ -270,7 +270,7 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
                   <BookOpen className="h-3 w-3 text-muted-foreground" />
                   <span className="font-mono text-xs font-medium flex-1">{slug}</span>
                   {commitHash && (
-                    <Badge variant="outline" className="text-[10px] font-mono">{commitHash.substring(0, 7)}</Badge>
+                    <Badge variant="outline" className="text-[10px] font-mono">{shortCommitHash(commitHash)}</Badge>
                   )}
                   {!commitHash && (
                     <Badge variant="secondary" className="text-[10px]">latest</Badge>
